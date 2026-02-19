@@ -1,0 +1,365 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* === solid-ui CSS Variables (Light) === */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 9% 46%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 220 14% 96%;
+    --accent-foreground: 220 9% 46%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 217 91% 60%;
+    --radius: 0.5rem;
+
+    /* Layout tokens (used by custom CSS below) */
+    --toolbar-bg: 220 14% 97%;
+    --sidebar-bg: 220 14% 96%;
+    --bg-hover: 220 13% 93%;
+    --bg-selected: 213 94% 92%;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+  }
+
+  .dark {
+    --background: 235 21% 13%;
+    --foreground: 226 64% 88%;
+    --card: 235 21% 13%;
+    --card-foreground: 226 64% 88%;
+    --popover: 234 20% 15%;
+    --popover-foreground: 226 64% 88%;
+    --primary: 224 78% 72%;
+    --primary-foreground: 235 21% 13%;
+    --secondary: 234 20% 15%;
+    --secondary-foreground: 229 21% 57%;
+    --muted: 234 20% 15%;
+    --muted-foreground: 229 21% 57%;
+    --accent: 234 20% 15%;
+    --accent-foreground: 226 64% 88%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 233 16% 22%;
+    --input: 233 16% 22%;
+    --ring: 224 78% 72%;
+
+    --toolbar-bg: 234 20% 15%;
+    --sidebar-bg: 235 21% 13%;
+    --bg-hover: 234 18% 20%;
+    --bg-selected: 211 52% 24%;
+  }
+}
+
+/* === Reset === */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-size: 14px;
+    line-height: 1.5;
+  }
+}
+
+/* === App Layout === */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* === Toolbar === */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: hsl(var(--toolbar-bg));
+  border-bottom: 1px solid hsl(var(--border));
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* === Breadcrumb === */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 500px;
+}
+
+.breadcrumb-root {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.breadcrumb-sep {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.5;
+}
+
+.breadcrumb-file {
+  color: hsl(var(--muted-foreground));
+}
+
+/* === Sidebar === */
+.sidebar {
+  background: hsl(var(--sidebar-bg));
+  border-right: 1px solid hsl(var(--border));
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex-shrink: 0;
+  min-width: 180px;
+}
+
+/* === Resize Handle === */
+.resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.resize-handle:hover {
+  background: hsl(var(--primary));
+}
+
+/* === File Tree === */
+.file-tree {
+  padding: 8px 0;
+}
+
+.file-tree-empty {
+  padding: 24px 16px;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+  text-align: center;
+}
+
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  color: hsl(var(--foreground));
+  transition: background 0.1s ease;
+  border-radius: 4px;
+  margin: 1px 4px;
+}
+
+.tree-item:hover {
+  background: hsl(var(--bg-hover));
+}
+
+.tree-item.selected {
+  background: hsl(var(--bg-selected));
+  color: hsl(var(--primary));
+  font-weight: 500;
+}
+
+.tree-item.directory {
+  font-weight: 500;
+}
+
+.tree-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: hsl(var(--muted-foreground));
+}
+
+.tree-item.selected .tree-icon {
+  color: hsl(var(--primary));
+}
+
+.folder-icon {
+  color: hsl(var(--primary));
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron-expanded {
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.chevron-collapsed {
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+}
+
+/* === Content / Preview === */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: hsl(var(--background));
+}
+
+.preview {
+  padding: 32px 48px;
+  max-width: 960px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.preview-loading {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--secondary));
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid hsl(var(--border));
+}
+
+/* === Empty State === */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+  padding: 48px;
+}
+
+.empty-state h2 {
+  color: hsl(var(--foreground));
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.empty-state p {
+  font-size: 15px;
+  max-width: 400px;
+}
+
+.empty-icon {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.4;
+}
+
+/* === Error === */
+.error {
+  color: #ef4444;
+  background: #fef2f2;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.dark .error {
+  background: #1a0f0f;
+  border-color: #5c1d1d;
+}
+
+/* === Print === */
+@media print {
+  .no-print,
+  .sidebar,
+  .resize-handle {
+    display: none !important;
+  }
+
+  .app {
+    display: block;
+    height: auto;
+  }
+
+  .main {
+    display: block;
+    height: auto;
+  }
+
+  .content {
+    overflow: visible;
+  }
+
+  .preview {
+    max-width: 100%;
+    padding: 0;
+  }
+}
+
+/* === Scrollbar === */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}

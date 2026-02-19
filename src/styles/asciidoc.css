@@ -1,0 +1,464 @@
+/* === AsciiDoc Output Styles === */
+.adoc-body {
+  line-height: 1.7;
+  color: hsl(var(--foreground));
+  word-wrap: break-word;
+}
+
+/* Headings */
+.adoc-body h1,
+.adoc-body h2,
+.adoc-body h3,
+.adoc-body h4,
+.adoc-body h5,
+.adoc-body h6 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  color: hsl(var(--foreground));
+}
+
+.adoc-body h1 { font-size: 2em; margin-top: 0; }
+.adoc-body h2 { font-size: 1.5em; padding-bottom: 0.3em; border-bottom: 1px solid hsl(var(--border)); }
+.adoc-body h3 { font-size: 1.25em; }
+.adoc-body h4 { font-size: 1.1em; }
+.adoc-body h5 { font-size: 1em; }
+.adoc-body h6 { font-size: 0.9em; color: hsl(var(--muted-foreground)); }
+
+/* Paragraphs */
+.adoc-body p,
+.adoc-body .paragraph > p {
+  margin-bottom: 1em;
+}
+
+/* Links */
+.adoc-body a {
+  color: hsl(var(--primary));
+  text-decoration: none;
+}
+
+.adoc-body a:hover {
+  text-decoration: underline;
+}
+
+/* Lists */
+.adoc-body ul,
+.adoc-body ol {
+  padding-left: 2em;
+  margin-bottom: 1em;
+}
+
+.adoc-body li {
+  margin-bottom: 0.3em;
+}
+
+.adoc-body li > p {
+  margin-bottom: 0.3em;
+}
+
+/* Description lists */
+.adoc-body .dlist dt {
+  font-weight: 600;
+  margin-top: 0.8em;
+}
+
+.adoc-body .dlist dd {
+  margin-left: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+/* Code - inline */
+.adoc-body code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: hsl(var(--secondary));
+  border: 1px solid hsl(var(--border));
+}
+
+/* Code - blocks */
+.adoc-body .listingblock,
+.adoc-body .literalblock {
+  margin-bottom: 1em;
+}
+
+.adoc-body .listingblock > .title,
+.adoc-body .literalblock > .title {
+  font-size: 0.85em;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 4px;
+}
+
+.adoc-body pre {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  line-height: 1.6;
+  padding: 16px;
+  border-radius: 8px;
+  background: hsl(var(--secondary));
+  border: 1px solid hsl(var(--border));
+  overflow-x: auto;
+  margin-bottom: 1em;
+}
+
+.adoc-body pre code {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: inherit;
+}
+
+/* Tables — horizontal scroll for wide tables */
+.adoc-body .tableblock {
+  overflow-x: auto;
+  margin-bottom: 1em;
+}
+
+.adoc-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.adoc-body table thead th {
+  background: hsl(var(--secondary));
+  font-weight: 600;
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid hsl(var(--border));
+}
+
+.adoc-body table td {
+  padding: 8px 12px;
+  border: 1px solid hsl(var(--border));
+  vertical-align: top;
+}
+
+.adoc-body table tbody tr:hover {
+  background: hsl(var(--bg-hover));
+}
+
+/* Admonitions */
+.adoc-body .admonitionblock {
+  margin-bottom: 1em;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.adoc-body .admonitionblock table {
+  margin: 0;
+}
+
+.adoc-body .admonitionblock td.icon {
+  padding: 12px 16px;
+  width: 60px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.adoc-body .admonitionblock td.content {
+  padding: 12px 16px;
+  border: none;
+}
+
+.adoc-body .admonitionblock.note {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+.adoc-body .admonitionblock.note td.icon { color: #2563eb; }
+
+.adoc-body .admonitionblock.tip {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+.adoc-body .admonitionblock.tip td.icon { color: #16a34a; }
+
+.adoc-body .admonitionblock.warning {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+.adoc-body .admonitionblock.warning td.icon { color: #d97706; }
+
+.adoc-body .admonitionblock.caution {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+.adoc-body .admonitionblock.caution td.icon { color: #ea580c; }
+
+.adoc-body .admonitionblock.important {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+.adoc-body .admonitionblock.important td.icon { color: #dc2626; }
+
+.dark .adoc-body .admonitionblock.note { background: #0f1729; border-color: #1e3a5f; }
+.dark .adoc-body .admonitionblock.tip { background: #071a0f; border-color: #14532d; }
+.dark .adoc-body .admonitionblock.warning { background: #1a1507; border-color: #713f12; }
+.dark .adoc-body .admonitionblock.caution { background: #1a1007; border-color: #9a3412; }
+.dark .adoc-body .admonitionblock.important { background: #1a0f0f; border-color: #7f1d1d; }
+
+/* Blockquote — unified style for .quoteblock (which contains a blockquote) */
+.adoc-body .quoteblock {
+  margin: 0 0 1em 0;
+  padding: 12px 20px;
+  border-left: 4px solid hsl(var(--primary));
+  background: hsl(var(--secondary));
+  border-radius: 0 8px 8px 0;
+}
+
+/* Prevent double-styling: the inner blockquote inside .quoteblock inherits */
+.adoc-body .quoteblock blockquote {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+}
+
+/* Standalone blockquotes (not inside .quoteblock) */
+.adoc-body > blockquote,
+.adoc-body .paragraph + blockquote {
+  margin: 0 0 1em 0;
+  padding: 12px 20px;
+  border-left: 4px solid hsl(var(--primary));
+  background: hsl(var(--secondary));
+  border-radius: 0 8px 8px 0;
+}
+
+.adoc-body .quoteblock .attribution {
+  margin-top: 8px;
+  font-size: 0.9em;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+/* Images */
+.adoc-body .imageblock {
+  margin-bottom: 1em;
+}
+
+.adoc-body .imageblock img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.adoc-body .imageblock > .title {
+  font-size: 0.85em;
+  color: hsl(var(--muted-foreground));
+  margin-top: 6px;
+  text-align: center;
+}
+
+/* Horizontal rule */
+.adoc-body hr {
+  border: none;
+  border-top: 1px solid hsl(var(--border));
+  margin: 2em 0;
+}
+
+/* Section anchors */
+.adoc-body a.anchor {
+  opacity: 0;
+  padding-right: 6px;
+  text-decoration: none;
+  font-weight: normal;
+}
+
+.adoc-body h1:hover a.anchor,
+.adoc-body h2:hover a.anchor,
+.adoc-body h3:hover a.anchor,
+.adoc-body h4:hover a.anchor,
+.adoc-body h5:hover a.anchor,
+.adoc-body h6:hover a.anchor {
+  opacity: 0.5;
+}
+
+/* TOC - Right sidebar layout */
+.adoc-body {
+  position: relative;
+}
+
+.adoc-body #toc {
+  position: fixed;
+  top: 44px; /* toolbar height */
+  right: 0;
+  width: 260px;
+  height: calc(100vh - 44px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 16px 32px 16px;
+  background: hsl(var(--secondary));
+  border-left: 1px solid hsl(var(--border));
+  z-index: 10;
+  font-size: 13px;
+}
+
+.adoc-body #toc .title,
+.adoc-body #toctitle {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: hsl(var(--muted-foreground));
+}
+
+.adoc-body #toc ul {
+  list-style: none;
+  padding-left: 12px;
+}
+
+.adoc-body #toc > ul {
+  padding-left: 0;
+}
+
+.adoc-body #toc li {
+  margin-bottom: 2px;
+  line-height: 1.4;
+}
+
+.adoc-body #toc a {
+  color: hsl(var(--muted-foreground));
+  font-size: 12.5px;
+  display: block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.1s ease;
+}
+
+.adoc-body #toc a:hover {
+  color: hsl(var(--primary));
+  background: hsl(var(--bg-hover));
+  text-decoration: none;
+}
+
+/* TOC active item highlight */
+.adoc-body #toc a.toc-active {
+  color: hsl(var(--primary));
+  background: hsl(var(--bg-hover));
+  font-weight: 500;
+}
+
+/* When TOC exists, add right margin to content so it doesn't overlap */
+.preview:has(#toc) .adoc-body > :not(#toc) {
+  margin-right: 276px;
+}
+
+.preview:has(#toc) {
+  max-width: 100%;
+}
+
+/* TOC scrollbar */
+.adoc-body #toc::-webkit-scrollbar { width: 4px; }
+.adoc-body #toc::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 2px; }
+
+/* Sidebar blocks */
+.adoc-body .sidebarblock {
+  background: hsl(var(--secondary));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 1em;
+}
+
+.adoc-body .sidebarblock > .content > .title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* Example blocks */
+.adoc-body .exampleblock {
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 1em;
+}
+
+.adoc-body .exampleblock > .title {
+  font-size: 0.85em;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 8px;
+}
+
+/* Bold, italic, etc */
+.adoc-body strong { font-weight: 600; }
+.adoc-body em { font-style: italic; }
+.adoc-body .line-through { text-decoration: line-through; }
+.adoc-body sup { font-size: 0.75em; }
+.adoc-body sub { font-size: 0.75em; }
+
+/* Mermaid diagrams */
+.adoc-body .mermaid {
+  margin: 1em 0;
+  text-align: center;
+}
+
+.adoc-body .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.adoc-body .mermaid-error {
+  color: #ef4444;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+}
+
+.dark .adoc-body .mermaid-error {
+  background: #1a0f0f;
+  border-color: #5c1d1d;
+}
+
+/* === Print === */
+@media print {
+  .adoc-body {
+    color: #000;
+    font-size: 12pt;
+    line-height: 1.6;
+  }
+
+  .adoc-body h1 { font-size: 24pt; }
+  .adoc-body h2 { font-size: 18pt; border-bottom-color: #ccc; }
+  .adoc-body h3 { font-size: 14pt; }
+
+  .adoc-body pre {
+    border: 1px solid #ccc;
+    background: #f5f5f5;
+    page-break-inside: avoid;
+  }
+
+  .adoc-body table {
+    page-break-inside: avoid;
+  }
+
+  .adoc-body .admonitionblock {
+    page-break-inside: avoid;
+  }
+
+  .adoc-body a {
+    color: #000;
+    text-decoration: underline;
+  }
+
+  .adoc-body a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #666;
+  }
+
+  .adoc-body a.anchor {
+    display: none;
+  }
+}
