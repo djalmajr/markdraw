@@ -43,8 +43,14 @@
 }
 
 /* Lists */
-.doc-body ul,
+.doc-body ul {
+  list-style: disc;
+  padding-left: 2em;
+  margin-bottom: 1em;
+}
+
 .doc-body ol {
+  list-style: decimal;
   padding-left: 2em;
   margin-bottom: 1em;
 }

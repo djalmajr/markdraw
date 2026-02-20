@@ -18,7 +18,7 @@ export function EmptyState(props: EmptyStateProps) {
             <div class="empty-icon">
               <IconFolderOpen width={64} height={64} />
             </div>
-            <h2>AsciiDoc Viewer</h2>
+            <h2>AsciiMark</h2>
             <p>Open a folder to browse and preview your AsciiDoc files.</p>
             <Button size="lg" onClick={props.onOpenFolder}>
               Open Folder

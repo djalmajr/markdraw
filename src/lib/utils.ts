@@ -26,6 +26,15 @@ export function isSupportedFile(name: string): boolean {
   return isAdocFile(name) || isMdFile(name);
 }
 
+/** Escape HTML special characters to prevent XSS */
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 /** Directories to skip when building file trees */
 export const IGNORED_DIRS = new Set([
   "node_modules", ".git", "dist", "build", "out", "target",

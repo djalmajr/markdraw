@@ -1,4 +1,4 @@
-import { createSignal, Show, For } from "solid-js";
+import { createSignal, createEffect, Show, For } from "solid-js";
 import type { FSEntry } from "../lib/fs.ts";
 import IconChevronRight from "~icons/lucide/chevron-right";
 import IconFolder from "~icons/lucide/folder";
@@ -16,6 +16,17 @@ interface FileTreeItemProps {
 
 export function FileTreeItem(props: FileTreeItemProps) {
   const [expanded, setExpanded] = createSignal(props.depth < 1);
+
+  // Auto-expand directories that contain the selected file
+  createEffect(() => {
+    const sel = props.selectedPath;
+    if (sel && props.entry.kind === "directory") {
+      const dirPrefix = props.entry.path + "/";
+      if (sel.startsWith(dirPrefix)) {
+        setExpanded(true);
+      }
+    }
+  });
 
   const isSelected = () => props.selectedPath === props.entry.path;
   const isDirectory = () => props.entry.kind === "directory";

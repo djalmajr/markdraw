@@ -116,6 +116,9 @@ export function App() {
   const [urlError, setUrlError] = createSignal<string | null>(null);
   const [fileAccessDenied, setFileAccessDenied] = createSignal(false);
 
+  // Fragment to scroll to after a cross-file xref navigation
+  const [pendingFragment, setPendingFragment] = createSignal<string | null>(null);
+
   // File watcher (folder mode only)
   const watcher = new FileWatcher(() => {
     const file = selectedFile();
@@ -143,6 +146,12 @@ export function App() {
 
   async function initUrlMode(url: string) {
     setUrlFileName(fileNameFromUrl(url));
+
+    // Restore fragment from URL hash (set by cross-file xref navigation)
+    const hash = window.location.hash;
+    if (hash.length > 1) {
+      setPendingFragment(decodeURIComponent(hash.slice(1)));
+    }
 
     await loadUrlContent(url);
 
@@ -389,7 +398,9 @@ export function App() {
   /**
    * Navigate to a file by its path (from xref link clicks).
    */
-  async function handleNavigate(targetPath: string) {
+  async function handleNavigate(targetPath: string, fragment?: string | null) {
+    // Store fragment so Preview scrolls to it after content loads
+    setPendingFragment(fragment ?? null);
     if (isUrlMode) {
       let targetUrl: string;
 
@@ -402,9 +413,10 @@ export function App() {
         targetUrl = resolveUrl(baseUrl, targetPath);
       }
 
-      // Navigate to the viewer with the new URL
+      // Navigate to the viewer with the new URL, preserving fragment for scroll
       const viewerUrl =
-        window.location.pathname + "?url=" + encodeURIComponent(targetUrl);
+        window.location.pathname + "?url=" + encodeURIComponent(targetUrl) +
+        (fragment ? "#" + encodeURIComponent(fragment) : "");
       window.location.href = viewerUrl;
       return;
     }
@@ -541,6 +553,8 @@ export function App() {
                 currentFilePath={
                   isUrlMode ? urlFileName() : (selectedFile()?.path ?? null)
                 }
+                pendingFragment={pendingFragment()}
+                onFragmentHandled={() => setPendingFragment(null)}
                 onNavigate={handleNavigate}
               />
             </Show>

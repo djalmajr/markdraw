@@ -15,6 +15,7 @@ import ins from "markdown-it-ins";
 import mark from "markdown-it-mark";
 import multimdTable from "markdown-it-multimd-table";
 import container from "markdown-it-container";
+import { escapeHtml } from "./utils";
 
 // --- Include preprocessor ---
 
@@ -169,14 +170,6 @@ function buildTocHtml(entries: TocEntry[]): string {
 }
 
 /** Escape HTML special characters */
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 // --- Slugify ---
 
 /** Generate a URL-friendly slug from heading text */

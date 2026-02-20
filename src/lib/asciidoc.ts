@@ -1,5 +1,6 @@
 // AsciiDoc conversion with include:: support via File System Access API
 import Asciidoctor from "@asciidoctor/core";
+import { escapeHtml } from "./utils";
 
 const asciidoctor = Asciidoctor();
 
@@ -75,6 +76,61 @@ export async function collectIncludes(
   }
 
   return result;
+}
+
+/** AsciiDoc file extensions pattern for regex matching */
+const ADOC_EXT_PATTERN = /\.(adoc|asciidoc|asc|ad)$/;
+
+/**
+ * Pre-process inter-document xref macros into pass-through HTML links.
+ *
+ * Asciidoctor.js with `standalone: false` can't resolve inter-document xrefs
+ * (generates `href="#"`). We convert them into `pass:[]` inline macros that
+ * output proper `<a>` tags which our Preview click handler can intercept.
+ *
+ * Handles:
+ * - `xref:path/file.adoc[Text]`
+ * - `xref:path/file.adoc#section[Text]`
+ * - `<<path/file.adoc#section,Text>>`
+ * - `<<path/file.adoc,Text>>`
+ * - `<<path/file.adoc>>`
+ */
+function preprocessXrefs(content: string): string {
+  // xref: macro syntax — xref:path.adoc[text] or xref:path.adoc#frag[text]
+  content = content.replace(
+    /xref:([^\[#\s]+(?:\.(?:adoc|asciidoc|asc|ad)))(#[^\[\s]*)?\[([^\]]*)\]/g,
+    (_match, path: string, fragment: string | undefined, text: string) => {
+      const displayText = text || path.split("/").pop()!.replace(ADOC_EXT_PATTERN, "");
+      const htmlPath = path.replace(ADOC_EXT_PATTERN, ".html");
+      const href = escapeHtml(`${htmlPath}${fragment || ""}`);
+      return `pass:[<a href="${href}">${escapeHtml(displayText)}</a>]`;
+    },
+  );
+
+  // <<path.adoc#frag,text>> shorthand with explicit text
+  // NOTE: This must run before the no-text variant below, otherwise
+  // the simpler regex would partially match inputs with comma+text.
+  content = content.replace(
+    /<<([^\s,>#]+\.(?:adoc|asciidoc|asc|ad))(#[^,>]*)?,\s*([^>]+)>>/g,
+    (_match, path: string, fragment: string | undefined, text: string) => {
+      const htmlPath = path.replace(ADOC_EXT_PATTERN, ".html");
+      const href = escapeHtml(`${htmlPath}${fragment || ""}`);
+      return `pass:[<a href="${href}">${escapeHtml(text)}</a>]`;
+    },
+  );
+
+  // <<path.adoc>> or <<path.adoc#frag>> shorthand without text
+  content = content.replace(
+    /<<([^\s,>#]+\.(?:adoc|asciidoc|asc|ad))(#[^,>]*)?>>/g,
+    (_match, path: string, fragment: string | undefined) => {
+      const displayText = path.split("/").pop()!.replace(ADOC_EXT_PATTERN, "");
+      const htmlPath = path.replace(ADOC_EXT_PATTERN, ".html");
+      const href = escapeHtml(`${htmlPath}${fragment || ""}`);
+      return `pass:[<a href="${href}">${escapeHtml(displayText)}</a>]`;
+    },
+  );
+
+  return content;
 }
 
 export interface ConvertOptions {
@@ -208,7 +264,10 @@ export async function convertAdoc(opts: ConvertOptions): Promise<string> {
     });
   });
 
-  const html = asciidoctor.convert(fileContent, {
+  // Pre-process inter-document xrefs into proper HTML links
+  const processedContent = preprocessXrefs(fileContent);
+
+  const html = asciidoctor.convert(processedContent, {
     extension_registry: registry,
     standalone: false,
     safe: "unsafe",

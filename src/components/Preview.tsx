@@ -8,8 +8,8 @@ import "../styles/asciidoc.css";
 
 let mermaidInitialized = false;
 
-function initMermaid() {
-  if (mermaidInitialized) return;
+function initMermaid(force = false) {
+  if (mermaidInitialized && !force) return;
   mermaid.initialize({
     startOnLoad: false,
     theme: document.documentElement.classList.contains("dark") ? "dark" : "default",
@@ -19,10 +19,17 @@ function initMermaid() {
   mermaidInitialized = true;
 }
 
+/** Monotonically increasing render generation — used to cancel stale renders */
+let mermaidRenderGen = 0;
+
 /** Apply syntax highlighting to code blocks that haven't been highlighted yet */
 function highlightCodeBlocks(container: HTMLElement) {
   container.querySelectorAll<HTMLElement>("pre code").forEach((el) => {
-    if (!el.classList.contains("hljs")) {
+    // Asciidoctor adds "hljs" class when source-highlighter is highlight.js,
+    // but doesn't actually run highlight.js. Check for real highlighting
+    // by looking for hljs-* child spans instead.
+    const alreadyHighlighted = el.querySelector("span[class^='hljs-']") !== null;
+    if (!alreadyHighlighted) {
       hljs.highlightElement(el);
     }
   });
@@ -32,20 +39,30 @@ async function renderMermaidBlocks(container: HTMLElement) {
   const blocks = container.querySelectorAll<HTMLElement>("div.mermaid");
   if (blocks.length === 0) return;
 
-  initMermaid();
+  // Bump generation — any in-flight render from a previous call will bail out
+  const gen = ++mermaidRenderGen;
+
+  // Force re-init to reset mermaid's internal parser/registry state
+  initMermaid(true);
 
   let idx = 0;
   for (const block of blocks) {
+    // Bail out if a newer render has started (navigation happened mid-render)
+    if (gen !== mermaidRenderGen) return;
+
     if (block.getAttribute("data-processed")) continue;
 
     const source = block.textContent?.trim() ?? "";
     if (!source) continue;
 
     try {
-      const id = `mermaid-${Date.now()}-${idx++}`;
+      const id = `mermaid-${gen}-${idx++}`;
       const { svg } = await mermaid.render(id, source);
+      // Check again after await — DOM may have been replaced
+      if (gen !== mermaidRenderGen) return;
       block.innerHTML = svg;
     } catch (e) {
+      if (gen !== mermaidRenderGen) return;
       // Show inline error instead of raw source
       const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       block.innerHTML = `<pre class="mermaid-error">Mermaid syntax error\n\n${escaped}</pre>`;
@@ -169,16 +186,18 @@ function isSupportedHref(href: string): boolean {
 
 /**
  * Normalize href for navigation:
- * - Strip fragment (#section)
+ * - Extract fragment (#section) separately
  * - Convert .html back to .adoc if applicable (AsciiDoc xref)
  */
-function normalizeHref(href: string): string {
-  let path = href.split("#")[0]!;
+function normalizeHref(href: string): { path: string; fragment: string | null } {
+  const hashIdx = href.indexOf("#");
+  let path = hashIdx >= 0 ? href.slice(0, hashIdx) : href;
+  const fragment = hashIdx >= 0 ? decodeURIComponent(href.slice(hashIdx + 1)) : null;
   // AsciiDoc xref: convert .html back to .adoc
   if (path.endsWith(".html")) {
     path = path.slice(0, -5) + ".adoc";
   }
-  return path;
+  return { path, fragment: fragment || null };
 }
 
 /**
@@ -208,8 +227,12 @@ interface PreviewProps {
   tocVisible: boolean;
   /** Current file path (relative to root), used to resolve xref links */
   currentFilePath: string | null;
-  /** Called when user clicks a document link (.adoc/.md); receives the resolved path */
-  onNavigate: (path: string) => void;
+  /** Fragment ID to scroll to after content loads (from cross-file xref navigation) */
+  pendingFragment: string | null;
+  /** Called after the pending fragment has been scrolled to (to clear the signal) */
+  onFragmentHandled: () => void;
+  /** Called when user clicks a document link (.adoc/.md); receives the resolved path and optional fragment */
+  onNavigate: (path: string, fragment?: string | null) => void;
 }
 
 export function Preview(props: PreviewProps) {
@@ -235,6 +258,21 @@ export function Preview(props: PreviewProps) {
    * - #anchor links: scroll manually within .content container (prevent hash corruption)
    * - .adoc file links: navigate via SPA routing
    */
+  function scrollToFragment(fragmentId: string) {
+    if (!articleRef) return;
+    const target = articleRef.querySelector(`[id="${CSS.escape(fragmentId)}"]`) as HTMLElement | null;
+    if (!target) return;
+    const contentEl = articleRef.closest(".content");
+    if (contentEl) {
+      const targetRect = target.getBoundingClientRect();
+      const contentRect = contentEl.getBoundingClientRect();
+      const offset = targetRect.top - contentRect.top + contentEl.scrollTop - 16;
+      contentEl.scrollTo({ top: offset, behavior: "smooth" });
+    } else {
+      target.scrollIntoView({ behavior: "smooth" });
+    }
+  }
+
   function handleClick(e: MouseEvent) {
     const anchor = (e.target as HTMLElement).closest("a");
     if (!anchor) return;
@@ -246,22 +284,7 @@ export function Preview(props: PreviewProps) {
     if (href.startsWith("#")) {
       e.preventDefault();
       const targetId = decodeURIComponent(href.slice(1));
-      if (!targetId) return;
-
-      // Find the target element and scroll it into view within the .content container
-      const target = articleRef?.querySelector(`[id="${CSS.escape(targetId)}"]`) as HTMLElement | null;
-      if (target) {
-        const contentEl = articleRef?.closest(".content");
-        if (contentEl) {
-          // Calculate offset within the scrollable container
-          const targetRect = target.getBoundingClientRect();
-          const contentRect = contentEl.getBoundingClientRect();
-          const offset = targetRect.top - contentRect.top + contentEl.scrollTop - 16;
-          contentEl.scrollTo({ top: offset, behavior: "smooth" });
-        } else {
-          target.scrollIntoView({ behavior: "smooth" });
-        }
-      }
+      if (targetId) scrollToFragment(targetId);
       return;
     }
 
@@ -276,7 +299,6 @@ export function Preview(props: PreviewProps) {
       if (isSupportedHref(href.replace(/^file:\/\//, ""))) {
         e.preventDefault();
         e.stopPropagation();
-        // Pass the full file:// URL to onNavigate
         props.onNavigate(href);
       }
       return;
@@ -289,13 +311,23 @@ export function Preview(props: PreviewProps) {
     e.stopPropagation();
 
     // Normalize href (e.g., .html → .adoc for xref links)
-    const normalized = normalizeHref(href);
+    const { path: normalizedPath, fragment } = normalizeHref(href);
 
     // Resolve relative to current file
     const currentPath = props.currentFilePath;
-    const targetPath = currentPath ? resolveRelativePath(currentPath, normalized) : normalized;
+    const targetPath = currentPath ? resolveRelativePath(currentPath, normalizedPath) : normalizedPath;
 
-    props.onNavigate(targetPath);
+    // If there's a fragment, check if it exists in the current document
+    // (handles both same-file xrefs and xrefs to included files)
+    if (fragment && articleRef) {
+      const existingEl = articleRef.querySelector(`[id="${CSS.escape(fragment)}"]`);
+      if (existingEl) {
+        scrollToFragment(fragment);
+        return;
+      }
+    }
+
+    props.onNavigate(targetPath, fragment);
   }
 
   // Render mermaid blocks, set up TOC tracking, and apply TOC visibility whenever html changes
@@ -321,6 +353,13 @@ export function Preview(props: PreviewProps) {
           cleanupToc = setupTocScrollTracking(articleRef!);
         } else {
           cleanupToc = undefined;
+        }
+
+        // Scroll to pending fragment after content renders (cross-file xref navigation)
+        const frag = props.pendingFragment;
+        if (frag) {
+          scrollToFragment(frag);
+          props.onFragmentHandled();
         }
       });
     }
