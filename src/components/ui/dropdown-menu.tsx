@@ -98,15 +98,93 @@ const DropdownMenuCheckboxItem = <T extends ValidComponent = "div">(
   )
 }
 
+type DropdownMenuSubTriggerProps = DropdownMenuPrimitive.DropdownMenuSubTriggerProps & {
+  class?: string | undefined
+  children?: JSX.Element
+}
+
+const DropdownMenuSubTrigger = <T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, DropdownMenuSubTriggerProps>
+) => {
+  const [local, others] = splitProps(props as DropdownMenuSubTriggerProps, ["class", "children"])
+  return (
+    <DropdownMenuPrimitive.SubTrigger
+      class={cn(
+        "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        local.class
+      )}
+      {...(others as any)}
+    >
+      {local.children}
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-auto size-4">
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+    </DropdownMenuPrimitive.SubTrigger>
+  )
+}
+
+type DropdownMenuSubContentProps = DropdownMenuPrimitive.DropdownMenuSubContentProps & {
+  class?: string | undefined
+}
+
+const DropdownMenuSubContent = <T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, DropdownMenuSubContentProps>
+) => {
+  const [local, others] = splitProps(props as DropdownMenuSubContentProps, ["class"])
+  return (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.SubContent
+        class={cn(
+          "z-50 min-w-[8rem] origin-[var(--kb-menu-content-transform-origin)] animate-content-hide overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[expanded]:animate-content-show",
+          local.class
+        )}
+        {...others}
+      />
+    </DropdownMenuPrimitive.Portal>
+  )
+}
+
+type DropdownMenuRadioItemProps = DropdownMenuPrimitive.DropdownMenuRadioItemProps & {
+  class?: string | undefined
+  children?: JSX.Element
+}
+
+const DropdownMenuRadioItem = <T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, DropdownMenuRadioItemProps>
+) => {
+  const [local, others] = splitProps(props as DropdownMenuRadioItemProps, ["class", "children"])
+  return (
+    <DropdownMenuPrimitive.RadioItem
+      class={cn(
+        "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        local.class
+      )}
+      {...(others as any)}
+    >
+      <span class="absolute left-2 flex size-3.5 items-center justify-center">
+        <DropdownMenuPrimitive.ItemIndicator>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4">
+            <circle cx="12" cy="12" r="5" fill="currentColor" />
+          </svg>
+        </DropdownMenuPrimitive.ItemIndicator>
+      </span>
+      {local.children}
+    </DropdownMenuPrimitive.RadioItem>
+  )
+}
+
 export {
   DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
+  DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuGroupLabel,
-  DropdownMenuSub,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
 }

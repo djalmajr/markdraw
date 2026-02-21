@@ -1,4 +1,4 @@
-import { createSignal, createEffect, onCleanup, Show } from "solid-js";
+import { createSignal, createEffect, onCleanup, onMount, Show } from "solid-js";
 import {
   openDirectory,
   openDirectoryFallback,
@@ -25,14 +25,35 @@ import {
 } from "../lib/url-source.ts";
 import { convertAdoc, getIncludePaths } from "../lib/asciidoc.ts";
 import { convertMarkdown, getMarkdownIncludePaths } from "../lib/markdown.ts";
-import { isMdFile } from "../lib/utils.ts";
+import { isMdFile, isSupportedFile } from "../lib/utils.ts";
 import { FileWatcher } from "../lib/watcher.ts";
 import { Toolbar } from "./Toolbar.tsx";
 import { FileTree } from "./FileTree.tsx";
 import { Preview } from "./Preview.tsx";
+import { Editor } from "./Editor.tsx";
 import { EmptyState } from "./EmptyState.tsx";
 import { FileAccessWarning } from "./FileAccessWarning.tsx";
-import { getStoredTheme, applyTheme } from "../newtab.tsx";
+import { getStoredTheme, applyTheme, type ThemeMode } from "../newtab.tsx";
+import {
+  CodeThemes,
+  applyCodeTheme,
+  getStoredCodeTheme,
+  setStoredCodeTheme,
+} from "../lib/code-theme.ts";
+import {
+  type RecentFile,
+  addRecentFile,
+  getRecentFiles,
+  clearRecentFiles,
+} from "../lib/recent-files.ts";
+import {
+  type FontPrefs,
+  FontFamilies,
+  FontSizes,
+  applyFontPrefs,
+  getStoredFontPrefs,
+  setStoredFontPrefs,
+} from "../lib/font-prefs.ts";
 
 // --- URL Mode helpers ---
 
@@ -90,15 +111,65 @@ export function App() {
   const [loading, setLoading] = createSignal(false);
   const [autoRefresh, setAutoRefresh] = createSignal(true);
   const [tocVisible, setTocVisible] = createSignal(true);
+  const [themeMode, setThemeMode] = createSignal<ThemeMode>(getStoredTheme());
   const [darkMode, setDarkMode] = createSignal(
     document.documentElement.classList.contains("dark")
   );
 
-  function toggleDarkMode() {
-    const next = !darkMode();
-    setDarkMode(next);
-    applyTheme(next ? "dark" : "light");
+  function handleThemeChange(mode: string) {
+    setThemeMode(mode as ThemeMode);
+    applyTheme(mode as ThemeMode);
+    setDarkMode(document.documentElement.classList.contains("dark"));
   }
+
+  // Update darkMode when OS theme changes in system mode
+  onMount(() => {
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = () => {
+      if (getStoredTheme() === "system") {
+        setDarkMode(document.documentElement.classList.contains("dark"));
+      }
+    };
+    mql.addEventListener("change", handler);
+    onCleanup(() => mql.removeEventListener("change", handler));
+  });
+
+  function handleCodeThemeChange(id: string) {
+    setCodeTheme(id);
+    setStoredCodeTheme(id);
+  }
+
+  // Font preferences
+  const [fontPrefs, setFontPrefs] = createSignal<FontPrefs>(getStoredFontPrefs());
+
+  createEffect(() => {
+    applyFontPrefs(fontPrefs());
+  });
+
+  function handleFontPrefsChange(partial: Partial<FontPrefs>) {
+    const updated = { ...fontPrefs(), ...partial };
+    setFontPrefs(updated);
+    setStoredFontPrefs(updated);
+  }
+
+  // Recent files
+  const [recentFiles, setRecentFiles] = createSignal<RecentFile[]>(getRecentFiles());
+
+  function handleOpenRecent(path: string) {
+    const entry = findEntryByPath(tree(), path);
+    if (entry && entry.kind === "file") {
+      loadFileContent(entry);
+    }
+  }
+
+  function handleClearRecent() {
+    clearRecentFiles();
+    setRecentFiles([]);
+  }
+
+  // Editor state
+  const [editorVisible, setEditorVisible] = createSignal(false);
+  const [editorContent, setEditorContent] = createSignal("");
 
   // Folder mode state
   const [rootHandle, setRootHandle] =
@@ -118,6 +189,20 @@ export function App() {
 
   // Fragment to scroll to after a cross-file xref navigation
   const [pendingFragment, setPendingFragment] = createSignal<string | null>(null);
+
+  // Navigation stack (folder mode back/forward)
+  const [navStack, setNavStack] = createSignal<string[]>([]);
+  const [navIndex, setNavIndex] = createSignal(-1);
+  const canGoBack = () => navIndex() > 0;
+  const canGoForward = () => navIndex() < navStack().length - 1;
+  const showNavButtons = () => !isUrlMode && (!!rootHandle() || !!fallbackFileMap());
+
+  // Code theme
+  const [codeTheme, setCodeTheme] = createSignal(getStoredCodeTheme());
+
+  createEffect(() => {
+    applyCodeTheme(codeTheme(), darkMode());
+  });
 
   // File watcher (folder mode only)
   const watcher = new FileWatcher(() => {
@@ -274,8 +359,46 @@ export function App() {
     if (isUrlMode) return;
     const hashPath = getPathFromHash();
     if (hashPath) {
+      // Sync navIndex with the stack
+      const stack = navStack();
+      const idx = navIndex();
+      if (hashPath === stack[idx - 1]) {
+        setNavIndex(idx - 1);
+      } else if (hashPath === stack[idx + 1]) {
+        setNavIndex(idx + 1);
+      }
       const entry = findEntryByPath(tree(), hashPath);
       if (entry && entry.kind === "file") {
+        loadFileContent(entry, false);
+      }
+    }
+  }
+
+  function handleGoBack() {
+    if (!canGoBack()) return;
+    const stack = navStack();
+    const newIdx = navIndex() - 1;
+    const path = stack[newIdx];
+    if (path) {
+      const entry = findEntryByPath(tree(), path);
+      if (entry && entry.kind === "file") {
+        setNavIndex(newIdx);
+        history.back();
+        loadFileContent(entry, false);
+      }
+    }
+  }
+
+  function handleGoForward() {
+    if (!canGoForward()) return;
+    const stack = navStack();
+    const newIdx = navIndex() + 1;
+    const path = stack[newIdx];
+    if (path) {
+      const entry = findEntryByPath(tree(), path);
+      if (entry && entry.kind === "file") {
+        setNavIndex(newIdx);
+        history.forward();
         loadFileContent(entry, false);
       }
     }
@@ -320,6 +443,8 @@ export function App() {
       setSelectedFile(null);
       setHtml("");
       setHashFromPath(null);
+      setNavStack([]);
+      setNavIndex(-1);
     } catch (e: any) {
       if (e.name === "AbortError") return;
       // SecurityError/InvalidStateError = user gesture expired (e.g., from dropdown animation)
@@ -345,6 +470,18 @@ export function App() {
 
     if (pushHistory) {
       setHashFromPath(entry.path);
+      // Update navigation stack: truncate forward history and push
+      const stack = navStack().slice(0, navIndex() + 1);
+      stack.push(entry.path);
+      setNavStack(stack);
+      setNavIndex(stack.length - 1);
+      // Track recent files
+      const updated = addRecentFile({
+        name: entry.name,
+        path: entry.path,
+        rootName: rootName(),
+      });
+      setRecentFiles(updated);
     }
 
     try {
@@ -368,6 +505,7 @@ export function App() {
         : await convertAdoc(convertOpts);
 
       setHtml(result);
+      setEditorContent(content);
 
       // Update watcher target (only in native mode — fallback has static snapshots)
       if (!isFallback && root) {
@@ -475,19 +613,151 @@ export function App() {
     console.warn(`File not found: ${targetPath}`);
   }
 
+  // TOC panel ref (sibling of .content)
+  let tocPanelRef: HTMLElement | undefined;
+
   function handleExportPdf() {
-    // Ensure TOC is visible for printing (it gets styled as a static block via @media print)
-    const toc = document.querySelector<HTMLElement>("#toc");
-    const tocWasHidden = toc && toc.style.display === "none";
-    if (toc && tocWasHidden) {
-      toc.style.display = "";
-    }
+    // Ensure TOC panel is visible for printing
+    const wasHidden = tocPanelRef?.classList.contains("toc-hidden");
+    if (wasHidden) tocPanelRef!.classList.remove("toc-hidden");
 
     window.print();
 
     // Restore TOC visibility state after printing
-    if (toc && tocWasHidden) {
-      toc.style.display = "none";
+    if (wasHidden) tocPanelRef!.classList.add("toc-hidden");
+  }
+
+  // Drag and drop files/folders
+  const [dragOver, setDragOver] = createSignal(false);
+
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault();
+    setDragOver(true);
+  }
+
+  function handleDragLeave() {
+    setDragOver(false);
+  }
+
+  async function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    if (isUrlMode) return;
+
+    const items = e.dataTransfer?.items;
+    if (!items || items.length === 0) return;
+
+    const firstItem = items[0];
+
+    // Try native FileSystemHandle (Chrome/Edge)
+    if ("getAsFileSystemHandle" in firstItem) {
+      try {
+        const handle = await (firstItem as any).getAsFileSystemHandle();
+        if (handle.kind === "directory") {
+          setRootHandle(handle);
+          setRootName(handle.name);
+          setFallbackFileMap(null);
+          await saveDirectoryHandle(handle);
+          setLoading(true);
+          const entries = await readTree(handle);
+          setTree(entries);
+          setLoading(false);
+          setSelectedFile(null);
+          setHtml("");
+          setHashFromPath(null);
+          setNavStack([]);
+          setNavIndex(-1);
+          return;
+        }
+        if (handle.kind === "file") {
+          const file = await handle.getFile();
+          if (isSupportedFile(file.name)) {
+            const entry: FSEntry = { name: file.name, kind: "file", path: file.name, handle };
+            setRootHandle(null);
+            setFallbackFileMap(null);
+            setRootName("");
+            setTree([entry]);
+            loadFileContent(entry);
+          }
+          return;
+        }
+      } catch {
+        // Fall through to File fallback
+      }
+    }
+
+    // Fallback: use File objects
+    const file = firstItem.getAsFile();
+    if (file && isSupportedFile(file.name)) {
+      const entry: FSEntry = { name: file.name, kind: "file", path: file.name, file };
+      setRootHandle(null);
+      setFallbackFileMap(null);
+      setRootName("");
+      setTree([entry]);
+      loadFileContent(entry);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    const element = document.querySelector<HTMLElement>(".doc-body");
+    if (!element) return;
+    const { default: html2pdf } = await import("html2pdf.js");
+    const filename = selectedFile()?.name?.replace(/\.(adoc|md)$/, ".pdf") ?? "document.pdf";
+    html2pdf()
+      .set({
+        margin: [15, 15],
+        filename,
+        html2canvas: { scale: 2 },
+        jsPDF: { format: "a4" },
+      })
+      .from(element)
+      .save();
+  }
+
+  // Editor change handler: reconvert content to HTML
+  async function handleEditorChange(newContent: string) {
+    setEditorContent(newContent);
+    const entry = selectedFile();
+    if (!entry) return;
+
+    const root = rootHandle();
+    const fileMap = fallbackFileMap();
+    const isFallback = !root && !!fileMap;
+
+    const readFile = isFallback
+      ? (path: string) => readFileByPathFallback(fileMap!, path)
+      : root
+        ? (path: string) => readFileByPath(root, path)
+        : () => Promise.resolve(null);
+
+    try {
+      const convertOpts = {
+        filePath: entry.path,
+        fileContent: newContent,
+        readFile,
+      };
+      const result = isMdFile(entry.path)
+        ? await convertMarkdown(convertOpts)
+        : await convertAdoc(convertOpts);
+      setHtml(result);
+    } catch (e) {
+      console.error("Failed to convert editor content:", e);
+    }
+  }
+
+  // Save editor content back to file (native mode only)
+  async function handleEditorSave() {
+    const entry = selectedFile();
+    const root = rootHandle();
+    if (!entry || !root || !entry.handle) return;
+
+    try {
+      const handle = entry.handle as FileSystemFileHandle;
+      const writable = await (handle as any).createWritable();
+      await writable.write(editorContent());
+      await writable.close();
+    } catch (e) {
+      console.error("Failed to save file:", e);
     }
   }
 
@@ -525,22 +795,47 @@ export function App() {
   const hasFile = () => isUrlMode ? !!html() : !!selectedFile();
 
   return (
-    <div class="app">
+    <div
+      class="app"
+      classList={{ "drag-over": dragOver() }}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <Toolbar
-        rootName={toolbarRootName()}
+        autoRefresh={autoRefresh()}
+        canGoBack={canGoBack()}
+        canGoForward={canGoForward()}
+        codeTheme={codeTheme()}
+        codeThemes={CodeThemes}
+        darkMode={darkMode()}
         fileName={toolbarFileName()}
         filePath={toolbarFilePath()}
-        autoRefresh={autoRefresh()}
-        onToggleAutoRefresh={() => setAutoRefresh((v) => !v)}
+        fontFamilies={FontFamilies}
+        fontPrefs={fontPrefs()}
+        fontSizes={FontSizes}
+        editorVisible={editorVisible()}
+        hasFile={hasFile()}
+        recentFiles={recentFiles()}
+        rootName={toolbarRootName()}
+        showNavButtons={showNavButtons()}
         sidebarVisible={sidebarVisible()}
+        themeMode={themeMode()}
         tocVisible={tocVisible()}
-        darkMode={darkMode()}
+        onClearRecent={handleClearRecent}
+        onCodeThemeChange={handleCodeThemeChange}
+        onDownloadPdf={handleDownloadPdf}
+        onExportPdf={handleExportPdf}
+        onFontPrefsChange={handleFontPrefsChange}
+        onGoBack={handleGoBack}
+        onGoForward={handleGoForward}
+        onOpenFolder={handleOpenFolder}
+        onOpenRecent={handleOpenRecent}
+        onThemeChange={handleThemeChange}
+        onToggleAutoRefresh={() => setAutoRefresh((v) => !v)}
+        onToggleEditor={() => setEditorVisible((v) => !v)}
         onToggleSidebar={() => setSidebarVisible((v) => !v)}
         onToggleToc={() => setTocVisible((v) => !v)}
-        onToggleDarkMode={toggleDarkMode}
-        onOpenFolder={handleOpenFolder}
-        onExportPdf={handleExportPdf}
-        hasFile={hasFile()}
       />
       <div class="main">
         <Show when={!isUrlMode && sidebarVisible() && (rootHandle() || fallbackFileMap())}>
@@ -552,6 +847,16 @@ export function App() {
             />
           </aside>
           <div class="resize-handle" onMouseDown={onResizeStart} />
+        </Show>
+        <Show when={editorVisible() && selectedFile()}>
+          <div class="editor-panel">
+            <Editor
+              content={editorContent()}
+              darkMode={darkMode()}
+              onChange={handleEditorChange}
+              onSave={handleEditorSave}
+            />
+          </div>
         </Show>
         <div class="content">
           <Show
@@ -571,6 +876,7 @@ export function App() {
                 html={html()}
                 loading={loading()}
                 tocVisible={tocVisible()}
+                tocContainer={tocPanelRef}
                 currentFilePath={
                   isUrlMode ? urlFileName() : (selectedFile()?.path ?? null)
                 }
@@ -581,6 +887,11 @@ export function App() {
             </Show>
           </Show>
         </div>
+        <aside
+          class="toc-panel"
+          classList={{ "toc-hidden": !tocVisible() || !hasFile() }}
+          ref={tocPanelRef}
+        />
       </div>
     </div>
   );

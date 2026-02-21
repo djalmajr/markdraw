@@ -192,12 +192,17 @@ export async function convertAdoc(opts: ConvertOptions): Promise<string> {
   const registry = asciidoctor.Extensions.create();
 
   // Register mermaid block processor: [mermaid] blocks become <div class="mermaid">
+  // 1. Convert <br/> variants to newlines (used for multi-line labels in sequence diagrams)
+  // 2. HTML-escape the result so tags don't become DOM elements (textContent stays clean)
   registry.block(function (this: any) {
     const self = this;
     self.named("mermaid");
     self.onContext(["listing", "literal", "open"]);
     self.process(function (_parent: any, reader: any) {
-      const source = reader.getLines().join("\n");
+      const source = reader.getLines().join("\n")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
       return self.createPassBlock(
         _parent,
         `<div class="mermaid">${source}</div>`,
@@ -205,6 +210,28 @@ export async function convertAdoc(opts: ConvertOptions): Promise<string> {
       );
     });
   });
+
+  // Kroki diagram blocks (plantuml, graphviz, ditaa, etc.)
+  const krokiTypes = ["plantuml", "graphviz", "ditaa", "c4plantuml", "nomnoml", "svgbob", "blockdiag", "nwdiag", "packetdiag", "rackdiag", "seqdiag", "erd", "excalidraw", "vega", "vegalite", "wavedrom"];
+  for (const type of krokiTypes) {
+    registry.block(function (this: any) {
+      const self = this;
+      self.named(type);
+      self.onContext(["listing", "literal", "open"]);
+      self.process(function (_parent: any, reader: any) {
+        const source = reader.getLines().join("\n");
+        const escaped = source
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        return self.createPassBlock(
+          _parent,
+          `<div class="kroki" data-type="${type}">${escaped}</div>`,
+          {},
+        );
+      });
+    });
+  }
 
   registry.includeProcessor(function (this: any) {
     const self = this;

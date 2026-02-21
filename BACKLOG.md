@@ -50,9 +50,9 @@
 ## Planned Features
 
 ### Editing
-- [ ] Inline editor for `.adoc` files (split view: editor + preview)
-- [ ] Save changes back to filesystem via File System Access API
-- [ ] Keyboard shortcuts (Ctrl+S to save, etc.)
+- [x] Inline editor for `.adoc` files (split view: editor + preview)
+- [x] Save changes back to filesystem via File System Access API
+- [x] Keyboard shortcuts (Ctrl+S to save, etc.)
 
 ### Scroll Sync
 - [ ] Bidirectional scroll sync between editor and preview
@@ -65,31 +65,31 @@
 - [ ] Option to disable `include::` resolution
 
 ### Syntax Highlighting
-- [ ] Theme selection for code highlighting
+- [x] Theme selection for code highlighting
 
 ### Search
-- [ ] Full-text search within file tree
-- [ ] Search within preview content (Ctrl+F overlay)
+- [x] Full-text search within file tree
+- [x] Search within preview content (Ctrl+F overlay)
 
 ### Navigation
 - [ ] Bookmarks / favorites
-- [ ] Recent files list
+- [x] Recent files list
 - [ ] Multiple tabs for preview
-- [ ] Back/forward navigation buttons in the UI
+- [x] Back/forward navigation buttons in the UI
 
 ### Diagrams
-- [ ] Asciidoctor diagram support via Kroki API
-- [ ] PlantUML rendering
-- [ ] Ditaa rendering
+- [x] Asciidoctor diagram support via Kroki API
+- [x] PlantUML rendering
+- [x] Ditaa rendering
 
 ### Export
-- [ ] Direct PDF generation (html2pdf.js or similar)
+- [x] Direct PDF generation (html2pdf.js or similar)
 - [ ] Export to EPUB
 - [ ] Export to DocBook
 
 ### UI/UX
-- [ ] System/auto theme option exposed in the UI
-- [ ] Configurable font size and family
+- [x] System/auto theme option exposed in the UI
+- [x] Configurable font size and family
 - [ ] Customizable CSS for preview
-- [ ] Keyboard navigation in file tree
-- [ ] Drag and drop files
+- [x] Keyboard navigation in file tree
+- [x] Drag and drop files

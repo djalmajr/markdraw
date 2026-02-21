@@ -148,20 +148,31 @@ function buildTocHtml(entries: TocEntry[]): string {
   let currentDepth = 0;
   html += "<ul>\n";
 
-  for (const entry of normalized) {
-    while (currentDepth < entry.depth) {
-      html += "<ul>\n";
-      currentDepth++;
-    }
+  for (let i = 0; i < normalized.length; i++) {
+    const entry = normalized[i]!;
+    const nextDepth = normalized[i + 1]?.depth ?? 0;
+
+    // Close levels when going shallower
     while (currentDepth > entry.depth) {
-      html += "</ul>\n";
+      html += "</ul></li>\n";
       currentDepth--;
     }
-    html += `<li><a href="#${entry.id}">${escapeHtml(entry.text)}</a></li>\n`;
+
+    // Open the <li> with the link
+    html += `<li><a href="#${entry.id}">${escapeHtml(entry.text)}</a>`;
+
+    if (nextDepth > entry.depth) {
+      // Next item is deeper — keep <li> open and start child <ul>
+      html += "\n<ul>\n";
+      currentDepth = entry.depth + 1;
+    } else {
+      html += "</li>\n";
+    }
   }
 
+  // Close remaining open levels
   while (currentDepth > 0) {
-    html += "</ul>\n";
+    html += "</ul></li>\n";
     currentDepth--;
   }
 
@@ -272,6 +283,13 @@ function createMarkdownIt(): MarkdownIt {
     if (info === "mermaid") {
       const content = token.content.trim();
       return `<div class="mermaid">${md.utils.escapeHtml(content)}</div>\n`;
+    }
+
+    // Kroki diagram types
+    const krokiTypes = new Set(["plantuml", "graphviz", "ditaa", "c4plantuml", "nomnoml", "svgbob", "blockdiag", "nwdiag", "packetdiag", "rackdiag", "seqdiag", "erd", "excalidraw", "vega", "vegalite", "wavedrom"]);
+    if (krokiTypes.has(info)) {
+      const content = token.content.trim();
+      return `<div class="kroki" data-type="${info}">${md.utils.escapeHtml(content)}</div>\n`;
     }
 
     return defaultFence(tokens, idx, options, env, self);

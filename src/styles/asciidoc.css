@@ -1,5 +1,7 @@
 /* === AsciiDoc Output Styles === */
 .doc-body {
+  font-size: var(--doc-font-size, 15px);
+  font-family: var(--doc-font-family, var(--font-sans));
   line-height: 1.7;
   color: hsl(var(--foreground));
   word-wrap: break-word;
@@ -291,28 +293,10 @@
   opacity: 0.5;
 }
 
-/* TOC - Right sidebar layout */
-.doc-body {
-  position: relative;
-}
+/* TOC - Rendered inside .toc-panel (flex sibling of .content) */
 
-.doc-body #toc {
-  position: fixed;
-  top: var(--toolbar-h, 49px);
-  right: 0;
-  width: 260px;
-  height: calc(100vh - var(--toolbar-h, 49px));
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 16px 16px 32px 16px;
-  background: hsl(var(--secondary));
-  border-left: 1px solid hsl(var(--border));
-  z-index: 10;
-  font-size: 13px;
-}
-
-.doc-body #toc .title,
-.doc-body #toctitle {
+.toc-panel #toc .title,
+.toc-panel #toctitle {
   font-weight: 600;
   font-size: 13px;
   margin-bottom: 8px;
@@ -321,55 +305,85 @@
   color: hsl(var(--muted-foreground));
 }
 
-.doc-body #toc ul {
+.toc-panel #toc ul {
   list-style: none;
-  padding-left: 12px;
+  padding-left: 20px;
   margin: 0;
 }
 
-.doc-body #toc > ul {
+.toc-panel #toc > ul {
   padding-left: 0;
 }
 
-.doc-body #toc li {
+.toc-panel #toc li {
   margin-bottom: 2px;
   line-height: 1.4;
 }
 
-.doc-body #toc a {
+.toc-panel #toc a {
   color: hsl(var(--muted-foreground));
   font-size: 12.5px;
   display: block;
-  padding: 2px 6px;
+  padding: 2px 6px 2px 20px;
   border-radius: 4px;
   transition: all 0.1s ease;
 }
 
-.doc-body #toc a:hover {
+.toc-panel #toc a:hover {
   color: hsl(var(--primary));
   background: hsl(var(--bg-hover));
   text-decoration: none;
 }
 
 /* TOC active item highlight */
-.doc-body #toc a.toc-active {
+.toc-panel #toc a.toc-active {
   color: hsl(var(--primary));
   background: hsl(var(--bg-hover));
   font-weight: 500;
 }
 
-/* When TOC is visible, add right margin to content so it doesn't overlap */
-.preview:has(#toc:not([style*="display: none"])) .doc-body > :not(#toc) {
-  margin-right: 276px;
+/* TOC collapsible items */
+.toc-panel #toc li.toc-collapsible {
+  position: relative;
 }
 
-.preview:has(#toc:not([style*="display: none"])) {
-  max-width: 100%;
+
+.toc-panel #toc .toc-toggle {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  color: hsl(var(--muted-foreground));
+  border-radius: 3px;
+  z-index: 1;
+  transition: color 0.15s ease;
 }
 
-/* TOC scrollbar */
-.doc-body #toc::-webkit-scrollbar { width: 4px; }
-.doc-body #toc::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 2px; }
+.toc-panel #toc .toc-toggle:hover {
+  color: hsl(var(--primary));
+  background: hsl(var(--bg-hover));
+}
+
+.toc-panel #toc .toc-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+.toc-panel #toc li.toc-expanded > .toc-toggle svg {
+  transform: rotate(90deg);
+}
+
+.toc-panel #toc li.toc-collapsed > .toc-toggle svg {
+  transform: rotate(0deg);
+}
+
+.toc-panel #toc li.toc-collapsed > ul {
+  display: none;
+}
 
 /* Sidebar blocks */
 .doc-body .sidebarblock {
@@ -528,83 +542,6 @@
   background: transparent;
 }
 
-/* Highlight.js: dark mode overrides (github-dark-dimmed colors) */
-.dark .doc-body .hljs {
-  color: #adbac7;
-}
-.dark .doc-body .hljs-doctag,
-.dark .doc-body .hljs-keyword,
-.dark .doc-body .hljs-meta .hljs-keyword,
-.dark .doc-body .hljs-template-tag,
-.dark .doc-body .hljs-template-variable,
-.dark .doc-body .hljs-type,
-.dark .doc-body .hljs-variable.language_ {
-  color: #f47067;
-}
-.dark .doc-body .hljs-title,
-.dark .doc-body .hljs-title.class_,
-.dark .doc-body .hljs-title.class_.inherited__,
-.dark .doc-body .hljs-title.function_ {
-  color: #dcbdfb;
-}
-.dark .doc-body .hljs-attr,
-.dark .doc-body .hljs-attribute,
-.dark .doc-body .hljs-literal,
-.dark .doc-body .hljs-meta,
-.dark .doc-body .hljs-number,
-.dark .doc-body .hljs-operator,
-.dark .doc-body .hljs-selector-attr,
-.dark .doc-body .hljs-selector-class,
-.dark .doc-body .hljs-selector-id,
-.dark .doc-body .hljs-variable {
-  color: #6cb6ff;
-}
-.dark .doc-body .hljs-meta .hljs-string,
-.dark .doc-body .hljs-regexp,
-.dark .doc-body .hljs-string {
-  color: #96d0ff;
-}
-.dark .doc-body .hljs-built_in,
-.dark .doc-body .hljs-symbol {
-  color: #f69d50;
-}
-.dark .doc-body .hljs-code,
-.dark .doc-body .hljs-comment,
-.dark .doc-body .hljs-formula {
-  color: #768390;
-}
-.dark .doc-body .hljs-name,
-.dark .doc-body .hljs-quote,
-.dark .doc-body .hljs-selector-pseudo,
-.dark .doc-body .hljs-selector-tag {
-  color: #8ddb8c;
-}
-.dark .doc-body .hljs-subst {
-  color: #adbac7;
-}
-.dark .doc-body .hljs-section {
-  color: #316dca;
-  font-weight: 700;
-}
-.dark .doc-body .hljs-bullet {
-  color: #eac55f;
-}
-.dark .doc-body .hljs-emphasis {
-  color: #adbac7;
-  font-style: italic;
-}
-.dark .doc-body .hljs-strong {
-  color: #adbac7;
-  font-weight: 700;
-}
-.dark .doc-body .hljs-addition {
-  color: #b4f1b4;
-  background-color: #1b4721;
-}
-.dark .doc-body .hljs-deletion {
-  color: #ffd8d3;
-  background-color: #78191b;
-}
 
 /* KaTeX math blocks */
 .doc-body .math-block {
@@ -704,7 +641,7 @@
   }
 
   /* Don't show href for TOC links and anchor links */
-  .doc-body #toc a[href]::after,
+  .toc-panel #toc a[href]::after,
   .doc-body a.anchor[href]::after {
     content: none;
   }
@@ -713,9 +650,9 @@
     display: none;
   }
 
-  /* TOC: render as a static block on the first page */
-  .doc-body #toc {
-    position: static !important;
+  /* TOC panel: render as a static block on the first page */
+  .toc-panel {
+    display: block !important;
     width: 100% !important;
     height: auto !important;
     overflow: visible !important;
@@ -729,27 +666,34 @@
     font-size: 10pt;
   }
 
-  .doc-body #toc .title,
-  .doc-body #toctitle {
+  .toc-panel #toc .title,
+  .toc-panel #toctitle {
     color: #000;
     font-size: 14pt;
     font-weight: 700;
     margin-bottom: 12px;
   }
 
-  .doc-body #toc a {
+  .toc-panel #toc a {
     color: #333;
     font-size: 10pt;
   }
 
-  .doc-body #toc a.toc-active {
+  .toc-panel #toc a.toc-active {
     background: none;
     font-weight: normal;
     color: #333;
   }
 
-  /* Remove TOC right margin offset in print */
-  .preview:has(#toc) .doc-body > :not(#toc) {
-    margin-right: 0 !important;
+  .toc-panel #toc li.toc-collapsed > ul {
+    display: block !important;
+  }
+
+  .toc-panel #toc .toc-toggle {
+    display: none !important;
+  }
+
+  .toc-panel #toc a {
+    padding-left: 6px !important;
   }
 }

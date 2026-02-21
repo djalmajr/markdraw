@@ -23,6 +23,7 @@ export function EmptyState(props: EmptyStateProps) {
             <Button size="lg" onClick={props.onOpenFolder}>
               Open Folder
             </Button>
+            <p class="empty-hint">or drag and drop a folder or file here</p>
           </>
         }
       >

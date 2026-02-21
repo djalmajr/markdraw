@@ -2,6 +2,8 @@
 import { render } from "solid-js/web";
 import { App } from "./components/App.tsx";
 import "./styles/index.css";
+import { applyCodeTheme, getStoredCodeTheme } from "./lib/code-theme.ts";
+import { applyFontPrefs, getStoredFontPrefs } from "./lib/font-prefs.ts";
 
 export type ThemeMode = "system" | "light" | "dark";
 
@@ -23,6 +25,11 @@ function applyTheme(mode: ThemeMode) {
 
 // Apply on load
 applyTheme(getStoredTheme());
+applyCodeTheme(
+  getStoredCodeTheme(),
+  document.documentElement.classList.contains("dark")
+);
+applyFontPrefs(getStoredFontPrefs());
 
 // Listen for system changes (only matters when mode is "system")
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {

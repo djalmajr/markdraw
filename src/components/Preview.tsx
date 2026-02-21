@@ -1,7 +1,8 @@
-import { Show, createEffect, onMount, onCleanup } from "solid-js";
+import { Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import mermaid from "mermaid";
 import hljs from "highlight.js/lib/common";
-import "highlight.js/styles/github.css";
+import { SearchOverlay } from "./SearchOverlay.tsx";
+import { isSupportedKrokiType, renderKroki } from "../lib/kroki.ts";
 import "katex/dist/katex.min.css";
 import "@mdit/plugin-alert/style";
 import "../styles/asciidoc.css";
@@ -61,11 +62,11 @@ async function renderMermaidBlocks(container: HTMLElement) {
       // Check again after await — DOM may have been replaced
       if (gen !== mermaidRenderGen) return;
       block.innerHTML = svg;
-    } catch (e) {
+    } catch (e: any) {
       if (gen !== mermaidRenderGen) return;
-      // Show inline error instead of raw source
+      const errMsg = e?.message || "Unknown error";
       const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      block.innerHTML = `<pre class="mermaid-error">Mermaid syntax error\n\n${escaped}</pre>`;
+      block.innerHTML = `<pre class="mermaid-error">Mermaid error: ${errMsg.replace(/</g, "&lt;")}\n\n${escaped}</pre>`;
     }
 
     // Always mark as processed to prevent re-processing on effect re-runs
@@ -76,9 +77,103 @@ async function renderMermaidBlocks(container: HTMLElement) {
   }
 }
 
+/** Render Kroki diagram blocks (plantuml, graphviz, ditaa, etc.) */
+async function renderKrokiBlocks(container: HTMLElement) {
+  const blocks = container.querySelectorAll<HTMLElement>("div.kroki");
+  for (const block of blocks) {
+    if (block.getAttribute("data-processed") === "true") continue;
+    block.setAttribute("data-processed", "true");
+
+    const type = block.getAttribute("data-type") || "plantuml";
+    const source = block.textContent || "";
+    if (!source.trim()) continue;
+
+    block.textContent = "Rendering diagram...";
+    block.style.color = "hsl(var(--muted-foreground))";
+    block.style.fontStyle = "italic";
+
+    try {
+      const svg = await renderKroki(type, source);
+      block.style.color = "";
+      block.style.fontStyle = "";
+      block.innerHTML = svg;
+    } catch (e: any) {
+      const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      block.innerHTML = `<pre class="mermaid-error">Kroki error (${type}): ${e?.message || "Unknown"}\n\n${escaped}</pre>`;
+      block.style.color = "";
+      block.style.fontStyle = "";
+    }
+  }
+}
+
+/** Add collapse/expand toggles to TOC items that have children */
+function setupTocCollapse(tocEl: HTMLElement): () => void {
+  const toggleHandlers: { el: HTMLElement; handler: EventListener; keyHandler: EventListener }[] = [];
+
+  for (const li of tocEl.querySelectorAll<HTMLLIElement>("li")) {
+    const childUl = li.querySelector(":scope > ul");
+    if (!childUl) continue;
+
+    const toggle = document.createElement("span");
+    toggle.className = "toc-toggle";
+    toggle.setAttribute("role", "button");
+    toggle.setAttribute("tabindex", "0");
+    toggle.setAttribute("aria-label", "Toggle section");
+    toggle.setAttribute("aria-expanded", "true");
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("width", "12");
+    svg.setAttribute("height", "12");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    polyline.setAttribute("points", "9 18 15 12 9 6");
+    svg.appendChild(polyline);
+    toggle.appendChild(svg);
+
+    li.classList.add("toc-collapsible", "toc-expanded");
+    li.insertBefore(toggle, li.firstChild);
+
+    const doToggle = () => {
+      li.classList.toggle("toc-expanded");
+      li.classList.toggle("toc-collapsed");
+      toggle.setAttribute("aria-expanded", String(li.classList.contains("toc-expanded")));
+    };
+
+    const handler = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      doToggle();
+    };
+
+    const keyHandler = (e: Event) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key === "Enter" || ke.key === " ") {
+        ke.preventDefault();
+        doToggle();
+      }
+    };
+
+    toggle.addEventListener("click", handler);
+    toggle.addEventListener("keydown", keyHandler);
+    toggleHandlers.push({ el: toggle, handler, keyHandler });
+  }
+
+  return () => {
+    for (const { el, handler, keyHandler } of toggleHandlers) {
+      el.removeEventListener("click", handler);
+      el.removeEventListener("keydown", keyHandler);
+    }
+  };
+}
+
 /** Set up IntersectionObserver to highlight the current TOC link based on scroll position */
-function setupTocScrollTracking(container: HTMLElement): (() => void) | undefined {
-  const toc = container.querySelector("#toc");
+function setupTocScrollTracking(container: HTMLElement, tocEl?: HTMLElement): (() => void) | undefined {
+  const toc = tocEl || container.querySelector("#toc");
   if (!toc) return;
 
   const tocLinks = Array.from(toc.querySelectorAll<HTMLAnchorElement>("a[href^='#']"));
@@ -102,6 +197,19 @@ function setupTocScrollTracking(container: HTMLElement): (() => void) | undefine
     if (link) {
       link.classList.add("toc-active");
       currentActive = link;
+
+      // Auto-expand collapsed parent sections so the active link is visible
+      let parent = link.parentElement;
+      while (parent && parent !== toc) {
+        if (parent.tagName === "LI" && parent.classList.contains("toc-collapsed")) {
+          parent.classList.remove("toc-collapsed");
+          parent.classList.add("toc-expanded");
+          const toggle = parent.querySelector(":scope > .toc-toggle");
+          toggle?.setAttribute("aria-expanded", "true");
+        }
+        parent = parent.parentElement;
+      }
+
       // Auto-scroll TOC so active item is visible
       link.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
@@ -225,6 +333,8 @@ interface PreviewProps {
   html: string;
   loading: boolean;
   tocVisible: boolean;
+  /** External container element where #toc will be moved to (flex sibling of .content) */
+  tocContainer?: HTMLElement;
   /** Current file path (relative to root), used to resolve xref links */
   currentFilePath: string | null;
   /** Fragment ID to scroll to after content loads (from cross-file xref navigation) */
@@ -236,8 +346,21 @@ interface PreviewProps {
 }
 
 export function Preview(props: PreviewProps) {
+  const [searchOpen, setSearchOpen] = createSignal(false);
   let articleRef: HTMLElement | undefined;
   let cleanupToc: (() => void) | undefined;
+
+  // Ctrl+F to open search overlay
+  onMount(() => {
+    const handleCtrlF = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleCtrlF);
+    onCleanup(() => window.removeEventListener("keydown", handleCtrlF));
+  });
 
   // Listen for theme changes to re-init mermaid
   onMount(() => {
@@ -330,7 +453,7 @@ export function Preview(props: PreviewProps) {
     props.onNavigate(targetPath, fragment);
   }
 
-  // Render mermaid blocks, set up TOC tracking, and apply TOC visibility whenever html changes
+  // Render mermaid blocks, set up TOC tracking, and move TOC to external panel
   createEffect(() => {
     const _html = props.html;
     // Also track tocVisible so this re-runs when it changes
@@ -340,17 +463,30 @@ export function Preview(props: PreviewProps) {
       queueMicrotask(() => {
         highlightCodeBlocks(articleRef!);
         renderMermaidBlocks(articleRef!);
+        renderKrokiBlocks(articleRef!);
 
-        // Apply TOC visibility
+        // Move #toc from article to external panel container (flex sibling layout)
+        const tocContainer = props.tocContainer;
         const toc = articleRef!.querySelector<HTMLElement>("#toc");
-        if (toc) {
-          toc.style.display = tocVis ? "" : "none";
+        if (toc && tocContainer) {
+          tocContainer.innerHTML = "";
+          tocContainer.appendChild(toc);
         }
 
-        // Set up scroll tracking (only if TOC is visible)
+        // Set up collapse toggles and scroll tracking (only if TOC is visible)
         cleanupToc?.();
         if (tocVis) {
-          cleanupToc = setupTocScrollTracking(articleRef!);
+          const tocEl = tocContainer?.querySelector<HTMLElement>("#toc") ?? undefined;
+          if (tocEl) {
+            const cleanupCollapse = setupTocCollapse(tocEl);
+            const cleanupScroll = setupTocScrollTracking(articleRef!, tocEl);
+            cleanupToc = () => {
+              cleanupCollapse();
+              cleanupScroll?.();
+            };
+          } else {
+            cleanupToc = undefined;
+          }
         } else {
           cleanupToc = undefined;
         }
@@ -369,6 +505,12 @@ export function Preview(props: PreviewProps) {
     <div class="preview">
       <Show when={props.loading}>
         <div class="preview-loading">Converting...</div>
+      </Show>
+      <Show when={searchOpen() && articleRef}>
+        <SearchOverlay
+          container={articleRef!}
+          onClose={() => setSearchOpen(false)}
+        />
       </Show>
       <article
         ref={articleRef}
