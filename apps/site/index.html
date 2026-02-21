@@ -66,12 +66,16 @@
       </div>
     </section>
 
-    <section class="section">
-      <h2>Available on</h2>
-      <ul>
-        <li><strong>Chrome Extension</strong> &mdash; Install from the Chrome Web Store and preview AsciiDoc/Markdown files directly in your browser.</li>
-        <li><strong>Desktop App</strong> (coming soon) &mdash; A native desktop application powered by Tauri for macOS, Windows, and Linux.</li>
-      </ul>
+    <section class="section" id="download">
+      <h2>Download</h2>
+      <div id="downloads-loading">
+        <p>Loading latest release...</p>
+      </div>
+      <div id="downloads-content" class="card-grid" style="display: none;"></div>
+      <div id="downloads-empty" style="display: none;">
+        <p>No releases available yet. Check back soon.</p>
+      </div>
+      <p>Also available as a <strong>Chrome Extension</strong> from the <a href="https://chromewebstore.google.com">Chrome Web Store</a>.</p>
       <p>For detailed instructions, see the <a href="guide.html">User Guide</a>.</p>
     </section>
 
@@ -87,5 +91,51 @@
   <footer class="site-footer">
     <p>AsciiMark &middot; <a href="privacy.html">Privacy Policy</a></p>
   </footer>
+
+  <script>
+    (async function () {
+      const RELEASES_URL = "https://releases.djalmajr.dev/asciimark/latest.json";
+      const platforms = {
+        "macos-arm64": { icon: "\u{1F34E}", label: "macOS (Apple Silicon)", ext: ".dmg" },
+        "macos-x64":  { icon: "\u{1F34E}", label: "macOS (Intel)", ext: ".dmg" },
+        "linux-appimage": { icon: "\u{1F427}", label: "Linux", ext: ".AppImage" },
+        "linux-deb":  { icon: "\u{1F427}", label: "Linux (Debian)", ext: ".deb" },
+        "windows-msi": { icon: "\u{1F4BB}", label: "Windows", ext: ".msi" },
+        "windows-exe": { icon: "\u{1F4BB}", label: "Windows", ext: ".exe" },
+      };
+
+      const loading = document.getElementById("downloads-loading");
+      const content = document.getElementById("downloads-content");
+      const empty = document.getElementById("downloads-empty");
+
+      try {
+        const res = await fetch(RELEASES_URL);
+        if (!res.ok) throw new Error(res.status);
+        const data = await res.json();
+
+        const cards = Object.entries(platforms)
+          .filter(([key]) => data.files[key])
+          .map(([key, info]) => {
+            const file = data.files[key];
+            return '<div class="card">'
+              + '<span class="card-icon">' + info.icon + '</span>'
+              + '<h3>' + info.label + '</h3>'
+              + '<a href="' + file.url + '" class="btn btn-primary">Download ' + info.ext + '</a>'
+              + '</div>';
+          });
+
+        loading.style.display = "none";
+        if (cards.length > 0) {
+          content.innerHTML = '<p>Latest: <strong>' + data.version + '</strong></p>' + cards.join("");
+          content.style.display = "";
+        } else {
+          empty.style.display = "";
+        }
+      } catch {
+        loading.style.display = "none";
+        empty.style.display = "";
+      }
+    })();
+  </script>
 </body>
 </html>

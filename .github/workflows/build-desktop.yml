@@ -86,3 +86,75 @@ jobs:
             apps/desktop/src-tauri/target/release/bundle/**/*.exe
             apps/desktop/src-tauri/target/release/bundle/**/*.nsis
           if-no-files-found: ignore
+
+  upload-r2:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Install rclone
+        run: |
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone for R2
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          acl = private
+          no_check_bucket = true
+          EOF
+
+      - name: Upload to R2
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "Uploading artifacts for tag: $TAG"
+          find artifacts -type f | while read -r file; do
+            filename=$(basename "$file")
+            echo "Uploading $filename..."
+            rclone copyto "$file" "r2:releases/asciimark/${TAG}/${filename}"
+          done
+          echo "Upload complete. Files in R2:"
+          rclone ls "r2:releases/asciimark/${TAG}/"
+
+      - name: Generate and upload latest.json
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          BASE_URL="https://releases.djalmajr.dev/asciimark/${TAG}"
+          FILES=$(find artifacts -type f -exec basename {} \; | sort)
+          JSON="{\"version\":\"${TAG}\",\"date\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"files\":{"
+          FIRST=true
+          for file in $FILES; do
+            ext="${file##*.}"
+            case "$ext" in
+              dmg)
+                if echo "$file" | grep -qi "aarch64\|arm64"; then
+                  key="macos-arm64"
+                else
+                  key="macos-x64"
+                fi ;;
+              AppImage) key="linux-appimage" ;;
+              deb) key="linux-deb" ;;
+              msi) key="windows-msi" ;;
+              exe|nsis) key="windows-exe" ;;
+              *) continue ;;
+            esac
+            if [ "$FIRST" = true ]; then FIRST=false; else JSON+=","; fi
+            JSON+="\"${key}\":{\"url\":\"${BASE_URL}/${file}\",\"filename\":\"${file}\"}"
+          done
+          JSON+="}}"
+          echo "$JSON" | jq '.' > latest.json
+          echo "Generated latest.json:"
+          cat latest.json
+          rclone copyto latest.json "r2:releases/asciimark/latest.json"
