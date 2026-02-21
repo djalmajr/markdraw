@@ -1,0 +1,35 @@
+{
+  "name": "@asciimark/desktop",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:frontend": "vite",
+    "build": "tauri build",
+    "build:frontend": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@asciimark/core": "workspace:*",
+    "@asciimark/ui": "workspace:*",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "html2pdf.js": "^0.14.0",
+    "solid-js": "^1.9.11"
+  },
+  "devDependencies": {
+    "@iconify/json": "^2.2.441",
+    "@tauri-apps/cli": "^2",
+    "@types/bun": "latest",
+    "@types/node": "^25.3.0",
+    "autoprefixer": "^10.4.24",
+    "postcss": "^8.5.6",
+    "tailwindcss": "3",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5.9.3",
+    "unplugin-icons": "^23.0.1",
+    "vite": "^7.3.1",
+    "vite-plugin-solid": "^2.11.10"
+  }
+}

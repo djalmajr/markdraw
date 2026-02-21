@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "AsciiMark",
+  "version": "1.0.0",
+  "description": "Preview AsciiDoc and Markdown files with syntax highlighting, mermaid diagrams, math, TOC, and auto-refresh",
+  "homepage_url": "https://asciimark.pages.dev/",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Open AsciiMark"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*/*.adoc", "*://*/*.adoc?*",
+        "*://*/*.asciidoc", "*://*/*.asciidoc?*",
+        "*://*/*.asc", "*://*/*.asc?*",
+        "*://*/*.ad", "*://*/*.ad?*",
+        "*://*/*.adoc.txt", "*://*/*.adoc.txt?*",
+        "*://*/*.md", "*://*/*.md?*",
+        "*://*/*.markdown", "*://*/*.markdown?*",
+        "*://*/*.mdown", "*://*/*.mdown?*",
+        "file:///*.adoc", "file:///*.asciidoc", "file:///*.asc",
+        "file:///*.ad", "file:///*.adoc.txt",
+        "file:///*.md", "file:///*.markdown", "file:///*.mdown"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "storage"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "index.html",
+        "assets/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

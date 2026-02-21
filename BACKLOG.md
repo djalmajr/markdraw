@@ -93,3 +93,19 @@
 - [ ] Customizable CSS for preview
 - [x] Keyboard navigation in file tree
 - [x] Drag and drop files
+
+### Desktop App (Tauri)
+- [ ] Tauri scaffold com SolidJS frontend
+- [ ] File system nativo (read/write via Tauri API)
+- [ ] Save de arquivos editados (Ctrl+S direto no filesystem)
+- [ ] Export to EPUB (via pandoc ou lib nativa)
+- [ ] Export to DocBook
+- [ ] Menus nativos (File, Edit, View, Help)
+- [ ] Associação de tipos de arquivo (.adoc, .md) com o app
+- [ ] Auto-update via Tauri updater
+- [ ] Tray icon / menu bar (opcional)
+
+### Infrastructure
+- [ ] Monorepo com workspaces (Bun)
+- [ ] GitHub Pages para documentação pública
+- [ ] CI/CD para build da extensão e do desktop app

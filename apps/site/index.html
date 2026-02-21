@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="AsciiMark - A viewer for AsciiDoc and Markdown files with syntax highlighting, diagrams, math, and more.">
+  <title>AsciiMark - AsciiDoc &amp; Markdown Viewer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="index.html" class="site-logo">
+        <span class="logo-icon">&lt;/&gt;</span> AsciiMark
+      </a>
+      <nav class="site-nav">
+        <a href="index.html" class="active">Home</a>
+        <a href="guide.html">Guide</a>
+        <a href="privacy.html">Privacy</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>AsciiMark</h1>
+      <p class="tagline">A viewer for AsciiDoc and Markdown files. Renders documents as formatted HTML directly in your browser &mdash; no server required.</p>
+      <div class="hero-actions">
+        <a href="guide.html" class="btn btn-primary">Read the Guide</a>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Features</h2>
+      <div class="card-grid">
+        <div class="card">
+          <span class="card-icon">&#128196;</span>
+          <h3>Dual Format Support</h3>
+          <p>Renders both AsciiDoc and Markdown files with full syntax support, including tables, admonitions, cross-references, and 14 markdown-it plugins.</p>
+        </div>
+        <div class="card">
+          <span class="card-icon">&#128193;</span>
+          <h3>Folder Browser</h3>
+          <p>Open entire folders and browse your documentation via a file tree sidebar. Supports drag-and-drop for quick access to files and directories.</p>
+        </div>
+        <div class="card">
+          <span class="card-icon">&#9998;</span>
+          <h3>Inline Editor</h3>
+          <p>Edit your documents in a split-view editor powered by CodeMirror. Save changes directly to disk with the File System Access API.</p>
+        </div>
+        <div class="card">
+          <span class="card-icon">&#127912;</span>
+          <h3>Diagrams &amp; Math</h3>
+          <p>Mermaid and Kroki diagrams render inline. KaTeX handles math expressions. No external services needed for Mermaid or KaTeX.</p>
+        </div>
+        <div class="card">
+          <span class="card-icon">&#127763;</span>
+          <h3>Dark &amp; Light Themes</h3>
+          <p>Choose between dark, light, or system-matched themes. Customize code syntax highlighting, font size, and font family.</p>
+        </div>
+        <div class="card">
+          <span class="card-icon">&#128270;</span>
+          <h3>Search &amp; Navigation</h3>
+          <p>Filter files in the tree, search within document previews, navigate via table of contents, and follow cross-reference links.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Available on</h2>
+      <ul>
+        <li><strong>Chrome Extension</strong> &mdash; Install from the Chrome Web Store and preview AsciiDoc/Markdown files directly in your browser.</li>
+        <li><strong>Desktop App</strong> (coming soon) &mdash; A native desktop application powered by Tauri for macOS, Windows, and Linux.</li>
+      </ul>
+      <p>For detailed instructions, see the <a href="guide.html">User Guide</a>.</p>
+    </section>
+
+    <nav class="page-nav">
+      <span></span>
+      <a href="guide.html" class="nav-next">
+        <span class="nav-label">Next</span>
+        User Guide
+      </a>
+    </nav>
+  </main>
+
+  <footer class="site-footer">
+    <p>AsciiMark &middot; <a href="privacy.html">Privacy Policy</a></p>
+  </footer>
+</body>
+</html>

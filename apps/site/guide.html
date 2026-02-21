@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="AsciiMark User Guide - Learn how to install, configure, and use AsciiMark for viewing AsciiDoc and Markdown files.">
+  <title>User Guide - AsciiMark</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="index.html" class="site-logo">
+        <span class="logo-icon">&lt;/&gt;</span> AsciiMark
+      </a>
+      <nav class="site-nav">
+        <a href="index.html">Home</a>
+        <a href="guide.html" class="active">Guide</a>
+        <a href="privacy.html">Privacy</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1 class="page-title">User Guide</h1>
+    <p class="page-subtitle">Everything you need to know to get started with AsciiMark and make the most of its features.</p>
+
+    <!-- Installation -->
+    <section class="section" id="installation">
+      <h2>Installation</h2>
+
+      <h3>Chrome Extension</h3>
+      <p class="notice"><strong>Coming soon.</strong> AsciiMark will be available on the Chrome Web Store in a future release.</p>
+
+      <h3>Desktop App (Tauri)</h3>
+      <p class="notice"><strong>Coming soon.</strong> A native desktop application for macOS, Windows, and Linux is under development.</p>
+    </section>
+
+    <!-- Opening Files -->
+    <section class="section" id="opening-files">
+      <h2>Opening Files</h2>
+      <p>There are several ways to open documents in AsciiMark:</p>
+
+      <h3>Open Folder</h3>
+      <p>Click the <strong>Open Folder</strong> button to select a directory from your filesystem. AsciiMark will display all <code>.adoc</code> and <code>.md</code> files in a navigable file tree.</p>
+
+      <h3>Drag &amp; Drop</h3>
+      <p>Drag and drop folders or individual files directly onto the AsciiMark window. Dropping a folder populates the file tree; dropping a file opens it immediately for preview.</p>
+
+      <h3>Extension Mode</h3>
+      <p>When you navigate to a URL ending in <code>.adoc</code> or <code>.md</code>, AsciiMark automatically detects the file and renders it as formatted HTML. This works with remote URLs served over <code>https://</code>.</p>
+
+      <h3>File URL Access</h3>
+      <p>To render local files opened via <code>file://</code> URLs:</p>
+      <ol>
+        <li>Go to <code>chrome://extensions</code></li>
+        <li>Find AsciiMark and click <strong>Details</strong></li>
+        <li>Enable <strong>Allow access to file URLs</strong></li>
+      </ol>
+      <p>With this enabled, opening a local <code>.adoc</code> or <code>.md</code> file in Chrome will automatically render it through AsciiMark.</p>
+    </section>
+
+    <!-- Navigation -->
+    <section class="section" id="navigation">
+      <h2>Navigation</h2>
+
+      <h3>File Tree Sidebar</h3>
+      <p>The sidebar displays all supported files in the opened directory as a collapsible tree. Click any file to open it in the preview pane.</p>
+
+      <h3>Cross-Reference Links</h3>
+      <p>Cross-reference (<code>xref</code>) links in AsciiDoc documents are resolved and navigable. Clicking an xref link opens the referenced document within AsciiMark.</p>
+
+      <h3>Back &amp; Forward</h3>
+      <p>Use the browser's back and forward buttons to navigate between previously viewed documents, just like browsing web pages.</p>
+
+      <h3>Breadcrumb Trail</h3>
+      <p>A breadcrumb trail at the top of the preview shows the current file path, allowing quick navigation to parent directories.</p>
+    </section>
+
+    <!-- Table of Contents -->
+    <section class="section" id="table-of-contents">
+      <h2>Table of Contents</h2>
+      <p>A collapsible table of contents panel displays all headings in the current document. The TOC is auto-generated from the heading hierarchy and highlights the currently visible section as you scroll.</p>
+    </section>
+
+    <!-- Search -->
+    <section class="section" id="search">
+      <h2>Search</h2>
+
+      <h3>Search in File Tree</h3>
+      <p>Type in the file tree search box to filter files by name. The tree updates in real time, showing only files matching your query.</p>
+
+      <h3>Search in Preview</h3>
+      <p>Press <kbd>Ctrl</kbd>+<kbd>F</kbd> to open a search overlay within the document preview. Matching terms are highlighted, and you can navigate between results.</p>
+    </section>
+
+    <!-- Editor -->
+    <section class="section" id="editor">
+      <h2>Editor</h2>
+
+      <h3>Inline Editor (Split View)</h3>
+      <p>Toggle the inline editor to get a side-by-side split view with the source on the left and the rendered preview on the right. The editor is powered by CodeMirror with syntax highlighting.</p>
+
+      <h3>Save Changes</h3>
+      <p>Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to save your edits directly to disk via the File System Access API.</p>
+    </section>
+
+    <!-- Appearance -->
+    <section class="section" id="appearance">
+      <h2>Appearance</h2>
+
+      <h3>Theme</h3>
+      <p>Choose between three theme options:</p>
+      <ul>
+        <li><strong>Light</strong> &mdash; A clean light interface</li>
+        <li><strong>Dark</strong> &mdash; A dark interface that reduces eye strain</li>
+        <li><strong>System</strong> &mdash; Automatically matches your operating system's color scheme</li>
+      </ul>
+
+      <h3>Code Syntax Theme</h3>
+      <p>Select from multiple syntax highlighting themes for code blocks (GitHub, Atom One, Nord, Tokyo Night).</p>
+
+      <h3>Font Size &amp; Family</h3>
+      <p>Adjust the font size and font family for the document preview from the settings panel.</p>
+    </section>
+
+    <!-- Document Processing -->
+    <section class="section" id="document-processing">
+      <h2>Document Processing</h2>
+
+      <h3>AsciiDoc</h3>
+      <p>Full rendering via <strong>@asciidoctor/core</strong> with support for admonitions, tables, source blocks, cross-references, and recursive <code>include::</code> resolution.</p>
+
+      <h3>Markdown</h3>
+      <p>Rendered via <strong>markdown-it</strong> with 14 plugins: task lists, footnotes, definition lists, abbreviations, sub/sup, emoji, KaTeX math, GitHub alerts, advanced tables, custom containers, and more.</p>
+    </section>
+
+    <!-- Diagrams -->
+    <section class="section" id="diagrams">
+      <h2>Diagrams</h2>
+
+      <h3>Mermaid</h3>
+      <p>Fenced code blocks with the <code>mermaid</code> language tag are rendered as diagrams directly in the browser. Supports flowcharts, sequence diagrams, Gantt charts, class diagrams, and more.</p>
+
+      <h3>Kroki</h3>
+      <p>For PlantUML, Ditaa, Graphviz, and other diagram formats, AsciiMark uses <a href="https://kroki.io/">Kroki</a> for rendering.</p>
+    </section>
+
+    <!-- Export -->
+    <section class="section" id="export">
+      <h2>Export</h2>
+      <ul>
+        <li><strong>Print to PDF</strong> &mdash; Press <kbd>Ctrl</kbd>+<kbd>P</kbd> for print-optimized output with "Save as PDF" option.</li>
+        <li><strong>Download PDF</strong> &mdash; Direct PDF generation via html2pdf.js without the print dialog.</li>
+      </ul>
+    </section>
+
+    <!-- Keyboard Shortcuts -->
+    <section class="section" id="keyboard-shortcuts">
+      <h2>Keyboard Shortcuts</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Shortcut</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><kbd>Ctrl</kbd>+<kbd>S</kbd></td>
+            <td>Save current document</td>
+          </tr>
+          <tr>
+            <td><kbd>Ctrl</kbd>+<kbd>F</kbd></td>
+            <td>Search in preview</td>
+          </tr>
+          <tr>
+            <td><kbd>Ctrl</kbd>+<kbd>B</kbd></td>
+            <td>Toggle sidebar</td>
+          </tr>
+          <tr>
+            <td><kbd>Ctrl</kbd>+<kbd>E</kbd></td>
+            <td>Toggle editor</td>
+          </tr>
+          <tr>
+            <td><kbd>Ctrl</kbd>+<kbd>P</kbd></td>
+            <td>Print / Export to PDF</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>On macOS, use <kbd>Cmd</kbd> instead of <kbd>Ctrl</kbd>.</p>
+    </section>
+
+    <nav class="page-nav">
+      <a href="index.html">
+        <span class="nav-label">Previous</span>
+        Home
+      </a>
+      <a href="privacy.html" class="nav-next">
+        <span class="nav-label">Next</span>
+        Privacy Policy
+      </a>
+    </nav>
+  </main>
+
+  <footer class="site-footer">
+    <p>AsciiMark &middot; <a href="privacy.html">Privacy Policy</a></p>
+  </footer>
+</body>
+</html>

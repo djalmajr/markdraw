@@ -1,0 +1,130 @@
+import { createSignal, createEffect, onCleanup, Show } from "solid-js";
+import { createConverter } from "@asciimark/core/converter.ts";
+import ConvertWorker from "@asciimark/core/convert-worker.ts?worker";
+import { createAppState } from "@asciimark/ui/composables/create-app-state.ts";
+import { AppShell } from "@asciimark/ui/components/app-shell.tsx";
+import { FileAccessWarning } from "@asciimark/ui/components/file-access-warning.tsx";
+import { getStoredTheme, applyTheme } from "./main.tsx";
+import { displayPathFromUrl } from "./lib/url-source.ts";
+import { FileWatcher } from "./lib/watcher.ts";
+import { getUrlParam } from "./lib/hash.ts";
+import { createFileLoader } from "./lib/file-loader.ts";
+import { createUrlMode } from "./lib/url-mode.ts";
+import { createFolder } from "./lib/folder.ts";
+import { createNavigation } from "./lib/navigation.ts";
+import { createDnd } from "./lib/dnd.ts";
+
+const { convertAdoc, convertMarkdown } = createConverter(new ConvertWorker());
+
+export function App() {
+  // Determine operating mode on mount
+  const sourceUrl = getUrlParam();
+  const isUrlMode = !!sourceUrl;
+
+  const state = createAppState({
+    applyTheme,
+    convertAdoc,
+    convertMarkdown,
+    getStoredTheme,
+  });
+
+  // Override canGoBack/canGoForward — extension uses browser history, not context stack
+  const canGoBack = () => state.navIndex() > 0;
+  const canGoForward = () => state.navIndex() < state.navStack().length - 1;
+
+  // Extension-specific state
+  const [rootHandle, setRootHandle] =
+    createSignal<FileSystemDirectoryHandle | null>(null);
+  const [fallbackFileMap, setFallbackFileMap] =
+    createSignal<Map<string, File> | null>(null);
+  const [urlFileName, setUrlFileName] = createSignal("");
+  const [, setUrlError] = createSignal<string | null>(null);
+  const [fileAccessDenied, setFileAccessDenied] = createSignal(false);
+
+  // File watcher (folder mode only)
+  const watcher = new FileWatcher(() => {
+    const file = state.selectedFile();
+    if (file) loader.loadFileContent(file);
+  });
+
+  // Create modules
+  const loader = createFileLoader({ fallbackFileMap, rootHandle, state, watcher });
+
+  const urlMode = createUrlMode({ setFileAccessDenied, setUrlError, setUrlFileName, state });
+
+  const folder = createFolder({
+    fallbackFileMap,
+    loadFileContent: loader.loadFileContent,
+    rootHandle,
+    setFallbackFileMap,
+    setRootHandle,
+    state,
+  });
+
+  const navigation = createNavigation({
+    canGoBack,
+    canGoForward,
+    fallbackFileMap,
+    isUrlMode,
+    loadFileContent: loader.loadFileContent,
+    rootHandle,
+    sourceUrl,
+    state,
+  });
+
+  const dnd = createDnd({
+    isUrlMode,
+    loadFileContent: loader.loadFileContent,
+    setFallbackFileMap,
+    setRootHandle,
+    state,
+  });
+
+  // Toggle auto-refresh (folder mode watcher)
+  createEffect(() => {
+    if (isUrlMode) return;
+    if (state.autoRefresh()) {
+      watcher.start();
+    } else {
+      watcher.stop();
+    }
+  });
+
+  onCleanup(() => {
+    watcher.destroy();
+    urlMode.cleanup();
+    navigation.cleanup();
+  });
+
+  // Initialize
+  if (isUrlMode) {
+    urlMode.initUrlMode(sourceUrl!);
+  } else {
+    folder.initFolderMode();
+  }
+
+  return (
+    <AppShell
+      state={state}
+      hasRoot={!!rootHandle() || !!fallbackFileMap()}
+      showEditorTabs={false}
+      showNavButtons={!isUrlMode && (!!rootHandle() || !!fallbackFileMap())}
+      showSidebar={!isUrlMode && state.sidebarVisible() && (!!rootHandle() || !!fallbackFileMap())}
+      showToolbar={isUrlMode || !!rootHandle() || !!fallbackFileMap()}
+      toolbarFilePath={isUrlMode ? displayPathFromUrl(sourceUrl!) : (state.selectedFile()?.path ?? null)}
+      toolbarRootName={isUrlMode ? "" : state.rootName()}
+      contentWrapper={(content) => (
+        <Show when={!fileAccessDenied()} fallback={<FileAccessWarning url={sourceUrl!} />}>
+          {content}
+        </Show>
+      )}
+      onDragLeave={dnd.handleDragLeave}
+      onDragOver={dnd.handleDragOver}
+      onDrop={dnd.handleDrop}
+      onGoBack={navigation.handleGoBack}
+      onGoForward={navigation.handleGoForward}
+      onLoadFile={(entry) => loader.loadFileContent(entry)}
+      onNavigate={navigation.handleNavigate}
+    />
+  );
+}

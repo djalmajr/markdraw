@@ -30,5 +30,24 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # IntelliJ based IDEs
 .idea
 
+# Tauri
+apps/desktop/src-tauri/target
+
 # Finder (MacOS) folder config
 .DS_Store
+
+# Agents
+.claude/*
+.claude/hooks/**/.bypass
+.claude/hooks/**/store.db
+!.claude/commands/
+!.claude/hooks/
+!.claude/rules/
+!.claude/settings.json
+
+.opencode/*
+!.opencode/commands/
+
+# CLAUDE.md files (except root)
+**/CLAUDE.md
+!/CLAUDE.md

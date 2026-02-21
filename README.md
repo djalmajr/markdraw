@@ -18,11 +18,28 @@ A viewer for AsciiDoc and Markdown files with syntax highlighting, diagrams, mat
 - **SPA routing** - Hash-based navigation with browser back/forward support
 - **Chrome Extension** - Auto-detects `.adoc`/`.md` files opened in the browser
 
+## Documentation
+
+Full user guide and privacy policy available at [djalmajr.github.io/asciimark](https://djalmajr.github.io/asciimark/).
+
+## Monorepo Structure
+
+```
+asciimark/
+├── packages/
+│   ├── core/          # Shared logic (AsciiDoc/Markdown conversion, utils)
+│   └── ui/            # Shared SolidJS components and styles
+├── apps/
+│   ├── extension/     # Chrome Extension
+│   └── desktop/       # Tauri Desktop App (planned)
+└── docs/              # GitHub Pages site
+```
+
 ## Getting Started
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) (recommended) or Node.js
+- [Bun](https://bun.sh)
 
 ### Install
 
@@ -30,25 +47,25 @@ A viewer for AsciiDoc and Markdown files with syntax highlighting, diagrams, mat
 bun install
 ```
 
-### Development
+### Development (Chrome Extension)
 
 ```sh
-bun run dev
+bun run dev:ext
 ```
 
 Opens a local dev server with hot reload.
 
-### Build
+### Build (Chrome Extension)
 
 ```sh
-bun run build
+bun run build:ext
 ```
 
-Outputs to `dist/`. Load this folder as an unpacked extension in Chrome:
+Outputs to `apps/extension/dist/`. Load this folder as an unpacked extension in Chrome:
 
 1. Go to `chrome://extensions`
 2. Enable **Developer mode**
-3. Click **Load unpacked** and select the `dist/` folder
+3. Click **Load unpacked** and select the `apps/extension/dist/` folder
 
 ### Usage
 
@@ -70,7 +87,7 @@ Outputs to `dist/`. Load this folder as an unpacked extension in Chrome:
 
 ## Privacy
 
-All processing is local. No data is collected or transmitted. See [PRIVACY.md](PRIVACY.md).
+All processing is local. No data is collected or transmitted. See [PRIVACY.md](PRIVACY.md) or the [online privacy policy](https://djalmajr.github.io/asciimark/privacy.html).
 
 ## License
 

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="AsciiMark Privacy Policy - Learn how AsciiMark handles your data.">
+  <title>Privacy Policy - AsciiMark</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="index.html" class="site-logo">
+        <span class="logo-icon">&lt;/&gt;</span> AsciiMark
+      </a>
+      <nav class="site-nav">
+        <a href="index.html">Home</a>
+        <a href="guide.html">Guide</a>
+        <a href="privacy.html" class="active">Privacy</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1 class="page-title">Privacy Policy</h1>
+    <p class="page-subtitle"><strong>Last updated:</strong> February 19, 2026</p>
+
+    <section class="section" id="data-collection">
+      <h2>Data Collection</h2>
+      <p>AsciiMark does <strong>not</strong> collect, store, or transmit any personal data or user information.</p>
+    </section>
+
+    <section class="section" id="what-asciimark-does">
+      <h2>What AsciiMark Does</h2>
+      <p>AsciiMark is a browser extension that renders AsciiDoc and Markdown files as formatted HTML. All processing happens <strong>entirely locally</strong> in your browser.</p>
+    </section>
+
+    <section class="section" id="local-storage">
+      <h2>Local Storage</h2>
+      <p>AsciiMark stores the following data locally in your browser. None of this data ever leaves your device:</p>
+      <ul>
+        <li><strong>Theme preference</strong> (light/dark) in <code>localStorage</code></li>
+        <li><strong>Last opened directory handle</strong> in <code>IndexedDB</code> (for session restore when reopening the browser)</li>
+      </ul>
+    </section>
+
+    <section class="section" id="permissions-explained">
+      <h2>Permissions Explained</h2>
+      <ul>
+        <li><strong>storage</strong>: Used to temporarily pass document content from the page to the extension viewer via <code>chrome.storage.session</code>. This data is session-only and is automatically cleared when the browser closes.</li>
+        <li><strong>File URL access</strong> (optional): If you enable "Allow access to file URLs" in the extension settings, AsciiMark can render <code>.adoc</code> and <code>.md</code> files opened from your local filesystem. This is not enabled by default and requires manual opt-in. No file content is transmitted anywhere.</li>
+      </ul>
+    </section>
+
+    <section class="section" id="network-requests">
+      <h2>Network Requests</h2>
+      <p>AsciiMark makes <strong>no network requests</strong> except when you open a document hosted on a remote URL (e.g., <code>https://</code>). In that case, the extension fetches the document content directly from that URL for rendering. No data is sent to any third-party server.</p>
+    </section>
+
+    <section class="section" id="third-party-libraries">
+      <h2>Third-Party Libraries</h2>
+      <p>AsciiMark bundles the following open-source libraries for local processing only. None of them make network requests or collect data:</p>
+      <ul>
+        <li><strong>@asciidoctor/core</strong> &mdash; AsciiDoc to HTML conversion</li>
+        <li><strong>markdown-it</strong> (+ plugins) &mdash; Markdown to HTML conversion</li>
+        <li><strong>highlight.js</strong> &mdash; Syntax highlighting for code blocks</li>
+        <li><strong>Mermaid</strong> &mdash; Diagram rendering</li>
+        <li><strong>KaTeX</strong> &mdash; Math expression rendering</li>
+      </ul>
+    </section>
+
+    <section class="section" id="third-party-services">
+      <h2>Third-Party Services</h2>
+      <p>AsciiMark does <strong>not</strong> use any third-party analytics, tracking, or telemetry services.</p>
+    </section>
+
+    <section class="section" id="changes">
+      <h2>Changes</h2>
+      <p>If this policy changes, the update will be posted here.</p>
+    </section>
+
+    <section class="section" id="contact">
+      <h2>Contact</h2>
+      <p>For questions about this privacy policy, open an issue at <a href="https://github.com/djalmajr/asciimark">github.com/djalmajr/asciimark</a>.</p>
+    </section>
+
+    <nav class="page-nav">
+      <a href="guide.html">
+        <span class="nav-label">Previous</span>
+        User Guide
+      </a>
+      <a href="index.html" class="nav-next">
+        <span class="nav-label">Back to</span>
+        Home
+      </a>
+    </nav>
+  </main>
+
+  <footer class="site-footer">
+    <p>AsciiMark &middot; <a href="privacy.html">Privacy Policy</a></p>
+  </footer>
+</body>
+</html>

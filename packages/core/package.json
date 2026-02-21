@@ -1,0 +1,35 @@
+{
+  "name": "@asciimark/core",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@asciidoctor/core": "^3.0.4",
+    "clsx": "^2.1.1",
+    "@mdit/plugin-alert": "^0.22.4",
+    "@traptitech/markdown-it-katex": "^3.6.0",
+    "highlight.js": "^11.11.1",
+    "markdown-it": "^14.1.1",
+    "markdown-it-abbr": "^2.0.0",
+    "markdown-it-anchor": "^9.2.0",
+    "markdown-it-container": "^4.0.0",
+    "markdown-it-deflist": "^3.0.0",
+    "markdown-it-emoji": "^3.0.0",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-ins": "^4.0.0",
+    "markdown-it-mark": "^4.0.0",
+    "markdown-it-multimd-table": "^4.2.3",
+    "markdown-it-sub": "^2.0.0",
+    "markdown-it-sup": "^2.0.0",
+    "markdown-it-task-lists": "^2.1.1",
+    "tailwind-merge": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/markdown-it-anchor": "^7.0.0",
+    "typescript": "^5.9.3"
+  }
+}
