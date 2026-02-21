@@ -42,6 +42,9 @@
   "permissions": [
     "storage"
   ],
+  "host_permissions": [
+    "https://kroki.io/*"
+  ],
   "web_accessible_resources": [
     {
       "resources": [
