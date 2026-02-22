@@ -30,10 +30,29 @@
       <h2>Installation</h2>
 
       <h3>Chrome Extension</h3>
-      <p class="notice"><strong>Coming soon.</strong> AsciiMark will be available on the Chrome Web Store in a future release.</p>
+      <p>Install AsciiMark from the <a href="https://chromewebstore.google.com">Chrome Web Store</a>. After installation, the extension automatically renders <code>.adoc</code> and <code>.md</code> files in your browser.</p>
 
       <h3>Desktop App (Tauri)</h3>
-      <p class="notice"><strong>Coming soon.</strong> A native desktop application for macOS, Windows, and Linux is under development.</p>
+      <p>Download the desktop app for your platform from the <a href="index.html#download">Downloads</a> page. Available for macOS (Apple Silicon &amp; Intel), Linux, and Windows.</p>
+
+      <h4>macOS: Removing the Quarantine Flag</h4>
+      <p>Since the app is not signed with an Apple Developer certificate, macOS Gatekeeper may show a warning saying the app "is damaged and can't be opened." To fix this, open Terminal and run:</p>
+      <pre><code>xattr -cr /Applications/AsciiMark.app</code></pre>
+      <p>Then open the app normally. This only needs to be done once after downloading.</p>
+
+      <h4>Windows: SmartScreen Warning</h4>
+      <p>Since the app is not signed with a code-signing certificate, Windows SmartScreen may show a "Windows protected your PC" warning. To proceed:</p>
+      <ol>
+        <li>Click <strong>More info</strong></li>
+        <li>Click <strong>Run anyway</strong></li>
+      </ol>
+      <p>This only appears on the first run after downloading.</p>
+
+      <h4>Linux: Running the AppImage</h4>
+      <p>After downloading the AppImage, make it executable before running:</p>
+      <pre><code>chmod +x AsciiMark_*.AppImage
+./AsciiMark_*.AppImage</code></pre>
+      <p>The <code>.deb</code> package installs normally via <code>sudo dpkg -i</code> or by double-clicking the file.</p>
     </section>
 
     <!-- Opening Files -->

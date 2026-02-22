@@ -71,10 +71,11 @@
       <div id="downloads-loading">
         <p>Loading latest release...</p>
       </div>
-      <div id="downloads-content" class="card-grid" style="display: none;"></div>
+      <div id="downloads-content" class="card-grid downloads-grid" style="display: none;"></div>
       <div id="downloads-empty" style="display: none;">
         <p>No releases available yet. Check back soon.</p>
       </div>
+      <div class="notice" id="platform-notice" style="display: none;"></div>
       <p>Also available as a <strong>Chrome Extension</strong> from the <a href="https://chromewebstore.google.com">Chrome Web Store</a>.</p>
       <p>For detailed instructions, see the <a href="guide.html">User Guide</a>.</p>
     </section>
@@ -126,8 +127,37 @@
 
         loading.style.display = "none";
         if (cards.length > 0) {
-          content.innerHTML = '<p>Latest: <strong>' + data.version + '</strong></p>' + cards.join("");
+          var versionEl = document.createElement("p");
+          versionEl.innerHTML = 'Latest: <strong>' + data.version + '</strong>';
+          content.parentNode.insertBefore(versionEl, content);
+          content.innerHTML = cards.join("");
           content.style.display = "";
+          var hasMac = data.files["macos-arm64"] || data.files["macos-x64"];
+          var hasWin = data.files["windows-msi"] || data.files["windows-exe"];
+          var hasLinux = data.files["linux-appimage"];
+          if (hasMac || hasWin || hasLinux) {
+            var notices = [];
+            if (hasMac) {
+              notices.push(
+                '<p><strong>macOS:</strong> Since the app is not notarized by Apple, macOS may block it on first launch. To fix this, open Terminal and run:</p>'
+                + '<pre><code>xattr -cr /Applications/AsciiMark.app</code></pre>'
+              );
+            }
+            if (hasWin) {
+              notices.push(
+                '<p><strong>Windows:</strong> SmartScreen may show a warning because the app is not signed. Click <strong>More info</strong>, then <strong>Run anyway</strong> to proceed with the installation.</p>'
+              );
+            }
+            if (hasLinux) {
+              notices.push(
+                '<p><strong>Linux (AppImage):</strong> After downloading, make the file executable before running:</p>'
+                + '<pre><code>chmod +x AsciiMark_*.AppImage</code></pre>'
+              );
+            }
+            var noticeEl = document.getElementById("platform-notice");
+            noticeEl.innerHTML = notices.join("");
+            noticeEl.style.display = "";
+          }
         } else {
           empty.style.display = "";
         }
