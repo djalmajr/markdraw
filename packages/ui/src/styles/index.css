@@ -73,6 +73,7 @@
 
 /* === Reset === */
 @layer base {
+
   *,
   *::before,
   *::after {
@@ -81,7 +82,9 @@
     padding: 0;
   }
 
-  html, body, #root {
+  html,
+  body,
+  #root {
     height: 100%;
     width: 100%;
     overflow: hidden;
@@ -160,6 +163,53 @@
 
 .toolbar-center {
   flex-shrink: 0;
+}
+
+.toolbar-window-frame {
+  min-height: 28px;
+  padding: 4px 8px 4px 78px;
+  gap: 8px;
+}
+
+.toolbar-window-frame:active {
+  cursor: default;
+}
+
+.toolbar-window-frame .toolbar-left,
+.toolbar-window-frame .toolbar-right {
+  gap: 4px;
+}
+
+.toolbar-window-frame .toolbar-left button,
+.toolbar-window-frame .toolbar-right button,
+.toolbar-window-frame .toolbar-left [role="button"],
+.toolbar-window-frame .toolbar-right [role="button"] {
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 !important;
+  cursor: default;
+}
+
+.toolbar-window-frame .toolbar-left button svg,
+.toolbar-window-frame .toolbar-right button svg,
+.toolbar-window-frame .toolbar-left [role="button"] svg,
+.toolbar-window-frame .toolbar-right [role="button"] svg {
+  width: 14px !important;
+  height: 14px !important;
+  flex-shrink: 0;
+}
+
+.toolbar-window-frame .toolbar-center [role="tablist"] {
+  height: 24px;
+}
+
+.toolbar-window-frame .toolbar-center [role="tab"] {
+  height: 18px;
+  padding: 0 8px;
+  font-size: 12px;
+  cursor: default;
 }
 
 /* === Status Bar === */
@@ -623,6 +673,8 @@ mark.search-highlight.search-active {
   color: hsl(var(--muted-foreground));
   text-align: center;
   padding: 48px;
+  cursor: default;
+  user-select: none;
 }
 
 .empty-state h2 {
@@ -647,13 +699,19 @@ mark.search-highlight.search-active {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  width: 280px;
-  padding: 40px 32px;
+  width: 480px;
+  padding: 64px 40px;
   border: 2px dashed hsl(var(--border));
   border-radius: 12px;
   color: hsl(var(--muted-foreground));
   font-size: 15px;
+  cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
+}
+
+.drop-zone:hover {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
 }
 
 .app.drag-over .drop-zone {
@@ -700,6 +758,7 @@ mark.search-highlight.search-active {
 
 /* === Print === */
 @media print {
+
   .no-print,
   .sidebar,
   .resize-handle,
@@ -708,7 +767,9 @@ mark.search-highlight.search-active {
   }
 
   /* Remove ALL overflow constraints so content flows across pages */
-  html, body, #root {
+  html,
+  body,
+  #root {
     height: auto !important;
     overflow: visible !important;
   }

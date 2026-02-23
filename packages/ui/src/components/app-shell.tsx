@@ -26,6 +26,7 @@ interface AppShellProps {
   showNavButtons: boolean;
   showToolbar: boolean;
   showSidebar: boolean;
+  windowFrameToolbar?: boolean;
 
   // Platform-derived toolbar strings
   toolbarFilePath: string | null;
@@ -38,6 +39,7 @@ interface AppShellProps {
   onLoadFile: (entry: FSEntry) => void;
   onNavigate: (path: string, fragment?: string | null) => void;
   onOpenFolder?: () => void;
+  onWindowDragStart?: () => void | Promise<void>;
   onRefreshTree?: () => void;
 
   // Platform-specific content (extension: FileAccessWarning wrapper)
@@ -78,6 +80,7 @@ export function AppShell(props: AppShellProps) {
         <EmptyState
           hasRoot={props.hasRoot}
           onOpenFolder={props.onOpenFolder}
+          onWindowDragStart={props.onWindowDragStart}
         />
       }
     >
@@ -99,7 +102,10 @@ export function AppShell(props: AppShellProps) {
     <AppProvider state={props.state}>
       <div
         class="app"
-        classList={{ "drag-over": s.dragOver() }}
+        classList={{
+          "drag-over": s.dragOver(),
+          "window-frame-toolbar": !!props.windowFrameToolbar,
+        }}
         ref={appRef}
         onDragOver={props.onDragOver}
         onDragLeave={props.onDragLeave}
@@ -125,6 +131,8 @@ export function AppShell(props: AppShellProps) {
             sidebarVisible={s.sidebarVisible()}
             themeMode={s.themeMode()}
             tocVisible={s.tocVisible()}
+            inWindowFrame={!!props.windowFrameToolbar}
+            onWindowDragStart={props.onWindowDragStart}
             onClearRecent={s.handleClearRecent}
             onCloseFolder={props.onCloseFolder}
             onCodeThemeChange={s.handleCodeThemeChange}

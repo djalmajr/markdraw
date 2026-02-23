@@ -1,6 +1,7 @@
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createConverter } from "@asciimark/core/converter.ts";
 import ConvertWorker from "@asciimark/core/convert-worker.ts?worker";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createAppState } from "@asciimark/ui/composables/create-app-state.ts";
 import { AppShell } from "@asciimark/ui/components/app-shell.tsx";
 import { getStoredTheme, applyTheme } from "./main.tsx";
@@ -84,6 +85,10 @@ export function App() {
     watcher.destroy();
   });
 
+  async function handleWindowDragStart() {
+    await getCurrentWindow().startDragging();
+  }
+
   return (
     <AppShell
       state={state}
@@ -94,6 +99,8 @@ export function App() {
       showSidebar={state.sidebarVisible() && !!rootPath()}
       toolbarFilePath={state.selectedFile()?.path ?? null}
       toolbarRootName={state.rootName()}
+      windowFrameToolbar={true}
+      onWindowDragStart={handleWindowDragStart}
       onCloseFolder={folder.handleCloseFolder}
       onGoBack={navigation.handleGoBack}
       onGoForward={navigation.handleGoForward}

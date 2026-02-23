@@ -1,34 +1,37 @@
 import { Show } from "solid-js";
 import IconFileText from "~icons/lucide/file-text";
 import IconUpload from "~icons/lucide/upload";
-import { Button } from "./ui/button.tsx";
 
 interface EmptyStateProps {
   hasRoot: boolean;
   onOpenFolder?: () => void;
+  onWindowDragStart?: () => void | Promise<void>;
 }
 
 export function EmptyState(props: EmptyStateProps) {
+  function handleMouseDown(e: MouseEvent) {
+    if (!props.onWindowDragStart) return;
+    if (e.button !== 0) return;
+
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+
+    const interactive = target.closest("button,a,input,select,textarea,.drop-zone");
+    if (interactive) return;
+
+    void props.onWindowDragStart();
+  }
+
   return (
-    <div class="empty-state">
+    <div class="empty-state" onMouseDown={handleMouseDown}>
       <Show
         when={props.hasRoot}
         fallback={
-          <>
-            <div class="drop-zone">
-              <IconUpload width={32} height={32} />
-              <span>Drop a folder or file here</span>
-            </div>
-            <p class="empty-hint">
-              Supports .adoc and .md files
-            </p>
-            <Show when={props.onOpenFolder}>
-              <p class="empty-hint">or</p>
-              <Button onClick={props.onOpenFolder}>
-                Open Folder
-              </Button>
-            </Show>
-          </>
+          <div class="drop-zone" onClick={props.onOpenFolder}>
+            <IconUpload width={32} height={32} />
+            <span>Drop a folder/file here or click to open</span>
+            <p class="empty-hint">Supports .adoc and .md files</p>
+          </div>
         }
       >
         <div class="empty-icon">

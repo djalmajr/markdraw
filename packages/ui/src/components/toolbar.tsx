@@ -48,6 +48,7 @@ interface ToolbarProps {
   fontSizes: readonly number[];
   hasFile: boolean;
   hasRoot: boolean;
+  inWindowFrame?: boolean;
   recentFiles: RecentFile[];
   showEditorTabs: boolean;
   showNavButtons?: boolean;
@@ -69,12 +70,30 @@ interface ToolbarProps {
   onToggleAutoRefresh: () => void;
   onToggleSidebar: () => void;
   onToggleToc: () => void;
+  onWindowDragStart?: () => void | Promise<void>;
 }
 
 export function Toolbar(props: ToolbarProps) {
+  function handleMouseDown(e: MouseEvent) {
+    if (!props.inWindowFrame) return;
+    if (e.button !== 0) return;
+
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+
+    const interactive = target.closest(
+      "button,[role='button'],[role='tab'],a,input,select,textarea,[data-no-window-drag]"
+    );
+    if (interactive) return;
+
+    void props.onWindowDragStart?.();
+  }
+
   return (
     <header
       class="toolbar no-print"
+      classList={{ "toolbar-window-frame": !!props.inWindowFrame }}
+      onMouseDown={handleMouseDown}
       ref={(el) => {
         const update = () => {
           const h = el.offsetHeight;
