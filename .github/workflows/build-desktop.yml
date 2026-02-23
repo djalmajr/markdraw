@@ -221,7 +221,7 @@ jobs:
               ("revert", "Reverts"),
           ]
 
-          lines = [f"# AsciiMark {tag}", ""]
+          lines = []
           if previous_tag:
               lines.append(f"Changes since `{previous_tag}`.")
           else:
