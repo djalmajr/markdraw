@@ -91,6 +91,16 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Validate public release configuration
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_DIST_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::PUBLIC_DIST_TOKEN is not set. Configure this secret with write access to $PUBLIC_RELEASES_REPO."
+            exit 1
+          fi
+          gh repo view "$PUBLIC_RELEASES_REPO" >/dev/null
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:

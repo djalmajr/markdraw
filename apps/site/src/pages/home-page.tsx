@@ -113,6 +113,12 @@ const screenshotItems: ScreenshotItem[] = [
   },
 ];
 
+const heroPreviewItem: ScreenshotItem = {
+  path: "/screenshots/extension-preview-markdown.png",
+  alt: "AsciiMark preview rendering markdown content",
+  caption: "Live preview with TOC and syntax highlighting.",
+};
+
 function releaseUrl(asset: string) {
   return `${RELEASES_BASE_URL}/${asset}`;
 }
@@ -249,11 +255,14 @@ export function HomePage() {
             </div>
           </div>
           <figure class="hero-shot">
-            <img
-              alt="AsciiMark preview rendering markdown content"
-              src="/screenshots/extension-preview-markdown.png"
-            />
-            <figcaption>Live preview with TOC and syntax highlighting.</figcaption>
+            <button
+              class="hero-shot-button"
+              onClick={() => openScreenshotModal(heroPreviewItem)}
+              type="button"
+            >
+              <img alt={heroPreviewItem.alt} src={heroPreviewItem.path} />
+            </button>
+            <figcaption>{heroPreviewItem.caption}</figcaption>
           </figure>
         </div>
       </section>
@@ -326,7 +335,14 @@ export function HomePage() {
             <div class="screenshot-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Screenshot preview">
               <div class="screenshot-modal-header">
                 <p>{item().caption}</p>
-                <Button onClick={closeScreenshotModal} size="sm" type="button" variant="outline">Close</Button>
+                <button
+                  aria-label="Close screenshot preview"
+                  class="screenshot-modal-close"
+                  onClick={closeScreenshotModal}
+                  type="button"
+                >
+                  ×
+                </button>
               </div>
               <div class="screenshot-modal-image-wrap">
                 <img

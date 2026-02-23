@@ -1,4 +1,4 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Button } from "@asciimark/ui/components/ui/button.tsx";
 
 interface GuideImage {
@@ -28,6 +28,7 @@ const sectionLinks: GuideSectionLink[] = [
 
 export function GuidePage() {
   const [activeImage, setActiveImage] = createSignal<GuideImage | null>(null);
+  const [activeSection, setActiveSection] = createSignal<string>("installation");
 
   function openImageModal(image: GuideImage) {
     setActiveImage(image);
@@ -37,6 +38,73 @@ export function GuidePage() {
     setActiveImage(null);
   }
 
+  onMount(() => {
+    const firstSectionId = sectionLinks[0].href.slice(1);
+    const lastSectionId = sectionLinks[sectionLinks.length - 1].href.slice(1);
+
+    const sectionElements = sectionLinks
+      .map((item) => item.href.slice(1))
+      .map((id) => document.getElementById(id))
+      .filter((element): element is HTMLElement => element !== null);
+
+    function syncFromHash() {
+      const hash = window.location.hash.replace("#", "");
+      if (hash) {
+        setActiveSection(hash);
+      }
+    }
+
+    function syncFromScrollExtremes() {
+      const currentScrollBottom = window.scrollY + window.innerHeight;
+      const pageBottom = document.documentElement.scrollHeight;
+      const nearBottom = currentScrollBottom >= pageBottom - 4;
+      const lastSectionElement = sectionElements[sectionElements.length - 1];
+
+      if (window.scrollY <= 4) {
+        setActiveSection(firstSectionId);
+        return;
+      }
+
+      const reachedLastSection =
+        !!lastSectionElement &&
+        lastSectionElement.getBoundingClientRect().top <= window.innerHeight - 120;
+
+      if (nearBottom && reachedLastSection) {
+        setActiveSection(lastSectionId);
+      }
+    }
+
+    syncFromHash();
+    syncFromScrollExtremes();
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntries = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top);
+
+        if (visibleEntries.length > 0) {
+          setActiveSection(visibleEntries[0].target.id);
+        }
+      },
+      {
+        root: null,
+        rootMargin: "-28% 0px -58% 0px",
+        threshold: [0, 0.25, 0.6, 1],
+      },
+    );
+
+    sectionElements.forEach((element) => observer.observe(element));
+    window.addEventListener("hashchange", syncFromHash);
+    window.addEventListener("scroll", syncFromScrollExtremes, { passive: true });
+
+    onCleanup(() => {
+      observer.disconnect();
+      window.removeEventListener("hashchange", syncFromHash);
+      window.removeEventListener("scroll", syncFromScrollExtremes);
+    });
+  });
+
   return (
     <div class="guide-layout">
       <aside class="guide-sidebar-panel">
@@ -44,7 +112,14 @@ export function GuidePage() {
         <nav aria-label="Guide sections" class="guide-sidebar-nav">
           <For each={sectionLinks}>
             {(item) => (
-              <a class="guide-sidebar-link" href={item.href}>
+              <a
+                class={
+                  item.href.slice(1) === activeSection()
+                    ? "guide-sidebar-link guide-sidebar-link-active"
+                    : "guide-sidebar-link"
+                }
+                href={item.href}
+              >
                 {item.label}
               </a>
             )}

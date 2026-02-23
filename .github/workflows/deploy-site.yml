@@ -34,6 +34,16 @@ jobs:
       - name: Add SPA fallback for GitHub Pages
         run: cp "apps/site/dist/index.html" "apps/site/dist/404.html"
 
+      - name: Validate public deploy configuration
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_DIST_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::PUBLIC_DIST_TOKEN is not set. Configure this secret with write access to $PUBLIC_RELEASES_REPO."
+            exit 1
+          fi
+          gh repo view "$PUBLIC_RELEASES_REPO" >/dev/null
+
       - name: Publish site to GitHub Pages branch
         uses: peaceiris/actions-gh-pages@v4
         with:

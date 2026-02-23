@@ -41,7 +41,7 @@ export function SiteLayout() {
               <Link
                 to={item.href}
                 class="site-nav-item"
-                activeProps={{ class: "site-nav-item site-nav-item-active" }}
+                activeProps={{ class: "site-nav-item site-nav-item-active", "aria-current": "page" }}
               >
                 {item.label}
               </Link>
@@ -65,8 +65,7 @@ export function SiteLayout() {
       </main>
 
       <footer class="site-footer">
-        <p>AsciiMark</p>
-        <p>© 2026 AsciiMark. Todos os direitos reservados.</p>
+        <p>© 2026 AsciiMark. All rights reserved.</p>
       </footer>
     </div>
   );
