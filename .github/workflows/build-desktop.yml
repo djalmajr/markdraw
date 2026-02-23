@@ -101,6 +101,12 @@ jobs:
           fi
           gh repo view "$PUBLIC_RELEASES_REPO" >/dev/null
 
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -149,18 +155,116 @@ jobs:
               print(asset.name)
           PY
 
+      - name: Generate release notes from commits
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          export TAG PREVIOUS_TAG
+          python <<'PY'
+          import os
+          import re
+          import subprocess
+
+          tag = os.environ["TAG"]
+          previous_tag = os.environ.get("PREVIOUS_TAG", "").strip()
+          revision_range = f"{previous_tag}..{tag}" if previous_tag else tag
+
+          commits = subprocess.check_output(
+              ["git", "log", revision_range, "--pretty=format:%h%x09%s", "--reverse"],
+              text=True,
+          ).splitlines()
+
+          grouped_commits = {
+              "build": [],
+              "chore": [],
+              "ci": [],
+              "docs": [],
+              "feat": [],
+              "fix": [],
+              "perf": [],
+              "refactor": [],
+              "revert": [],
+              "test": [],
+          }
+          conventional_commit = re.compile(
+              r"^(?P<type>[a-zA-Z]+)(?:\([^)]*\))?(?:!)?:\s*(?P<description>.+)$"
+          )
+          other_changes = []
+
+          for line in commits:
+              if "\t" not in line:
+                  continue
+              short_hash, subject = line.split("\t", 1)
+              normalized_subject = subject.strip()
+              entry = f"- {normalized_subject}"
+              match = conventional_commit.match(normalized_subject)
+              if not match:
+                  other_changes.append(entry)
+                  continue
+              commit_type = match.group("type").lower()
+              if commit_type in grouped_commits:
+                  grouped_commits[commit_type].append(entry)
+              else:
+                  other_changes.append(entry)
+
+          ordered_sections = [
+              ("feat", "Features"),
+              ("fix", "Fixes"),
+              ("perf", "Performance"),
+              ("refactor", "Refactors"),
+              ("docs", "Documentation"),
+              ("test", "Tests"),
+              ("build", "Build"),
+              ("ci", "CI"),
+              ("chore", "Chores"),
+              ("revert", "Reverts"),
+          ]
+
+          lines = [f"# AsciiMark {tag}", ""]
+          if previous_tag:
+              lines.append(f"Changes since `{previous_tag}`.")
+          else:
+              lines.append("Initial tagged release.")
+          lines.append("")
+
+          if not commits:
+              lines.append("No commits found for this tag range.")
+          else:
+              for key, title in ordered_sections:
+                  if not grouped_commits[key]:
+                      continue
+                  lines.append(f"## {title}")
+                  lines.extend(grouped_commits[key])
+                  lines.append("")
+              if other_changes:
+                  lines.append("## Other Changes")
+                  lines.extend(other_changes)
+                  lines.append("")
+
+          with open("release-notes.md", "w", encoding="utf-8") as notes_file:
+              notes_file.write("\n".join(lines).rstrip() + "\n")
+
+          print("Generated release notes:")
+          print(open("release-notes.md", encoding="utf-8").read())
+          PY
+
       - name: Create or update release
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_DIST_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           if gh release view "$TAG" --repo "$PUBLIC_RELEASES_REPO" >/dev/null 2>&1; then
-            echo "Release $TAG already exists in $PUBLIC_RELEASES_REPO"
+            echo "Release $TAG already exists in $PUBLIC_RELEASES_REPO. Updating release notes."
+            gh release edit "$TAG" \
+              --repo "$PUBLIC_RELEASES_REPO" \
+              --title "AsciiMark $TAG" \
+              --notes-file release-notes.md
           else
             gh release create "$TAG" \
               --repo "$PUBLIC_RELEASES_REPO" \
               --title "AsciiMark $TAG" \
-              --notes "Desktop binaries for AsciiMark."
+              --notes-file release-notes.md
           fi
 
       - name: Upload assets to public release
