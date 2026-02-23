@@ -3,8 +3,6 @@ import { defineConfig } from "vite";
 import solidPlugin from "vite-plugin-solid";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
-const basePath = process.env.VITE_SITE_BASE_PATH ?? "/";
-
 export default defineConfig({
   plugins: [
     tanstackRouter({
@@ -19,7 +17,6 @@ export default defineConfig({
       "@asciimark/ui": path.resolve(__dirname, "../../packages/ui/src"),
     },
   },
-  base: basePath,
   build: {
     outDir: "dist",
     target: "esnext",

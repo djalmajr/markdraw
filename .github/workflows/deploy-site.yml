@@ -28,8 +28,6 @@ jobs:
 
       - name: Build site
         run: bun run --filter @asciimark/site build
-        env:
-          VITE_SITE_BASE_PATH: ${{ vars.PUBLIC_SITE_BASE_PATH || '/' }}
 
       - name: Add SPA fallback for GitHub Pages
         run: cp "apps/site/dist/index.html" "apps/site/dist/404.html"
@@ -53,5 +51,5 @@ jobs:
           publish_dir: apps/site/dist
           force_orphan: true
           enable_jekyll: false
-          cname: ${{ vars.PUBLIC_SITE_CNAME || 'asciimark.djalmajr.dev' }}
+          cname: asciimark.djalmajr.dev
           full_commit_message: "Deploy public site"
