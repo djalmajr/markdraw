@@ -29,9 +29,6 @@ jobs:
       - name: Build site
         run: bun run --filter @asciimark/site build
 
-      - name: Add SPA fallback for GitHub Pages
-        run: cp "apps/site/dist/index.html" "apps/site/dist/404.html"
-
       - name: Validate public deploy configuration
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_DIST_TOKEN }}
