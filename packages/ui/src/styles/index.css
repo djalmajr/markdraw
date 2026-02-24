@@ -106,6 +106,20 @@
   height: 100vh;
 }
 
+/* Disable text selection across the app UI by default. */
+.app,
+.app * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Keep selection enabled inside rendered document content only. */
+.app .doc-body,
+.app .doc-body * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .app.drag-over {
   box-shadow: inset 0 0 0 3px hsl(var(--primary));
 }
@@ -210,6 +224,24 @@
   padding: 0 8px;
   font-size: 12px;
   cursor: default;
+}
+
+/* Desktop-only: force arrow cursor (no hand/pointer) across interactive UI */
+body:has(.app.window-frame-toolbar) a,
+body:has(.app.window-frame-toolbar) button,
+body:has(.app.window-frame-toolbar) [role="button"],
+body:has(.app.window-frame-toolbar) [role="menuitem"],
+body:has(.app.window-frame-toolbar) [role="option"],
+body:has(.app.window-frame-toolbar) [role="tab"],
+body:has(.app.window-frame-toolbar) .drop-zone,
+body:has(.app.window-frame-toolbar) .file-tree-levels,
+body:has(.app.window-frame-toolbar) .file-tree-search-clear,
+body:has(.app.window-frame-toolbar) .recent-item-main,
+body:has(.app.window-frame-toolbar) .recent-item-remove,
+body:has(.app.window-frame-toolbar) .search-nav-btn,
+body:has(.app.window-frame-toolbar) .toc-panel-options,
+body:has(.app.window-frame-toolbar) .tree-item {
+  cursor: default !important;
 }
 
 /* === Status Bar === */
@@ -699,7 +731,7 @@ mark.search-highlight.search-active {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  width: 480px;
+  width: min(100%, 560px);
   padding: 64px 40px;
   border: 2px dashed hsl(var(--border));
   border-radius: 12px;
@@ -723,6 +755,143 @@ mark.search-highlight.search-active {
   font-size: 13px !important;
   opacity: 0.6;
   margin-top: -8px;
+}
+
+.empty-home {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(100%, 760px);
+}
+
+.recent-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 0;
+  text-align: left;
+  width: min(100%, 560px);
+}
+
+.recent-section-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.recent-section-header h3 {
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: clamp(140px, 28vh, 220px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.recent-item {
+  align-items: center;
+  border-radius: 8px;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.recent-item-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: default;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.recent-item-main:hover {
+  color: hsl(var(--primary));
+}
+
+.recent-item-main:hover .recent-item-name {
+  color: hsl(var(--primary));
+}
+
+.recent-item-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.recent-item-name {
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-item-meta {
+  font-size: 11px;
+  line-height: 1.2;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-item-remove {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: default;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  margin-right: 7px;
+  min-width: 24px;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.recent-item-remove:hover {
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+}
+
+@media (max-width: 768px) {
+  .empty-state {
+    padding: 20px;
+  }
+
+  .drop-zone {
+    padding: 36px 20px;
+  }
+
+  .recent-history {
+    width: 100%;
+  }
 }
 
 /* === Error === */
@@ -757,21 +926,41 @@ mark.search-highlight.search-active {
 }
 
 /* === Print === */
+@page {
+  margin: 56px;
+}
+
 @media print {
 
   .no-print,
   .sidebar,
   .resize-handle,
-  .editor-panel {
+  .editor-panel,
+  .search-overlay,
+  .toc-panel,
+  .status-bar {
     display: none !important;
   }
 
-  /* Remove ALL overflow constraints so content flows across pages */
+  /* Hide Kobalte/corvu portals (dropdowns, tooltips, popovers) */
+  body>[data-kb-overlay],
+  body>[data-kb-menu],
+  body>[role="menu"],
+  body>[role="listbox"],
+  body>[role="tooltip"],
+  body>div:not(#root) {
+    display: none !important;
+  }
+
   html,
   body,
   #root {
     height: auto !important;
     overflow: visible !important;
+  }
+
+  body {
+    background: white;
   }
 
   .app {
@@ -781,26 +970,24 @@ mark.search-highlight.search-active {
   }
 
   .main {
-    display: flex;
-    flex-direction: column;
+    display: block;
     height: auto !important;
     overflow: visible !important;
+    transform: none !important;
   }
 
   .content {
     overflow: visible !important;
     height: auto !important;
-    order: 2;
-  }
-
-  .toc-panel {
-    order: 1;
+    transform: none !important;
+    scrollbar-gutter: auto;
   }
 
   .preview {
     max-width: 100%;
     padding: 0;
     overflow: visible !important;
+    transform: none !important;
   }
 }
 

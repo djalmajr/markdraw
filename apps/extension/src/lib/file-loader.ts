@@ -39,7 +39,9 @@ export function createFileLoader(deps: FileLoaderDeps) {
 
     if (pushHistory) {
       setHashFromPath(entry.path);
-      state.pushNavHistory(entry, state.rootName());
+      state.pushNavHistory({
+        entry,
+      });
     }
 
     try {

@@ -30,7 +30,9 @@ export function createFileLoader(deps: FileLoaderDeps) {
     state.setLoading(true);
 
     if (pushHistory) {
-      state.pushNavHistory(entry, state.rootName());
+      state.pushNavHistory({
+        entry,
+      });
     }
 
     // Yield to let the UI render loading state before heavy conversion

@@ -41,6 +41,7 @@ export function setupTauriDnd(deps: TauriDndDeps) {
             state.setHtml("");
             state.setNavStack([]);
             state.setNavIndex(-1);
+            state.pushRecentFolder(droppedPath);
             return;
           }
         } catch {
@@ -57,6 +58,12 @@ export function setupTauriDnd(deps: TauriDndDeps) {
           state.setRootName(parentDir.split("/").pop() ?? parentDir);
           state.setTree([entry]);
           state.setSidebarVisible(false);
+          state.pushRecentFolder(parentDir);
+          state.pushRecentFile({
+            entry,
+            rootName: state.rootName(),
+            rootPath: parentDir,
+          });
           loadFileContent(entry);
         }
       }

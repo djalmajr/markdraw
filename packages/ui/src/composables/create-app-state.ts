@@ -17,7 +17,15 @@ import {
   addRecentFile,
   clearRecentFiles,
   getRecentFiles,
+  removeRecentFile,
 } from "@asciimark/core/recent-files.ts";
+import {
+  type RecentFolder,
+  addRecentFolder,
+  clearRecentFolders,
+  getRecentFolders,
+  removeRecentFolder,
+} from "@asciimark/core/recent-folders.ts";
 import {
   type FontPrefs,
   FontFamilies,
@@ -35,6 +43,7 @@ interface AppStateConfig {
   convertAdoc: (opts: ConvertOptions) => Promise<string>;
   convertMarkdown: (opts: ConvertOptions) => Promise<string>;
   getStoredTheme: () => ThemeMode;
+  printPage?: () => void | Promise<void>;
 }
 
 export { CodeThemes, FontFamilies, FontSizes };
@@ -76,6 +85,9 @@ export function createAppState(config: AppStateConfig) {
 
   const [recentFiles, setRecentFiles] = createSignal<RecentFile[]>(
     getRecentFiles(),
+  );
+  const [recentFolders, setRecentFolders] = createSignal<RecentFolder[]>(
+    getRecentFolders(),
   );
 
   // ── Editor state ────────────────────────────────────────────────────────
@@ -148,9 +160,43 @@ export function createAppState(config: AppStateConfig) {
     setStoredFontPrefs(updated);
   }
 
-  function handleClearRecent() {
+  function handleClearRecentFiles() {
     clearRecentFiles();
     setRecentFiles([]);
+  }
+
+  function handleClearRecentFolders() {
+    clearRecentFolders();
+    setRecentFolders([]);
+  }
+
+  function handleClearRecentHistory() {
+    handleClearRecentFiles();
+    handleClearRecentFolders();
+  }
+
+  function handleRemoveRecentFile(path: string, rootPath: string) {
+    const updated = removeRecentFile(path, rootPath);
+    setRecentFiles(updated);
+  }
+
+  function handleRemoveRecentFolder(path: string) {
+    const updated = removeRecentFolder(path);
+    setRecentFolders(updated);
+  }
+
+  function getRootFolderName(path: string) {
+    const normalizedPath = path.replace(/\\/g, "/");
+    const parts = normalizedPath.split("/").filter(Boolean);
+    return parts[parts.length - 1] ?? normalizedPath;
+  }
+
+  function pushRecentFolder(path: string) {
+    const updated = addRecentFolder({
+      name: getRootFolderName(path),
+      path,
+    });
+    setRecentFolders(updated);
   }
 
   // ── Tree utility ────────────────────────────────────────────────────────
@@ -169,56 +215,46 @@ export function createAppState(config: AppStateConfig) {
     return find(tree(), targetPath);
   }
 
-  // ── Recent file opener (needs a loadFile callback from the app) ─────────
-
-  function createHandleOpenRecent(loadFile: (entry: FSEntry) => void) {
-    return (path: string) => {
-      const entry = findEntryByPath(path);
-      if (entry && entry.kind === "file") {
-        loadFile(entry);
-      }
-    };
-  }
-
   // ── Navigation history ──────────────────────────────────────────────────
 
-  function pushNavHistory(entry: FSEntry, rName: string) {
+  interface PushNavHistoryParams {
+    entry: FSEntry;
+  }
+
+  interface PushRecentFileParams {
+    entry: FSEntry;
+    rootName: string;
+    rootPath: string;
+  }
+
+  function pushNavHistory({ entry }: PushNavHistoryParams) {
     const stack = navStack().slice(0, navIndex() + 1);
     stack.push(entry.path);
     setNavStack(stack);
     setNavIndex(stack.length - 1);
+  }
+
+  function pushRecentFile({
+    entry,
+    rootName,
+    rootPath,
+  }: PushRecentFileParams) {
     const updated = addRecentFile({
       name: entry.name,
       path: entry.path,
-      rootName: rName,
+      rootName,
+      rootPath,
     });
     setRecentFiles(updated);
   }
 
   // ── PDF export ──────────────────────────────────────────────────────────
 
-  function handleExportPdf(tocPanelRef?: HTMLElement) {
-    const wasHidden = tocPanelRef?.classList.contains("toc-hidden");
-    if (wasHidden) tocPanelRef!.classList.remove("toc-hidden");
-    window.print();
-    if (wasHidden) tocPanelRef!.classList.add("toc-hidden");
-  }
-
-  async function handleDownloadPdf() {
-    const element = document.querySelector<HTMLElement>(".doc-body");
-    if (!element) return;
-    const { default: html2pdf } = await import("html2pdf.js");
-    const filename =
-      selectedFile()?.name?.replace(/\.(adoc|md)$/, ".pdf") ?? "document.pdf";
-    html2pdf()
-      .set({
-        margin: [15, 15],
-        filename,
-        html2canvas: { scale: 2 },
-        jsPDF: { format: "a4" },
-      })
-      .from(element)
-      .save();
+  function handleExportPdf() {
+    const wasDark = document.documentElement.classList.contains("dark");
+    if (wasDark) document.documentElement.classList.remove("dark");
+    void config.printPage?.();
+    if (wasDark) document.documentElement.classList.add("dark");
   }
 
   // ── Sidebar resize ─────────────────────────────────────────────────────
@@ -379,6 +415,7 @@ export function createAppState(config: AppStateConfig) {
     navStack,
     pendingFragment,
     recentFiles,
+    recentFolders,
     rootName,
     savedContent,
     selectedFile,
@@ -405,6 +442,7 @@ export function createAppState(config: AppStateConfig) {
     setNavStack,
     setPendingFragment,
     setRecentFiles,
+    setRecentFolders,
     setRootName,
     setSavedContent,
     setSelectedFile,
@@ -427,20 +465,24 @@ export function createAppState(config: AppStateConfig) {
     // Handlers
     clearToc,
     convert,
-    createHandleOpenRecent,
     debouncedConvert,
     findEntryByPath,
-    handleClearRecent,
+    handleClearRecentFiles,
+    handleClearRecentFolders,
+    handleClearRecentHistory,
     handleCodeThemeChange,
-    handleDownloadPdf,
     handleExportPdf,
     handleFontPrefsChange,
+    handleRemoveRecentFile,
+    handleRemoveRecentFolder,
     handleThemeChange,
     onEditorResizeReset,
     onEditorResizeStart,
     onResizeReset,
     onResizeStart,
     pushNavHistory,
+    pushRecentFile,
+    pushRecentFolder,
     resetState,
 
     // Constants (for AppShell convenience)

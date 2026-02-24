@@ -12,7 +12,7 @@ Plan an implementation task using plan mode, then create a GitHub issue with the
 4. **After approval** — create a GitHub issue with the plan content:
 
 ```bash
-gh issue create --repo zommehq/platform \
+gh issue create --repo djalmajr/asciimark \
   --title "<plan title>" \
   --body "<plan content>" \
   --label "<appropriate label>"
@@ -23,7 +23,7 @@ gh issue create --repo zommehq/platform \
 
 ## Labels
 
-Pick based on scope: `skedly`, `kashes`, `identity`, `infra`, `ui`
+Pick based on scope: `desktop`, `site`, `core`, `ui`, `infra`
 
 ## Issue body format
 

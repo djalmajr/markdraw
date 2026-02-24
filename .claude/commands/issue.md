@@ -2,17 +2,17 @@
 description: Create a GitHub issue with label
 ---
 
-Create a GitHub issue in `zommehq/platform` and apply the appropriate label.
+Create a GitHub issue in `djalmajr/asciimark` and apply the appropriate label.
 
 ## Labels
 
 | Label | When to use |
 |-------|-------------|
-| `skedly` | Skedly app (scheduling) |
-| `kashes` | Kashes app (finances) |
-| `identity` | Identity Service (auth) |
-| `infra` | Infrastructure and operations |
-| `ui` | UI components (@zomme/ui) |
+| `desktop` | Desktop app (Tauri) |
+| `site` | Site público |
+| `core` | Pacote core |
+| `ui` | UI components |
+| `infra` | CI/CD, build, deploy |
 
 ## Steps
 
@@ -21,7 +21,7 @@ Create a GitHub issue in `zommehq/platform` and apply the appropriate label.
 3. Create the issue:
 
 ```bash
-gh issue create --repo zommehq/platform \
+gh issue create --repo djalmajr/asciimark \
   --title "<title>" \
   --body "<body>" \
   --label "<label>"

@@ -1,6 +1,8 @@
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createConverter } from "@asciimark/core/converter.ts";
 import ConvertWorker from "@asciimark/core/convert-worker.ts?worker";
+import type { RecentFile } from "@asciimark/core/recent-files.ts";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createAppState } from "@asciimark/ui/composables/create-app-state.ts";
 import { AppShell } from "@asciimark/ui/components/app-shell.tsx";
@@ -19,6 +21,7 @@ export function App() {
     convertAdoc,
     convertMarkdown,
     getStoredTheme,
+    printPage: () => invoke("print_webview"),
   });
 
   const [rootPath, setRootPath] = createSignal<string | null>(null);
@@ -40,7 +43,6 @@ export function App() {
   });
 
   const folder = createFolder({
-    loadFileContent: loader.loadFileContent,
     resetNavigation: navigation.resetStacks,
     rootPath,
     setRootPath,
@@ -89,10 +91,44 @@ export function App() {
     await getCurrentWindow().startDragging();
   }
 
+  async function handleWindowTitleDoubleClick() {
+    await invoke("toggle_maximize_instant");
+  }
+
+  async function handleOpenRecentFolder(path: string) {
+    const opened = await folder.openFolderPath(path);
+    if (!opened) {
+      state.handleRemoveRecentFolder(path);
+    }
+  }
+
+  async function handleOpenRecentFile(recentFile: RecentFile) {
+    const opened = await folder.openFolderPath(recentFile.rootPath);
+    if (!opened) {
+      state.handleRemoveRecentFile(recentFile.path, recentFile.rootPath);
+      state.handleRemoveRecentFolder(recentFile.rootPath);
+      return;
+    }
+
+    const entry = state.findEntryByPath(recentFile.path);
+    if (!entry || entry.kind !== "file") {
+      state.handleRemoveRecentFile(recentFile.path, recentFile.rootPath);
+      return;
+    }
+
+    state.pushRecentFile({
+      entry,
+      rootName: state.rootName(),
+      rootPath: recentFile.rootPath,
+    });
+    await loader.loadFileContent(entry);
+  }
+
   return (
     <AppShell
       state={state}
       hasRoot={!!rootPath()}
+      showRecentHistory={true}
       showEditorTabs={!!rootPath()}
       showNavButtons={!!rootPath()}
       showToolbar={!!rootPath()}
@@ -101,12 +137,15 @@ export function App() {
       toolbarRootName={state.rootName()}
       windowFrameToolbar={true}
       onWindowDragStart={handleWindowDragStart}
+      onWindowTitleDoubleClick={handleWindowTitleDoubleClick}
       onCloseFolder={folder.handleCloseFolder}
       onGoBack={navigation.handleGoBack}
       onGoForward={navigation.handleGoForward}
       onLoadFile={loader.loadFileContent}
       onNavigate={navigation.handleNavigate}
       onOpenFolder={folder.handleOpenFolder}
+      onOpenRecentFile={handleOpenRecentFile}
+      onOpenRecentFolder={handleOpenRecentFolder}
       onRefreshTree={() => folder.refreshTree()}
     />
   );

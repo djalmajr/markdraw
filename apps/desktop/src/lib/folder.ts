@@ -1,11 +1,9 @@
 import type { Accessor, Setter } from "solid-js";
-import type { FSEntry } from "@asciimark/core/types.ts";
 import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
 import { openDirectory, readTree, writeFile } from "./fs.ts";
 import type { FileWatcher } from "./watcher.ts";
 
 interface FolderDeps {
-  loadFileContent: (entry: FSEntry, pushHistory?: boolean) => Promise<void>;
   resetNavigation: () => void;
   rootPath: Accessor<string | null>;
   setRootPath: Setter<string | null>;
@@ -14,25 +12,42 @@ interface FolderDeps {
 }
 
 export function createFolder(deps: FolderDeps) {
-  const { loadFileContent, resetNavigation, rootPath, setRootPath, state, watcher } = deps;
+  const { resetNavigation, rootPath, setRootPath, state, watcher } = deps;
+
+  function getPathName(path: string) {
+    const normalizedPath = path.replace(/\\/g, "/");
+    const parts = normalizedPath.split("/").filter(Boolean);
+    return parts[parts.length - 1] ?? normalizedPath;
+  }
+
+  async function openFolderPath(path: string): Promise<boolean> {
+    try {
+      state.setLoading(true);
+      const entries = await readTree(path);
+      setRootPath(path);
+      state.setRootName(getPathName(path));
+      state.setTree(entries);
+      state.setSidebarVisible(true);
+      state.setShowAllDirs(false);
+      state.setShowAllFiles(false);
+      state.resetState();
+      resetNavigation();
+      state.pushRecentFolder(path);
+      return true;
+    } catch (e) {
+      console.error("Failed to open directory:", e);
+      return false;
+    } finally {
+      state.setLoading(false);
+    }
+  }
 
   async function handleOpenFolder() {
     try {
       const path = await openDirectory();
       if (!path) return;
 
-      setRootPath(path);
-      const parts = path.replace(/\\/g, "/").split("/");
-      state.setRootName(parts[parts.length - 1] ?? path);
-      state.setLoading(true);
-      const entries = await readTree(path);
-      state.setTree(entries);
-      state.setLoading(false);
-      state.setSidebarVisible(true);
-      state.setSelectedFile(null);
-      state.setHtml("");
-      state.setNavStack([]);
-      state.setNavIndex(-1);
+      await openFolderPath(path);
     } catch (e) {
       console.error("Failed to open directory:", e);
     }
@@ -80,5 +95,11 @@ export function createFolder(deps: FolderDeps) {
     }
   }
 
-  return { handleCloseFolder, handleEditorSave, handleOpenFolder, refreshTree };
+  return {
+    handleCloseFolder,
+    handleEditorSave,
+    handleOpenFolder,
+    openFolderPath,
+    refreshTree,
+  };
 }

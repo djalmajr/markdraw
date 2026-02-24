@@ -1,8 +1,6 @@
 import { For, Show } from "solid-js";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconArrowRight from "~icons/lucide/arrow-right";
-import IconClock from "~icons/lucide/clock";
-import IconDownload from "~icons/lucide/download";
 import IconFileDown from "~icons/lucide/file-down";
 import IconFolder from "~icons/lucide/folder-open";
 import IconListTree from "~icons/lucide/list-tree";
@@ -17,7 +15,6 @@ import IconX from "~icons/lucide/x";
 
 import type { CodeTheme } from "@asciimark/core/code-theme.ts";
 import type { FontPrefs } from "@asciimark/core/font-prefs.ts";
-import type { RecentFile } from "@asciimark/core/recent-files.ts";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.tsx";
 import { Toggle } from "./ui/toggle.tsx";
 import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip.tsx";
@@ -49,44 +46,55 @@ interface ToolbarProps {
   hasFile: boolean;
   hasRoot: boolean;
   inWindowFrame?: boolean;
-  recentFiles: RecentFile[];
   showEditorTabs: boolean;
   showNavButtons?: boolean;
   sidebarVisible: boolean;
   themeMode: string;
   tocVisible: boolean;
-  onClearRecent: () => void;
   onCloseFolder?: () => void;
   onCodeThemeChange: (id: string) => void;
-  onDownloadPdf: () => void;
   onEditorModeChange: (mode: "edit" | "split" | "preview") => void;
-  onExportPdf: () => void;
+  onExportPdf?: () => void;
   onFontPrefsChange: (prefs: Partial<FontPrefs>) => void;
   onGoBack?: () => void;
   onGoForward?: () => void;
   onOpenFolder?: () => void;
-  onOpenRecent: (path: string) => void;
   onThemeChange: (mode: string) => void;
   onToggleAutoRefresh: () => void;
   onToggleSidebar: () => void;
   onToggleToc: () => void;
   onWindowDragStart?: () => void | Promise<void>;
+  onWindowTitleDoubleClick?: () => void | Promise<void>;
 }
 
 export function Toolbar(props: ToolbarProps) {
+  function isInteractiveTarget(target: HTMLElement) {
+    return target.closest(
+      "button,[role='button'],[role='tab'],a,input,select,textarea,[data-no-window-drag]"
+    );
+  }
+
   function handleMouseDown(e: MouseEvent) {
+    if (!props.inWindowFrame) return;
+    if (e.button !== 0) return;
+    if (e.detail > 1) return;
+
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (isInteractiveTarget(target)) return;
+
+    void props.onWindowDragStart?.();
+  }
+
+  function handleDoubleClick(e: MouseEvent) {
     if (!props.inWindowFrame) return;
     if (e.button !== 0) return;
 
     const target = e.target as HTMLElement | null;
     if (!target) return;
+    if (isInteractiveTarget(target)) return;
 
-    const interactive = target.closest(
-      "button,[role='button'],[role='tab'],a,input,select,textarea,[data-no-window-drag]"
-    );
-    if (interactive) return;
-
-    void props.onWindowDragStart?.();
+    void props.onWindowTitleDoubleClick?.();
   }
 
   return (
@@ -94,6 +102,7 @@ export function Toolbar(props: ToolbarProps) {
       class="toolbar no-print"
       classList={{ "toolbar-window-frame": !!props.inWindowFrame }}
       onMouseDown={handleMouseDown}
+      onDblClick={handleDoubleClick}
       ref={(el) => {
         const update = () => {
           const h = el.offsetHeight;
@@ -199,27 +208,6 @@ export function Toolbar(props: ToolbarProps) {
                 Close Folder
               </DropdownMenuItem>
             </Show>
-            <Show when={props.recentFiles.length > 0}>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <IconClock width={14} height={14} />
-                  Recent Files
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent class="w-56">
-                  <For each={props.recentFiles}>
-                    {(file) => (
-                      <DropdownMenuItem onSelect={() => props.onOpenRecent(file.path)}>
-                        {file.name}
-                      </DropdownMenuItem>
-                    )}
-                  </For>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={props.onClearRecent}>
-                    Clear recent files
-                  </DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            </Show>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               closeOnSelect={false}
@@ -315,15 +303,11 @@ export function Toolbar(props: ToolbarProps) {
                 </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            <Show when={props.hasFile}>
+            <Show when={props.hasFile && props.onExportPdf}>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={props.onExportPdf}>
                 <IconFileDown width={14} height={14} />
-                Print to PDF
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={props.onDownloadPdf}>
-                <IconDownload width={14} height={14} />
-                Download PDF
+                Export PDF
               </DropdownMenuItem>
             </Show>
           </DropdownMenuContent>

@@ -232,7 +232,7 @@ export function FileTree(props: FileTreeProps) {
             title="Tree options"
             tabindex={-1}
           >
-            <IconSlidersHorizontal width={13} height={13} />
+            <IconSlidersHorizontal width={16} height={16} />
           </DropdownMenuTrigger>
           <DropdownMenuContent>
             <DropdownMenuItem onSelect={expandAll}>

@@ -1,6 +1,6 @@
 {
   "name": "@asciimark/desktop",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "type": "module",
   "private": true,
   "scripts": {
@@ -15,7 +15,6 @@
     "@asciimark/ui": "workspace:*",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
-    "html2pdf.js": "^0.14.0",
     "solid-js": "^1.9.11"
   },
   "devDependencies": {

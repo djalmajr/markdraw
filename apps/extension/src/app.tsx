@@ -110,6 +110,7 @@ export function App() {
       hasRoot={!!rootHandle() || !!fallbackFileMap()}
       showEditorTabs={false}
       showNavButtons={!isUrlMode && (!!rootHandle() || !!fallbackFileMap())}
+      showPdfExport={false}
       showSidebar={!isUrlMode && state.sidebarVisible() && (!!rootHandle() || !!fallbackFileMap())}
       showToolbar={isUrlMode || !!rootHandle() || !!fallbackFileMap()}
       toolbarFilePath={isUrlMode ? displayPathFromUrl(sourceUrl!) : (state.selectedFile()?.path ?? null)}

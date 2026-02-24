@@ -1,5 +1,6 @@
 import { Show, type JSX } from "solid-js";
 import type { FSEntry } from "@asciimark/core/types.ts";
+import type { RecentFile } from "@asciimark/core/recent-files.ts";
 import type { AppState } from "../composables/create-app-state.ts";
 import { AppProvider } from "../context/app-context.tsx";
 import { Toolbar } from "./toolbar.tsx";
@@ -22,9 +23,11 @@ interface AppShellProps {
 
   // Platform-specific booleans (as accessors for reactivity)
   hasRoot: boolean;
+  showRecentHistory?: boolean;
   showEditorTabs: boolean;
   showNavButtons: boolean;
   showToolbar: boolean;
+  showPdfExport?: boolean;
   showSidebar: boolean;
   windowFrameToolbar?: boolean;
 
@@ -39,7 +42,10 @@ interface AppShellProps {
   onLoadFile: (entry: FSEntry) => void;
   onNavigate: (path: string, fragment?: string | null) => void;
   onOpenFolder?: () => void;
+  onOpenRecentFile?: (recentFile: RecentFile) => void | Promise<void>;
+  onOpenRecentFolder?: (path: string) => void | Promise<void>;
   onWindowDragStart?: () => void | Promise<void>;
+  onWindowTitleDoubleClick?: () => void | Promise<void>;
   onRefreshTree?: () => void;
 
   // Platform-specific content (extension: FileAccessWarning wrapper)
@@ -80,18 +86,26 @@ export function AppShell(props: AppShellProps) {
         <EmptyState
           hasRoot={props.hasRoot}
           onOpenFolder={props.onOpenFolder}
+          onOpenRecentFile={props.onOpenRecentFile}
+          onOpenRecentFolder={props.onOpenRecentFolder}
+          onClearRecentHistory={s.handleClearRecentHistory}
+          onRemoveRecentFile={s.handleRemoveRecentFile}
+          onRemoveRecentFolder={s.handleRemoveRecentFolder}
           onWindowDragStart={props.onWindowDragStart}
+          recentFiles={s.recentFiles()}
+          recentFolders={s.recentFolders()}
+          showRecentHistory={!!props.showRecentHistory}
         />
       }
     >
-        <Preview
-          html={s.html()}
-          loading={s.loading()}
-          tocVisible={s.tocVisible()}
-          tocContainer={tocContainerRef}
-          currentFilePath={s.selectedFile()?.path ?? null}
-          pendingFragment={s.pendingFragment()}
-          onFragmentHandled={() => s.setPendingFragment(null)}
+      <Preview
+        html={s.html()}
+        loading={s.loading()}
+        tocVisible={s.tocVisible()}
+        tocContainer={tocContainerRef}
+        currentFilePath={s.selectedFile()?.path ?? null}
+        pendingFragment={s.pendingFragment()}
+        onFragmentHandled={() => s.setPendingFragment(null)}
         onNavigate={props.onNavigate}
         onTocChange={(has) => s.setHasToc(has)}
       />
@@ -125,7 +139,6 @@ export function AppShell(props: AppShellProps) {
             fontSizes={s.FontSizes}
             hasFile={s.hasFile()}
             hasRoot={props.hasRoot}
-            recentFiles={s.recentFiles()}
             showEditorTabs={props.showEditorTabs}
             showNavButtons={props.showNavButtons}
             sidebarVisible={s.sidebarVisible()}
@@ -133,20 +146,15 @@ export function AppShell(props: AppShellProps) {
             tocVisible={s.tocVisible()}
             inWindowFrame={!!props.windowFrameToolbar}
             onWindowDragStart={props.onWindowDragStart}
-            onClearRecent={s.handleClearRecent}
+            onWindowTitleDoubleClick={props.onWindowTitleDoubleClick}
             onCloseFolder={props.onCloseFolder}
             onCodeThemeChange={s.handleCodeThemeChange}
-            onDownloadPdf={s.handleDownloadPdf}
             onEditorModeChange={(m) => s.setEditorMode(m)}
-            onExportPdf={() => s.handleExportPdf(tocPanelRef)}
+            onExportPdf={props.showPdfExport !== false ? s.handleExportPdf : undefined}
             onFontPrefsChange={s.handleFontPrefsChange}
             onGoBack={props.onGoBack}
             onGoForward={props.onGoForward}
             onOpenFolder={props.onOpenFolder}
-            onOpenRecent={(path) => {
-              const entry = s.findEntryByPath(path);
-              if (entry && entry.kind === "file") props.onLoadFile(entry);
-            }}
             onThemeChange={s.handleThemeChange}
             onToggleAutoRefresh={() => s.setAutoRefresh((v) => !v)}
             onToggleSidebar={() => s.setSidebarVisible((v) => !v)}
@@ -217,7 +225,7 @@ export function AppShell(props: AppShellProps) {
                   aria-label="TOC options"
                   title="TOC options"
                 >
-                  <IconSlidersHorizontal width={13} height={13} />
+                  <IconSlidersHorizontal width={16} height={16} />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                   <DropdownMenuItem onSelect={() => setTocExpanded(true)}>

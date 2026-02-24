@@ -23,19 +23,34 @@
   "content_scripts": [
     {
       "matches": [
-        "*://*/*.adoc", "*://*/*.adoc?*",
-        "*://*/*.asciidoc", "*://*/*.asciidoc?*",
-        "*://*/*.asc", "*://*/*.asc?*",
-        "*://*/*.ad", "*://*/*.ad?*",
-        "*://*/*.adoc.txt", "*://*/*.adoc.txt?*",
-        "*://*/*.md", "*://*/*.md?*",
-        "*://*/*.markdown", "*://*/*.markdown?*",
-        "*://*/*.mdown", "*://*/*.mdown?*",
-        "file:///*.adoc", "file:///*.asciidoc", "file:///*.asc",
-        "file:///*.ad", "file:///*.adoc.txt",
-        "file:///*.md", "file:///*.markdown", "file:///*.mdown"
+        "*://*/*.adoc",
+        "*://*/*.adoc?*",
+        "*://*/*.asciidoc",
+        "*://*/*.asciidoc?*",
+        "*://*/*.asc",
+        "*://*/*.asc?*",
+        "*://*/*.ad",
+        "*://*/*.ad?*",
+        "*://*/*.adoc.txt",
+        "*://*/*.adoc.txt?*",
+        "*://*/*.md",
+        "*://*/*.md?*",
+        "*://*/*.markdown",
+        "*://*/*.markdown?*",
+        "*://*/*.mdown",
+        "*://*/*.mdown?*",
+        "file:///*.adoc",
+        "file:///*.asciidoc",
+        "file:///*.asc",
+        "file:///*.ad",
+        "file:///*.adoc.txt",
+        "file:///*.md",
+        "file:///*.markdown",
+        "file:///*.mdown"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],

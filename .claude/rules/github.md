@@ -1,21 +1,21 @@
 # GitHub Issues
 
-## Repositório
+## Repositórios
 
-- **Repo:** `zommehq/platform`
-- **Gestão:** Issues com labels (sem GitHub Projects)
+- **Source (privado):** `djalmajr/asciimark` — issues internas, desenvolvimento
+- **Public:** `djalmajr/asciimark-releases` — issues do público, releases, site
 
-## Labels por app
+## Labels
 
 | Label | Cor | Uso |
 |-------|-----|-----|
-| `skedly` | roxo | Skedly (scheduling) |
-| `kashes` | amarelo | Kashes (finances) |
-| `identity` | verde | Identity Service (auth) |
-| `infra` | cinza | Infrastructure and operations |
-| `ui` | rosa | UI components (@zomme/ui) |
+| `desktop` | azul | Desktop app (Tauri) |
+| `site` | verde | Site público |
+| `core` | roxo | Pacote core |
+| `ui` | rosa | UI components |
+| `infra` | cinza | CI/CD, build, deploy |
 
-Toda issue DEVE ter pelo menos uma label de app/escopo.
+Toda issue DEVE ter pelo menos uma label de escopo.
 
 ## Fluxo: Issue como fonte de verdade
 
@@ -29,17 +29,17 @@ Toda issue DEVE ter pelo menos uma label de app/escopo.
 ### Criação de issues
 
 ```bash
-# Criar issue com label
-gh issue create --repo zommehq/platform \
+# Issue interna (desenvolvimento)
+gh issue create --repo djalmajr/asciimark \
   --title "Titulo" \
   --body "..." \
-  --label "skedly"
+  --label "desktop"
 
 # Múltiplas labels
-gh issue create --repo zommehq/platform \
+gh issue create --repo djalmajr/asciimark \
   --title "Titulo" \
   --body "..." \
-  --label "skedly" --label "infra"
+  --label "desktop" --label "infra"
 ```
 
 ### Formato da issue de plano
@@ -64,7 +64,7 @@ gh issue create --repo zommehq/platform \
 
 ## Regras
 
-- **Toda issue** deve ter label de app (`skedly`, `kashes`, `identity`, `infra`, `ui`)
+- **Toda issue** deve ter label de escopo (`desktop`, `site`, `core`, `ui`, `infra`)
 - **Issues são a fonte de verdade** para planos e tarefas
 - **Docs locais** (`.adoc`, `.md`) são para arquitetura e referência técnica do código
 - **Nunca** duplicar conteúdo entre docs locais e issues

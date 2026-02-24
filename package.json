@@ -15,6 +15,8 @@
     "dev:ext": "bun run --filter @asciimark/extension dev",
     "dev:site": "bun run --filter @asciimark/site dev",
     "generate:icons": "bash scripts/generate-icons.sh",
+    "bump:app": "bash scripts/bump-version.sh",
+    "bump:ext": "bash scripts/bump-ext-version.sh",
     "typecheck": "bun run --filter '*' typecheck"
   }
 }

@@ -49,10 +49,11 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "asciimark"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "notify",
  "notify-debouncer-mini",
+ "objc2",
  "serde",
  "serde_json",
  "tauri",

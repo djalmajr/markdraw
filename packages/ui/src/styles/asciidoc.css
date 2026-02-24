@@ -728,7 +728,6 @@
 .doc-body details summary {
   cursor: pointer;
   font-weight: 600;
-  user-select: none;
 }
 
 .doc-body details[open] summary {
@@ -782,26 +781,15 @@
 /* === Print === */
 @media print {
   .doc-body {
-    color: #000;
     font-size: 12pt;
     line-height: 1.6;
     overflow: visible !important;
   }
 
-  .doc-body h1 {
-    font-size: 24pt;
-  }
+  .doc-body h1 { font-size: 24pt; }
+  .doc-body h2 { font-size: 18pt; }
+  .doc-body h3 { font-size: 14pt; }
 
-  .doc-body h2 {
-    font-size: 18pt;
-    border-bottom-color: #ccc;
-  }
-
-  .doc-body h3 {
-    font-size: 14pt;
-  }
-
-  /* Headings: avoid widows (heading at bottom without content) */
   .doc-body h1,
   .doc-body h2,
   .doc-body h3,
@@ -813,94 +801,29 @@
   }
 
   .doc-body pre {
-    border: 1px solid #ccc;
-    background: #f5f5f5;
     page-break-inside: avoid;
     white-space: pre-wrap;
     word-wrap: break-word;
   }
 
-  .doc-body table {
-    page-break-inside: auto;
-  }
+  .doc-body table { page-break-inside: auto; }
+  .doc-body tr { page-break-inside: avoid; }
+  .doc-body .admonitionblock { page-break-inside: avoid; }
+  .doc-body .imageblock { page-break-inside: avoid; }
+  .doc-body .mermaid { page-break-inside: avoid; }
 
-  .doc-body tr {
-    page-break-inside: avoid;
-  }
+  .doc-body a.anchor { display: none; }
 
-  .doc-body .admonitionblock {
-    page-break-inside: avoid;
-  }
-
-  .doc-body .imageblock {
-    page-break-inside: avoid;
-  }
-
-  .doc-body a {
-    color: #000;
-    text-decoration: underline;
-  }
-
-  .doc-body a[href]::after {
+  /* Only show href for external links */
+  .doc-body a[href^="http"]::after {
     content: " (" attr(href) ")";
     font-size: 0.8em;
     color: #666;
   }
 
-  /* Don't show href for TOC links and anchor links */
-  .toc-panel #toc a[href]::after,
-  .doc-body a.anchor[href]::after {
+  .doc-body a[href^="#"]::after,
+  .doc-body .footnote-ref a[href]::after,
+  .doc-body .footnote-backref[href]::after {
     content: none;
-  }
-
-  .doc-body a.anchor {
-    display: none;
-  }
-
-  /* TOC panel: render as a static block on the first page */
-  .toc-panel {
-    display: block !important;
-    width: 100% !important;
-    height: auto !important;
-    overflow: visible !important;
-    border-left: none !important;
-    border: 1px solid #ccc;
-    border-radius: 8px;
-    padding: 16px 24px !important;
-    margin-bottom: 24px;
-    background: #f9f9f9 !important;
-    page-break-after: always;
-    font-size: 10pt;
-  }
-
-  .toc-panel #toc .title,
-  .toc-panel #toctitle {
-    color: #000;
-    font-size: 14pt;
-    font-weight: 700;
-    margin-bottom: 12px;
-  }
-
-  .toc-panel #toc a {
-    color: #333;
-    font-size: 10pt;
-  }
-
-  .toc-panel #toc a.toc-active {
-    background: none;
-    font-weight: normal;
-    color: #333;
-  }
-
-  .toc-panel #toc li.toc-collapsed>ul {
-    display: block !important;
-  }
-
-  .toc-panel #toc .toc-toggle {
-    display: none !important;
-  }
-
-  .toc-panel #toc a {
-    padding-left: 6px !important;
   }
 }
