@@ -222,11 +222,6 @@ jobs:
           ]
 
           lines = []
-          if previous_tag:
-              lines.append(f"Changes since `{previous_tag}`.")
-          else:
-              lines.append("Initial tagged release.")
-          lines.append("")
 
           if not commits:
               lines.append("No commits found for this tag range.")
