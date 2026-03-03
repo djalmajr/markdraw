@@ -24,11 +24,14 @@ export function createFileLoader(deps: FileLoaderDeps) {
     const targetRootId = rootId ?? state.selectedRootId();
     const root = targetRootId ? rootPaths().get(targetRootId) : null;
     if (!root || entry.kind !== "file") return;
-    if (!force && state.selectedFile()?.path === entry.path && state.selectedRootId() === targetRootId) return;
+    const isSameFile = state.selectedFile()?.path === entry.path && state.selectedRootId() === targetRootId;
+    if (!force && isSameFile) return;
 
     state.setSelectedRootId(targetRootId);
     state.setSelectedFile(entry);
-    state.setHtml("");
+    if (!isSameFile) {
+      state.setHtml("");
+    }
     state.setLoading(true);
 
     if (pushHistory) {

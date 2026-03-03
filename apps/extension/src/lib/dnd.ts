@@ -23,7 +23,14 @@ interface DndDeps {
 export function createDnd(deps: DndDeps) {
   const { isUrlMode, loadFileContent, setFallbackFileMap, setRootHandle, setRootHandles, state } = deps;
 
+  function hasExternalFilePayload(e: DragEvent): boolean {
+    const dataTransfer = e.dataTransfer;
+    if (!dataTransfer) return false;
+    return Array.from(dataTransfer.types).includes("Files");
+  }
+
   function handleDragOver(e: DragEvent) {
+    if (!hasExternalFilePayload(e)) return;
     e.preventDefault();
     state.setDragOver(true);
   }
@@ -33,6 +40,11 @@ export function createDnd(deps: DndDeps) {
   }
 
   async function handleDrop(e: DragEvent) {
+    if (!hasExternalFilePayload(e)) {
+      state.setDragOver(false);
+      return;
+    }
+
     e.preventDefault();
     state.setDragOver(false);
     if (isUrlMode) return;

@@ -141,6 +141,7 @@ export function App() {
       onOpenRecentFile={handleOpenRecentFile}
       onOpenRecentFolder={handleOpenRecentFolder}
       onRefreshRoot={(rootId) => folder.refreshRoot(rootId)}
+      onReorderRoots={(newOrder) => state.reorderRoots(newOrder)}
     />
   );
 }

@@ -138,6 +138,7 @@ export function App() {
       onLoadFile={(entry, rootId) => loader.loadFileContent(entry, true, false, rootId)}
       onNavigate={navigation.handleNavigate}
       onRefreshRoot={(rootId) => folder.refreshRoot(rootId)}
+      onReorderRoots={(newOrder) => state.reorderRoots(newOrder)}
     />
   );
 }

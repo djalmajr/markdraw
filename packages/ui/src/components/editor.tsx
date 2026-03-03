@@ -1,6 +1,6 @@
 import { onMount, onCleanup, createEffect } from "solid-js";
-import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
+import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirror/view";
+import { Compartment, EditorState } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from "@codemirror/language";
@@ -8,12 +8,15 @@ import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from "@cod
 interface EditorProps {
   content: string;
   darkMode: boolean;
+  wrapText: boolean;
   onChange: (value: string) => void;
 }
 
 export function Editor(props: EditorProps) {
   let containerRef: HTMLDivElement | undefined;
   let view: EditorView | undefined;
+  const themeCompartment = new Compartment();
+  const wrapCompartment = new Compartment();
 
   const darkTheme = EditorView.theme({
     "&": {
@@ -34,7 +37,7 @@ export function Editor(props: EditorProps) {
     ".cm-cursor": {
       borderLeftColor: "hsl(226 64% 88%)",
     },
-    ".cm-selectionBackground": {
+    ".cm-content::selection, .cm-content *::selection": {
       backgroundColor: "hsl(211 52% 24%) !important",
     },
   }, { dark: true });
@@ -55,6 +58,9 @@ export function Editor(props: EditorProps) {
     ".cm-activeLine": {
       backgroundColor: "hsl(220 14% 97%)",
     },
+    ".cm-content::selection, .cm-content *::selection": {
+      backgroundColor: "hsl(188 65% 86%) !important",
+    },
   });
 
   onMount(() => {
@@ -65,13 +71,13 @@ export function Editor(props: EditorProps) {
       extensions: [
         lineNumbers(),
         history(),
-        drawSelection(),
         bracketMatching(),
         highlightActiveLine(),
         syntaxHighlighting(defaultHighlightStyle),
         markdown(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
-        props.darkMode ? darkTheme : lightTheme,
+        themeCompartment.of(props.darkMode ? darkTheme : lightTheme),
+        wrapCompartment.of(props.wrapText ? EditorView.lineWrapping : []),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             props.onChange(update.state.doc.toString());
@@ -92,6 +98,22 @@ export function Editor(props: EditorProps) {
         changes: { from: 0, to: view.state.doc.length, insert: newContent },
       });
     }
+  });
+
+  createEffect(() => {
+    const wrapText = props.wrapText;
+    if (!view) return;
+    view.dispatch({
+      effects: wrapCompartment.reconfigure(wrapText ? EditorView.lineWrapping : []),
+    });
+  });
+
+  createEffect(() => {
+    const darkMode = props.darkMode;
+    if (!view) return;
+    view.dispatch({
+      effects: themeCompartment.reconfigure(darkMode ? darkTheme : lightTheme),
+    });
   });
 
   onCleanup(() => {

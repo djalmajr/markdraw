@@ -13,6 +13,7 @@
     "@codemirror/language": "^6.12.1",
     "@codemirror/state": "^6.5.4",
     "@codemirror/view": "^6.39.15",
+    "@dnd-kit/solid": "^0.3.2",
     "@kobalte/core": "^0.13.11",
     "@mdit/plugin-alert": "^0.22.4",
     "class-variance-authority": "^0.7.1",

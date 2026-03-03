@@ -34,6 +34,7 @@ import {
   getStoredFontPrefs,
   setStoredFontPrefs,
 } from "@asciimark/core/font-prefs.ts";
+import { getStoredWrapText, setStoredWrapText } from "@asciimark/core/editor-prefs.ts";
 import { isMdFile } from "@asciimark/core/utils.ts";
 
 export type ThemeMode = "system" | "light" | "dark";
@@ -94,12 +95,14 @@ export function createAppState(config: AppStateConfig) {
 
   const [editorMode, setEditorMode] = createSignal<"edit" | "split" | "preview">("preview");
   const editorVisible = () => editorMode() !== "preview";
+  const [wrapText, setWrapText] = createSignal(getStoredWrapText());
   const [editorContent, setEditorContent] = createSignal("");
   const [savedContent, setSavedContent] = createSignal("");
 
   // ── Workspace roots ─────────────────────────────────────────────────────
 
   const [roots, setRoots] = createSignal<Map<string, WorkspaceRoot>>(new Map());
+  const [rootOrder, setRootOrder] = createSignal<string[]>([]);
   const [selectedRootId, setSelectedRootId] = createSignal<string | null>(null);
   const [selectedFile, setSelectedFile] = createSignal<FSEntry | null>(null);
   const DEFAULT_SIDEBAR_WIDTH = 280;
@@ -108,8 +111,23 @@ export function createAppState(config: AppStateConfig) {
   const [showAllDirs, setShowAllDirs] = createSignal(false);
   const [showAllFiles, setShowAllFiles] = createSignal(false);
 
-  // Derived: list of all roots
-  const rootsList = () => Array.from(roots().values());
+  // Derived: list of all roots ordered by rootOrder
+  const rootsList = () => {
+    const order = rootOrder();
+    const rootsMap = roots();
+    const allRoots = Array.from(rootsMap.values());
+    
+    if (order.length === 0) return allRoots;
+    
+    // Create a map for O(1) lookup
+    const orderMap = new Map(order.map((id, idx) => [id, idx]));
+    
+    return allRoots.sort((a, b) => {
+      const idxA = orderMap.get(a.id) ?? Infinity;
+      const idxB = orderMap.get(b.id) ?? Infinity;
+      return idxA - idxB;
+    });
+  };
 
   // Derived: active root (where selected file lives)
   const activeRoot = (): WorkspaceRoot | null => {
@@ -173,6 +191,11 @@ export function createAppState(config: AppStateConfig) {
     const updated = { ...fontPrefs(), ...partial };
     setFontPrefs(updated);
     setStoredFontPrefs(updated);
+  }
+
+  function handleWrapTextChange(enabled: boolean) {
+    setWrapText(enabled);
+    setStoredWrapText(enabled);
   }
 
   function handleClearRecentFiles() {
@@ -281,6 +304,11 @@ export function createAppState(config: AppStateConfig) {
       next.set(root.id, root);
       return next;
     });
+    // Add to end of order if new
+    setRootOrder((prev) => {
+      if (prev.includes(root.id)) return prev;
+      return [...prev, root.id];
+    });
   }
 
   function removeRoot(rootId: string) {
@@ -289,6 +317,8 @@ export function createAppState(config: AppStateConfig) {
       next.delete(rootId);
       return next;
     });
+    // Remove from order
+    setRootOrder((prev) => prev.filter((id) => id !== rootId));
     if (selectedRootId() === rootId) {
       setSelectedFile(null);
       setSelectedRootId(null);
@@ -297,6 +327,22 @@ export function createAppState(config: AppStateConfig) {
       setSavedContent("");
       setEditorMode("preview");
     }
+  }
+
+  function reorderRoots(newOrder: string[]) {
+    // Filter to only include IDs that exist in roots
+    const validIds = newOrder.filter((id) => roots().has(id));
+    // Add any new roots not in the order
+    for (const [id] of roots()) {
+      if (!validIds.includes(id)) {
+        validIds.push(id);
+      }
+    }
+    const current = rootOrder();
+    if (current.length === validIds.length && current.every((id, idx) => id === validIds[idx])) {
+      return;
+    }
+    setRootOrder(validIds);
   }
 
   function updateRootEntries(rootId: string, entries: FSEntry[]) {
@@ -476,6 +522,7 @@ export function createAppState(config: AppStateConfig) {
     setSelectedFile(null);
     setSelectedRootId(null);
     setRoots(new Map());
+    setRootOrder([]);
     setHtml("");
     setEditorContent("");
     setSavedContent("");
@@ -505,6 +552,7 @@ export function createAppState(config: AppStateConfig) {
     pendingFragment,
     recentFiles,
     recentFolders,
+    rootOrder,
     roots,
     rootsList,
     activeRoot,
@@ -520,6 +568,7 @@ export function createAppState(config: AppStateConfig) {
     tocVisible,
     tocLevels,
     tree,
+    wrapText,
     setAutoRefresh,
     setCodeTheme,
     setDarkMode,
@@ -537,6 +586,7 @@ export function createAppState(config: AppStateConfig) {
     setRecentFiles,
     setRecentFolders,
     setRootName,
+    setRootOrder,
     setRoots,
     setSavedContent,
     setSelectedFile,
@@ -549,6 +599,7 @@ export function createAppState(config: AppStateConfig) {
     setTocVisible,
     setTocLevels,
     setTree,
+    setWrapText,
 
     // Derived signals
     canGoBack,
@@ -572,6 +623,7 @@ export function createAppState(config: AppStateConfig) {
     handleRemoveRecentFile,
     handleRemoveRecentFolder,
     handleThemeChange,
+    handleWrapTextChange,
     onEditorResizeReset,
     onEditorResizeStart,
     onResizeReset,
@@ -580,6 +632,7 @@ export function createAppState(config: AppStateConfig) {
     pushRecentFile,
     pushRecentFolder,
     removeRoot,
+    reorderRoots,
     resetState,
     toggleRootCollapsed,
     updateRootEntries,

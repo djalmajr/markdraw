@@ -32,7 +32,8 @@ export function createFileLoader(deps: FileLoaderDeps) {
 
     if (!root && !fileMap && !hasDirectHandle) return;
     if (entry.kind !== "file") return;
-    if (!force && state.selectedFile()?.path === entry.path) return;
+    const isSameFile = state.selectedFile()?.path === entry.path && state.selectedRootId() === targetRootId;
+    if (!force && isSameFile) return;
 
     // Set selected root when loading a file
     if (targetRootId) {
@@ -41,8 +42,10 @@ export function createFileLoader(deps: FileLoaderDeps) {
 
     state.setSelectedFile(entry);
     state.setLoading(true);
-    state.setHtml("");
-    state.clearToc();
+    if (!isSameFile) {
+      state.setHtml("");
+      state.clearToc();
+    }
 
     if (pushHistory) {
       setHashFromPath(entry.path);

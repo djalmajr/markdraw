@@ -5,6 +5,7 @@ import type { AppState } from "../composables/create-app-state.ts";
 import { AppProvider } from "../context/app-context.tsx";
 import { Toolbar } from "./toolbar.tsx";
 import { ContentToolbar } from "./content-toolbar.tsx";
+import { EditorToolbar } from "./editor-toolbar.tsx";
 import { FileTree } from "./file-tree.tsx";
 import { Preview } from "./preview.tsx";
 import { Editor } from "./editor.tsx";
@@ -46,6 +47,7 @@ interface AppShellProps {
   onOpenRecentFile?: (recentFile: RecentFile) => void | Promise<void>;
   onOpenRecentFolder?: (path: string) => void | Promise<void>;
   onRefreshRoot?: (rootId: string) => void;
+  onReorderRoots?: (newOrder: string[]) => void;
   onWindowDragStart?: () => void | Promise<void>;
   onWindowTitleDoubleClick?: () => void | Promise<void>;
 
@@ -168,6 +170,7 @@ export function AppShell(props: AppShellProps) {
                 showAllFiles={s.showAllFiles()}
                 onCloseRoot={props.onCloseRoot}
                 onRefreshRoot={props.onRefreshRoot}
+                onReorderRoots={props.onReorderRoots}
                 onSelect={(entry, rootId) => props.onLoadFile(entry, rootId)}
                 onToggleRootCollapsed={(id) => s.toggleRootCollapsed(id)}
                 onToggleShowAllDirs={props.onRefreshRoot ? () => s.setShowAllDirs((v) => !v) : undefined}
@@ -177,28 +180,22 @@ export function AppShell(props: AppShellProps) {
             <div class="resize-handle" onDblClick={s.onResizeReset} onMouseDown={(e) => s.onResizeStart(e, appRef)} />
           </Show>
           <div class="content-area">
-            <Show when={props.showToolbar && s.hasFile()}>
-              <ContentToolbar
-                autoRefresh={s.autoRefresh()}
-                codeTheme={s.codeTheme()}
-                codeThemes={s.CodeThemes}
-                fontFamilies={s.FontFamilies}
-                fontPrefs={s.fontPrefs()}
-                fontSizes={s.FontSizes}
-                onCodeThemeChange={s.handleCodeThemeChange}
-                onFontPrefsChange={s.handleFontPrefsChange}
-                onToggleAutoRefresh={() => s.setAutoRefresh((v) => !v)}
-              />
-            </Show>
             <div class="content-panels">
               <Show when={s.editorMode() !== "preview" && s.selectedFile()}>
                 <div
                   class="editor-panel"
                   style={s.editorMode() === "split" ? { flex: s.editorWidth() } : undefined}
                 >
+                  <Show when={props.showToolbar}>
+                    <EditorToolbar
+                      wrapText={s.wrapText()}
+                      onToggleWrapText={() => s.handleWrapTextChange(!s.wrapText())}
+                    />
+                  </Show>
                   <Editor
                     content={s.savedContent()}
                     darkMode={s.darkMode()}
+                    wrapText={s.wrapText()}
                     onChange={(content) => {
                       const entry = s.selectedFile();
                       if (entry) s.debouncedConvert(content, entry.path, s._readFile ?? (() => Promise.resolve(null)));
@@ -215,13 +212,28 @@ export function AppShell(props: AppShellProps) {
               </Show>
               <Show when={s.editorMode() !== "edit"}>
                 <div
-                  class="content"
+                  class="preview-panel"
                   style={s.editorMode() === "split" ? { flex: 100 - s.editorWidth() } : undefined}
                 >
-                  {props.contentWrapper
-                    ? props.contentWrapper(defaultContent())
-                    : defaultContent()
-                  }
+                  <Show when={props.showToolbar && s.hasFile()}>
+                    <ContentToolbar
+                      autoRefresh={s.autoRefresh()}
+                      codeTheme={s.codeTheme()}
+                      codeThemes={s.CodeThemes}
+                      fontFamilies={s.FontFamilies}
+                      fontPrefs={s.fontPrefs()}
+                      fontSizes={s.FontSizes}
+                      onCodeThemeChange={s.handleCodeThemeChange}
+                      onFontPrefsChange={s.handleFontPrefsChange}
+                      onToggleAutoRefresh={() => s.setAutoRefresh((v) => !v)}
+                    />
+                  </Show>
+                  <div class="content">
+                    {props.contentWrapper
+                      ? props.contentWrapper(defaultContent())
+                      : defaultContent()
+                    }
+                  </div>
                 </div>
               </Show>
             </div>

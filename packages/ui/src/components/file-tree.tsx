@@ -1,4 +1,5 @@
-import { createSignal, createEffect, createMemo, For, Index, Show } from "solid-js";
+import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
+import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/solid";
 import { FileTreeItem } from "./file-tree-item.tsx";
 import {
   DropdownMenu,
@@ -29,6 +30,7 @@ interface FileTreeProps {
   showAllFiles?: boolean;
   onCloseRoot?: (rootId: string) => void;
   onRefreshRoot?: (rootId: string) => void;
+  onReorderRoots?: (newOrder: string[]) => void;
   onSelect: (entry: FSEntry, rootId: string) => void;
   onToggleRootCollapsed?: (rootId: string) => void;
   onToggleShowAllDirs?: () => void;
@@ -84,11 +86,184 @@ interface FilteredRoot {
   name: string;
 }
 
+const ROOT_DND_PREFIX = "root::";
+
+function toRootDndId(rootId: string): string {
+  return `${ROOT_DND_PREFIX}${rootId}`;
+}
+
+function fromRootDndId(dndId: unknown): string | null {
+  if (typeof dndId !== "string") return null;
+  if (!dndId.startsWith(ROOT_DND_PREFIX)) return null;
+  return dndId.slice(ROOT_DND_PREFIX.length);
+}
+
 export function FileTree(props: FileTreeProps) {
   const [filterText, setFilterText] = createSignal("");
   const [focusedPath, setFocusedPath] = createSignal<string | null>(null);
   const [expandAction, setExpandAction] = createSignal<ExpandAction>({ action: "collapse", version: 0 });
+  const [activeDragRootId, setActiveDragRootId] = createSignal<string | null>(null);
+  let suppressRootClickUntil = 0;
   let navRef: HTMLDivElement | undefined;
+
+  const canReorderRoots = createMemo(() => !!props.onReorderRoots && props.roots.length > 1);
+
+  // ── Root drag-and-drop reordering ──────────────────────────────────────
+
+  function handleProviderDragStart(event: any) {
+    if (!canReorderRoots()) return;
+    const sourceRootId = fromRootDndId(event?.operation?.source?.id);
+    setActiveDragRootId(sourceRootId);
+  }
+
+  function handleProviderDragEnd(event: any) {
+    const sourceRootId =
+      fromRootDndId(event?.operation?.source?.id) ??
+      activeDragRootId();
+    const targetRootId = fromRootDndId(event?.operation?.target?.id);
+    setActiveDragRootId(null);
+
+    if (sourceRootId) {
+      suppressRootClickUntil = Date.now() + 150;
+    }
+
+    if (event?.canceled) return;
+    if (!sourceRootId || !targetRootId || sourceRootId === targetRootId || !props.onReorderRoots) {
+      return;
+    }
+
+    const newOrder = props.roots.map((r) => r.id);
+    const sourceIdx = newOrder.indexOf(sourceRootId);
+    const targetIdx = newOrder.indexOf(targetRootId);
+
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    const sourceVal = newOrder[sourceIdx];
+    const targetVal = newOrder[targetIdx];
+    newOrder[sourceIdx] = targetVal;
+    newOrder[targetIdx] = sourceVal;
+    props.onReorderRoots(newOrder);
+  }
+
+  function getRootNameByDndId(dndId: unknown): string {
+    const rootId = fromRootDndId(dndId);
+    if (!rootId) return "";
+    return props.roots.find((root) => root.id === rootId)?.name ?? rootId;
+  }
+
+  interface RootHeaderProps {
+    root: FilteredRoot;
+    rootFocusedPath: () => string | null;
+    rootSelectedPath: () => string | null;
+  }
+
+  function RootHeader(propsRoot: RootHeaderProps) {
+    const dndId = () => toRootDndId(propsRoot.root.id);
+    const draggable = useDraggable({
+      get id() {
+        return dndId();
+      },
+      disabled: !canReorderRoots(),
+    });
+    const droppable = useDroppable({
+      get id() {
+        return dndId();
+      },
+      disabled: !canReorderRoots(),
+    });
+
+    const isDropTarget = () =>
+      droppable.isDropTarget() && activeDragRootId() !== propsRoot.root.id;
+
+    return (
+      <div
+        class="workspace-root-block"
+        classList={{
+          "drag-over": isDropTarget(),
+          "dragging": draggable.isDragging(),
+        }}
+        ref={droppable.ref}
+      >
+        <div
+          class="workspace-root-header"
+          classList={{
+            "workspace-root-active": props.selectedRootId === propsRoot.root.id,
+            "draggable-root": canReorderRoots(),
+          }}
+          ref={draggable.ref}
+          onClick={() => {
+            if (Date.now() < suppressRootClickUntil) return;
+            props.onToggleRootCollapsed?.(propsRoot.root.id);
+          }}
+        >
+          <div class="workspace-root-main">
+            <Show when={canReorderRoots()}>
+              <span
+                class="workspace-root-drag-handle"
+                aria-label="Reorder root"
+                title="Drag to reorder"
+                ref={draggable.handleRef}
+                onClick={(e: MouseEvent) => e.stopPropagation()}
+              />
+            </Show>
+            <span
+              class="workspace-root-chevron"
+              classList={{ "workspace-root-chevron-open": !propsRoot.root.collapsed }}
+            >
+              <IconChevronRight width={14} height={14} />
+            </span>
+            <IconFolderOpen width={14} height={14} class="workspace-root-icon" />
+            <span class="workspace-root-name">{propsRoot.root.name}</span>
+          </div>
+          <div class="workspace-root-actions">
+            <Show when={props.onRefreshRoot}>
+              <button
+                class="workspace-root-btn"
+                aria-label="Refresh"
+                title="Refresh"
+                onClick={(e: MouseEvent) => {
+                  e.stopPropagation();
+                  props.onRefreshRoot!(propsRoot.root.id);
+                }}
+              >
+                <IconRefreshCw width={12} height={12} />
+              </button>
+            </Show>
+            <Show when={props.onCloseRoot}>
+              <button
+                class="workspace-root-btn"
+                aria-label="Close"
+                title="Close"
+                onClick={(e: MouseEvent) => {
+                  e.stopPropagation();
+                  props.onCloseRoot!(propsRoot.root.id);
+                }}
+              >
+                <IconX width={12} height={12} />
+              </button>
+            </Show>
+          </div>
+        </div>
+        <Show when={!propsRoot.root.collapsed}>
+          <For each={propsRoot.root.entries}>
+            {(entry) => (
+              <FileTreeItem
+                depth={1}
+                entry={entry}
+                expandAction={expandAction()}
+                focusedPath={propsRoot.rootFocusedPath()}
+                forceExpand={isFiltering()}
+                selectedPath={propsRoot.rootSelectedPath()}
+                onSelect={(e) => props.onSelect(e, propsRoot.root.id)}
+              />
+            )}
+          </For>
+        </Show>
+      </div>
+    );
+  }
+
+  // ── Focus / keyboard ───────────────────────────────────────────────────
 
   // Sync focused path when selection changes (e.g. via click)
   createEffect(() => {
@@ -290,69 +465,31 @@ export function FileTree(props: FileTreeProps) {
       </div>
       <div class="file-tree-list" ref={navRef}>
         <Show when={hasAnyEntries()} fallback={<div class="file-tree-empty">No supported files found</div>}>
-          <Index each={filteredRoots()}>
-            {(root) => {
-              const isActiveRoot = () => props.selectedRootId === root().id;
-              const rootSelectedPath = () => isActiveRoot() ? props.selectedPath : null;
-              const rootFocusedPath = () => isActiveRoot() ? focusedPath() : null;
+          <DragDropProvider
+            onDragStart={handleProviderDragStart}
+            onDragEnd={handleProviderDragEnd}
+          >
+            <For each={filteredRoots()}>
+              {(root) => {
+                const isActiveRoot = () => props.selectedRootId === root.id;
+                const rootSelectedPath = () => isActiveRoot() ? props.selectedPath : null;
+                const rootFocusedPath = () => isActiveRoot() ? focusedPath() : null;
 
-              return (
-                <>
-                  <div
-                    class="workspace-root-header"
-                    classList={{ "workspace-root-active": isActiveRoot() }}
-                    onClick={() => props.onToggleRootCollapsed?.(root().id)}
-                  >
-                    <span
-                      class="workspace-root-chevron"
-                      classList={{ "workspace-root-chevron-open": !root().collapsed }}
-                    >
-                      <IconChevronRight width={14} height={14} />
-                    </span>
-                    <IconFolderOpen width={14} height={14} class="workspace-root-icon" />
-                    <span class="workspace-root-name">{root().name}</span>
-                    <div class="workspace-root-actions">
-                      <Show when={props.onRefreshRoot}>
-                        <button
-                          class="workspace-root-btn"
-                          aria-label="Refresh"
-                          title="Refresh"
-                          onClick={(e: MouseEvent) => { e.stopPropagation(); props.onRefreshRoot!(root().id); }}
-                        >
-                          <IconRefreshCw width={12} height={12} />
-                        </button>
-                      </Show>
-                      <Show when={props.onCloseRoot}>
-                        <button
-                          class="workspace-root-btn"
-                          aria-label="Close"
-                          title="Close"
-                          onClick={(e: MouseEvent) => { e.stopPropagation(); props.onCloseRoot!(root().id); }}
-                        >
-                          <IconX width={12} height={12} />
-                        </button>
-                      </Show>
-                    </div>
-                  </div>
-                  <Show when={!root().collapsed}>
-                    <For each={root().entries}>
-                      {(entry) => (
-                        <FileTreeItem
-                          depth={1}
-                          entry={entry}
-                          expandAction={expandAction()}
-                          focusedPath={rootFocusedPath()}
-                          forceExpand={isFiltering()}
-                          selectedPath={rootSelectedPath()}
-                          onSelect={(e) => props.onSelect(e, root().id)}
-                        />
-                      )}
-                    </For>
-                  </Show>
-                </>
-              );
-            }}
-          </Index>
+                return (
+                  <RootHeader
+                    root={root}
+                    rootFocusedPath={rootFocusedPath}
+                    rootSelectedPath={rootSelectedPath}
+                  />
+                );
+              }}
+            </For>
+            <DragOverlay>
+              {(source: any) => (
+                <div class="workspace-root-overlay">{getRootNameByDndId(source?.id)}</div>
+              )}
+            </DragOverlay>
+          </DragDropProvider>
         </Show>
       </div>
     </nav>
