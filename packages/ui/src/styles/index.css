@@ -771,11 +771,19 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .editor-container {
   height: 100%;
   overflow: auto;
+}
+
+.editor-search-scope {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 .editor-container .cm-editor {
@@ -862,20 +870,38 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 /* === Search Overlay === */
 .search-overlay {
-  position: fixed;
-  top: calc(var(--toolbar-h, 40px) + 8px);
-  right: 16px;
-  z-index: 10;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
   width: max-content;
-  max-width: calc(100vw - 32px);
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
   border-radius: 6px;
   box-shadow: 0 2px 8px hsl(var(--foreground) / 0.15);
+}
+
+.search-overlay-inline {
+  position: absolute;
+  z-index: 10;
+  top: 8px;
+  right: 12px;
+  max-width: calc(100% - 24px);
+}
+
+.search-overlay-preview {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+}
+
+.preview-panel:has(.content-toolbar) .search-overlay-preview {
+  top: 40px;
+}
+
+.search-overlay-editor {
+  top: 8px;
+  right: 12px;
 }
 
 .search-overlay-hidden {
@@ -895,6 +921,34 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 .search-input:focus {
   border-color: hsl(var(--primary));
+}
+
+.search-option-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.search-option-btn:hover {
+  background: hsl(var(--bg-hover));
+  color: hsl(var(--foreground));
+}
+
+.search-option-btn-active {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.12);
 }
 
 .search-count {
@@ -923,23 +977,28 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 mark.search-highlight {
-  background: hsl(var(--primary) / 0.24);
+  background: hsl(188 65% 86% / 0.55);
   border-radius: 2px;
   color: inherit;
+  padding: 0;
 }
 
 mark.search-highlight.search-active {
-  background: hsl(var(--primary) / 0.38);
-  outline: 2px solid hsl(var(--primary) / 0.72);
+  background: hsl(188 65% 76% / 0.8);
+  outline: 1px solid hsl(186 80% 40% / 0.7);
 }
 
 .dark mark.search-highlight {
-  background: hsl(var(--primary) / 0.3);
+  background: hsl(211 52% 24% / 0.45);
 }
 
 .dark mark.search-highlight.search-active {
-  background: hsl(var(--primary) / 0.45);
-  outline-color: hsl(var(--primary) / 0.78);
+  background: hsl(211 52% 24% / 0.65);
+  outline-color: hsl(211 72% 55% / 0.8);
+}
+
+.preview-scope {
+  position: relative;
 }
 
 .preview {

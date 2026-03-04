@@ -34,7 +34,19 @@ import {
   getStoredFontPrefs,
   setStoredFontPrefs,
 } from "@asciimark/core/font-prefs.ts";
-import { getStoredWrapText, setStoredWrapText } from "@asciimark/core/editor-prefs.ts";
+import {
+  type IndentMode,
+  getStoredIndentMode,
+  getStoredIndentSize,
+  getStoredLineNumbers,
+  getStoredShowInvisibles,
+  getStoredWrapText,
+  setStoredIndentMode,
+  setStoredIndentSize,
+  setStoredLineNumbers,
+  setStoredShowInvisibles,
+  setStoredWrapText,
+} from "@asciimark/core/editor-prefs.ts";
 import { isMdFile } from "@asciimark/core/utils.ts";
 
 export type ThemeMode = "system" | "light" | "dark";
@@ -95,6 +107,12 @@ export function createAppState(config: AppStateConfig) {
 
   const [editorMode, setEditorMode] = createSignal<"edit" | "split" | "preview">("preview");
   const editorVisible = () => editorMode() !== "preview";
+  const [showLineNumbers, setShowLineNumbers] = createSignal(getStoredLineNumbers());
+  const [showInvisibles, setShowInvisibles] = createSignal(getStoredShowInvisibles());
+  const [indentMode, setIndentMode] = createSignal<IndentMode>(getStoredIndentMode());
+  const [indentSize, setIndentSize] = createSignal(getStoredIndentSize());
+  const [editorSearchOpen, setEditorSearchOpen] = createSignal(false);
+  const [editorFindTrigger, setEditorFindTrigger] = createSignal(0);
   const [wrapText, setWrapText] = createSignal(getStoredWrapText());
   const [editorContent, setEditorContent] = createSignal("");
   const [savedContent, setSavedContent] = createSignal("");
@@ -146,6 +164,8 @@ export function createAppState(config: AppStateConfig) {
   const [pendingFragment, setPendingFragment] = createSignal<string | null>(
     null,
   );
+  const [previewSearchOpen, setPreviewSearchOpen] = createSignal(false);
+  const [previewFindTrigger, setPreviewFindTrigger] = createSignal(0);
   const [navStack, setNavStack] = createSignal<QualifiedPath[]>([]);
   const [navIndex, setNavIndex] = createSignal(-1);
 
@@ -196,6 +216,36 @@ export function createAppState(config: AppStateConfig) {
   function handleWrapTextChange(enabled: boolean) {
     setWrapText(enabled);
     setStoredWrapText(enabled);
+  }
+
+  function handleLineNumbersChange(enabled: boolean) {
+    setShowLineNumbers(enabled);
+    setStoredLineNumbers(enabled);
+  }
+
+  function handleShowInvisiblesChange(enabled: boolean) {
+    setShowInvisibles(enabled);
+    setStoredShowInvisibles(enabled);
+  }
+
+  function handleIndentModeChange(mode: IndentMode) {
+    setIndentMode(mode);
+    setStoredIndentMode(mode);
+  }
+
+  function handleIndentSizeChange(size: number) {
+    setIndentSize(size);
+    setStoredIndentSize(size);
+  }
+
+  function triggerEditorFind() {
+    setEditorSearchOpen(true);
+    setEditorFindTrigger((value) => value + 1);
+  }
+
+  function triggerPreviewFind() {
+    setPreviewSearchOpen(true);
+    setPreviewFindTrigger((value) => value + 1);
   }
 
   function handleClearRecentFiles() {
@@ -325,6 +375,8 @@ export function createAppState(config: AppStateConfig) {
       setHtml("");
       setEditorContent("");
       setSavedContent("");
+      setEditorSearchOpen(false);
+      setPreviewSearchOpen(false);
       setEditorMode("preview");
     }
   }
@@ -526,6 +578,8 @@ export function createAppState(config: AppStateConfig) {
     setHtml("");
     setEditorContent("");
     setSavedContent("");
+    setEditorSearchOpen(false);
+    setPreviewSearchOpen(false);
     setEditorMode("preview");
     clearToc(tocPanelRef);
     setNavStack([]);
@@ -541,7 +595,9 @@ export function createAppState(config: AppStateConfig) {
     darkMode,
     dragOver,
     editorContent,
+    editorFindTrigger,
     editorMode,
+    editorSearchOpen,
     editorVisible,
     editorWidth,
     fontPrefs,
@@ -550,8 +606,12 @@ export function createAppState(config: AppStateConfig) {
     navIndex,
     navStack,
     pendingFragment,
+    previewSearchOpen,
+    previewFindTrigger,
     recentFiles,
     recentFolders,
+    indentMode,
+    indentSize,
     rootOrder,
     roots,
     rootsList,
@@ -560,6 +620,8 @@ export function createAppState(config: AppStateConfig) {
     savedContent,
     selectedFile,
     selectedRootId,
+    showInvisibles,
+    showLineNumbers,
     showAllDirs,
     showAllFiles,
     sidebarVisible,
@@ -574,7 +636,9 @@ export function createAppState(config: AppStateConfig) {
     setDarkMode,
     setDragOver,
     setEditorContent,
+    setEditorFindTrigger,
     setEditorMode,
+    setEditorSearchOpen,
     setEditorWidth,
     setFontPrefs,
     setHasToc,
@@ -583,14 +647,20 @@ export function createAppState(config: AppStateConfig) {
     setNavIndex,
     setNavStack,
     setPendingFragment,
+    setPreviewSearchOpen,
+    setPreviewFindTrigger,
     setRecentFiles,
     setRecentFolders,
+    setIndentMode,
+    setIndentSize,
     setRootName,
     setRootOrder,
     setRoots,
     setSavedContent,
     setSelectedFile,
     setSelectedRootId,
+    setShowInvisibles,
+    setShowLineNumbers,
     setShowAllDirs,
     setShowAllFiles,
     setSidebarVisible,
@@ -620,8 +690,12 @@ export function createAppState(config: AppStateConfig) {
     handleCodeThemeChange,
     handleExportPdf,
     handleFontPrefsChange,
+    handleIndentModeChange,
+    handleIndentSizeChange,
+    handleLineNumbersChange,
     handleRemoveRecentFile,
     handleRemoveRecentFolder,
+    handleShowInvisiblesChange,
     handleThemeChange,
     handleWrapTextChange,
     onEditorResizeReset,
@@ -634,6 +708,8 @@ export function createAppState(config: AppStateConfig) {
     removeRoot,
     reorderRoots,
     resetState,
+    triggerEditorFind,
+    triggerPreviewFind,
     toggleRootCollapsed,
     updateRootEntries,
 

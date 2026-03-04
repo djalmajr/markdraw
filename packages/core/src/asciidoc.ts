@@ -301,7 +301,6 @@ export async function convertAdoc(opts: ConvertOptions): Promise<string> {
     attributes: {
       showtitle: true,
       icons: "font",
-      "source-highlighter": "highlight.js",
       sectanchors: true,
       sectlinks: true,
       idprefix: "",

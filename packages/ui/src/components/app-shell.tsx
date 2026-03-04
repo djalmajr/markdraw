@@ -65,6 +65,7 @@ export function AppShell(props: AppShellProps) {
   let tocPanelRef: HTMLElement | undefined;
   let appRef: HTMLDivElement | undefined;
   let mainRef: HTMLDivElement | undefined;
+  let previewPanelRef: HTMLDivElement | undefined;
 
   // Wire tocPanelRef for state methods that need it
   const s = props.state;
@@ -102,14 +103,18 @@ export function AppShell(props: AppShellProps) {
       }
     >
       <Preview
+        findTrigger={s.previewFindTrigger()}
         html={s.html()}
         loading={s.loading()}
+        searchOpen={s.previewSearchOpen()}
         tocVisible={s.tocVisible()}
         tocContainer={tocContainerRef}
         currentFilePath={s.selectedFile()?.path ?? null}
         pendingFragment={s.pendingFragment()}
+        previewOverlayHost={previewPanelRef}
         onFragmentHandled={() => s.setPendingFragment(null)}
         onNavigate={props.onNavigate}
+        onSearchOpenChange={s.setPreviewSearchOpen}
         onTocChange={(has) => s.setHasToc(has)}
       />
     </Show>
@@ -188,18 +193,37 @@ export function AppShell(props: AppShellProps) {
                 >
                   <Show when={props.showToolbar}>
                     <EditorToolbar
+                      showInvisibles={s.showInvisibles()}
+                      showLineNumbers={s.showLineNumbers()}
+                      indentMode={s.indentMode()}
+                      indentSize={s.indentSize()}
                       wrapText={s.wrapText()}
+                      searchOpen={s.editorSearchOpen()}
+                      onToggleFind={() => s.setEditorSearchOpen((value) => !value)}
+                      onIndentChange={(mode, size) => {
+                        s.handleIndentModeChange(mode);
+                        s.handleIndentSizeChange(size);
+                      }}
+                      onToggleShowInvisibles={() => s.handleShowInvisiblesChange(!s.showInvisibles())}
+                      onToggleShowLineNumbers={() => s.handleLineNumbersChange(!s.showLineNumbers())}
                       onToggleWrapText={() => s.handleWrapTextChange(!s.wrapText())}
                     />
                   </Show>
                   <Editor
                     content={s.savedContent()}
                     darkMode={s.darkMode()}
+                    findTrigger={s.editorFindTrigger()}
+                    indentMode={s.indentMode()}
+                    indentSize={s.indentSize()}
+                    showInvisibles={s.showInvisibles()}
+                    showLineNumbers={s.showLineNumbers()}
                     wrapText={s.wrapText()}
+                    searchOpen={s.editorSearchOpen()}
                     onChange={(content) => {
                       const entry = s.selectedFile();
                       if (entry) s.debouncedConvert(content, entry.path, s._readFile ?? (() => Promise.resolve(null)));
                     }}
+                    onSearchOpenChange={s.setEditorSearchOpen}
                   />
                 </div>
               </Show>
@@ -213,6 +237,7 @@ export function AppShell(props: AppShellProps) {
               <Show when={s.editorMode() !== "edit"}>
                 <div
                   class="preview-panel"
+                  ref={previewPanelRef}
                   style={s.editorMode() === "split" ? { flex: 100 - s.editorWidth() } : undefined}
                 >
                   <Show when={props.showToolbar && s.hasFile()}>
@@ -224,6 +249,9 @@ export function AppShell(props: AppShellProps) {
                       fontPrefs={s.fontPrefs()}
                       fontSizes={s.FontSizes}
                       onCodeThemeChange={s.handleCodeThemeChange}
+                      onFind={s.triggerPreviewFind}
+                      searchOpen={s.previewSearchOpen()}
+                      onToggleFind={() => s.setPreviewSearchOpen((value) => !value)}
                       onFontPrefsChange={s.handleFontPrefsChange}
                       onToggleAutoRefresh={() => s.setAutoRefresh((v) => !v)}
                     />

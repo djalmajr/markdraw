@@ -1,7 +1,8 @@
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 import IconMinus from "~icons/lucide/minus";
 import IconPlus from "~icons/lucide/plus";
 import IconRefreshCw from "~icons/lucide/refresh-cw";
+import IconSearch from "~icons/lucide/search";
 
 import type { CodeTheme } from "@asciimark/core/code-theme.ts";
 import type { FontPrefs } from "@asciimark/core/font-prefs.ts";
@@ -25,6 +26,9 @@ interface ContentToolbarProps {
   fontPrefs: FontPrefs;
   fontSizes: readonly number[];
   onCodeThemeChange: (id: string) => void;
+  onFind?: () => void;
+  searchOpen?: boolean;
+  onToggleFind?: () => void;
   onFontPrefsChange: (prefs: Partial<FontPrefs>) => void;
   onToggleAutoRefresh: () => void;
 }
@@ -74,6 +78,26 @@ export function ContentToolbar(props: ContentToolbarProps) {
         </TooltipTrigger>
         <TooltipContent>Auto-refresh</TooltipContent>
       </Tooltip>
+      <Show when={props.onFind || props.onToggleFind}>
+        <Tooltip>
+          <TooltipTrigger
+            as={Toggle}
+            size="sm"
+            pressed={!!props.searchOpen}
+            aria-label="Find in preview"
+            onChange={() => {
+              if (props.onToggleFind) {
+                props.onToggleFind();
+                return;
+              }
+              props.onFind?.();
+            }}
+          >
+            <IconSearch width={14} height={14} />
+          </TooltipTrigger>
+          <TooltipContent>Find in preview</TooltipContent>
+        </Tooltip>
+      </Show>
       <Separator orientation="vertical" class="content-toolbar-separator" />
       {/* Font size */}
       <div class="content-toolbar-group">

@@ -1,15 +1,83 @@
 import IconFileText from "~icons/lucide/file-text";
+import IconListOrdered from "~icons/lucide/list-ordered";
+import IconPilcrow from "~icons/lucide/pilcrow";
+import IconSearch from "~icons/lucide/search";
 import { Toggle } from "./ui/toggle.tsx";
+import { Separator } from "./ui/separator.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
 
+type IndentMode = "tabs" | "spaces";
+
 interface EditorToolbarProps {
+  searchOpen: boolean;
+  showInvisibles: boolean;
+  showLineNumbers: boolean;
+  indentMode: IndentMode;
+  indentSize: number;
   wrapText: boolean;
+  onToggleFind: () => void;
+  onIndentChange: (mode: IndentMode, size: number) => void;
+  onToggleShowInvisibles: () => void;
+  onToggleShowLineNumbers: () => void;
   onToggleWrapText: () => void;
 }
 
 export function EditorToolbar(props: EditorToolbarProps) {
+  function indentLabel() {
+    const mode = props.indentMode === "tabs" ? "Tabs" : "Spaces";
+    return `${mode}: ${props.indentSize}`;
+  }
+
   return (
     <div class="editor-toolbar no-print space-x-0.5">
+      <Tooltip>
+        <TooltipTrigger
+          as={Toggle}
+          size="sm"
+          pressed={props.searchOpen}
+          aria-label="Find in editor"
+          onChange={() => props.onToggleFind()}
+        >
+          <IconSearch width={14} height={14} />
+        </TooltipTrigger>
+        <TooltipContent>Find in editor</TooltipContent>
+      </Tooltip>
+
+      <Separator orientation="vertical" class="content-toolbar-separator" />
+
+      <Tooltip>
+        <TooltipTrigger
+          as={Toggle}
+          size="sm"
+          pressed={props.showLineNumbers}
+          onChange={props.onToggleShowLineNumbers}
+          aria-label="Show line numbers"
+        >
+          <IconListOrdered width={14} height={14} />
+        </TooltipTrigger>
+        <TooltipContent>Line numbers</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger
+          as={Toggle}
+          size="sm"
+          pressed={props.showInvisibles}
+          onChange={props.onToggleShowInvisibles}
+          aria-label="Show invisibles"
+        >
+          <IconPilcrow width={14} height={14} />
+        </TooltipTrigger>
+        <TooltipContent>Show invisibles</TooltipContent>
+      </Tooltip>
+
       <Tooltip>
         <TooltipTrigger
           as={Toggle}
@@ -22,6 +90,33 @@ export function EditorToolbar(props: EditorToolbarProps) {
         </TooltipTrigger>
         <TooltipContent>Wrap text</TooltipContent>
       </Tooltip>
+
+      <Separator orientation="vertical" class="content-toolbar-separator" />
+
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger as={DropdownMenuTrigger} class="content-toolbar-select">
+            {indentLabel()}
+          </TooltipTrigger>
+          <TooltipContent>Indent settings</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent>
+          <DropdownMenuRadioGroup
+            value={`${props.indentMode}:${props.indentSize}`}
+            onChange={(value) => {
+              const [modeRaw, sizeRaw] = value.split(":");
+              const mode = modeRaw === "tabs" ? "tabs" : "spaces";
+              const size = Number(sizeRaw) === 4 ? 4 : 2;
+              props.onIndentChange(mode, size);
+            }}
+          >
+            <DropdownMenuRadioItem value="spaces:2">Spaces: 2</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="spaces:4">Spaces: 4</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="tabs:2">Tabs: 2</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="tabs:4">Tabs: 4</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

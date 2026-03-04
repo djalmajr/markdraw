@@ -364,8 +364,11 @@ function resolveRelativePath(currentFilePath: string, target: string): string {
 }
 
 interface PreviewProps {
+  findTrigger: number;
   html: string;
   loading: boolean;
+  previewOverlayHost?: HTMLElement;
+  searchOpen: boolean;
   tocVisible: boolean;
   /** External container element where #toc will be moved to (flex sibling of .content) */
   tocContainer?: HTMLElement;
@@ -377,26 +380,44 @@ interface PreviewProps {
   onFragmentHandled: () => void;
   /** Called when user clicks a document link (.adoc/.md); receives the resolved path and optional fragment */
   onNavigate: (path: string, fragment?: string | null) => void;
+  onSearchOpenChange: (open: boolean) => void;
   /** Called after content swap to report whether the new content has a TOC */
   onTocChange: (hasToc: boolean) => void;
 }
 
 export function Preview(props: PreviewProps) {
-  const [searchOpen, setSearchOpen] = createSignal(false);
   const [hasArticle, setHasArticle] = createSignal(false);
+  const [overlayHost, setOverlayHost] = createSignal<HTMLElement | undefined>(undefined);
+  let lastFindTrigger = props.findTrigger;
   let articleRef: HTMLElement | undefined;
   let cleanupToc: (() => void) | undefined;
 
   // Ctrl+F to open search overlay
   onMount(() => {
     const handleCtrlF = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        const activeElement = document.activeElement as HTMLElement | null;
+        if (activeElement?.closest(".editor-panel")) return;
         e.preventDefault();
-        setSearchOpen((visible) => !visible);
+        e.stopImmediatePropagation();
+        props.onSearchOpenChange(!props.searchOpen);
       }
     };
     window.addEventListener("keydown", handleCtrlF);
     onCleanup(() => window.removeEventListener("keydown", handleCtrlF));
+  });
+
+  createEffect(() => {
+    const findTrigger = props.findTrigger;
+    if (findTrigger === lastFindTrigger) return;
+    lastFindTrigger = findTrigger;
+    props.onSearchOpenChange(true);
+  });
+
+  createEffect(() => {
+    if (!hasArticle()) return;
+    setOverlayHost(articleRef?.closest(".preview-panel") as HTMLElement | undefined);
   });
 
   // Listen for theme changes to re-init mermaid
@@ -616,25 +637,29 @@ export function Preview(props: PreviewProps) {
   });
 
   return (
-    <div class="preview">
-      <Show when={props.loading}>
-        <div class="preview-loading">Converting...</div>
-      </Show>
+    <div class="preview-scope">
       <Show when={hasArticle()}>
         <SearchOverlay
           container={articleRef!}
-          visible={searchOpen()}
-          onClose={() => setSearchOpen(false)}
+          class="search-overlay-preview"
+          portalHost={props.previewOverlayHost ?? overlayHost()}
+          visible={props.searchOpen}
+          onClose={() => props.onSearchOpenChange(false)}
         />
       </Show>
-      <article
-        ref={(el) => {
-          articleRef = el;
-          setHasArticle(true);
-        }}
-        class="doc-body"
-        onClick={handleClick}
-      />
+      <div class="preview">
+        <Show when={props.loading}>
+          <div class="preview-loading">Converting...</div>
+        </Show>
+        <article
+          ref={(el) => {
+            articleRef = el;
+            setHasArticle(true);
+          }}
+          class="doc-body"
+          onClick={handleClick}
+        />
+      </div>
     </div>
   );
 }
