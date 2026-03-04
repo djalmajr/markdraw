@@ -293,6 +293,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .sidebar {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 0;
   background: hsl(var(--sidebar-bg));
   border-right: 1px solid hsl(var(--border));
   overflow: hidden;
@@ -317,6 +319,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .file-tree {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -432,6 +436,10 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   align-items: center;
   gap: 4px;
   padding: 6px 8px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: hsl(var(--sidebar-bg));
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -447,6 +455,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   gap: 4px;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .workspace-root-drag-handle {
@@ -476,8 +485,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .workspace-root-block {
-  width: max-content;
-  min-width: calc(100% - 8px);
+  width: auto;
+  min-width: 0;
   margin: 1px 4px;
   border: 1px dashed transparent;
   border-radius: 6px;
@@ -506,9 +515,10 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .workspace-root-name {
-  flex: 0 0 auto;
-  overflow: visible;
-  text-overflow: clip;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -520,13 +530,17 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .workspace-root-actions {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 2px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.15s;
 }
 
-.workspace-root-header:hover .workspace-root-actions {
+.workspace-root-header:hover .workspace-root-actions,
+.workspace-root-header:focus-within .workspace-root-actions {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .workspace-root-btn {
@@ -613,7 +627,6 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .tree-item.selected {
   background: hsl(var(--bg-selected));
   color: hsl(var(--primary));
-  font-weight: 500;
 }
 
 .tree-item.directory {
@@ -639,6 +652,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .tree-name {
+  flex: 0 0 auto;
   overflow: visible;
   text-overflow: clip;
   white-space: nowrap;
@@ -665,7 +679,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .tree-item.focused {
-  outline: 2px solid hsl(var(--ring));
+  outline: 1px solid hsl(var(--ring) / 0.55);
   outline-offset: -2px;
 }
 
@@ -765,6 +779,10 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   border-right: 1px solid hsl(var(--border));
 }
 
+.content-panels > .editor-panel:only-child {
+  border-right: none;
+}
+
 .preview-panel {
   display: flex;
   flex: 1;
@@ -775,6 +793,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .editor-container {
+  flex: 1;
+  min-width: 0;
   height: 100%;
   overflow: auto;
 }

@@ -189,7 +189,7 @@ export function AppShell(props: AppShellProps) {
               <Show when={s.editorMode() !== "preview" && s.selectedFile()}>
                 <div
                   class="editor-panel"
-                  style={s.editorMode() === "split" ? { flex: s.editorWidth() } : undefined}
+                  style={s.editorMode() === "split" ? { flex: s.editorWidth() } : { flex: 1 }}
                 >
                   <Show when={props.showToolbar}>
                     <EditorToolbar
@@ -265,7 +265,7 @@ export function AppShell(props: AppShellProps) {
           </div>
           <aside
             class="toc-panel"
-            classList={{ "toc-hidden": !s.tocVisible() || !s.hasFile() || !s.hasToc() }}
+            classList={{ "toc-hidden": s.editorMode() === "edit" || !s.tocVisible() || !s.hasFile() || !s.hasToc() }}
             data-toc-levels={s.tocLevels()}
             ref={tocPanelRef}
           >
