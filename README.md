@@ -1,12 +1,12 @@
 # AsciiMark
 
-A viewer for AsciiDoc and Markdown files with syntax highlighting, diagrams, math, and more. Works as a Chrome extension that auto-renders `.adoc`/`.md` URLs, or as a standalone web app for browsing local directories. All processing happens locally in your browser.
+A viewer for AsciiDoc and Markdown files with diagrams, math, and more. Works as a Chrome extension that auto-renders `.adoc`/`.md` URLs, or as a standalone web app for browsing local directories. All processing happens locally in your browser.
 
 ## Features
 
 - **AsciiDoc & Markdown** - Full rendering with `@asciidoctor/core` and `markdown-it` (14 plugins)
-- **Syntax highlighting** - Code blocks via highlight.js with dark mode support
-- **Mermaid diagrams** - Rendered inline with theme support on initial render
+- **Syntax highlighting** - Code blocks highlighted with Prism (embedded, local)
+- **Mermaid diagrams** - Rendered inline in preview
 - **KaTeX math** - LaTeX expressions in Markdown
 - **Include resolution** - Recursive `include::` (AsciiDoc) and `<!-- include: path -->` (Markdown)
 - **File tree** - Browse local directories via File System Access API (with fallback)
@@ -81,13 +81,13 @@ Outputs to `apps/extension/dist/`. Load this folder as an unpacked extension in 
 - [Kobalte](https://kobalte.dev) - Accessible UI primitives
 - [@asciidoctor/core](https://github.com/asciidoctor/asciidoctor.js) - AsciiDoc processor
 - [markdown-it](https://github.com/markdown-it/markdown-it) - Markdown processor
-- [highlight.js](https://highlightjs.org) - Syntax highlighting
+- [Prism](https://prismjs.com) - Syntax highlighting
 - [Mermaid](https://mermaid.js.org) - Diagrams
 - [KaTeX](https://katex.org) - Math rendering (via markdown-it-katex)
 
 ## Privacy
 
-All processing is local. No data is collected or transmitted. See [PRIVACY.md](PRIVACY.md) or the [online privacy policy](https://djalmajr.github.io/asciimark/privacy.html).
+AsciiMark does not use analytics or telemetry. Most processing is local; Kroki diagram blocks use `https://kroki.io` for SVG rendering. See the [online privacy policy](https://djalmajr.github.io/asciimark/privacy.html).
 
 ## License
 

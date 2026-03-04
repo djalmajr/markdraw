@@ -13,6 +13,7 @@
     "@asciimark/ui": "workspace:*",
     "@tanstack/history": "^1.132.31",
     "@tanstack/solid-router": "^1.132.31",
+    "prismjs": "^1.30.0",
     "solid-js": "^1.9.11"
   },
   "devDependencies": {

@@ -1,11 +1,10 @@
 // Web Worker for heavy AsciiDoc/Markdown conversion
-// Runs asciidoctor.js, markdown-it, and highlight.js off the main thread
+// Runs asciidoctor.js and markdown-it off the main thread
 
 import Asciidoctor from "@asciidoctor/core";
 import MarkdownIt from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
-import hljs from "highlight.js/lib/common";
 import mk from "@traptitech/markdown-it-katex";
 import { alert } from "@mdit/plugin-alert";
 import footnote from "markdown-it-footnote";
@@ -147,7 +146,6 @@ function convertAdocSync(
     attributes: {
       showtitle: true,
       icons: "font",
-      "source-highlighter": "highlight.js",
       sectanchors: true,
       sectlinks: true,
       idprefix: "",
@@ -173,13 +171,6 @@ function getMd(): MarkdownIt {
     html: true,
     linkify: true,
     typographer: true,
-    highlight(str, lang) {
-      if (lang && hljs.getLanguage(lang)) {
-        try { return hljs.highlight(str, { language: lang, ignoreIllegals: true }).value; }
-        catch { /* fall through */ }
-      }
-      return "";
-    },
   });
 
   md.use(anchor, { permalink: false, slugify });

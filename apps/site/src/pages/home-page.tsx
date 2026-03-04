@@ -33,7 +33,7 @@ const featureItems: FeatureItem[] = [
   {
     title: "AsciiDoc + Markdown",
     description:
-      "Renders both formats with syntax highlighting, admonitions, diagrams, and math in one viewer.",
+      "Renders both formats with admonitions, diagrams, and math in one viewer.",
   },
   {
     title: "Desktop + Extension",
@@ -116,7 +116,7 @@ const screenshotItems: ScreenshotItem[] = [
 const heroPreviewItem: ScreenshotItem = {
   path: "/screenshots/extension-preview-markdown.png",
   alt: "AsciiMark preview rendering markdown content",
-  caption: "Live preview with TOC and syntax highlighting.",
+  caption: "Live preview with TOC and search.",
 };
 
 function releaseUrl(asset: string) {

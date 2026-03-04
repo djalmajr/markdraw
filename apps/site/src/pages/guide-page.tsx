@@ -279,7 +279,7 @@ export function GuidePage() {
           <h2>Appearance</h2>
           <ul>
             <li>Theme: Light, Dark, or System.</li>
-            <li>Code theme options for syntax highlighting.</li>
+            <li>Consistent code block styling.</li>
             <li>Font size and family customization.</li>
           </ul>
           <figure class="guide-media guide-media-compact">
@@ -318,7 +318,7 @@ export function GuidePage() {
               onClick={() =>
                 openImageModal({
                   alt: "Rendered markdown preview with sections",
-                  caption: "Rendered output with markdown features and highlighted content.",
+                  caption: "Rendered output with markdown features.",
                   src: "/screenshots/extension-preview-markdown.png",
                 })
               }
@@ -326,7 +326,7 @@ export function GuidePage() {
             >
               <img alt="Rendered markdown preview with sections" src="/screenshots/extension-preview-markdown.png" />
             </button>
-            <figcaption>Rendered output with markdown features and highlighted content.</figcaption>
+            <figcaption>Rendered output with markdown features.</figcaption>
           </figure>
         </section>
 

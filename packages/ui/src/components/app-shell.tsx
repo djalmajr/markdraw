@@ -243,12 +243,9 @@ export function AppShell(props: AppShellProps) {
                   <Show when={props.showToolbar && s.hasFile()}>
                     <ContentToolbar
                       autoRefresh={s.autoRefresh()}
-                      codeTheme={s.codeTheme()}
-                      codeThemes={s.CodeThemes}
                       fontFamilies={s.FontFamilies}
                       fontPrefs={s.fontPrefs()}
                       fontSizes={s.FontSizes}
-                      onCodeThemeChange={s.handleCodeThemeChange}
                       onFind={s.triggerPreviewFind}
                       searchOpen={s.previewSearchOpen()}
                       onToggleFind={() => s.setPreviewSearchOpen((value) => !value)}

@@ -7,10 +7,7 @@ import {
 import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@asciimark/core/types.ts";
 import type { ConvertOptions } from "@asciimark/core/converter.ts";
 import {
-  CodeThemes,
   applyCodeTheme,
-  getStoredCodeTheme,
-  setStoredCodeTheme,
 } from "@asciimark/core/code-theme.ts";
 import {
   type RecentFile,
@@ -59,7 +56,7 @@ interface AppStateConfig {
   printPage?: () => void | Promise<void>;
 }
 
-export { CodeThemes, FontFamilies, FontSizes };
+export { FontFamilies, FontSizes };
 
 export function createAppState(config: AppStateConfig) {
   // ── Core signals ────────────────────────────────────────────────────────
@@ -76,12 +73,8 @@ export function createAppState(config: AppStateConfig) {
     document.documentElement.classList.contains("dark"),
   );
 
-  // ── Code theme ──────────────────────────────────────────────────────────
-
-  const [codeTheme, setCodeTheme] = createSignal(getStoredCodeTheme());
-
   createEffect(() => {
-    applyCodeTheme(codeTheme(), darkMode());
+    applyCodeTheme("github-light", false);
   });
 
   // ── Font preferences ────────────────────────────────────────────────────
@@ -200,11 +193,6 @@ export function createAppState(config: AppStateConfig) {
     setThemeMode(mode as ThemeMode);
     config.applyTheme(mode as ThemeMode);
     setDarkMode(document.documentElement.classList.contains("dark"));
-  }
-
-  function handleCodeThemeChange(id: string) {
-    setCodeTheme(id);
-    setStoredCodeTheme(id);
   }
 
   function handleFontPrefsChange(partial: Partial<FontPrefs>) {
@@ -591,7 +579,6 @@ export function createAppState(config: AppStateConfig) {
   return {
     // Signals (getter + setter)
     autoRefresh,
-    codeTheme,
     darkMode,
     dragOver,
     editorContent,
@@ -632,7 +619,6 @@ export function createAppState(config: AppStateConfig) {
     tree,
     wrapText,
     setAutoRefresh,
-    setCodeTheme,
     setDarkMode,
     setDragOver,
     setEditorContent,
@@ -687,7 +673,6 @@ export function createAppState(config: AppStateConfig) {
     handleClearRecentFiles,
     handleClearRecentFolders,
     handleClearRecentHistory,
-    handleCodeThemeChange,
     handleExportPdf,
     handleFontPrefsChange,
     handleIndentModeChange,
@@ -714,7 +699,6 @@ export function createAppState(config: AppStateConfig) {
     updateRootEntries,
 
     // Constants (for AppShell convenience)
-    CodeThemes,
     FontFamilies,
     FontSizes,
 

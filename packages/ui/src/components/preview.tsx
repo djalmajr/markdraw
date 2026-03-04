@@ -1,8 +1,28 @@
 import { Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import mermaid from "mermaid";
-import hljs from "highlight.js/lib/common";
+import Prism from "prismjs";
+import "prismjs/components/prism-markup";
+import "prismjs/components/prism-css";
+import "prismjs/components/prism-clike";
+import "prismjs/components/prism-javascript";
+import "prismjs/components/prism-typescript";
+import "prismjs/components/prism-jsx";
+import "prismjs/components/prism-tsx";
+import "prismjs/components/prism-json";
+import "prismjs/components/prism-yaml";
+import "prismjs/components/prism-bash";
+import "prismjs/components/prism-docker";
+import "prismjs/components/prism-diff";
+import "prismjs/components/prism-java";
+import "prismjs/components/prism-go";
+import "prismjs/components/prism-rust";
+import "prismjs/components/prism-python";
+import "prismjs/components/prism-sql";
+import "prismjs/components/prism-markdown";
+import "prismjs/components/prism-toml";
+import "prismjs/components/prism-ini";
 import { SearchOverlay } from "./search-overlay.tsx";
-import { isSupportedKrokiType, renderKroki } from "@asciimark/core/kroki.ts";
+import { renderKroki } from "@asciimark/core/kroki.ts";
 import "katex/dist/katex.min.css";
 import "@mdit/plugin-alert/style";
 import "../styles/asciidoc.css";
@@ -27,18 +47,52 @@ function initMermaid(force = false) {
 /** Monotonically increasing render generation — used to cancel stale renders */
 let renderGen = 0;
 
-/** Apply syntax highlighting to code blocks that haven't been highlighted yet */
+/** Placeholder for code-block post-processing (kept for render pipeline symmetry) */
+const LANGUAGE_ALIASES: Record<string, string> = {
+  "c++": "cpp",
+  "c#": "csharp",
+  conf: "ini",
+  dockerfile: "docker",
+  js: "javascript",
+  shell: "bash",
+  sh: "bash",
+  ts: "typescript",
+  yml: "yaml",
+  zsh: "bash",
+};
+
+function detectCodeLanguage(codeEl: HTMLElement): string | null {
+  const fromClass = codeEl.className.match(/\b(?:language|lang)-([a-z0-9+#._-]+)\b/i)?.[1];
+  const fromData =
+    codeEl.getAttribute("data-lang") ||
+    codeEl.parentElement?.getAttribute("data-lang") ||
+    codeEl.getAttribute("data-language");
+
+  const rawLanguage = (fromClass || fromData || "").trim().toLowerCase();
+  if (!rawLanguage) return null;
+
+  const normalized = LANGUAGE_ALIASES[rawLanguage] || rawLanguage;
+  return Object.prototype.hasOwnProperty.call(Prism.languages, normalized)
+    ? normalized
+    : null;
+}
+
 async function highlightCodeBlocks(container: HTMLElement, gen: number): Promise<void> {
+  if (gen !== renderGen) return;
   const blocks = container.querySelectorAll<HTMLElement>("pre code");
-  for (const el of blocks) {
+  for (const codeEl of blocks) {
     if (gen !== renderGen) return;
-    // Asciidoctor adds "hljs" class when source-highlighter is highlight.js,
-    // but doesn't actually run highlight.js. Check for real highlighting
-    // by looking for hljs-* child spans instead.
-    const alreadyHighlighted = el.querySelector("span[class^='hljs-']") !== null;
-    if (!alreadyHighlighted) {
-      hljs.highlightElement(el);
+
+    const language = detectCodeLanguage(codeEl);
+    if (!language) continue;
+
+    codeEl.classList.add(`language-${language}`);
+    const preEl = codeEl.parentElement;
+    if (preEl) {
+      preEl.classList.add(`language-${language}`);
     }
+
+    Prism.highlightElement(codeEl);
     await yieldToMain();
   }
 }

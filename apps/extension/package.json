@@ -12,6 +12,7 @@
   "dependencies": {
     "@asciimark/core": "workspace:*",
     "@asciimark/ui": "workspace:*",
+    "prismjs": "^1.30.0",
     "solid-js": "^1.9.11"
   },
   "devDependencies": {

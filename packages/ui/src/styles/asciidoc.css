@@ -154,6 +154,101 @@
   font-size: inherit;
 }
 
+/* Prism syntax highlighting (single embedded theme) */
+.doc-body pre[class*="language-"] {
+  background: #f6f8fa;
+  border-color: #d0d7de;
+  color: #24292f;
+}
+
+.doc-body code[class*="language-"] .token.comment,
+.doc-body code[class*="language-"] .token.prolog,
+.doc-body code[class*="language-"] .token.doctype,
+.doc-body code[class*="language-"] .token.cdata {
+  color: #6e7781;
+}
+
+.doc-body code[class*="language-"] .token.punctuation {
+  color: #24292f;
+}
+
+.doc-body code[class*="language-"] .token.keyword,
+.doc-body code[class*="language-"] .token.atrule {
+  color: #cf222e;
+}
+
+.doc-body code[class*="language-"] .token.function,
+.doc-body code[class*="language-"] .token.class-name {
+  color: #8250df;
+}
+
+.doc-body code[class*="language-"] .token.string,
+.doc-body code[class*="language-"] .token.char,
+.doc-body code[class*="language-"] .token.attr-value,
+.doc-body code[class*="language-"] .token.regex,
+.doc-body code[class*="language-"] .token.url {
+  color: #0a3069;
+}
+
+.doc-body code[class*="language-"] .token.number,
+.doc-body code[class*="language-"] .token.boolean,
+.doc-body code[class*="language-"] .token.constant {
+  color: #0550ae;
+}
+
+.doc-body code[class*="language-"] .token.operator,
+.doc-body code[class*="language-"] .token.entity,
+.doc-body code[class*="language-"] .token.symbol {
+  color: #24292f;
+}
+
+.dark .doc-body pre[class*="language-"] {
+  background: #0d1117;
+  border-color: #30363d;
+  color: #c9d1d9;
+}
+
+.dark .doc-body code[class*="language-"] .token.comment,
+.dark .doc-body code[class*="language-"] .token.prolog,
+.dark .doc-body code[class*="language-"] .token.doctype,
+.dark .doc-body code[class*="language-"] .token.cdata {
+  color: #8b949e;
+}
+
+.dark .doc-body code[class*="language-"] .token.punctuation {
+  color: #c9d1d9;
+}
+
+.dark .doc-body code[class*="language-"] .token.keyword,
+.dark .doc-body code[class*="language-"] .token.atrule {
+  color: #ff7b72;
+}
+
+.dark .doc-body code[class*="language-"] .token.function,
+.dark .doc-body code[class*="language-"] .token.class-name {
+  color: #d2a8ff;
+}
+
+.dark .doc-body code[class*="language-"] .token.string,
+.dark .doc-body code[class*="language-"] .token.char,
+.dark .doc-body code[class*="language-"] .token.attr-value,
+.dark .doc-body code[class*="language-"] .token.regex,
+.dark .doc-body code[class*="language-"] .token.url {
+  color: #a5d6ff;
+}
+
+.dark .doc-body code[class*="language-"] .token.number,
+.dark .doc-body code[class*="language-"] .token.boolean,
+.dark .doc-body code[class*="language-"] .token.constant {
+  color: #79c0ff;
+}
+
+.dark .doc-body code[class*="language-"] .token.operator,
+.dark .doc-body code[class*="language-"] .token.entity,
+.dark .doc-body code[class*="language-"] .token.symbol {
+  color: #c9d1d9;
+}
+
 /* Tables — horizontal scroll for wide tables */
 .doc-body table.tableblock {
   display: block;
@@ -747,12 +842,6 @@
 .doc-body details[open] summary {
   margin-bottom: 8px;
 }
-
-/* Highlight.js: transparent bg (inherits from pre) */
-.doc-body pre code.hljs {
-  background: transparent;
-}
-
 
 /* KaTeX math blocks */
 .doc-body .math-block {

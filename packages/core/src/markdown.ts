@@ -1,8 +1,7 @@
-// Markdown conversion with include support, mermaid, syntax highlighting, and extensions
+// Markdown conversion with include support, mermaid, and extensions
 import MarkdownIt from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
-import hljs from "highlight.js/lib/common";
 import mk from "@traptitech/markdown-it-katex";
 import { alert } from "@mdit/plugin-alert";
 import footnote from "markdown-it-footnote";
@@ -199,16 +198,6 @@ function createMarkdownIt(): MarkdownIt {
     html: true,
     linkify: true,
     typographer: true,
-    highlight(str, lang) {
-      if (lang && hljs.getLanguage(lang)) {
-        try {
-          return hljs.highlight(str, { language: lang, ignoreIllegals: true }).value;
-        } catch {
-          // fall through to default
-        }
-      }
-      return ""; // use markdown-it's default escaping
-    },
   });
 
   // --- Core plugins ---

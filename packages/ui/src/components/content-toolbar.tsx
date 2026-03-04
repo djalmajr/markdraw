@@ -4,7 +4,6 @@ import IconPlus from "~icons/lucide/plus";
 import IconRefreshCw from "~icons/lucide/refresh-cw";
 import IconSearch from "~icons/lucide/search";
 
-import type { CodeTheme } from "@asciimark/core/code-theme.ts";
 import type { FontPrefs } from "@asciimark/core/font-prefs.ts";
 import { Toggle } from "./ui/toggle.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
@@ -14,18 +13,14 @@ import {
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu.tsx";
 
 interface ContentToolbarProps {
   autoRefresh: boolean;
-  codeTheme: string;
-  codeThemes: CodeTheme[];
   fontFamilies: readonly { readonly id: string; readonly label: string }[];
   fontPrefs: FontPrefs;
   fontSizes: readonly number[];
-  onCodeThemeChange: (id: string) => void;
   onFind?: () => void;
   searchOpen?: boolean;
   onToggleFind?: () => void;
@@ -50,12 +45,6 @@ export function ContentToolbar(props: ContentToolbarProps) {
     if (idx < props.fontSizes.length - 1) {
       props.onFontPrefsChange({ fontSize: props.fontSizes[idx + 1] });
     }
-  }
-
-  function currentThemeLabel() {
-    if (props.codeTheme === "auto") return "Auto";
-    const found = props.codeThemes.find((t) => t.id === props.codeTheme);
-    return found?.label ?? props.codeTheme;
   }
 
   function currentFontLabel() {
@@ -128,34 +117,6 @@ export function ContentToolbar(props: ContentToolbarProps) {
         </Tooltip>
       </div>
       <Separator orientation="vertical" class="content-toolbar-separator" />
-      {/* Code theme */}
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger
-            as={DropdownMenuTrigger}
-            class="content-toolbar-select"
-          >
-            {currentThemeLabel()}
-          </TooltipTrigger>
-          <TooltipContent>Code theme</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent class="w-48 max-h-64 overflow-y-auto">
-          <DropdownMenuRadioGroup
-            value={props.codeTheme}
-            onChange={props.onCodeThemeChange}
-          >
-            <DropdownMenuRadioItem value="auto">Auto</DropdownMenuRadioItem>
-            <DropdownMenuSeparator />
-            <For each={props.codeThemes}>
-              {(theme) => (
-                <DropdownMenuRadioItem value={theme.id}>
-                  {theme.label}
-                </DropdownMenuRadioItem>
-              )}
-            </For>
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
       {/* Font family */}
       <DropdownMenu>
         <Tooltip>
