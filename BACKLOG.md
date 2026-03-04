@@ -55,7 +55,7 @@
 - [x] Keyboard shortcuts (Ctrl+S to save, etc.)
 
 ### Scroll Sync
-- [ ] Bidirectional scroll sync between editor and preview
+- [x] Bidirectional scroll sync between editor and preview
 - [ ] Source mapping from AsciiDoc lines to HTML elements
 
 ### Security
@@ -95,9 +95,9 @@
 - [x] Drag and drop files
 
 ### Desktop App (Tauri)
-- [ ] Tauri scaffold com SolidJS frontend
-- [ ] File system nativo (read/write via Tauri API)
-- [ ] Save de arquivos editados (Ctrl+S direto no filesystem)
+- [x] Tauri scaffold com SolidJS frontend
+- [x] File system nativo (read/write via Tauri API)
+- [x] Save de arquivos editados (Ctrl+S direto no filesystem)
 - [ ] Export to EPUB (via pandoc ou lib nativa)
 - [ ] Export to DocBook
 - [ ] Menus nativos (File, Edit, View, Help)
@@ -106,6 +106,6 @@
 - [ ] Tray icon / menu bar (opcional)
 
 ### Infrastructure
-- [ ] Monorepo com workspaces (Bun)
+- [x] Monorepo com workspaces (Bun)
 - [ ] GitHub Pages para documentação pública
-- [ ] CI/CD para build da extensão e do desktop app
+- [x] CI/CD para build da extensão e do desktop app
