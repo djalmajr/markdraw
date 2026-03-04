@@ -779,7 +779,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   border-right: 1px solid hsl(var(--border));
 }
 
-.content-panels > .editor-panel:only-child {
+.content-panels>.editor-panel:only-child {
   border-right: none;
 }
 
@@ -1032,6 +1032,11 @@ mark.search-highlight.search-active {
 
 .doc-body {
   transition: opacity 100ms ease-in;
+}
+
+.doc-body::selection,
+.doc-body *::selection {
+  background: hsl(var(--primary) / 0.3) !important;
 }
 
 .preview-loading {

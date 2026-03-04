@@ -1,4 +1,5 @@
 import IconFileText from "~icons/lucide/file-text";
+import IconIndentIncrease from "~icons/lucide/indent-increase";
 import IconListOrdered from "~icons/lucide/list-ordered";
 import IconPilcrow from "~icons/lucide/pilcrow";
 import IconSearch from "~icons/lucide/search";
@@ -95,10 +96,14 @@ export function EditorToolbar(props: EditorToolbarProps) {
 
       <DropdownMenu>
         <Tooltip>
-          <TooltipTrigger as={DropdownMenuTrigger} class="content-toolbar-select">
-            {indentLabel()}
+          <TooltipTrigger
+            as={DropdownMenuTrigger}
+            class="content-toolbar-btn"
+            aria-label={`Indent settings (${indentLabel()})`}
+          >
+            <IconIndentIncrease width={14} height={14} />
           </TooltipTrigger>
-          <TooltipContent>Indent settings</TooltipContent>
+          <TooltipContent>{indentLabel()}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent>
           <DropdownMenuRadioGroup

@@ -3,6 +3,7 @@ import IconMinus from "~icons/lucide/minus";
 import IconPlus from "~icons/lucide/plus";
 import IconRefreshCw from "~icons/lucide/refresh-cw";
 import IconSearch from "~icons/lucide/search";
+import IconType from "~icons/lucide/type";
 
 import type { FontPrefs } from "@asciimark/core/font-prefs.ts";
 import { Toggle } from "./ui/toggle.tsx";
@@ -122,11 +123,12 @@ export function ContentToolbar(props: ContentToolbarProps) {
         <Tooltip>
           <TooltipTrigger
             as={DropdownMenuTrigger}
-            class="content-toolbar-select"
+            class="content-toolbar-btn"
+            aria-label={`Font family (${currentFontLabel()})`}
           >
-            {currentFontLabel()}
+            <IconType width={14} height={14} />
           </TooltipTrigger>
-          <TooltipContent>Font family</TooltipContent>
+          <TooltipContent>{currentFontLabel()}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent class="w-48">
           <DropdownMenuRadioGroup

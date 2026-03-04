@@ -110,16 +110,16 @@ export function Editor(props: EditorProps) {
       borderRight: "1px solid hsl(233 16% 22%)",
     },
     ".cm-activeLineGutter": {
-      backgroundColor: "hsl(234 18% 20%)",
+      backgroundColor: "hsl(var(--primary) / 0.15)",
     },
     ".cm-activeLine": {
-      backgroundColor: "hsl(234 18% 18%)",
+      backgroundColor: "hsl(var(--primary) / 0.1)",
     },
     ".cm-cursor": {
       borderLeftColor: "hsl(226 64% 88%)",
     },
     ".cm-content::selection, .cm-content *::selection": {
-      backgroundColor: "hsl(211 52% 24%) !important",
+      backgroundColor: "hsl(var(--primary) / 0.45) !important",
     },
     ".cm-visible-space, .cm-visible-tab": {
       color: "hsl(229 21% 57% / 0.8)",
@@ -146,13 +146,13 @@ export function Editor(props: EditorProps) {
       borderRight: "1px solid hsl(220 13% 91%)",
     },
     ".cm-activeLineGutter": {
-      backgroundColor: "hsl(220 13% 93%)",
+      backgroundColor: "hsl(var(--primary) / 0.15)",
     },
     ".cm-activeLine": {
-      backgroundColor: "hsl(220 14% 97%)",
+      backgroundColor: "hsl(var(--primary) / 0.1)",
     },
     ".cm-content::selection, .cm-content *::selection": {
-      backgroundColor: "hsl(188 65% 86%) !important",
+      backgroundColor: "hsl(var(--primary) / 0.3) !important",
     },
     ".cm-visible-space, .cm-visible-tab": {
       color: "hsl(220 9% 46% / 0.75)",
