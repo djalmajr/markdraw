@@ -3,6 +3,7 @@ type IndentMode = "tabs" | "spaces";
 const WRAP_TEXT_KEY = "asciimark-editor-wrap-text";
 const SHOW_LINE_NUMBERS_KEY = "asciimark-editor-show-line-numbers";
 const SHOW_INVISIBLES_KEY = "asciimark-editor-show-invisibles";
+const SYNC_SCROLL_KEY = "asciimark-editor-sync-scroll";
 const INDENT_MODE_KEY = "asciimark-editor-indent-mode";
 const INDENT_SIZE_KEY = "asciimark-editor-indent-size";
 
@@ -36,6 +37,14 @@ function setStoredShowInvisibles(enabled: boolean): void {
   localStorage.setItem(SHOW_INVISIBLES_KEY, String(enabled));
 }
 
+function getStoredSyncScroll(): boolean {
+  return getStoredBoolean(SYNC_SCROLL_KEY, true);
+}
+
+function setStoredSyncScroll(enabled: boolean): void {
+  localStorage.setItem(SYNC_SCROLL_KEY, String(enabled));
+}
+
 function getStoredIndentMode(): IndentMode {
   const stored = localStorage.getItem(INDENT_MODE_KEY);
   if (stored === "tabs" || stored === "spaces") return stored;
@@ -63,10 +72,12 @@ export {
   getStoredIndentSize,
   getStoredLineNumbers,
   getStoredShowInvisibles,
+  getStoredSyncScroll,
   getStoredWrapText,
   setStoredIndentMode,
   setStoredIndentSize,
   setStoredLineNumbers,
   setStoredShowInvisibles,
+  setStoredSyncScroll,
   setStoredWrapText,
 };

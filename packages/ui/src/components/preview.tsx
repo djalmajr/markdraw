@@ -472,6 +472,9 @@ interface PreviewProps {
   loading: boolean;
   previewOverlayHost?: HTMLElement;
   searchOpen: boolean;
+  syncScrollActive: boolean;
+  syncScrollTargetRatio: number | null;
+  syncScrollTargetVersion: number;
   tocVisible: boolean;
   /** External container element where #toc will be moved to (flex sibling of .content) */
   tocContainer?: HTMLElement;
@@ -483,6 +486,7 @@ interface PreviewProps {
   onFragmentHandled: () => void;
   /** Called when user clicks a document link (.adoc/.md); receives the resolved path and optional fragment */
   onNavigate: (path: string, fragment?: string | null) => void;
+  onScrollRatioChange: (ratio: number) => void;
   onSearchOpenChange: (open: boolean) => void;
   /** Called after content swap to report whether the new content has a TOC */
   onTocChange: (hasToc: boolean) => void;
@@ -492,8 +496,17 @@ export function Preview(props: PreviewProps) {
   const [hasArticle, setHasArticle] = createSignal(false);
   const [overlayHost, setOverlayHost] = createSignal<HTMLElement | undefined>(undefined);
   let lastFindTrigger = props.findTrigger;
+  let lastSyncScrollTargetVersion = props.syncScrollTargetVersion;
   let articleRef: HTMLElement | undefined;
   let cleanupToc: (() => void) | undefined;
+  let suppressScrollCallback = false;
+
+  function computeScrollRatio(scrollTop: number, scrollHeight: number, clientHeight: number): number {
+    const maxScrollTop = scrollHeight - clientHeight;
+    if (maxScrollTop <= 0) return 0;
+    const ratio = scrollTop / maxScrollTop;
+    return Math.max(0, Math.min(1, ratio));
+  }
 
   // Ctrl+F to open search overlay
   onMount(() => {
@@ -521,6 +534,55 @@ export function Preview(props: PreviewProps) {
   createEffect(() => {
     if (!hasArticle()) return;
     setOverlayHost(articleRef?.closest(".preview-panel") as HTMLElement | undefined);
+  });
+
+  createEffect(() => {
+    if (!articleRef) return;
+
+    const scrollContainer = articleRef.closest(".content") as HTMLElement | null;
+    if (!scrollContainer) return;
+
+    let scrollRaf = 0;
+    const onScroll = () => {
+      if (suppressScrollCallback || !props.syncScrollActive) return;
+      cancelAnimationFrame(scrollRaf);
+      scrollRaf = requestAnimationFrame(() => {
+        props.onScrollRatioChange(computeScrollRatio(
+          scrollContainer.scrollTop,
+          scrollContainer.scrollHeight,
+          scrollContainer.clientHeight,
+        ));
+      });
+    };
+
+    scrollContainer.addEventListener("scroll", onScroll, { passive: true });
+    onCleanup(() => {
+      cancelAnimationFrame(scrollRaf);
+      scrollContainer.removeEventListener("scroll", onScroll);
+    });
+  });
+
+  createEffect(() => {
+    const targetVersion = props.syncScrollTargetVersion;
+    if (targetVersion === lastSyncScrollTargetVersion) return;
+    lastSyncScrollTargetVersion = targetVersion;
+
+    if (!props.syncScrollActive || !articleRef) return;
+
+    const targetRatio = props.syncScrollTargetRatio;
+    if (targetRatio === null) return;
+
+    const scrollContainer = articleRef.closest(".content") as HTMLElement | null;
+    if (!scrollContainer) return;
+
+    const maxScrollTop = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+    const targetTop = maxScrollTop <= 0 ? 0 : Math.max(0, Math.min(1, targetRatio)) * maxScrollTop;
+
+    suppressScrollCallback = true;
+    scrollContainer.scrollTop = targetTop;
+    requestAnimationFrame(() => {
+      suppressScrollCallback = false;
+    });
   });
 
   // Listen for theme changes to re-init mermaid

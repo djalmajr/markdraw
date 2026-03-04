@@ -4,6 +4,7 @@ import IconListOrdered from "~icons/lucide/list-ordered";
 import IconPilcrow from "~icons/lucide/pilcrow";
 import IconRedo2 from "~icons/lucide/redo-2";
 import IconSearch from "~icons/lucide/search";
+import IconArrowUpDown from "~icons/lucide/arrow-up-down";
 import IconUndo2 from "~icons/lucide/undo-2";
 import { Toggle } from "./ui/toggle.tsx";
 import { Separator } from "./ui/separator.tsx";
@@ -24,6 +25,7 @@ interface EditorToolbarProps {
   showLineNumbers: boolean;
   indentMode: IndentMode;
   indentSize: number;
+  syncScroll: boolean;
   wrapText: boolean;
   canRedo: boolean;
   canUndo: boolean;
@@ -34,6 +36,7 @@ interface EditorToolbarProps {
   onToggleShowInvisibles: () => void;
   onToggleShowLineNumbers: () => void;
   onToggleWrapText: () => void;
+  onToggleSyncScroll: () => void;
 }
 
 export function EditorToolbar(props: EditorToolbarProps) {
@@ -116,6 +119,18 @@ export function EditorToolbar(props: EditorToolbarProps) {
           <IconFileText width={14} height={14} />
         </TooltipTrigger>
         <TooltipContent>Wrap text</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          as={Toggle}
+          size="sm"
+          pressed={props.syncScroll}
+          onChange={props.onToggleSyncScroll}
+          aria-label="Sync scroll"
+        >
+          <IconArrowUpDown width={14} height={14} />
+        </TooltipTrigger>
+        <TooltipContent>Sync scroll</TooltipContent>
       </Tooltip>
       <Separator orientation="vertical" class="content-toolbar-separator" />
       <DropdownMenu>

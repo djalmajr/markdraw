@@ -34,10 +34,14 @@ interface EditorProps {
   searchOpen: boolean;
   showInvisibles: boolean;
   showLineNumbers: boolean;
+  syncScrollActive: boolean;
+  syncScrollTargetRatio: number | null;
+  syncScrollTargetVersion: number;
   undoTrigger: number;
   wrapText: boolean;
   onChange: (value: string) => void;
   onHistoryStateChange: (historyState: { canRedo: boolean; canUndo: boolean }) => void;
+  onScrollRatioChange: (ratio: number) => void;
   onSearchOpenChange: (open: boolean) => void;
 }
 
@@ -96,8 +100,10 @@ export function Editor(props: EditorProps) {
   let lastFindTrigger = props.findTrigger;
   let lastRedoTrigger = props.redoTrigger;
   let lastSearchOpen = props.searchOpen;
+  let lastSyncScrollTargetVersion = props.syncScrollTargetVersion;
   let lastUndoTrigger = props.undoTrigger;
   let matches: SearchMatch[] = [];
+  let suppressScrollCallback = false;
 
   const themeCompartment = new Compartment();
   const lineNumbersCompartment = new Compartment();
@@ -268,6 +274,13 @@ export function Editor(props: EditorProps) {
     });
   }
 
+  function computeScrollRatio(scrollTop: number, scrollHeight: number, clientHeight: number): number {
+    const maxScrollTop = scrollHeight - clientHeight;
+    if (maxScrollTop <= 0) return 0;
+    const ratio = scrollTop / maxScrollTop;
+    return Math.max(0, Math.min(1, ratio));
+  }
+
   onMount(() => {
     if (!containerRef) return;
 
@@ -304,6 +317,18 @@ export function Editor(props: EditorProps) {
     view = new EditorView({ state, parent: containerRef });
     emitHistoryState(state);
 
+    const scrollEl = view.scrollDOM;
+    let scrollRaf = 0;
+    const onScroll = () => {
+      if (suppressScrollCallback || !props.syncScrollActive) return;
+      cancelAnimationFrame(scrollRaf);
+      scrollRaf = requestAnimationFrame(() => {
+        props.onScrollRatioChange(computeScrollRatio(scrollEl.scrollTop, scrollEl.scrollHeight, scrollEl.clientHeight));
+      });
+    };
+
+    scrollEl.addEventListener("scroll", onScroll, { passive: true });
+
     const onWindowKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
 
@@ -339,7 +364,11 @@ export function Editor(props: EditorProps) {
     };
 
     window.addEventListener("keydown", onWindowKeyDown);
-    onCleanup(() => window.removeEventListener("keydown", onWindowKeyDown));
+    onCleanup(() => {
+      cancelAnimationFrame(scrollRaf);
+      scrollEl.removeEventListener("scroll", onScroll);
+      window.removeEventListener("keydown", onWindowKeyDown);
+    });
   });
 
   createEffect(() => {
@@ -418,6 +447,27 @@ export function Editor(props: EditorProps) {
     if (trigger === lastFindTrigger) return;
     lastFindTrigger = trigger;
     openFind();
+  });
+
+  createEffect(() => {
+    const targetVersion = props.syncScrollTargetVersion;
+    if (targetVersion === lastSyncScrollTargetVersion) return;
+    lastSyncScrollTargetVersion = targetVersion;
+
+    if (!view || !props.syncScrollActive) return;
+
+    const targetRatio = props.syncScrollTargetRatio;
+    if (targetRatio === null) return;
+
+    const scrollEl = view.scrollDOM;
+    const maxScrollTop = scrollEl.scrollHeight - scrollEl.clientHeight;
+    const targetTop = maxScrollTop <= 0 ? 0 : Math.max(0, Math.min(1, targetRatio)) * maxScrollTop;
+
+    suppressScrollCallback = true;
+    scrollEl.scrollTop = targetTop;
+    requestAnimationFrame(() => {
+      suppressScrollCallback = false;
+    });
   });
 
   createEffect(() => {

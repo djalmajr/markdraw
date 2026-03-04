@@ -37,11 +37,13 @@ import {
   getStoredIndentSize,
   getStoredLineNumbers,
   getStoredShowInvisibles,
+  getStoredSyncScroll,
   getStoredWrapText,
   setStoredIndentMode,
   setStoredIndentSize,
   setStoredLineNumbers,
   setStoredShowInvisibles,
+  setStoredSyncScroll,
   setStoredWrapText,
 } from "@asciimark/core/editor-prefs.ts";
 import { isMdFile } from "@asciimark/core/utils.ts";
@@ -107,6 +109,7 @@ export function createAppState(config: AppStateConfig) {
   const [editorSearchOpen, setEditorSearchOpen] = createSignal(false);
   const [editorFindTrigger, setEditorFindTrigger] = createSignal(0);
   const [wrapText, setWrapText] = createSignal(getStoredWrapText());
+  const [syncScroll, setSyncScroll] = createSignal(getStoredSyncScroll());
   const [editorContent, setEditorContent] = createSignal("");
   const [savedContent, setSavedContent] = createSignal("");
 
@@ -215,6 +218,11 @@ export function createAppState(config: AppStateConfig) {
   function handleShowInvisiblesChange(enabled: boolean) {
     setShowInvisibles(enabled);
     setStoredShowInvisibles(enabled);
+  }
+
+  function handleSyncScrollChange(enabled: boolean) {
+    setSyncScroll(enabled);
+    setStoredSyncScroll(enabled);
   }
 
   function handleIndentModeChange(mode: IndentMode) {
@@ -610,6 +618,7 @@ export function createAppState(config: AppStateConfig) {
     selectedRootId,
     showInvisibles,
     showLineNumbers,
+    syncScroll,
     showAllDirs,
     showAllFiles,
     showHiddenEntries,
@@ -649,6 +658,7 @@ export function createAppState(config: AppStateConfig) {
     setSelectedRootId,
     setShowInvisibles,
     setShowLineNumbers,
+    setSyncScroll,
     setShowAllDirs,
     setShowAllFiles,
     setShowHiddenEntries,
@@ -684,6 +694,7 @@ export function createAppState(config: AppStateConfig) {
     handleRemoveRecentFile,
     handleRemoveRecentFolder,
     handleShowInvisiblesChange,
+    handleSyncScrollChange,
     handleThemeChange,
     handleWrapTextChange,
     onEditorResizeReset,

@@ -1,4 +1,4 @@
-import { Show, createSignal, type JSX } from "solid-js";
+import { Show, createEffect, createSignal, type JSX } from "solid-js";
 import type { FSEntry } from "@asciimark/core/types.ts";
 import type { RecentFile } from "@asciimark/core/recent-files.ts";
 import type { AppState } from "../composables/create-app-state.ts";
@@ -74,6 +74,18 @@ export function AppShell(props: AppShellProps) {
   const [editorRedoTrigger, setEditorRedoTrigger] = createSignal(0);
   const [canUndo, setCanUndo] = createSignal(false);
   const [canRedo, setCanRedo] = createSignal(false);
+  const [editorSyncTargetRatio, setEditorSyncTargetRatio] = createSignal<number | null>(null);
+  const [editorSyncTargetVersion, setEditorSyncTargetVersion] = createSignal(0);
+  const [previewSyncTargetRatio, setPreviewSyncTargetRatio] = createSignal<number | null>(null);
+  const [previewSyncTargetVersion, setPreviewSyncTargetVersion] = createSignal(0);
+
+  const syncScrollActive = () => s.editorMode() === "split" && s.syncScroll() && !!s.selectedFile();
+
+  createEffect(() => {
+    if (syncScrollActive()) return;
+    setEditorSyncTargetRatio(null);
+    setPreviewSyncTargetRatio(null);
+  });
 
   function setTocExpanded(expanded: boolean) {
     if (!tocContainerRef) return;
@@ -112,11 +124,19 @@ export function AppShell(props: AppShellProps) {
         html={s.html()}
         loading={s.loading()}
         searchOpen={s.previewSearchOpen()}
+        syncScrollActive={syncScrollActive()}
+        syncScrollTargetRatio={previewSyncTargetRatio()}
+        syncScrollTargetVersion={previewSyncTargetVersion()}
         tocVisible={s.tocVisible()}
         tocContainer={tocContainerRef}
         currentFilePath={s.selectedFile()?.path ?? null}
         pendingFragment={s.pendingFragment()}
         previewOverlayHost={previewPanelRef}
+        onScrollRatioChange={(ratio) => {
+          if (!syncScrollActive()) return;
+          setEditorSyncTargetRatio(ratio);
+          setEditorSyncTargetVersion((value) => value + 1);
+        }}
         onFragmentHandled={() => s.setPendingFragment(null)}
         onNavigate={props.onNavigate}
         onSearchOpenChange={s.setPreviewSearchOpen}
@@ -212,6 +232,7 @@ export function AppShell(props: AppShellProps) {
                       showLineNumbers={s.showLineNumbers()}
                       indentMode={s.indentMode()}
                       indentSize={s.indentSize()}
+                      syncScroll={s.syncScroll()}
                       wrapText={s.wrapText()}
                       onRedo={() => setEditorRedoTrigger((value) => value + 1)}
                       searchOpen={s.editorSearchOpen()}
@@ -223,6 +244,7 @@ export function AppShell(props: AppShellProps) {
                       }}
                       onToggleShowInvisibles={() => s.handleShowInvisiblesChange(!s.showInvisibles())}
                       onToggleShowLineNumbers={() => s.handleLineNumbersChange(!s.showLineNumbers())}
+                      onToggleSyncScroll={() => s.handleSyncScrollChange(!s.syncScroll())}
                       onToggleWrapText={() => s.handleWrapTextChange(!s.wrapText())}
                     />
                   </Show>
@@ -235,9 +257,17 @@ export function AppShell(props: AppShellProps) {
                     showInvisibles={s.showInvisibles()}
                     showLineNumbers={s.showLineNumbers()}
                     wrapText={s.wrapText()}
+                    syncScrollActive={syncScrollActive()}
+                    syncScrollTargetRatio={editorSyncTargetRatio()}
+                    syncScrollTargetVersion={editorSyncTargetVersion()}
                     redoTrigger={editorRedoTrigger()}
                     searchOpen={s.editorSearchOpen()}
                     undoTrigger={editorUndoTrigger()}
+                    onScrollRatioChange={(ratio) => {
+                      if (!syncScrollActive()) return;
+                      setPreviewSyncTargetRatio(ratio);
+                      setPreviewSyncTargetVersion((value) => value + 1);
+                    }}
                     onChange={(content) => {
                       const entry = s.selectedFile();
                       if (entry) s.debouncedConvert(content, entry.path, s._readFile ?? (() => Promise.resolve(null)));
