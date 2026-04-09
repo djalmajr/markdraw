@@ -1,6 +1,6 @@
 [package]
 name = "asciimark"
-version = "0.6.0-rc.0"
+version = "0.6.0-0"
 description = "AsciiMark Desktop - AsciiDoc & Markdown viewer"
 edition = "2021"
 
