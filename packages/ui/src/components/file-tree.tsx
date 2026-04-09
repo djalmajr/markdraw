@@ -31,7 +31,9 @@ interface FileTreeProps {
   showAllDirs?: boolean;
   showAllFiles?: boolean;
   onCloseRoot?: (rootId: string) => void;
+  onCopyPath?: (entry: FSEntry, rootId: string) => void | Promise<void>;
   onRefreshRoot?: (rootId: string) => void;
+  onRename?: (entry: FSEntry, rootId: string, newName: string) => Promise<void>;
   onReorderRoots?: (newOrder: string[]) => void;
   onSelect: (entry: FSEntry, rootId: string) => void;
   onToggleRootCollapsed?: (rootId: string) => void;
@@ -317,7 +319,10 @@ export function FileTree(props: FileTreeProps) {
                 expandAction={expandActions()[propsRoot.root.id] ?? defaultExpandAction}
                 focusedPath={propsRoot.rootFocusedPath()}
                 forceExpand={isFiltering()}
+                rootId={propsRoot.root.id}
                 selectedPath={propsRoot.rootSelectedPath()}
+                onCopyPath={props.onCopyPath}
+                onRename={props.onRename}
                 onSelect={(e) => props.onSelect(e, propsRoot.root.id)}
               />
             )}
@@ -419,7 +424,35 @@ export function FileTree(props: FileTreeProps) {
       case " ": {
         e.preventDefault();
         if (idx < 0) break;
-        items[idx].click();
+        // macOS rename shortcut: Cmd+Enter dispatches a rename event instead
+        // of activating the item.
+        if (e.metaKey && e.key === "Enter") {
+          items[idx].dispatchEvent(new Event("tree-rename"));
+        } else {
+          items[idx].click();
+        }
+        break;
+      }
+      case "F2": {
+        // Cross-platform rename shortcut (primary on Windows/Linux).
+        e.preventDefault();
+        if (idx < 0) break;
+        items[idx].dispatchEvent(new Event("tree-rename"));
+        break;
+      }
+      case "c":
+      case "C": {
+        // Copy focused item's absolute path. Shortcut: ⇧⌘C on macOS,
+        // Alt+Shift+C on Windows/Linux. Dispatched as an event so the item
+        // can call its platform-provided `onCopyPath` (which knows the
+        // workspace root and can build the absolute path).
+        if (!e.shiftKey) return;
+        const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+        const modifierOk = isMac ? e.metaKey : e.altKey;
+        if (!modifierOk) return;
+        if (idx < 0) return;
+        e.preventDefault();
+        items[idx].dispatchEvent(new Event("tree-copy-path"));
         break;
       }
       case "Home": {

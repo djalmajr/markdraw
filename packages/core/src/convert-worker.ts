@@ -171,6 +171,9 @@ function getMd(): MarkdownIt {
     html: true,
     linkify: true,
     typographer: true,
+    // Single newlines inside a paragraph become <br> — matches Obsidian/GitHub
+    // wiki style and is what users expect when they manually break lines.
+    breaks: true,
   });
 
   md.use(anchor, { permalink: false, slugify });

@@ -1,6 +1,12 @@
 // AsciiDoc conversion with include:: support via File System Access API
 import Asciidoctor from "@asciidoctor/core";
 import { escapeHtml } from "./utils";
+import { extractFrontmatter, type Frontmatter } from "./frontmatter";
+
+export interface ConvertResult {
+  html: string;
+  frontmatter: Frontmatter | null;
+}
 
 const asciidoctor = Asciidoctor();
 
@@ -153,15 +159,18 @@ function dirOf(path: string): string {
  * we pre-load all referenced files before conversion, then use a
  * directory stack to track the current file context during processing.
  */
-export async function convertAdoc(opts: ConvertOptions): Promise<string> {
+export async function convertAdoc(opts: ConvertOptions): Promise<ConvertResult> {
   const { filePath, fileContent, readFile } = opts;
+
+  // Strip YAML frontmatter (if any) before any other processing
+  const { frontmatter, body } = extractFrontmatter(fileContent);
 
   // Determine the base directory of the current file
   const baseDirPath = dirOf(filePath);
 
   // Pre-load all includes recursively
   const includeCache = await collectIncludes(
-    fileContent,
+    body,
     baseDirPath,
     readFile,
   );
@@ -292,7 +301,7 @@ export async function convertAdoc(opts: ConvertOptions): Promise<string> {
   });
 
   // Pre-process inter-document xrefs into proper HTML links
-  const processedContent = preprocessXrefs(fileContent);
+  const processedContent = preprocessXrefs(body);
 
   const html = asciidoctor.convert(processedContent, {
     extension_registry: registry,
@@ -310,7 +319,7 @@ export async function convertAdoc(opts: ConvertOptions): Promise<string> {
     },
   }) as string;
 
-  return html;
+  return { html, frontmatter };
 }
 
 /**

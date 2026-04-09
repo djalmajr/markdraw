@@ -1,6 +1,8 @@
 import type { Accessor, Setter } from "solid-js";
+import { writeText as clipboardWriteText } from "@tauri-apps/plugin-clipboard-manager";
+import type { FSEntry } from "@asciimark/core/types.ts";
 import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
-import { openDirectory, readTree, writeFile } from "./fs.ts";
+import { openDirectory, readTree, renameFile, writeFile } from "./fs.ts";
 import type { FileWatcher } from "./watcher.ts";
 
 interface FolderDeps {
@@ -138,11 +140,54 @@ export function createFolder(deps: FolderDeps) {
     }
   }
 
+  async function handleCopyPath(entry: FSEntry, rootId: string): Promise<void> {
+    const rootPath = rootPaths().get(rootId);
+    if (!rootPath) return;
+    // Build the absolute filesystem path. The workspace root id IS the
+    // absolute path on desktop, so we just join with the entry's relative path.
+    const absolutePath = entry.path ? `${rootPath}/${entry.path}` : rootPath;
+    try {
+      // Tauri's clipboard plugin is more reliable than navigator.clipboard
+      // inside the webview (which can fail silently in some focus contexts).
+      await clipboardWriteText(absolutePath);
+    } catch (e) {
+      console.error("Failed to copy path:", e);
+    }
+  }
+
+  async function handleRename(entry: FSEntry, rootId: string, newName: string): Promise<void> {
+    const rootPath = rootPaths().get(rootId);
+    if (!rootPath) throw new Error("Root not found");
+
+    // Build new relative path: keep the parent directory, swap the basename
+    const slash = entry.path.lastIndexOf("/");
+    const parentRel = slash >= 0 ? entry.path.slice(0, slash + 1) : "";
+    const newRelative = parentRel + newName;
+    if (newRelative === entry.path) return;
+
+    await renameFile(rootPath, entry.path, newRelative);
+
+    // If the renamed entry is (or contains) the open file, rewrite its path
+    const sel = state.selectedFile();
+    if (sel && state.selectedRootId() === rootId) {
+      if (sel.path === entry.path) {
+        state.setSelectedFile({ ...sel, path: newRelative, name: newName });
+      } else if (sel.path.startsWith(entry.path + "/")) {
+        const newSelPath = newRelative + sel.path.slice(entry.path.length);
+        state.setSelectedFile({ ...sel, path: newSelPath });
+      }
+    }
+
+    await refreshRoot(rootId);
+  }
+
   return {
     getPathName,
     handleCloseRoot,
+    handleCopyPath,
     handleEditorSave,
     handleOpenFolder,
+    handleRename,
     openFolderPath,
     refreshAllRoots,
     refreshRoot,

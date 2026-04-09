@@ -249,19 +249,31 @@
   color: #c9d1d9;
 }
 
-/* Tables — horizontal scroll for wide tables */
-.doc-body table.tableblock {
-  display: block;
-  overflow-x: auto;
-  margin-bottom: 1em;
-  border-collapse: collapse;
-  font-size: 0.95em;
-}
-
+/*
+ * Tables — kept as native `display: table` (preserves border-collapse and
+ * border rendering on edge cells). Horizontal scroll for wide tables is
+ * handled by wrapping the <table> in `.table-wrapper` after render — see
+ * `wrapTablesForScroll` in preview.tsx.
+ */
+.doc-body table.tableblock,
 .doc-body table:not(.tableblock) {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.95em;
+}
+
+.doc-body .table-wrapper {
+  margin-bottom: 1em;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.doc-body .table-wrapper > table {
+  /* Inside the scroll wrapper, the table can grow beyond 100% to its content
+     so wide tables actually trigger horizontal scrolling. */
+  width: max-content;
+  min-width: 100%;
+  margin-bottom: 0;
 }
 
 .doc-body table thead th {
@@ -828,7 +840,7 @@
 
 /* Details/summary container */
 .doc-body details {
-  margin-bottom: 1em;
+  margin: 1em 0;
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
   padding: 12px 16px;
@@ -864,6 +876,21 @@
 .doc-body .mermaid svg {
   max-width: 100%;
   height: auto;
+}
+
+/* Diagrams (mermaid + kroki): clickable to open in zoom viewer */
+.doc-body .mermaid[data-processed]:has(svg),
+.doc-body .kroki[data-processed]:has(svg) {
+  cursor: zoom-in;
+  border-radius: 6px;
+  transition: outline-color 0.15s ease, background-color 0.15s ease;
+  outline: 1px dashed transparent;
+  outline-offset: 4px;
+}
+
+.doc-body .mermaid[data-processed]:has(svg):hover,
+.doc-body .kroki[data-processed]:has(svg):hover {
+  outline-color: hsl(var(--border));
 }
 
 .doc-body .mermaid-error {

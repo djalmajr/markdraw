@@ -40,7 +40,8 @@ export function createUrlMode(deps: UrlModeDeps) {
       // Set a synthetic selectedFile so AppShell shows Preview (not EmptyState)
       // and the toc panel visibility works correctly
       state.setSelectedFile({ name: filePath, kind: "file", path: filePath });
-      state.setHtml(result);
+      state.setHtml(result.html);
+      state.setFrontmatter(result.frontmatter);
       state.setEditorContent(content);
       state.setSavedContent(content);
     } catch (e) {
@@ -70,7 +71,8 @@ export function createUrlMode(deps: UrlModeDeps) {
           const filePath = fileNameFromUrl(url);
           const readFile = createUrlReadFile(baseUrl);
           const result = await state.convert(filePath, content, readFile);
-          state.setHtml(result);
+          state.setHtml(result.html);
+          state.setFrontmatter(result.frontmatter);
         }
       } catch {
         // Silently ignore polling errors

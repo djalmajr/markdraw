@@ -72,7 +72,8 @@ export function createFileLoader(deps: FileLoaderDeps) {
       // Yield again before DOM update to prevent long frame
       await new Promise((r) => setTimeout(r, 0));
 
-      state.setHtml(result);
+      state.setHtml(result.html);
+      state.setFrontmatter(result.frontmatter);
       state.setEditorContent(content);
       state.setSavedContent(content);
 

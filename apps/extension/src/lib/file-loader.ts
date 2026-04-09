@@ -72,7 +72,8 @@ export function createFileLoader(deps: FileLoaderDeps) {
 
       const result = await state.convert(entry.path, content, readFile);
 
-      state.setHtml(result);
+      state.setHtml(result.html);
+      state.setFrontmatter(result.frontmatter);
       state.setEditorContent(content);
       state.setSavedContent(content);
 

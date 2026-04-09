@@ -124,6 +124,36 @@ async fn write_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, &content).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn rename_file(
+    root: String,
+    old_relative: String,
+    new_relative: String,
+) -> Result<(), String> {
+    let root_path = PathBuf::from(&root);
+    let from = root_path.join(&old_relative);
+    let to = root_path.join(&new_relative);
+
+    // Sanity: source and destination must resolve inside the workspace root
+    let root_canon = std::fs::canonicalize(&root_path).map_err(|e| e.to_string())?;
+    let from_canon = std::fs::canonicalize(&from).map_err(|e| e.to_string())?;
+    if !from_canon.starts_with(&root_canon) {
+        return Err("rename source escapes workspace root".into());
+    }
+
+    let to_parent = to.parent().ok_or_else(|| "invalid destination".to_string())?;
+    let to_parent_canon = std::fs::canonicalize(to_parent).map_err(|e| e.to_string())?;
+    if !to_parent_canon.starts_with(&root_canon) {
+        return Err("rename destination escapes workspace root".into());
+    }
+
+    if to.exists() {
+        return Err("destination already exists".into());
+    }
+
+    std::fs::rename(&from, &to).map_err(|e| e.to_string())
+}
+
 struct WatcherHolder(
     Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>>,
 );
@@ -368,6 +398,7 @@ fn print_webview(webview: tauri::Webview) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(WatcherHolder(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             open_directory_dialog,
@@ -378,6 +409,7 @@ pub fn run() {
             toggle_maximize_instant,
             print_webview,
             write_file,
+            rename_file,
             watch_paths,
             stop_watching,
         ])

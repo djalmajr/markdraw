@@ -2,7 +2,7 @@ import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createConverter } from "@asciimark/core/converter.ts";
 import ConvertWorker from "@asciimark/core/convert-worker.ts?worker";
 import type { RecentFile } from "@asciimark/core/recent-files.ts";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createAppState } from "@asciimark/ui/composables/create-app-state.ts";
 import { AppShell } from "@asciimark/ui/components/app-shell.tsx";
@@ -96,6 +96,44 @@ export function App() {
     }
   }
 
+  /**
+   * Resolve a relative `<img>` src from the current document into a Tauri
+   * asset URL the webview can load. Returns `null` for already-absolute URLs
+   * (http(s)://, data:, file:) so they pass through untouched.
+   */
+  function resolveImageSrc(src: string): string | null {
+    // Already-absolute URL: leave it alone
+    if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return null;
+
+    const file = state.selectedFile();
+    const rootId = state.selectedRootId();
+    if (!file || !rootId) return null;
+    const rootPath = rootPaths().get(rootId);
+    if (!rootPath) return null;
+
+    // Resolve `src` against the current file's directory.
+    // Workspace-rooted absolute (`/foo/bar.png`) is treated as relative to
+    // the workspace root.
+    const fileDir = file.path.includes("/")
+      ? file.path.slice(0, file.path.lastIndexOf("/"))
+      : "";
+
+    let relativeFromRoot: string;
+    if (src.startsWith("/")) {
+      relativeFromRoot = src.slice(1);
+    } else {
+      const parts = fileDir ? fileDir.split("/") : [];
+      for (const part of src.split("/")) {
+        if (part === "..") parts.pop();
+        else if (part !== "" && part !== ".") parts.push(part);
+      }
+      relativeFromRoot = parts.join("/");
+    }
+
+    const absolutePath = `${rootPath}/${relativeFromRoot}`;
+    return convertFileSrc(absolutePath);
+  }
+
   async function handleOpenRecentFile(recentFile: RecentFile) {
     const opened = await folder.openFolderPath(recentFile.rootPath);
     if (!opened) {
@@ -133,6 +171,7 @@ export function App() {
       onWindowDragStart={handleWindowDragStart}
       onWindowTitleDoubleClick={handleWindowTitleDoubleClick}
       onCloseRoot={(rootId) => folder.handleCloseRoot(rootId)}
+      onCopyPath={folder.handleCopyPath}
       onGoBack={navigation.handleGoBack}
       onGoForward={navigation.handleGoForward}
       onLoadFile={(entry, rootId) => loader.loadFileContent(entry, true, false, rootId)}
@@ -140,6 +179,8 @@ export function App() {
       onOpenFolder={folder.handleOpenFolder}
       onOpenRecentFile={handleOpenRecentFile}
       onOpenRecentFolder={handleOpenRecentFolder}
+      onRename={folder.handleRename}
+      resolveImageSrc={resolveImageSrc}
       onToggleShowHiddenEntries={(enabled) => folder.refreshAllRoots(enabled)}
       onRefreshRoot={(rootId) => folder.refreshRoot(rootId)}
       onReorderRoots={(newOrder) => state.reorderRoots(newOrder)}

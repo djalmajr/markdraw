@@ -4,8 +4,14 @@
 
 import { collectIncludes } from "./asciidoc";
 import type { ConvertOptions } from "./asciidoc";
+import { extractFrontmatter, type Frontmatter } from "./frontmatter";
 
 export type { ConvertOptions };
+
+export interface ConvertResult {
+  html: string;
+  frontmatter: Frontmatter | null;
+}
 
 // ─── Include resolution (Markdown) ──────────────────────────────────────────
 
@@ -91,34 +97,40 @@ function postToWorker(w: Worker, msg: Record<string, unknown>): Promise<string> 
 export function createConverter(w: Worker) {
   setupWorker(w);
 
-  async function convertAdoc(opts: ConvertOptions): Promise<string> {
+  async function convertAdoc(opts: ConvertOptions): Promise<ConvertResult> {
     const { filePath, fileContent, readFile } = opts;
     const baseDirPath = dirOf(filePath);
 
-    const includeCache = await collectIncludes(fileContent, baseDirPath, readFile);
+    // Extract frontmatter on the main thread so the worker keeps a string→string API
+    const { frontmatter, body } = extractFrontmatter(fileContent);
+
+    const includeCache = await collectIncludes(body, baseDirPath, readFile);
     const includeCacheObj: Record<string, string> = {};
     for (const [k, v] of includeCache) {
       includeCacheObj[k] = v;
     }
 
-    return postToWorker(w, {
+    const html = await postToWorker(w, {
       type: "convert-adoc",
-      fileContent,
+      fileContent: body,
       filePath,
       includeCache: includeCacheObj,
     });
+    return { html, frontmatter };
   }
 
-  async function convertMarkdown(opts: ConvertOptions): Promise<string> {
+  async function convertMarkdown(opts: ConvertOptions): Promise<ConvertResult> {
     const { filePath, fileContent, readFile } = opts;
     const baseDirPath = dirOf(filePath);
 
-    const processedContent = await processMarkdownIncludes(fileContent, baseDirPath, readFile);
+    const { frontmatter, body } = extractFrontmatter(fileContent);
+    const processedContent = await processMarkdownIncludes(body, baseDirPath, readFile);
 
-    return postToWorker(w, {
+    const html = await postToWorker(w, {
       type: "convert-md",
       processedContent,
     });
+    return { html, frontmatter };
   }
 
   return { convertAdoc, convertMarkdown };

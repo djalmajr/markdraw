@@ -46,6 +46,22 @@ interface AppShellProps {
   onOpenFolder?: () => void;
   onOpenRecentFile?: (recentFile: RecentFile) => void | Promise<void>;
   onOpenRecentFolder?: (path: string) => void | Promise<void>;
+  /**
+   * Copy the absolute filesystem path of a tree entry. Platforms with
+   * filesystem access (desktop) pass this; the file tree falls back to
+   * copying the workspace-relative path when omitted.
+   */
+  onCopyPath?: (entry: FSEntry, rootId: string) => void | Promise<void>;
+  /**
+   * Rename a file or directory. Only platforms with write access (desktop)
+   * pass this; if absent, the file tree hides the Rename menu item.
+   */
+  onRename?: (entry: FSEntry, rootId: string, newName: string) => Promise<void>;
+  /**
+   * Resolve an `<img>` src in the rendered document. Desktop maps relative
+   * paths to Tauri asset URLs so the webview can load files from disk.
+   */
+  resolveImageSrc?: (src: string) => string | null;
   onToggleShowHiddenEntries?: (enabled: boolean) => void | Promise<void>;
   onRefreshRoot?: (rootId: string) => void;
   onReorderRoots?: (newOrder: string[]) => void;
@@ -122,6 +138,8 @@ export function AppShell(props: AppShellProps) {
       <Preview
         findTrigger={s.previewFindTrigger()}
         html={s.html()}
+        frontmatter={s.frontmatter()}
+        resolveImageSrc={props.resolveImageSrc}
         loading={s.loading()}
         searchOpen={s.previewSearchOpen()}
         syncScrollActive={syncScrollActive()}
@@ -200,7 +218,9 @@ export function AppShell(props: AppShellProps) {
                 showAllDirs={s.showAllDirs()}
                 showAllFiles={s.showAllFiles()}
                 onCloseRoot={props.onCloseRoot}
+                onCopyPath={props.onCopyPath}
                 onRefreshRoot={props.onRefreshRoot}
+                onRename={props.onRename}
                 onReorderRoots={props.onReorderRoots}
                 onSelect={(entry, rootId) => props.onLoadFile(entry, rootId)}
                 onToggleRootCollapsed={(id) => s.toggleRootCollapsed(id)}

@@ -22,7 +22,10 @@ import "prismjs/components/prism-markdown";
 import "prismjs/components/prism-toml";
 import "prismjs/components/prism-ini";
 import { SearchOverlay } from "./search-overlay.tsx";
+import { DiagramViewer } from "./diagram-viewer.tsx";
+import { FrontmatterPanel } from "./frontmatter-panel.tsx";
 import { renderKroki } from "@asciimark/core/kroki.ts";
+import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
 import "katex/dist/katex.min.css";
 import "@mdit/plugin-alert/style";
 import "../styles/asciidoc.css";
@@ -185,6 +188,45 @@ async function renderMermaidBlocks(container: HTMLElement, gen: number): Promise
     document.querySelectorAll('div[id^="dmermaid-"]').forEach((el) => el.remove());
 
     await yieldToMain();
+  }
+}
+
+/**
+ * Walk all `<img>` elements in `container` and rewrite their `src` using the
+ * provided `resolve` callback. Used to make relative image paths in the
+ * source document (markdown ![](path) or asciidoc image::path[]) loadable
+ * inside the webview, by mapping them to a Tauri asset URL.
+ *
+ * The callback should return `null` for already-absolute URLs so the
+ * original src is left intact.
+ */
+function rewriteImageSources(
+  container: HTMLElement,
+  resolve: (src: string) => string | null,
+): void {
+  const imgs = container.querySelectorAll<HTMLImageElement>("img");
+  for (const img of imgs) {
+    const src = img.getAttribute("src");
+    if (!src) continue;
+    const resolved = resolve(src);
+    if (resolved) img.setAttribute("src", resolved);
+  }
+}
+
+/**
+ * Wrap every <table> in a `.table-wrapper` div so wide tables get a horizontal
+ * scroll without breaking the table's native border-collapse behavior. The
+ * markdown-it / asciidoctor renderers don't emit a wrapper, so we add it here.
+ */
+function wrapTablesForScroll(container: HTMLElement): void {
+  const tables = container.querySelectorAll<HTMLTableElement>("table");
+  for (const table of tables) {
+    // Skip tables already wrapped (covers re-runs of the effect on the same DOM)
+    if (table.parentElement?.classList.contains("table-wrapper")) continue;
+    const wrapper = document.createElement("div");
+    wrapper.className = "table-wrapper";
+    table.parentElement?.insertBefore(wrapper, table);
+    wrapper.appendChild(table);
   }
 }
 
@@ -469,6 +511,7 @@ function resolveRelativePath(currentFilePath: string, target: string): string {
 interface PreviewProps {
   findTrigger: number;
   html: string;
+  frontmatter: Frontmatter | null;
   loading: boolean;
   previewOverlayHost?: HTMLElement;
   searchOpen: boolean;
@@ -486,6 +529,14 @@ interface PreviewProps {
   onFragmentHandled: () => void;
   /** Called when user clicks a document link (.adoc/.md); receives the resolved path and optional fragment */
   onNavigate: (path: string, fragment?: string | null) => void;
+  /**
+   * Resolve an `<img>` src that appears in the document into a URL the
+   * webview can fetch (e.g. via Tauri's asset protocol). Should return
+   * `null` for already-absolute URLs (`http://`, `data:`, etc.) so the
+   * original src is left untouched. Only platforms with filesystem access
+   * (desktop) need to provide this.
+   */
+  resolveImageSrc?: (src: string) => string | null;
   onScrollRatioChange: (ratio: number) => void;
   onSearchOpenChange: (open: boolean) => void;
   /** Called after content swap to report whether the new content has a TOC */
@@ -495,6 +546,7 @@ interface PreviewProps {
 export function Preview(props: PreviewProps) {
   const [hasArticle, setHasArticle] = createSignal(false);
   const [overlayHost, setOverlayHost] = createSignal<HTMLElement | undefined>(undefined);
+  const [viewerSvg, setViewerSvg] = createSignal<string | null>(null);
   let lastFindTrigger = props.findTrigger;
   let lastSyncScrollTargetVersion = props.syncScrollTargetVersion;
   let articleRef: HTMLElement | undefined;
@@ -620,6 +672,20 @@ export function Preview(props: PreviewProps) {
   }
 
   function handleClick(e: MouseEvent) {
+    // Open the diagram viewer when clicking a rendered Mermaid or Kroki block.
+    const diagram = (e.target as HTMLElement).closest<HTMLElement>(
+      ".mermaid[data-processed], .kroki[data-processed]",
+    );
+    if (diagram) {
+      const svgEl = diagram.querySelector("svg");
+      if (svgEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        setViewerSvg(svgEl.outerHTML);
+        return;
+      }
+    }
+
     const anchor = (e.target as HTMLElement).closest("a");
     if (!anchor) return;
 
@@ -760,6 +826,8 @@ export function Preview(props: PreviewProps) {
     if (isNewDocument) {
       const buffer = document.createElement("div");
       buffer.innerHTML = sanitizedHtml;
+      wrapTablesForScroll(buffer);
+      if (props.resolveImageSrc) rewriteImageSources(buffer, props.resolveImageSrc);
 
       queueMicrotask(async () => {
         await highlightCodeBlocks(buffer, gen);
@@ -783,6 +851,8 @@ export function Preview(props: PreviewProps) {
       const prevScrollTop = scrollContainer?.scrollTop ?? 0;
       articleRef!.innerHTML = sanitizedHtml;
       if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
+      wrapTablesForScroll(articleRef!);
+      if (props.resolveImageSrc) rewriteImageSources(articleRef!, props.resolveImageSrc);
 
       afterSwap(articleRef!, false, tocVis);
 
@@ -809,9 +879,17 @@ export function Preview(props: PreviewProps) {
           onClose={() => props.onSearchOpenChange(false)}
         />
       </Show>
+      <DiagramViewer svg={viewerSvg()} onClose={() => setViewerSvg(null)} />
       <div class="preview">
         <Show when={props.loading}>
           <div class="preview-loading">Converting...</div>
+        </Show>
+        <Show when={props.frontmatter && Object.keys(props.frontmatter).length > 0}>
+          <FrontmatterPanel
+            frontmatter={props.frontmatter!}
+            currentFilePath={props.currentFilePath}
+            onNavigate={props.onNavigate}
+          />
         </Show>
         <article
           ref={(el) => {

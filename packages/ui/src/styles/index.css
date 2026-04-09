@@ -656,6 +656,26 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   overflow: visible;
   text-overflow: clip;
   white-space: nowrap;
+  /*
+   * Reserve a 1px border slot ALWAYS, even at rest. The negative margin
+   * compensates so the resting visual layout is unchanged. When the user
+   * starts a rename, the span itself becomes contentEditable (same DOM
+   * element — no swap, no creation, no destruction) and the only thing
+   * that changes is `border-color` + `background`. Zero possibility of
+   * layout shift because no box dimension ever changes.
+   */
+  border: 1px solid transparent;
+  border-radius: 2px;
+  margin: -1px;
+  outline: none;
+}
+
+.tree-name.tree-name-editing {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--background));
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .tree-dirty {
@@ -663,6 +683,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   margin-left: 2px;
   font-weight: 700;
 }
+
 
 .chevron-expanded {
   transform: rotate(90deg);
@@ -1017,6 +1038,91 @@ mark.search-highlight.search-active {
   outline-color: hsl(211 72% 55% / 0.8);
 }
 
+/* === Diagram Viewer (Mermaid/Kroki lightbox) === */
+.diagram-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: hsl(var(--background) / 0.85);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.diagram-viewer-toolbar {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  box-shadow: 0 4px 16px hsl(var(--foreground) / 0.18);
+}
+
+.diagram-viewer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+
+.diagram-viewer-btn:hover {
+  background: hsl(var(--bg-hover));
+  color: hsl(var(--foreground));
+}
+
+.diagram-viewer-btn:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.diagram-viewer-zoom {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--muted-foreground));
+  min-width: 44px;
+  text-align: center;
+  padding: 0 4px;
+}
+
+.diagram-viewer-canvas {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.diagram-viewer-canvas.diagram-viewer-grabbing {
+  cursor: grabbing;
+}
+
+.diagram-viewer-transform {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.diagram-viewer-transform svg {
+  display: block;
+  pointer-events: none;
+}
+
 .preview-scope {
   position: relative;
 }
@@ -1032,6 +1138,133 @@ mark.search-highlight.search-active {
 
 .doc-body {
   transition: opacity 100ms ease-in;
+}
+
+/* === Frontmatter (Properties) panel === */
+.frontmatter-panel {
+  margin: 0 0 24px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--card, var(--background)));
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.frontmatter-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 14px;
+  background: hsl(var(--muted) / 0.4);
+  border: none;
+  border-bottom: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.frontmatter-header:hover {
+  background: hsl(var(--muted) / 0.55);
+  color: hsl(var(--foreground));
+}
+
+.frontmatter-panel.frontmatter-collapsed .frontmatter-header {
+  border-bottom-color: transparent;
+}
+
+.frontmatter-chevron {
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.frontmatter-collapsed .frontmatter-chevron {
+  transform: rotate(-90deg);
+}
+
+.frontmatter-title {
+  color: hsl(var(--foreground));
+}
+
+.frontmatter-body {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+}
+
+.frontmatter-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 8px 14px;
+}
+
+.frontmatter-row:hover {
+  background: hsl(var(--muted) / 0.25);
+}
+
+.frontmatter-key {
+  flex: 0 0 140px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  padding-top: 2px;
+}
+
+.frontmatter-value {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+  /* Long content (URLs, IDs, etc.) gets horizontal scroll instead of being
+     truncated with ellipsis. */
+  overflow-x: auto;
+  color: hsl(var(--foreground));
+  padding-top: 1px;
+}
+
+.frontmatter-text {
+  font-size: 13px;
+}
+
+.frontmatter-empty {
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+.frontmatter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.frontmatter-links {
+  /* Vertical list — one link per line, like the YAML source. */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.frontmatter-link {
+  color: hsl(var(--primary));
+  text-decoration: none;
+  font-size: 13px;
+  border-bottom: 1px dashed hsl(var(--primary) / 0.4);
+  padding-bottom: 1px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.frontmatter-link:hover {
+  border-bottom-style: solid;
 }
 
 .doc-body::selection,

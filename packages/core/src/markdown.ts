@@ -15,6 +15,12 @@ import mark from "markdown-it-mark";
 import multimdTable from "markdown-it-multimd-table";
 import container from "markdown-it-container";
 import { escapeHtml } from "./utils";
+import { extractFrontmatter, type Frontmatter } from "./frontmatter";
+
+export interface ConvertResult {
+  html: string;
+  frontmatter: Frontmatter | null;
+}
 
 // --- Include preprocessor ---
 
@@ -198,6 +204,9 @@ function createMarkdownIt(): MarkdownIt {
     html: true,
     linkify: true,
     typographer: true,
+    // Single newlines inside a paragraph become <br> — matches Obsidian/GitHub
+    // wiki style and is what users expect when they manually break lines.
+    breaks: true,
   });
 
   // --- Core plugins ---
@@ -307,16 +316,20 @@ export interface ConvertOptions {
 
 /**
  * Convert Markdown to HTML with include support, mermaid blocks, and TOC.
- * Returns the same kind of HTML string as convertAdoc.
+ * Returns `{ html, frontmatter }` — frontmatter is `null` if the document
+ * has no YAML header.
  */
-export async function convertMarkdown(opts: ConvertOptions): Promise<string> {
+export async function convertMarkdown(opts: ConvertOptions): Promise<ConvertResult> {
   const { filePath, fileContent, readFile } = opts;
 
   const baseDirPath = dirOf(filePath);
 
+  // Strip YAML frontmatter (if any) before any other processing
+  const { frontmatter, body } = extractFrontmatter(fileContent);
+
   // Process includes recursively
   const processed = await processIncludes(
-    fileContent,
+    body,
     baseDirPath,
     readFile,
   );
@@ -347,7 +360,7 @@ export async function convertMarkdown(opts: ConvertOptions): Promise<string> {
   const tocHtml = buildTocHtml(tocEntries);
 
   // Combine: TOC first (for right sidebar), then body
-  return tocHtml + bodyHtml;
+  return { html: tocHtml + bodyHtml, frontmatter };
 }
 
 /**

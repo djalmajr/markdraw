@@ -46,3 +46,15 @@ export async function writeFile(
 ): Promise<void> {
   await invoke("write_file", { path: filePath, content });
 }
+
+export async function renameFile(
+  rootPath: string,
+  oldRelative: string,
+  newRelative: string,
+): Promise<void> {
+  await invoke("rename_file", {
+    root: rootPath,
+    oldRelative,
+    newRelative,
+  });
+}

@@ -5,7 +5,8 @@ import {
   onMount,
 } from "solid-js";
 import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@asciimark/core/types.ts";
-import type { ConvertOptions } from "@asciimark/core/converter.ts";
+import type { ConvertOptions, ConvertResult } from "@asciimark/core/converter.ts";
+import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
 import {
   applyCodeTheme,
 } from "@asciimark/core/code-theme.ts";
@@ -52,8 +53,8 @@ export type ThemeMode = "system" | "light" | "dark";
 
 interface AppStateConfig {
   applyTheme: (mode: ThemeMode) => void;
-  convertAdoc: (opts: ConvertOptions) => Promise<string>;
-  convertMarkdown: (opts: ConvertOptions) => Promise<string>;
+  convertAdoc: (opts: ConvertOptions) => Promise<ConvertResult>;
+  convertMarkdown: (opts: ConvertOptions) => Promise<ConvertResult>;
   getStoredTheme: () => ThemeMode;
   printPage?: () => void | Promise<void>;
 }
@@ -64,6 +65,8 @@ export function createAppState(config: AppStateConfig) {
   // ── Core signals ────────────────────────────────────────────────────────
 
   const [html, setHtml] = createSignal("");
+  const [frontmatter, setFrontmatter] = createSignal<Frontmatter | null>(null);
+  const [editingPath, setEditingPath] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [autoRefresh, setAutoRefresh] = createSignal(true);
   const [tocVisible, setTocVisible] = createSignal(true);
@@ -370,6 +373,7 @@ export function createAppState(config: AppStateConfig) {
       setSelectedFile(null);
       setSelectedRootId(null);
       setHtml("");
+      setFrontmatter(null);
       setEditorContent("");
       setSavedContent("");
       setEditorSearchOpen(false);
@@ -543,7 +547,8 @@ export function createAppState(config: AppStateConfig) {
         const result = isMdFile(filePath)
           ? await config.convertMarkdown(convertOpts)
           : await config.convertAdoc(convertOpts);
-        setHtml(result);
+        setHtml(result.html);
+        setFrontmatter(result.frontmatter);
       } catch (e) {
         console.error("Failed to convert editor content:", e);
       }
@@ -554,7 +559,7 @@ export function createAppState(config: AppStateConfig) {
     filePath: string,
     content: string,
     readFile: (p: string) => Promise<string | null>,
-  ): Promise<string> {
+  ): Promise<ConvertResult> {
     const convertOpts = { filePath, fileContent: content, readFile };
     return isMdFile(filePath)
       ? await config.convertMarkdown(convertOpts)
@@ -573,6 +578,7 @@ export function createAppState(config: AppStateConfig) {
     setRoots(new Map());
     setRootOrder([]);
     setHtml("");
+    setFrontmatter(null);
     setEditorContent("");
     setSavedContent("");
     setEditorSearchOpen(false);
@@ -598,6 +604,8 @@ export function createAppState(config: AppStateConfig) {
     editorWidth,
     fontPrefs,
     html,
+    frontmatter,
+    editingPath,
     loading,
     navIndex,
     navStack,
@@ -640,6 +648,8 @@ export function createAppState(config: AppStateConfig) {
     setFontPrefs,
     setHasToc,
     setHtml,
+    setFrontmatter,
+    setEditingPath,
     setLoading,
     setNavIndex,
     setNavStack,
