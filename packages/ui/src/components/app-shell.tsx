@@ -184,6 +184,7 @@ export function AppShell(props: AppShellProps) {
             editorMode={s.editorMode()}
             hasFile={s.hasFile()}
             hasRoot={props.hasRoot}
+            supportsPreview={s.previewSupported()}
             inWindowFrame={!!props.windowFrameToolbar}
             recentFiles={s.recentFiles()}
             recentFolders={s.recentFolders()}

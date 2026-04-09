@@ -2,7 +2,7 @@ import type { Accessor } from "solid-js";
 import type { FSEntry } from "@asciimark/core/types.ts";
 import { getIncludePaths } from "@asciimark/core/asciidoc.ts";
 import { getMarkdownIncludePaths } from "@asciimark/core/markdown.ts";
-import { isMdFile } from "@asciimark/core/utils.ts";
+import { isMdFile, isSupportedFile } from "@asciimark/core/utils.ts";
 import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
 import {
   readFileByPath,
@@ -47,6 +47,19 @@ export function createFileLoader(deps: FileLoaderDeps) {
     try {
       const absolutePath = `${root}/${entry.path}`;
       const content = await readFileContent(absolutePath);
+
+      // Non-previewable formats (json, txt, yaml, …) skip conversion entirely
+      // and open straight in the editor. The createEffect in app state forces
+      // editor mode to "edit" because previewSupported() turns false.
+      if (!isSupportedFile(entry.path)) {
+        state.setHtml("");
+        state.setFrontmatter(null);
+        state.setEditorContent(content);
+        state.setSavedContent(content);
+        watcher.setTarget({ filePath: absolutePath, includePaths: [], rootPath: root });
+        if (state.autoRefresh()) watcher.start();
+        return;
+      }
 
       // Pre-scan include paths and batch-read them in a single IPC call
       const baseDirForIncludes = entry.path.includes("/")

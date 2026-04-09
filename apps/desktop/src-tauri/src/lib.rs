@@ -19,11 +19,38 @@ pub struct WatchEvent {
     pub paths: Vec<String>,
 }
 
-const IGNORED_DIRS: &[&str] = &[
-    "node_modules", ".git", "dist", "build", "out", "target",
-    ".next", ".nuxt", ".output", ".cache", ".turbo", ".svelte-kit",
-    "vendor", "__pycache__", ".venv", "venv", ".idea", ".vscode",
-    "coverage", ".nyc_output", "tmp", "temp",
+/// Bulky directories that are ALWAYS skipped, regardless of "show hidden".
+/// These are caches/build artifacts/dependencies that would freeze the tree
+/// (and any subsequent re-renders) if we walked them. The user can still
+/// access them outside the app.
+const ALWAYS_IGNORED_DIRS: &[&str] = &[
+    "node_modules",
+    "dist",
+    "build",
+    "out",
+    "target",
+    "vendor",
+    "__pycache__",
+    "venv",
+    "coverage",
+    "tmp",
+    "temp",
+];
+
+/// Hidden tooling directories that are skipped *only* when "show hidden" is
+/// off. With show hidden enabled the user expects to see them.
+const HIDDEN_TOOL_DIRS: &[&str] = &[
+    ".git",
+    ".next",
+    ".nuxt",
+    ".output",
+    ".cache",
+    ".turbo",
+    ".svelte-kit",
+    ".venv",
+    ".idea",
+    ".vscode",
+    ".nyc_output",
 ];
 
 fn read_dir_recursive(dir: &Path, base: &Path, include_hidden_entries: bool) -> Result<Vec<DirEntry>, String> {
@@ -34,6 +61,7 @@ fn read_dir_recursive(dir: &Path, base: &Path, include_hidden_entries: bool) -> 
         let entry = entry.map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().to_string();
 
+        // Hidden files (dotfiles) — skipped unless the user wants to see them.
         if name.starts_with('.') && !include_hidden_entries {
             continue;
         }
@@ -47,7 +75,13 @@ fn read_dir_recursive(dir: &Path, base: &Path, include_hidden_entries: bool) -> 
             .replace('\\', "/");
 
         if file_type.is_dir() {
-            if !include_hidden_entries && IGNORED_DIRS.contains(&name.as_str()) {
+            // Bulky build/cache/deps dirs: ALWAYS skipped — these would freeze
+            // the UI if walked, and aren't useful in a markdown editor.
+            if ALWAYS_IGNORED_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            // Tool dotfile dirs (.git, .vscode, …): skipped unless show hidden.
+            if !include_hidden_entries && HIDDEN_TOOL_DIRS.contains(&name.as_str()) {
                 continue;
             }
             let children = read_dir_recursive(&entry.path(), base, include_hidden_entries)?;

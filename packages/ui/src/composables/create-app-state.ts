@@ -47,7 +47,7 @@ import {
   setStoredSyncScroll,
   setStoredWrapText,
 } from "@asciimark/core/editor-prefs.ts";
-import { isMdFile } from "@asciimark/core/utils.ts";
+import { isMdFile, isSupportedFile } from "@asciimark/core/utils.ts";
 
 export type ThemeMode = "system" | "light" | "dark";
 
@@ -180,6 +180,22 @@ export function createAppState(config: AppStateConfig) {
   const hasFile = () => !!selectedFile();
   const [hasToc, setHasToc] = createSignal(false);
   const isDirty = () => editorContent() !== savedContent();
+  /**
+   * Whether the currently selected file can be previewed (markdown or
+   * asciidoc). Other formats (json, txt, yaml, …) are edit-only.
+   */
+  const previewSupported = () => {
+    const f = selectedFile();
+    return f ? isSupportedFile(f.name) : true;
+  };
+
+  // When the user opens a non-previewable file, force the editor view —
+  // there's nothing meaningful to render in the preview.
+  createEffect(() => {
+    if (!previewSupported() && editorMode() !== "edit") {
+      setEditorMode("edit");
+    }
+  });
 
   // ── System theme listener ───────────────────────────────────────────────
 
@@ -686,6 +702,7 @@ export function createAppState(config: AppStateConfig) {
     hasFile,
     hasToc,
     isDirty,
+    previewSupported,
 
     // Handlers
     addRoot,

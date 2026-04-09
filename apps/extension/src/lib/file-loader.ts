@@ -2,7 +2,7 @@ import type { Accessor } from "solid-js";
 import type { FSEntry } from "@asciimark/core/types.ts";
 import { getIncludePaths } from "@asciimark/core/asciidoc.ts";
 import { getMarkdownIncludePaths } from "@asciimark/core/markdown.ts";
-import { isMdFile } from "@asciimark/core/utils.ts";
+import { isMdFile, isSupportedFile } from "@asciimark/core/utils.ts";
 import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
 import { setHashFromPath } from "./hash.ts";
 import {
@@ -59,6 +59,16 @@ export function createFileLoader(deps: FileLoaderDeps) {
       const content = entry.file
         ? await readFileContent(entry.file as File)
         : await readFileContent(entry.handle as FileSystemFileHandle);
+
+      // Non-previewable formats (json, txt, yaml, …) skip conversion entirely
+      // and open straight in the editor.
+      if (!isSupportedFile(entry.path)) {
+        state.setHtml("");
+        state.setFrontmatter(null);
+        state.setEditorContent(content);
+        state.setSavedContent(content);
+        return;
+      }
 
       // Build readFile function for include:: resolution
       const readFile = isFallback

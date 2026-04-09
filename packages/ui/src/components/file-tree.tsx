@@ -44,27 +44,45 @@ interface FileTreeProps {
 
 /**
  * Filter entries by visibility settings (showAllDirs, showAllFiles).
- * When showAllDirs is false, directories that contain no supported files (recursively) are hidden.
- * When showAllFiles is false, non-supported files are hidden.
+ *
+ * Preserves entry references when nothing is filtered out, so Solid's
+ * `<For>` can skip recreating FileTreeItem components on toggle. This is
+ * critical for performance — without it, every toggle deep-clones the
+ * whole tree and re-renders thousands of items.
  */
 function filterByVisibility(entries: FSEntry[], showAllDirs: boolean, showAllFiles: boolean): FSEntry[] {
   if (showAllDirs && showAllFiles) return entries;
 
-  return entries.reduce<FSEntry[]>((acc, entry) => {
+  const result: FSEntry[] = [];
+  let changed = false;
+
+  for (const entry of entries) {
     if (entry.kind === "directory") {
-      const filteredChildren = filterByVisibility(entry.children ?? [], showAllDirs, showAllFiles);
-      // Show directory if showAllDirs is true, or if it has visible children
+      const originalChildren = entry.children ?? [];
+      const filteredChildren = filterByVisibility(originalChildren, showAllDirs, showAllFiles);
       if (showAllDirs || filteredChildren.length > 0) {
-        acc.push({ ...entry, children: filteredChildren });
+        if (filteredChildren === originalChildren) {
+          // Children unchanged → reuse the original entry reference
+          result.push(entry);
+        } else {
+          result.push({ ...entry, children: filteredChildren });
+          changed = true;
+        }
+      } else {
+        // Directory dropped entirely
+        changed = true;
       }
+    } else if (showAllFiles || isSupportedFile(entry.name)) {
+      result.push(entry);
     } else {
-      // File: show if showAllFiles is true, or if it's a supported file
-      if (showAllFiles || isSupportedFile(entry.name)) {
-        acc.push(entry);
-      }
+      // File dropped
+      changed = true;
     }
-    return acc;
-  }, []);
+  }
+
+  // If nothing actually changed, return the original array so Solid sees
+  // the same reference and doesn't re-render anything.
+  return changed ? result : entries;
 }
 
 function filterBySearch(entries: FSEntry[], text: string): FSEntry[] {

@@ -36,6 +36,8 @@ interface ToolbarProps {
   editorMode: "edit" | "split" | "preview";
   hasFile: boolean;
   hasRoot: boolean;
+  /** Whether the current file supports preview (markdown / asciidoc). */
+  supportsPreview: boolean;
   inWindowFrame?: boolean;
   recentFiles?: RecentFile[];
   recentFolders?: RecentFolder[];
@@ -145,8 +147,18 @@ export function Toolbar(props: ToolbarProps) {
           >
             <TabsList>
               <TabsTrigger disabled={!props.hasFile} value="edit">Edit</TabsTrigger>
-              <TabsTrigger disabled={!props.hasFile} value="split">Edit & Preview</TabsTrigger>
-              <TabsTrigger disabled={!props.hasFile} value="preview">Preview</TabsTrigger>
+              <TabsTrigger
+                disabled={!props.hasFile || !props.supportsPreview}
+                value="split"
+              >
+                Edit & Preview
+              </TabsTrigger>
+              <TabsTrigger
+                disabled={!props.hasFile || !props.supportsPreview}
+                value="preview"
+              >
+                Preview
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
