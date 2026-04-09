@@ -80,19 +80,22 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.platform }}-${{ matrix.rust_targets || 'default' }}
+          # NOTE: use single-extension globs only — `@actions/glob` does not
+          # reliably match multi-dot suffixes like `*.AppImage.tar.gz` (this
+          # silently dropped the linux updater bundle on v0.6.0-rc.0).
+          # `*.tar.gz` covers both `.app.tar.gz` (macOS) and `.AppImage.tar.gz`
+          # (linux); `*.sig` covers all signature files; `*.zip` covers
+          # `.nsis.zip` (windows updater bundle).
           path: |
             apps/desktop/src-tauri/target/**/bundle/**/*.dmg
-            apps/desktop/src-tauri/target/**/bundle/**/*.app.tar.gz
-            apps/desktop/src-tauri/target/**/bundle/**/*.app.tar.gz.sig
             apps/desktop/src-tauri/target/**/bundle/**/*.deb
             apps/desktop/src-tauri/target/**/bundle/**/*.AppImage
-            apps/desktop/src-tauri/target/**/bundle/**/*.AppImage.tar.gz
-            apps/desktop/src-tauri/target/**/bundle/**/*.AppImage.tar.gz.sig
             apps/desktop/src-tauri/target/**/bundle/**/*.msi
             apps/desktop/src-tauri/target/**/bundle/**/*.exe
             apps/desktop/src-tauri/target/**/bundle/**/*.nsis
-            apps/desktop/src-tauri/target/**/bundle/**/*.nsis.zip
-            apps/desktop/src-tauri/target/**/bundle/**/*.nsis.zip.sig
+            apps/desktop/src-tauri/target/**/bundle/**/*.tar.gz
+            apps/desktop/src-tauri/target/**/bundle/**/*.zip
+            apps/desktop/src-tauri/target/**/bundle/**/*.sig
           if-no-files-found: ignore
 
   publish-public-release:
@@ -122,7 +125,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
+          # Don't merge — macOS arm64 and x64 generate `AsciiMark.app.tar.gz`
+          # with the same filename and would overwrite each other. Keep them
+          # in their per-matrix subdirs so the python script can disambiguate
+          # by full path (`aarch64-apple-darwin` vs `x86_64-apple-darwin`).
 
       - name: Generate release notes from commits
         run: |
@@ -232,12 +238,17 @@ jobs:
           output_dir.mkdir(parents=True, exist_ok=True)
 
           files = [path for path in source_dir.rglob("*") if path.is_file()]
+          # Predicates now receive the FULL path (as a lowercased POSIX
+          # string) so they can disambiguate by directory — e.g. macOS arm64
+          # vs x64 generate the same file name (`AsciiMark.app.tar.gz`) but
+          # live under different per-target subdirs.
+          file_keys = {path: str(path).lower().replace("\\", "/") for path in files}
 
           def pick(target_name, predicate):
-              candidates = [path for path in files if predicate(path.name.lower())]
+              candidates = [path for path in files if predicate(file_keys[path])]
               if not candidates:
                   return False
-              candidates.sort(key=lambda path: len(path.name))
+              candidates.sort(key=lambda p: len(p.name))
               source = candidates[0]
               destination = output_dir / target_name
               shutil.copy2(source, destination)
@@ -245,31 +256,31 @@ jobs:
               return True
 
           # Normal installers (first install)
-          pick("AsciiMark-macos-arm64.dmg", lambda name: name.endswith(".dmg") and ("arm64" in name or "aarch64" in name))
-          pick("AsciiMark-macos-x64.dmg", lambda name: name.endswith(".dmg") and "arm64" not in name and "aarch64" not in name)
-          pick("AsciiMark-linux-x64.AppImage", lambda name: name.endswith(".appimage"))
-          pick("AsciiMark-linux-x64.deb", lambda name: name.endswith(".deb"))
-          pick("AsciiMark-windows-x64.msi", lambda name: name.endswith(".msi"))
+          pick("AsciiMark-macos-arm64.dmg", lambda key: key.endswith(".dmg") and ("arm64" in key or "aarch64" in key))
+          pick("AsciiMark-macos-x64.dmg", lambda key: key.endswith(".dmg") and "arm64" not in key and "aarch64" not in key)
+          pick("AsciiMark-linux-x64.AppImage", lambda key: key.endswith(".appimage"))
+          pick("AsciiMark-linux-x64.deb", lambda key: key.endswith(".deb"))
+          pick("AsciiMark-windows-x64.msi", lambda key: key.endswith(".msi"))
           pick(
               "AsciiMark-windows-x64.exe",
-              lambda name: name.endswith(".exe") and ("installer" in name or "setup" in name),
+              lambda key: key.endswith(".exe") and ("installer" in key or "setup" in key),
           )
 
           # ── Updater artifacts: pick the .tar.gz/.zip + matching .sig per platform ──
-          update_targets = []  # [(asset_name, sig_name, platform_key, predicate)]
+          update_targets = []  # [(asset_name, sig_name, platform_key)]
 
           def pick_update(asset_name, platform_key, predicate):
-              candidates = [path for path in files if predicate(path.name.lower())]
+              candidates = [path for path in files if predicate(file_keys[path])]
               if not candidates:
                   print(f"WARN: no updater asset for {platform_key} ({asset_name})")
                   return
-              candidates.sort(key=lambda path: len(path.name))
+              candidates.sort(key=lambda p: len(p.name))
               source = candidates[0]
               destination = output_dir / asset_name
               shutil.copy2(source, destination)
-              print(f"Mapped (update) {source.name} -> {destination.name}")
+              print(f"Mapped (update) {source} -> {destination.name}")
 
-              # Sibling .sig — try same dir first, then any matching .sig
+              # Sibling .sig — try same dir first, then any matching .sig in tree
               sig_source = source.with_name(source.name + ".sig")
               if not sig_source.exists():
                   sig_candidates = [p for p in files if p.name == source.name + ".sig"]
@@ -282,25 +293,26 @@ jobs:
               shutil.copy2(sig_source, output_dir / sig_name)
               update_targets.append((asset_name, sig_name, platform_key))
 
+          # macOS: disambiguate by per-target subdir in the path (set by --target)
           pick_update(
               "AsciiMark-macos-arm64.app.tar.gz",
               "darwin-aarch64",
-              lambda name: name.endswith(".app.tar.gz") and ("arm64" in name or "aarch64" in name),
+              lambda key: key.endswith(".app.tar.gz") and ("aarch64" in key or "arm64" in key),
           )
           pick_update(
               "AsciiMark-macos-x64.app.tar.gz",
               "darwin-x86_64",
-              lambda name: name.endswith(".app.tar.gz") and "arm64" not in name and "aarch64" not in name,
+              lambda key: key.endswith(".app.tar.gz") and "aarch64" not in key and "arm64" not in key,
           )
           pick_update(
               "AsciiMark-linux-x64.AppImage.tar.gz",
               "linux-x86_64",
-              lambda name: name.endswith(".appimage.tar.gz"),
+              lambda key: key.endswith(".appimage.tar.gz"),
           )
           pick_update(
               "AsciiMark-windows-x64.nsis.zip",
               "windows-x86_64",
-              lambda name: name.endswith(".nsis.zip"),
+              lambda key: key.endswith(".nsis.zip"),
           )
 
           # ── Generate latest.json ──
