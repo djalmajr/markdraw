@@ -1,6 +1,6 @@
 {
   "name": "@asciimark/desktop",
-  "version": "0.6.0-3",
+  "version": "0.6.0-4",
   "type": "module",
   "private": true,
   "scripts": {
