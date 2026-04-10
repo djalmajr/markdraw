@@ -80,22 +80,24 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: binaries-${{ matrix.platform }}-${{ matrix.rust_targets || 'default' }}
-          # NOTE: use single-extension globs only — `@actions/glob` does not
-          # reliably match multi-dot suffixes like `*.AppImage.tar.gz` (this
-          # silently dropped the linux updater bundle on v0.6.0-rc.0).
-          # `*.tar.gz` covers both `.app.tar.gz` (macOS) and `.AppImage.tar.gz`
-          # (linux); `*.sig` covers all signature files; `*.zip` covers
-          # `.nsis.zip` (windows updater bundle).
+          # NOTE: `@actions/glob` does not reliably match multi-dot
+          # extensions (e.g. `.AppImage.tar.gz`, `.nsis.zip`) even when
+          # using single-extension patterns like `*.tar.gz` or `*.zip`.
+          # This caused Linux and Windows updater artifacts to be silently
+          # dropped. Use directory-based globs instead — each Tauri bundle
+          # type lives in its own subdirectory, so `bundle/<type>/*`
+          # captures every file regardless of extension count.
+          # The only exception is macOS `bundle/macos/` which contains the
+          # `.app` directory (thousands of files) — target only the
+          # compressed updater artifacts there.
           path: |
-            apps/desktop/src-tauri/target/**/bundle/**/*.dmg
-            apps/desktop/src-tauri/target/**/bundle/**/*.deb
-            apps/desktop/src-tauri/target/**/bundle/**/*.AppImage
-            apps/desktop/src-tauri/target/**/bundle/**/*.msi
-            apps/desktop/src-tauri/target/**/bundle/**/*.exe
-            apps/desktop/src-tauri/target/**/bundle/**/*.nsis
-            apps/desktop/src-tauri/target/**/bundle/**/*.tar.gz
-            apps/desktop/src-tauri/target/**/bundle/**/*.zip
-            apps/desktop/src-tauri/target/**/bundle/**/*.sig
+            apps/desktop/src-tauri/target/**/bundle/dmg/*
+            apps/desktop/src-tauri/target/**/bundle/macos/*.tar.gz
+            apps/desktop/src-tauri/target/**/bundle/macos/*.sig
+            apps/desktop/src-tauri/target/**/bundle/deb/*
+            apps/desktop/src-tauri/target/**/bundle/appimage/*
+            apps/desktop/src-tauri/target/**/bundle/msi/*
+            apps/desktop/src-tauri/target/**/bundle/nsis/*
           if-no-files-found: ignore
 
   publish-public-release:

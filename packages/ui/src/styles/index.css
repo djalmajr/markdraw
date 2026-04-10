@@ -190,7 +190,7 @@
 
 .toolbar-window-frame {
   min-height: 28px;
-  padding: 4px 8px 4px 78px;
+  padding: 4px 8px 4px var(--toolbar-frame-inset-left, 8px);
   gap: 8px;
 }
 

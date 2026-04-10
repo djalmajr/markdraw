@@ -89,6 +89,13 @@ export function App() {
   // Native app menu (macOS menu bar, Windows/Linux window menu) and tray icon.
   // Both are fire-and-forget; errors are logged but don't break the app.
   onMount(() => {
+    // macOS traffic lights sit in the top-left corner of the overlay title
+    // bar. Reserve space so toolbar controls don't overlap them.
+    // On Windows/Linux the controls are on the right — no inset needed.
+    if (navigator.platform.startsWith("Mac")) {
+      document.documentElement.style.setProperty("--toolbar-frame-inset-left", "78px");
+    }
+
     void setupAppMenu({
       onOpenFolder: folder.handleOpenFolder,
       onExportPdf: () => invoke("print_webview"),
@@ -165,8 +172,8 @@ export function App() {
   }
 
   // Check for app updates a few seconds after boot — silent so any network
-  // hiccup or "you're up to date" doesn't interrupt the user. The manual menu
-  // item still surfaces feedback.
+  // hiccup or "you're up to date" doesn't interrupt the user. The manual
+  // menu item still surfaces feedback.
   onMount(() => {
     const updateTimer = window.setTimeout(() => {
       void checkForAppUpdates(true);
