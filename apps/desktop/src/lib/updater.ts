@@ -39,6 +39,11 @@ export async function checkForAppUpdates(silent: boolean): Promise<void> {
 
     if (!accepted) return;
 
+    // Signal the close-to-tray handler to allow the window to actually close
+    // instead of hiding. Without this, relaunch gets stuck because
+    // onCloseRequested prevents the exit.
+    (window as any).__asciimark_updating = true;
+
     await update.downloadAndInstall();
     await relaunch();
   } catch (e) {

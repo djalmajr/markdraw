@@ -116,6 +116,7 @@ export function App() {
     // tray menu actually terminates.
     const win = getCurrentWindow();
     void win.onCloseRequested(async (event) => {
+      if ((window as any).__asciimark_updating) return;
       event.preventDefault();
       await win.hide();
     });

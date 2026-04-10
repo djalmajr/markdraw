@@ -4,6 +4,7 @@ import {
   PredefinedMenuItem,
   Submenu,
 } from "@tauri-apps/api/menu";
+import { getVersion } from "@tauri-apps/api/app";
 
 interface MenuDeps {
   onOpenFolder: () => void;
@@ -143,6 +144,8 @@ export async function setupAppMenu(deps: MenuDeps): Promise<void> {
     ],
   });
 
+  const version = await getVersion();
+
   const helpSubmenu = await Submenu.new({
     text: "Help",
     items: [
@@ -150,6 +153,12 @@ export async function setupAppMenu(deps: MenuDeps): Promise<void> {
         id: "help-updates",
         text: "Check for Updates...",
         action: deps.onCheckForUpdates,
+      }),
+      await PredefinedMenuItem.new({ item: "Separator" }),
+      await MenuItem.new({
+        id: "help-version",
+        text: `Version ${version}`,
+        enabled: false,
       }),
     ],
   });
