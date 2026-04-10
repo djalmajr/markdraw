@@ -471,15 +471,16 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
+        .run(|_app, _event| {
             // macOS: when the OS asks the app to open a file (double-click on
             // an associated .md/.adoc), Tauri delivers it as RunEvent::Opened.
             // We forward the path to the frontend via an event.
-            if let tauri::RunEvent::Opened { urls } = event {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
                 for url in urls {
                     if let Ok(path) = url.to_file_path() {
                         if let Some(path_str) = path.to_str() {
-                            let _ = app.emit("open-file", path_str.to_string());
+                            let _ = _app.emit("open-file", path_str.to_string());
                         }
                     }
                 }
