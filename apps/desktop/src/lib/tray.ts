@@ -1,6 +1,7 @@
 import { TrayIcon } from "@tauri-apps/api/tray";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { Image } from "@tauri-apps/api/image";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/plugin-process";
 
@@ -39,7 +40,9 @@ export async function setupTray(deps: TrayDeps): Promise<void> {
       const win = getCurrentWindow();
       if (await win.isVisible()) {
         await win.hide();
+        await invoke("set_dock_visible", { visible: false });
       } else {
+        await invoke("set_dock_visible", { visible: true });
         await win.show();
         await win.setFocus();
       }
@@ -78,8 +81,9 @@ export async function setupTray(deps: TrayDeps): Promise<void> {
     iconAsTemplate: true,
     tooltip: "AsciiMark",
     action: async (event) => {
-      if (event.type === "Click") {
+      if (event.type === "Click" && event.button === "Left") {
         const win = getCurrentWindow();
+        await invoke("set_dock_visible", { visible: true });
         await win.show();
         await win.setFocus();
       }

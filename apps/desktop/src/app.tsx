@@ -119,6 +119,7 @@ export function App() {
       if ((window as any).__asciimark_updating) return;
       event.preventDefault();
       await win.hide();
+      await invoke("set_dock_visible", { visible: false });
     });
   });
 

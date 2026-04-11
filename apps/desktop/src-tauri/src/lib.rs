@@ -430,6 +430,25 @@ fn get_startup_args() -> Vec<String> {
     std::env::args().skip(1).collect()
 }
 
+/// Show or hide the dock icon on macOS by changing the activation policy.
+/// `Accessory` removes the app from the dock; `Regular` brings it back.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn set_dock_visible(app: AppHandle, visible: bool) -> Result<(), String> {
+    let policy = if visible {
+        tauri::ActivationPolicy::Regular
+    } else {
+        tauri::ActivationPolicy::Accessory
+    };
+    app.set_activation_policy(policy).map_err(|e| e.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn set_dock_visible() -> Result<(), String> {
+    Ok(())
+}
+
 #[tauri::command]
 fn print_webview(webview: tauri::Webview) -> Result<(), String> {
     webview.print().map_err(|e| e.to_string())
@@ -448,8 +467,10 @@ pub fn run() {
             if let Some(path) = argv.get(1) {
                 let _ = app.emit("open-file", path.clone());
             }
-            // Focus the existing window
+            // Focus the existing window and restore dock icon
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(target_os = "macos")]
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
                 let _ = window.show();
                 let _ = window.set_focus();
             }
@@ -462,6 +483,7 @@ pub fn run() {
             read_file_relative,
             read_files_relative,
             get_startup_args,
+            set_dock_visible,
             toggle_maximize_instant,
             print_webview,
             write_file,
