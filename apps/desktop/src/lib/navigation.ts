@@ -1,16 +1,20 @@
 import type { Accessor } from "solid-js";
 import type { FSEntry, QualifiedPath } from "@asciimark/core/types.ts";
+import { makeTabId } from "@asciimark/core/tabs.ts";
 import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
+import type { TabStore } from "@asciimark/ui/composables/create-tab-store.ts";
 import { readFileContent, readTree } from "./fs.ts";
 
 interface NavigationDeps {
   loadFileContent: (entry: FSEntry, pushHistory?: boolean, force?: boolean, rootId?: string) => Promise<void>;
   rootPaths: Accessor<Map<string, string>>;
   state: AppState;
+  tabStore?: TabStore;
+  onActivateTab?: (tabId: string) => void;
 }
 
 export function createNavigation(deps: NavigationDeps) {
-  const { loadFileContent, rootPaths, state } = deps;
+  const { loadFileContent, rootPaths, state, tabStore, onActivateTab } = deps;
 
   function canGoBack() {
     return state.navIndex() > 0;
@@ -87,30 +91,37 @@ export function createNavigation(deps: NavigationDeps) {
     console.warn(`File not found: ${targetPath}`);
   }
 
-  function handleGoBack() {
-    if (!canGoBack()) return;
-
+  function navigateToStackEntry(newIdx: number) {
     const stack = state.navStack();
-    const newIdx = state.navIndex() - 1;
     const qp: QualifiedPath = stack[newIdx]!;
     const entry = state.findEntryByPath(qp.path, qp.rootId);
-    if (entry && entry.kind === "file") {
-      state.setNavIndex(newIdx);
-      loadFileContent(entry, false, false, qp.rootId);
+    if (!entry || entry.kind !== "file") return;
+
+    state.setNavIndex(newIdx);
+
+    // If tabs are active, check if the target is already in a tab
+    if (tabStore && onActivateTab) {
+      const tabId = makeTabId(qp.rootId, qp.path);
+      const tab = tabStore.getTab(tabId);
+      if (tab) {
+        onActivateTab(tabId);
+        return;
+      }
+      // Target not in a tab — open it as a pinned tab
+      tabStore.openTab(entry, qp.rootId);
     }
+
+    loadFileContent(entry, false, false, qp.rootId);
+  }
+
+  function handleGoBack() {
+    if (!canGoBack()) return;
+    navigateToStackEntry(state.navIndex() - 1);
   }
 
   function handleGoForward() {
     if (!canGoForward()) return;
-
-    const stack = state.navStack();
-    const newIdx = state.navIndex() + 1;
-    const qp: QualifiedPath = stack[newIdx]!;
-    const entry = state.findEntryByPath(qp.path, qp.rootId);
-    if (entry && entry.kind === "file") {
-      state.setNavIndex(newIdx);
-      loadFileContent(entry, false, false, qp.rootId);
-    }
+    navigateToStackEntry(state.navIndex() + 1);
   }
 
   function resetStacks() {

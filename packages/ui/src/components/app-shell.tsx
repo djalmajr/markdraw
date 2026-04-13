@@ -2,8 +2,10 @@ import { Show, createEffect, createSignal, type JSX } from "solid-js";
 import type { FSEntry } from "@asciimark/core/types.ts";
 import type { RecentFile } from "@asciimark/core/recent-files.ts";
 import type { AppState } from "../composables/create-app-state.ts";
+import type { TabStore } from "../composables/create-tab-store.ts";
 import { AppProvider } from "../context/app-context.tsx";
 import { Toolbar } from "./toolbar.tsx";
+import { TabBar } from "./tab-bar.tsx";
 import { ContentToolbar } from "./content-toolbar.tsx";
 import { EditorToolbar } from "./editor-toolbar.tsx";
 import { FileTree } from "./file-tree.tsx";
@@ -47,6 +49,8 @@ interface AppShellProps {
   onGoBack: () => void;
   onGoForward: () => void;
   onLoadFile: (entry: FSEntry, rootId: string) => void;
+  onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;
+  onDoubleClickFile?: (entry: FSEntry, rootId: string) => void;
   onNavigate: (path: string, fragment?: string | null) => void;
   onOpenFolder?: () => void;
   onOpenRecentFile?: (recentFile: RecentFile) => void | Promise<void>;
@@ -70,6 +74,10 @@ interface AppShellProps {
   onToggleShowHiddenEntries?: (enabled: boolean) => void | Promise<void>;
   onRefreshRoot?: (rootId: string) => void;
   onReorderRoots?: (newOrder: string[]) => void;
+  tabStore?: TabStore;
+  onActivateTab?: (tabId: string) => void;
+  onCloseTab?: (tabId: string) => void;
+  onNewTab?: () => void;
   onWindowDragStart?: () => void | Promise<void>;
   onWindowTitleDoubleClick?: () => void | Promise<void>;
 
@@ -232,6 +240,8 @@ export function AppShell(props: AppShellProps) {
                 onRename={props.onRename}
                 onReorderRoots={props.onReorderRoots}
                 onSelect={(entry, rootId) => props.onLoadFile(entry, rootId)}
+                onOpenInNewTab={props.onOpenInNewTab}
+                onDoubleClickFile={props.onDoubleClickFile}
                 onToggleRootCollapsed={(id) => s.toggleRootCollapsed(id)}
                 onToggleShowHiddenEntries={props.onToggleShowHiddenEntries
                   ? () => {
@@ -247,6 +257,15 @@ export function AppShell(props: AppShellProps) {
             <div class="resize-handle" onDblClick={s.onResizeReset} onMouseDown={(e) => s.onResizeStart(e, appRef)} />
           </Show>
           <div class="content-area">
+            <Show when={props.tabStore && props.tabStore.tabs().length > 0}>
+              <TabBar
+                tabStore={props.tabStore!}
+                activeTabDirty={s.isDirty()}
+                onActivateTab={props.onActivateTab ?? (() => {})}
+                onCloseTab={props.onCloseTab ?? (() => {})}
+                onNewTab={props.onNewTab}
+              />
+            </Show>
             <div class="content-panels">
               <Show when={s.editorMode() !== "preview" && s.selectedFile()}>
                 <div
@@ -299,7 +318,9 @@ export function AppShell(props: AppShellProps) {
                     }}
                     onChange={(content) => {
                       const entry = s.selectedFile();
-                      if (entry) s.debouncedConvert(content, entry.path, s._readFile ?? (() => Promise.resolve(null)));
+                      if (entry) {
+                        s.debouncedConvert(content, entry.path, s._readFile ?? (() => Promise.resolve(null)));
+                      }
                     }}
                     onHistoryStateChange={(historyState) => {
                       setCanUndo(historyState.canUndo);

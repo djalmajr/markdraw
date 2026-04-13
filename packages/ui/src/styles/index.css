@@ -254,6 +254,171 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   cursor: default !important;
 }
 
+/* === Tab Bar === */
+.tab-bar {
+  display: flex;
+  background: hsl(var(--sidebar-bg));
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.tab-bar-list {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tab-bar-list::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 4px 0 12px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  border-right: 1px solid hsl(var(--border));
+  white-space: nowrap;
+  flex-shrink: 0;
+  position: relative;
+  width: 100%;
+}
+
+.tab-bar-item-active {
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+}
+
+.tab-bar-item-active::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: hsl(var(--primary));
+}
+
+.tab-bar-item-tooltip-trigger {
+  flex-shrink: 0;
+  max-width: 200px;
+}
+
+.tab-bar-item-handle {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.tab-bar-item-name {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-bar-item-dirty {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+  background: hsl(var(--foreground));
+  opacity: 0.6;
+  position: relative;
+  z-index: 1;
+}
+
+.tab-bar-item-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  opacity: 0.5;
+  transition: color 0.1s, opacity 0.1s;
+  position: relative;
+  z-index: 1;
+}
+
+.tab-bar-item-close:hover {
+  color: hsl(var(--foreground));
+  opacity: 1;
+}
+
+/* When dirty: hide close, show on hover replacing the dot */
+.tab-bar-item-close-dirty {
+  display: none;
+}
+
+.tab-bar-item:hover .tab-bar-item-close-dirty {
+  display: flex;
+}
+
+.tab-bar-item:hover .tab-bar-item-dirty {
+  display: none;
+}
+
+.tab-bar-scroll {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  color: hsl(var(--muted-foreground));
+  border-right: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+  transition: color 0.1s;
+}
+
+.tab-bar-scroll-right {
+  border-right: none;
+  border-left: 1px solid hsl(var(--border));
+}
+
+.tab-bar-scroll:hover {
+  color: hsl(var(--foreground));
+}
+
+.tab-bar-scroll-disabled {
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+.tab-bar-item-dragging {
+  opacity: 0.4;
+}
+
+.tab-bar-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  color: hsl(var(--muted-foreground));
+  opacity: 0.6;
+  flex-shrink: 0;
+  transition: opacity 0.1s;
+}
+
+.tab-bar-new:hover {
+  opacity: 1;
+}
+
+.tab-bar-drag-overlay {
+  opacity: 0.8;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
 /* === Status Bar === */
 .status-bar {
   display: flex;

@@ -40,6 +40,10 @@ interface FileTreeItemProps {
   onCopyPath?: (entry: FSEntry, rootId: string) => void | Promise<void>;
   onRename?: (entry: FSEntry, rootId: string, newName: string) => Promise<void>;
   onSelect: (entry: FSEntry) => void;
+  /** Open file in a new pinned tab (right-click / middle-click). */
+  onOpenInNewTab?: (entry: FSEntry) => void;
+  /** Double-click on file — pin the tab. */
+  onDoubleClickFile?: (entry: FSEntry) => void;
 }
 
 /** Reject empty, traversal segments, and characters disallowed on common filesystems. */
@@ -147,6 +151,18 @@ export function FileTreeItem(props: FileTreeItemProps) {
     }
   }
 
+  function handleDoubleClick() {
+    if (isEditing() || isDirectory()) return;
+    props.onDoubleClickFile?.(props.entry);
+  }
+
+  function handleMouseDown(e: MouseEvent) {
+    if (e.button === 1 && !isDirectory()) {
+      e.preventDefault();
+      props.onOpenInNewTab?.(props.entry);
+    }
+  }
+
   function copyPath() {
     if (props.onCopyPath) {
       void Promise.resolve(props.onCopyPath(props.entry, props.rootId)).catch(() => {
@@ -249,6 +265,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
           style={{ "padding-left": `${indent()}px` }}
           title={props.entry.path}
           onClick={handleClick}
+          onDblClick={handleDoubleClick}
+          onMouseDown={handleMouseDown}
         >
           <span class="tree-icon">
             <Show when={isDirectory()}>
@@ -299,6 +317,11 @@ export function FileTreeItem(props: FileTreeItemProps) {
          * widest item has visible separation.
          */}
         <ContextMenuContent class="tree-context-menu min-w-44">
+          <Show when={!isDirectory() && props.onOpenInNewTab}>
+            <ContextMenuItem onSelect={() => props.onOpenInNewTab?.(props.entry)}>
+              Open in New Tab
+            </ContextMenuItem>
+          </Show>
           <ContextMenuItem class="justify-between" onSelect={copyPath}>
             <span>Copy path</span>
             <ContextMenuShortcut class="ml-0">{COPY_SHORTCUT_LABEL}</ContextMenuShortcut>
@@ -325,6 +348,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
               onCopyPath={props.onCopyPath}
               onRename={props.onRename}
               onSelect={props.onSelect}
+              onOpenInNewTab={props.onOpenInNewTab}
+              onDoubleClickFile={props.onDoubleClickFile}
             />
           )}
         </For>

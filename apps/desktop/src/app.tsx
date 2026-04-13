@@ -2,10 +2,12 @@ import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { createConverter } from "@asciimark/core/converter.ts";
 import ConvertWorker from "@asciimark/core/convert-worker.ts?worker";
 import type { RecentFile } from "@asciimark/core/recent-files.ts";
+import { makeTabId } from "@asciimark/core/tabs.ts";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@asciimark/ui/composables/create-app-state.ts";
+import { createTabStore } from "@asciimark/ui/composables/create-tab-store.ts";
 import { AppShell } from "@asciimark/ui/components/app-shell.tsx";
 import { getStoredTheme, applyTheme } from "./main.tsx";
 import { FileWatcher } from "./lib/watcher.ts";
@@ -13,6 +15,7 @@ import { createFileLoader } from "./lib/file-loader.ts";
 import { createNavigation } from "./lib/navigation.ts";
 import { createFolder } from "./lib/folder.ts";
 import { isSupportedFile } from "@asciimark/core/utils.ts";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
 import { setupTray } from "./lib/tray.ts";
@@ -29,12 +32,25 @@ export function App() {
     printPage: () => invoke("print_webview"),
   });
 
+  const tabStore = createTabStore({ state });
+
   const [rootPaths, setRootPaths] = createSignal<Map<string, string>>(new Map());
 
+  // Flag to suppress auto-save during tab switches
+  let isTabSwitching = false;
+
   // File watcher (watches current file + includes for content changes)
-  const watcher = new FileWatcher(() => {
+  const watcher = new FileWatcher(async () => {
     const file = state.selectedFile();
-    if (file) loader.loadFileContent(file, false, true);
+    if (file) {
+      await loader.loadFileContent(file, false, true);
+      tabStore.updateActiveTabContent({
+        editorContent: state.editorContent(),
+        savedContent: state.savedContent(),
+        html: state.html(),
+        frontmatter: state.frontmatter(),
+      });
+    }
   });
 
   // Create modules: loader -> navigation -> folder -> dnd
@@ -44,6 +60,8 @@ export function App() {
     loadFileContent: loader.loadFileContent,
     rootPaths,
     state,
+    tabStore,
+    onActivateTab: (tabId) => handleActivateTab(tabId),
   });
 
   const folder = createFolder({
@@ -73,6 +91,7 @@ export function App() {
   let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
     const content = state.editorContent();
+    if (isTabSwitching) return;
     if (state.editorMode() === "preview") return;
     if (!state.selectedFile()) return;
     clearTimeout(autoSaveTimer);
@@ -100,6 +119,10 @@ export function App() {
       onOpenFolder: folder.handleOpenFolder,
       onExportPdf: () => invoke("print_webview"),
       onCheckForUpdates: () => checkForAppUpdates(false),
+      onCloseTab: () => {
+        const activeTab = tabStore.activeTabId();
+        if (activeTab) handleCloseTab(activeTab);
+      },
       onEditorMode: (m) => state.setEditorMode(m),
       onToggleSidebar: () => state.setSidebarVisible((v) => !v),
       onToggleToc: () => state.setTocVisible((v) => !v),
@@ -139,10 +162,10 @@ export function App() {
     const opened = await folder.openFolderPath(dirPath);
     if (!opened) return;
 
-    // Find the file in the tree and load it
+    // Find the file in the tree and load it (via tab system)
     const entry = state.findEntryByPath(fileName, dirPath);
     if (entry) {
-      await loader.loadFileContent(entry, true, false, dirPath);
+      await handleLoadFileWithTab(entry, dirPath);
     }
   }
 
@@ -255,8 +278,292 @@ export function App() {
       rootName: state.rootName(),
       rootPath: recentFile.rootPath,
     });
-    await loader.loadFileContent(entry, true, false, recentFile.rootPath);
+    await handleLoadFileWithTab(entry, recentFile.rootPath);
   }
+
+  // ── Tab session restore ──────────────────────────────────────────────────
+  // Restore tabs when roots become available after startup.
+  let sessionRestored = false;
+
+  createEffect(() => {
+    // React to rootPaths changing (roots being opened)
+    const paths = rootPaths();
+    if (paths.size === 0 || sessionRestored) return;
+
+    const session = tabStore.getPersistedSession();
+    if (!session || session.tabs.length === 0) {
+      sessionRestored = true;
+      return;
+    }
+
+    // Try to restore tabs whose roots are now available
+    const restorable = session.tabs.filter((t) => paths.has(t.rootId));
+    if (restorable.length === 0) return;
+
+    sessionRestored = true;
+
+    // Restore tabs asynchronously
+    (async () => {
+      for (const persisted of restorable) {
+        const entry = state.findEntryByPath(persisted.filePath, persisted.rootId);
+        if (!entry || entry.kind !== "file") continue;
+
+        const isActive = persisted.id === session.activeTabId;
+        tabStore.openTab(entry, persisted.rootId, {
+          background: !isActive,
+        });
+
+        if (isActive) {
+          await loader.loadFileContent(entry, false, false, persisted.rootId);
+          tabStore.updateActiveTabContent({
+            editorContent: state.editorContent(),
+            savedContent: state.savedContent(),
+            html: state.html(),
+            frontmatter: state.frontmatter(),
+          });
+        } else {
+          // Mark background tabs to load content when activated
+          tabStore.updateActiveTabContent({ });  // no-op on non-active
+          // Directly mark needsLoad on the tab
+          const tabId = tabStore.tabs().find((t) => t.filePath === persisted.filePath && t.rootId === persisted.rootId)?.id;
+          if (tabId) {
+            tabStore.markTabNeedsLoad(tabId);
+          }
+        }
+      }
+
+      // If the active tab from session wasn't restored, activate the first tab
+      if (!tabStore.activeTabId() && tabStore.tabs().length > 0) {
+        const first = tabStore.tabs()[0]!;
+        handleActivateTab(first.id);
+        const entry = state.findEntryByPath(first.filePath, first.rootId);
+        if (entry) {
+          await loader.loadFileContent(entry, false, false, first.rootId);
+          tabStore.updateActiveTabContent({
+            editorContent: state.editorContent(),
+            savedContent: state.savedContent(),
+            html: state.html(),
+            frontmatter: state.frontmatter(),
+          });
+        }
+      }
+    })();
+  });
+
+  // Snapshot active tab before app hides (close-to-tray)
+  onMount(() => {
+    const win = getCurrentWindow();
+    const unlisten = win.onFocusChanged((focused) => {
+      if (!focused.payload) {
+        tabStore.snapshotActiveTab();
+        tabStore.persistSession();
+      }
+    });
+    onCleanup(() => { void unlisten.then((fn) => fn()); });
+  });
+
+  // ── Tab handlers ────────────────────────────────────────────────────────
+
+  /** Single click: load file in the active tab (replacing its content). */
+  async function handleLoadFileWithTab(entry: import("@asciimark/core/types.ts").FSEntry, rootId: string) {
+    tabStore.loadInActiveTab(entry, rootId);
+    await loader.loadFileContent(entry, true, false, rootId);
+    tabStore.updateActiveTabContent({
+      editorContent: state.editorContent(),
+      savedContent: state.savedContent(),
+      html: state.html(),
+      frontmatter: state.frontmatter(),
+    });
+  }
+
+  /** Open in New Tab / middle-click / double-click: always create a new tab. */
+  async function handleOpenInNewTab(entry: import("@asciimark/core/types.ts").FSEntry, rootId: string) {
+    tabStore.openTab(entry, rootId);
+    await loader.loadFileContent(entry, true, false, rootId);
+    tabStore.updateActiveTabContent({
+      editorContent: state.editorContent(),
+      savedContent: state.savedContent(),
+      html: state.html(),
+      frontmatter: state.frontmatter(),
+    });
+  }
+
+  /** "+" button: create an empty tab (shows empty state). */
+  function handleNewTab() {
+    // Snapshot current tab, then clear state for the empty tab
+    tabStore.snapshotActiveTab();
+
+    // Create a minimal empty tab
+    const emptyEntry: import("@asciimark/core/types.ts").FSEntry = {
+      name: "New Tab",
+      kind: "file",
+      path: "",
+    };
+    const rootId = state.selectedRootId() ?? "";
+    tabStore.openTab(emptyEntry, rootId);
+
+    state.setSelectedFile(null);
+    state.setHtml("");
+    state.setFrontmatter(null);
+    state.setEditorContent("");
+    state.setSavedContent("");
+    state.setEditorMode("preview");
+  }
+
+  async function handleActivateTab(tabId: string) {
+    const tab = tabStore.getTab(tabId);
+    if (!tab) return;
+
+    isTabSwitching = true;
+    clearTimeout(autoSaveTimer);
+
+    tabStore.activateTab(tabId);
+
+    // Set the selected file/root from the tab
+    const entry = state.findEntryByPath(tab.filePath, tab.rootId);
+    if (entry) {
+      state.setSelectedFile(entry);
+      state.setSelectedRootId(tab.rootId);
+    }
+
+    // If the tab needs content loaded (restored from session or reopened)
+    if (tab.needsLoad && entry) {
+      await loader.loadFileContent(entry, false, false, tab.rootId);
+      tabStore.updateActiveTabContent({
+        editorContent: state.editorContent(),
+        savedContent: state.savedContent(),
+        html: state.html(),
+        frontmatter: state.frontmatter(),
+      });
+    }
+
+    // Re-arm file watcher for the new active tab
+    const rootPath = rootPaths().get(tab.rootId);
+    if (rootPath && tab.filePath) {
+      watcher.setTarget({
+        filePath: `${rootPath}/${tab.filePath}`,
+        includePaths: tab.includePaths,
+        rootPath,
+      });
+      if (state.autoRefresh()) watcher.start();
+    }
+
+    queueMicrotask(() => {
+      isTabSwitching = false;
+    });
+  }
+
+  async function handleCloseTab(tabId: string) {
+    const tab = tabStore.getTab(tabId);
+    if (!tab) return;
+
+    // For the active tab, check live dirty state; for others, check cached
+    const isDirty = tabId === tabStore.activeTabId()
+      ? state.isDirty()
+      : tab.editorContent !== tab.savedContent;
+
+    if (isDirty) {
+      const discard = await ask(
+        `"${tab.fileName}" has unsaved changes. Discard them?`,
+        { title: "Close Tab", kind: "warning", okLabel: "Discard", cancelLabel: "Cancel" },
+      );
+      if (!discard) return;
+    }
+
+    tabStore.closeTab(tabId);
+
+    // After close, activate the new active tab
+    const newActive = tabStore.getActiveTab();
+    if (newActive) {
+      const entry = state.findEntryByPath(newActive.filePath, newActive.rootId);
+      if (entry) {
+        state.setSelectedFile(entry);
+        state.setSelectedRootId(newActive.rootId);
+      }
+      const rootPath = rootPaths().get(newActive.rootId);
+      if (rootPath) {
+        watcher.setTarget({
+          filePath: `${rootPath}/${newActive.filePath}`,
+          includePaths: newActive.includePaths,
+          rootPath,
+        });
+        if (state.autoRefresh()) watcher.start();
+      }
+    }
+  }
+
+  // Close tabs when a root is closed
+  const originalCloseRoot = folder.handleCloseRoot;
+  folder.handleCloseRoot = (rootId: string) => {
+    tabStore.closeTabsByRoot(rootId);
+    originalCloseRoot(rootId);
+  };
+
+  // Update tab when a file is renamed
+  const originalRename = folder.handleRename;
+  folder.handleRename = async (entry, rootId, newName) => {
+    const oldPath = entry.path;
+    const slash = oldPath.lastIndexOf("/");
+    const parentRel = slash >= 0 ? oldPath.slice(0, slash + 1) : "";
+    const newPath = parentRel + newName;
+
+    await originalRename(entry, rootId, newName);
+
+    // Update any tabs pointing to the renamed file
+    for (const tab of tabStore.tabs()) {
+      if (tab.rootId === rootId && tab.filePath === oldPath) {
+        tabStore.updateTabFile(tab.id, newPath, newName);
+      }
+    }
+  };
+
+  // Keyboard shortcuts for tabs
+  onMount(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const isMac = navigator.platform.startsWith("Mac");
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+
+      // Cmd/Ctrl+W: close active tab
+      if (mod && e.key === "w" && !e.shiftKey) {
+        const activeTab = tabStore.activeTabId();
+        if (activeTab) {
+          e.preventDefault();
+          handleCloseTab(activeTab);
+        }
+      }
+
+      // Cmd/Ctrl+T: new tab
+      if (mod && !e.shiftKey && e.key === "t") {
+        e.preventDefault();
+        handleNewTab();
+      }
+
+      // Cmd/Ctrl+Shift+T: reopen last closed tab
+      if (mod && e.shiftKey && e.key === "t") {
+        e.preventDefault();
+        const reopened = tabStore.reopenClosedTab();
+        if (reopened) {
+          void handleActivateTab(reopened.id);
+        }
+      }
+
+      // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs
+      if (e.ctrlKey && e.key === "Tab") {
+        e.preventDefault();
+        const tabs = tabStore.tabs();
+        const activeId = tabStore.activeTabId();
+        if (tabs.length < 2 || !activeId) return;
+        const currentIdx = tabs.findIndex((t) => t.id === activeId);
+        const nextIdx = e.shiftKey
+          ? (currentIdx - 1 + tabs.length) % tabs.length
+          : (currentIdx + 1) % tabs.length;
+        handleActivateTab(tabs[nextIdx]!.id);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
+  });
 
   return (
     <AppShell
@@ -273,11 +580,17 @@ export function App() {
       onWindowDragStart={handleWindowDragStart}
       onWindowTitleDoubleClick={handleWindowTitleDoubleClick}
       onCheckForUpdates={() => checkForAppUpdates(false)}
+      tabStore={tabStore}
+      onActivateTab={handleActivateTab}
+      onCloseTab={handleCloseTab}
+      onNewTab={handleNewTab}
       onCloseRoot={(rootId) => folder.handleCloseRoot(rootId)}
       onCopyPath={folder.handleCopyPath}
       onGoBack={navigation.handleGoBack}
       onGoForward={navigation.handleGoForward}
-      onLoadFile={(entry, rootId) => loader.loadFileContent(entry, true, false, rootId)}
+      onLoadFile={handleLoadFileWithTab}
+      onOpenInNewTab={handleOpenInNewTab}
+      onDoubleClickFile={handleOpenInNewTab}
       onNavigate={navigation.handleNavigate}
       onOpenFolder={folder.handleOpenFolder}
       onOpenRecentFile={handleOpenRecentFile}

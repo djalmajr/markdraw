@@ -10,6 +10,7 @@ interface MenuDeps {
   onOpenFolder: () => void;
   onExportPdf: () => void;
   onCheckForUpdates: () => void;
+  onCloseTab?: () => void;
   onEditorMode: (mode: "edit" | "split" | "preview") => void;
   onToggleSidebar: () => void;
   onToggleToc: () => void;
@@ -67,6 +68,16 @@ export async function setupAppMenu(deps: MenuDeps): Promise<void> {
         action: deps.onExportPdf,
       }),
       await PredefinedMenuItem.new({ item: "Separator" }),
+      ...(deps.onCloseTab
+        ? [
+            await MenuItem.new({
+              id: "close-tab",
+              text: "Close Tab",
+              accelerator: "CmdOrCtrl+W",
+              action: deps.onCloseTab,
+            }),
+          ]
+        : []),
       await PredefinedMenuItem.new({ item: "CloseWindow" }),
     ],
   });
