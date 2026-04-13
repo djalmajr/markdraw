@@ -456,6 +456,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 /* === Sidebar === */
 .sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -469,10 +470,14 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 /* === Resize Handle === */
 .resize-handle {
-  width: 2px;
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
   cursor: col-resize;
   background: transparent;
-  flex-shrink: 0;
+  z-index: 2;
   transition: background 0.15s;
 }
 
