@@ -166,7 +166,7 @@ export function FileTree(props: FileTreeProps) {
     queueMicrotask(() => {
       if (!navRef) return;
       const el = navRef.querySelector<HTMLElement>(`.tree-item[data-path="${CSS.escape(sel)}"]`);
-      el?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      el?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
     });
   });
 
