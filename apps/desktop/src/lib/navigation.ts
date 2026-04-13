@@ -89,7 +89,7 @@ export function createNavigation(deps: NavigationDeps) {
       }
     }
 
-    showToast({ title: "File not found", description: targetPath, variant: "destructive", duration: 4000 });
+    showToast({ title: "File not found", description: targetPath, duration: 4000 });
   }
 
   function navigateToStackEntry(newIdx: number) {
