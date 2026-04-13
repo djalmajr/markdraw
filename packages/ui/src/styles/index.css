@@ -456,7 +456,6 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 /* === Sidebar === */
 .sidebar {
-  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -470,13 +469,12 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 /* === Resize Handle === */
 .resize-handle {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
   width: 4px;
+  margin-left: -4px;
   cursor: col-resize;
+  flex-shrink: 0;
   z-index: 2;
+  position: relative;
 }
 
 
@@ -1805,8 +1803,8 @@ mark.search-highlight.search-active {
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -1815,7 +1813,7 @@ mark.search-highlight.search-active {
 
 ::-webkit-scrollbar-thumb {
   background: hsl(var(--muted-foreground) / 0.4);
-  border-radius: 0;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {

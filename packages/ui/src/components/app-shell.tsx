@@ -259,8 +259,8 @@ export function AppShell(props: AppShellProps) {
                 onToggleShowAllDirs={() => s.setShowAllDirs((v) => !v)}
                 onToggleShowAllFiles={() => s.setShowAllFiles((v) => !v)}
               />
-              <div class="resize-handle" onDblClick={s.onResizeReset} onMouseDown={(e) => s.onResizeStart(e, appRef)} />
             </aside>
+            <div class="resize-handle" onDblClick={s.onResizeReset} onMouseDown={(e) => s.onResizeStart(e, appRef)} />
           </Show>
           <div class="content-area">
             <Show when={props.tabStore && props.tabStore.tabs().length > 0}>
