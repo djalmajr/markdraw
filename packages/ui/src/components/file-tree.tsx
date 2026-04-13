@@ -1,5 +1,4 @@
 import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
-import { createStore, produce } from "solid-js/store";
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/solid";
 import { FileTreeItem } from "./file-tree-item.tsx";
 import {
@@ -129,40 +128,68 @@ export function FileTree(props: FileTreeProps) {
   const [expandActions, setExpandActions] = createSignal<Record<string, ExpandAction>>({});
   const [activeDragRootId, setActiveDragRootId] = createSignal<string | null>(null);
   // Expanded state lives outside FileTreeItem so it survives entry reconciliation.
-  // Using createStore for reactive map-like access (granular updates).
-  const [expanded, setExpanded] = createStore<Record<string, Record<string, boolean>>>({});
+  // One signal per root holds a frozen Set; we replace it to trigger reactivity.
+  const expandedSignals = new Map<string, ReturnType<typeof createSignal<Set<string>>>>();
+
+  function getOrCreateExpandedSignal(rootId: string) {
+    let sig = expandedSignals.get(rootId);
+    if (!sig) {
+      sig = createSignal<Set<string>>(new Set());
+      expandedSignals.set(rootId, sig);
+    }
+    return sig;
+  }
 
   function isPathExpanded(rootId: string, path: string): boolean {
-    return !!expanded[rootId]?.[path];
+    const [get] = getOrCreateExpandedSignal(rootId);
+    return get().has(path);
   }
 
   function setPathExpanded(rootId: string, path: string, value: boolean) {
-    setExpanded(produce((s) => {
-      if (!s[rootId]) s[rootId] = {};
-      if (value) s[rootId]![path] = true;
-      else delete s[rootId]![path];
-    }));
+    const [get, set] = getOrCreateExpandedSignal(rootId);
+    const next = new Set(get());
+    if (value) next.add(path);
+    else next.delete(path);
+    set(next);
+  }
+
+  function expandPaths(rootId: string, paths: string[]) {
+    const [get, set] = getOrCreateExpandedSignal(rootId);
+    const current = get();
+    const next = new Set(current);
+    let changed = false;
+    for (const p of paths) {
+      if (!next.has(p)) { next.add(p); changed = true; }
+    }
+    if (changed) set(next);
   }
 
   // When selection changes (e.g. tab activation), ensure all ancestor
-  // directories of the selected file are expanded, then scroll into view.
+  // directories are expanded and scroll into view. Only runs when the
+  // selectedPath actually changes, so manual collapse isn't undone.
+  let lastRevealedPath: string | null = null;
+  let lastRevealedRootId: string | null = null;
   createEffect(() => {
     const sel = props.selectedPath;
     const rootId = props.selectedRootId;
-    if (!sel || !rootId) return;
+    if (!sel || !rootId) {
+      lastRevealedPath = sel;
+      lastRevealedRootId = rootId;
+      return;
+    }
+    if (sel === lastRevealedPath && rootId === lastRevealedRootId) return;
+    lastRevealedPath = sel;
+    lastRevealedRootId = rootId;
 
     if (sel.includes("/")) {
-      setExpanded(produce((s) => {
-        if (!s[rootId]) s[rootId] = {};
-        const parts = sel.split("/");
-        for (let i = 1; i < parts.length; i++) {
-          const ancestor = parts.slice(0, i).join("/");
-          s[rootId]![ancestor] = true;
-        }
-      }));
+      const parts = sel.split("/");
+      const ancestors: string[] = [];
+      for (let i = 1; i < parts.length; i++) {
+        ancestors.push(parts.slice(0, i).join("/"));
+      }
+      expandPaths(rootId, ancestors);
     }
 
-    // Scroll the selected item into view after DOM updates
     queueMicrotask(() => {
       if (!navRef) return;
       const el = navRef.querySelector<HTMLElement>(`.tree-item[data-path="${CSS.escape(sel)}"]`);
