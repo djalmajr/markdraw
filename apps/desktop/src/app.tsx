@@ -103,6 +103,31 @@ export function App() {
     }
   });
 
+  // Watch workspace directories for file tree changes (rename/delete/create)
+  createEffect(() => {
+    const paths = rootPaths();
+    if (paths.size === 0) {
+      void invoke("stop_watching_dirs");
+      return;
+    }
+    void invoke("watch_dirs", { paths: Array.from(paths.values()) });
+  });
+
+  onMount(() => {
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const unlisten = listen("fs-tree-change", () => {
+      // Debounce rapid filesystem events
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        void folder.refreshAllRoots(state.showHiddenEntries());
+      }, 300);
+    });
+    onCleanup(() => {
+      clearTimeout(refreshTimer);
+      void unlisten.then((fn) => fn());
+    });
+  });
+
   // Auto-save: debounce 1s after editor content changes
   let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {

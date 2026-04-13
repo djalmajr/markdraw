@@ -207,6 +207,10 @@ struct WatcherHolder(
     Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>>,
 );
 
+struct DirWatcherHolder(
+    Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>>,
+);
+
 #[tauri::command]
 async fn watch_paths(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
     // Stop existing watcher
@@ -248,6 +252,50 @@ async fn watch_paths(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
 #[tauri::command]
 async fn stop_watching(app: AppHandle) -> Result<(), String> {
     if let Some(state) = app.try_state::<WatcherHolder>() {
+        let mut lock = state.0.lock().map_err(|e| e.to_string())?;
+        *lock = None;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn watch_dirs(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+    if let Some(state) = app.try_state::<DirWatcherHolder>() {
+        let mut lock = state.0.lock().map_err(|e| e.to_string())?;
+        *lock = None;
+    }
+
+    let app_clone = app.clone();
+    let mut debouncer = new_debouncer(
+        Duration::from_millis(800),
+        move |events: Result<Vec<DebouncedEvent>, notify::Error>| {
+            if let Ok(events) = events {
+                let changed: Vec<String> = events
+                    .iter()
+                    .map(|e| e.path.to_string_lossy().replace('\\', "/"))
+                    .collect();
+                let _ = app_clone.emit("fs-tree-change", WatchEvent { paths: changed });
+            }
+        },
+    )
+    .map_err(|e| e.to_string())?;
+
+    let watcher = debouncer.watcher();
+    for p in &paths {
+        let _ = watcher.watch(Path::new(p), notify::RecursiveMode::Recursive);
+    }
+
+    if let Some(state) = app.try_state::<DirWatcherHolder>() {
+        let mut lock = state.0.lock().map_err(|e| e.to_string())?;
+        *lock = Some(debouncer);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_watching_dirs(app: AppHandle) -> Result<(), String> {
+    if let Some(state) = app.try_state::<DirWatcherHolder>() {
         let mut lock = state.0.lock().map_err(|e| e.to_string())?;
         *lock = None;
     }
@@ -492,6 +540,7 @@ pub fn run() {
             }
         }))
         .manage(WatcherHolder(Mutex::new(None)))
+        .manage(DirWatcherHolder(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             open_directory_dialog,
             read_dir,
@@ -507,6 +556,8 @@ pub fn run() {
             trash_path,
             watch_paths,
             stop_watching,
+            watch_dirs,
+            stop_watching_dirs,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
