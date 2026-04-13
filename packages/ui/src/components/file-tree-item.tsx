@@ -4,6 +4,7 @@ import type { ExpandAction } from "./file-tree.tsx";
 import IconChevronRight from "~icons/lucide/chevron-right";
 import IconFolder from "~icons/lucide/folder";
 import IconFile from "~icons/lucide/file-text";
+import IconEllipsisVertical from "~icons/lucide/ellipsis-vertical";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -11,6 +12,12 @@ import {
   ContextMenuShortcut,
   ContextMenuTrigger,
 } from "./ui/context-menu.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu.tsx";
 import { useApp } from "../context/app-context.tsx";
 
 const INDENT_PER_DEPTH = 20;
@@ -307,6 +314,34 @@ export function FileTreeItem(props: FileTreeItemProps) {
           </span>
           <Show when={!isEditing() && app.isDirty() && app.selectedFile()?.path === props.entry.path}>
             <span class="tree-dirty">*</span>
+          </Show>
+          <Show when={!isEditing()}>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                as="button"
+                class="tree-item-more"
+                onClick={(e: MouseEvent) => e.stopPropagation()}
+              >
+                <IconEllipsisVertical width={14} height={14} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent class="min-w-44">
+                <Show when={!isDirectory() && props.onOpenInNewTab}>
+                  <DropdownMenuItem onSelect={() => props.onOpenInNewTab?.(props.entry)}>
+                    Open in New Tab
+                  </DropdownMenuItem>
+                </Show>
+                <DropdownMenuItem class="justify-between" onSelect={copyPath}>
+                  <span>Copy path</span>
+                  <span class="ml-auto text-xs tracking-widest opacity-60">{COPY_SHORTCUT_LABEL}</span>
+                </DropdownMenuItem>
+                <Show when={props.onRename}>
+                  <DropdownMenuItem class="justify-between" onSelect={startRename}>
+                    <span>Rename</span>
+                    <span class="ml-auto text-xs tracking-widest opacity-60">{RENAME_SHORTCUT_LABEL}</span>
+                  </DropdownMenuItem>
+                </Show>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </Show>
         </ContextMenuTrigger>
         {/*
