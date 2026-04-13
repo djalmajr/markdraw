@@ -18,7 +18,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -40,13 +40,27 @@ jobs:
           gh repo view "$PUBLIC_RELEASES_REPO" >/dev/null
 
       - name: Publish site to GitHub Pages branch
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          personal_token: ${{ secrets.PUBLIC_DIST_TOKEN }}
-          external_repository: ${{ env.PUBLIC_RELEASES_REPO }}
-          publish_branch: gh-pages
-          publish_dir: apps/site/dist
-          force_orphan: true
-          enable_jekyll: false
-          cname: asciimark.djalmajr.dev
-          full_commit_message: "Deploy public site"
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_DIST_TOKEN }}
+        run: |
+          set -euo pipefail
+          DEPLOY_DIR="apps/site/dist"
+          DEPLOY_BRANCH="gh-pages"
+          DEPLOY_REPO="${PUBLIC_RELEASES_REPO}"
+          CNAME="asciimark.djalmajr.dev"
+
+          # Set up a temp dir with the deploy content
+          WORK=$(mktemp -d)
+          cp -r "${DEPLOY_DIR}/." "${WORK}/"
+          echo "${CNAME}" > "${WORK}/CNAME"
+          touch "${WORK}/.nojekyll"
+
+          cd "${WORK}"
+          git init -b "${DEPLOY_BRANCH}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Deploy public site"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${DEPLOY_REPO}.git"
+          git push --force origin "${DEPLOY_BRANCH}"
+          rm -rf "${WORK}"
