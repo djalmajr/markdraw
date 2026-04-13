@@ -82,16 +82,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
   const expanded = () => props.isExpanded(props.entry.path);
   const setExpanded = (value: boolean) => props.onSetExpanded(props.entry.path, value);
 
-  // Auto-expand directories that contain the selected file
-  createEffect(() => {
-    const sel = props.selectedPath;
-    if (sel && props.entry.kind === "directory") {
-      const dirPrefix = props.entry.path + "/";
-      if (sel.startsWith(dirPrefix) && !expanded()) {
-        setExpanded(true);
-      }
-    }
-  });
+  // Auto-expand handled centrally in FileTree when selectedPath changes.
 
   // React to expand/collapse all action
   createEffect(() => {

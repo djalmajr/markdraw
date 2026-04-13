@@ -141,6 +141,26 @@ export function FileTree(props: FileTreeProps) {
     return set;
   }
 
+  // When selection changes (e.g. tab activation), ensure all ancestor
+  // directories of the selected file are expanded.
+  createEffect(() => {
+    const sel = props.selectedPath;
+    const rootId = props.selectedRootId;
+    if (!sel || !rootId) return;
+    const set = getExpandedSet(rootId);
+    let changed = false;
+    const parts = sel.split("/");
+    // Add each ancestor path: "a", "a/b", "a/b/c" for "a/b/c/file.md"
+    for (let i = 1; i < parts.length; i++) {
+      const ancestor = parts.slice(0, i).join("/");
+      if (!set.has(ancestor)) {
+        set.add(ancestor);
+        changed = true;
+      }
+    }
+    if (changed) setExpandedVersion((v) => v + 1);
+  });
+
   let suppressRootClickUntil = 0;
   let navRef: HTMLDivElement | undefined;
 
