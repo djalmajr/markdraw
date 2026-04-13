@@ -43,15 +43,30 @@ export function App() {
   // File watcher (watches current file + includes for content changes)
   const watcher = new FileWatcher(async () => {
     const file = state.selectedFile();
-    if (file) {
-      await loader.loadFileContent(file, false, true);
-      tabStore.updateActiveTabContent({
-        editorContent: state.editorContent(),
-        savedContent: state.savedContent(),
-        html: state.html(),
-        frontmatter: state.frontmatter(),
-      });
+    const rootId = state.selectedRootId();
+    if (!file || !rootId) return;
+
+    // Refresh the file tree first to detect renames/deletes
+    await folder.refreshRoot(rootId);
+
+    // Check if the file still exists in the tree after refresh
+    const stillExists = state.findEntryByPath(file.path, rootId);
+    if (!stillExists) {
+      // File was deleted or renamed externally — close the tab
+      const activeTab = tabStore.activeTabId();
+      if (activeTab) tabStore.closeTab(activeTab);
+      const { showToast } = await import("@asciimark/ui/components/ui/toast.tsx");
+      showToast({ title: "File deleted or moved", description: file.name, duration: 4000 });
+      return;
     }
+
+    await loader.loadFileContent(file, false, true);
+    tabStore.updateActiveTabContent({
+      editorContent: state.editorContent(),
+      savedContent: state.savedContent(),
+      html: state.html(),
+      frontmatter: state.frontmatter(),
+    });
   });
 
   // Create modules: loader -> navigation -> folder -> dnd
@@ -608,17 +623,15 @@ export function App() {
         });
         if (confirmed) {
           await folder.handleDelete(entry, rootId);
-          // Close tabs for deleted files
-          if (entry.kind === "file") {
-            const tabId = tabStore.tabs().find((t) => t.filePath === entry.path && t.rootId === rootId)?.id;
-            if (tabId) tabStore.closeTab(tabId);
-          } else {
-            // Directory deleted — close all tabs with paths under it
-            for (const tab of tabStore.tabs()) {
-              if (tab.rootId === rootId && tab.filePath.startsWith(entry.path + "/")) {
-                tabStore.closeTab(tab.id);
-              }
-            }
+          // Close ALL tabs for deleted files (including duplicates)
+          const tabsToClose = tabStore.tabs().filter((t) =>
+            t.rootId === rootId && (
+              t.filePath === entry.path ||
+              (entry.kind === "directory" && t.filePath.startsWith(entry.path + "/"))
+            ),
+          );
+          for (const tab of tabsToClose) {
+            tabStore.closeTab(tab.id);
           }
         }
       }}
