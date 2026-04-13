@@ -43,30 +43,20 @@ export function App() {
   // File watcher (watches current file + includes for content changes)
   const watcher = new FileWatcher(async () => {
     const file = state.selectedFile();
-    const rootId = state.selectedRootId();
-    if (!file || !rootId) return;
+    if (!file) return;
 
-    // Refresh the file tree first to detect renames/deletes
-    await folder.refreshRoot(rootId);
-
-    // Check if the file still exists in the tree after refresh
-    const stillExists = state.findEntryByPath(file.path, rootId);
-    if (!stillExists) {
-      // File was deleted or renamed externally — close the tab
-      const activeTab = tabStore.activeTabId();
-      if (activeTab) tabStore.closeTab(activeTab);
-      const { showToast } = await import("@asciimark/ui/components/ui/toast.tsx");
-      showToast({ title: "File deleted or moved", description: file.name, duration: 4000 });
-      return;
+    try {
+      await loader.loadFileContent(file, false, true);
+      tabStore.updateActiveTabContent({
+        editorContent: state.editorContent(),
+        savedContent: state.savedContent(),
+        html: state.html(),
+        frontmatter: state.frontmatter(),
+      });
+    } catch {
+      // File likely deleted — the dir watcher will refresh the tree
+      // and the tab will show an error until clicked away
     }
-
-    await loader.loadFileContent(file, false, true);
-    tabStore.updateActiveTabContent({
-      editorContent: state.editorContent(),
-      savedContent: state.savedContent(),
-      html: state.html(),
-      frontmatter: state.frontmatter(),
-    });
   });
 
   // Create modules: loader -> navigation -> folder -> dnd
@@ -245,11 +235,12 @@ export function App() {
   // In production, block the native WebView context menu (Reload / Inspect
   // Element). Kobalte's ContextMenu triggers call preventDefault() before this
   // listener fires, so custom menus (file tree, etc.) keep working.
-  if (import.meta.env.PROD) {
-    document.addEventListener("contextmenu", (e) => {
-      if (!e.defaultPrevented) e.preventDefault();
-    });
-  }
+  onMount(() => {
+    if (!import.meta.env.PROD) return;
+    const handler = (e: Event) => { if (!e.defaultPrevented) e.preventDefault(); };
+    document.addEventListener("contextmenu", handler);
+    onCleanup(() => document.removeEventListener("contextmenu", handler));
+  });
 
   // Check for app updates a few seconds after boot — silent so any network
   // hiccup or "you're up to date" doesn't interrupt the user. The manual
@@ -357,52 +348,46 @@ export function App() {
 
     sessionRestored = true;
 
-    // Restore tabs asynchronously
-    (async () => {
-      for (const persisted of restorable) {
-        const entry = state.findEntryByPath(persisted.filePath, persisted.rootId);
-        if (!entry || entry.kind !== "file") continue;
+    // Restore all tabs synchronously (no file loading), mark as needsLoad.
+    // Only the active tab gets its content loaded immediately.
+    let activeEntry: import("@asciimark/core/types.ts").FSEntry | null = null;
+    let activeRootId: string | null = null;
 
-        const isActive = persisted.id === session.activeTabId;
-        tabStore.openTab(entry, persisted.rootId, {
-          background: !isActive,
+    for (const persisted of restorable) {
+      const entry = state.findEntryByPath(persisted.filePath, persisted.rootId);
+      if (!entry || entry.kind !== "file") continue;
+
+      const isActive = persisted.id === session.activeTabId;
+      tabStore.openTab(entry, persisted.rootId, { background: true });
+
+      // Mark all restored tabs as needing content load
+      const tabId = tabStore.tabs().find((t) => t.filePath === persisted.filePath && t.rootId === persisted.rootId)?.id;
+      if (tabId) tabStore.markTabNeedsLoad(tabId);
+
+      if (isActive) {
+        activeEntry = entry;
+        activeRootId = persisted.rootId;
+      }
+    }
+
+    // Load only the active tab
+    if (activeEntry && activeRootId) {
+      void (async () => {
+        await loader.loadFileContent(activeEntry!, false, false, activeRootId!);
+        tabStore.updateActiveTabContent({
+          editorContent: state.editorContent(),
+          savedContent: state.savedContent(),
+          html: state.html(),
+          frontmatter: state.frontmatter(),
         });
-
-        if (isActive) {
-          await loader.loadFileContent(entry, false, false, persisted.rootId);
-          tabStore.updateActiveTabContent({
-            editorContent: state.editorContent(),
-            savedContent: state.savedContent(),
-            html: state.html(),
-            frontmatter: state.frontmatter(),
-          });
-        } else {
-          // Mark background tabs to load content when activated
-          tabStore.updateActiveTabContent({ });  // no-op on non-active
-          // Directly mark needsLoad on the tab
-          const tabId = tabStore.tabs().find((t) => t.filePath === persisted.filePath && t.rootId === persisted.rootId)?.id;
-          if (tabId) {
-            tabStore.markTabNeedsLoad(tabId);
-          }
-        }
-      }
-
-      // If the active tab from session wasn't restored, activate the first tab
-      if (!tabStore.activeTabId() && tabStore.tabs().length > 0) {
-        const first = tabStore.tabs()[0]!;
-        handleActivateTab(first.id);
-        const entry = state.findEntryByPath(first.filePath, first.rootId);
-        if (entry) {
-          await loader.loadFileContent(entry, false, false, first.rootId);
-          tabStore.updateActiveTabContent({
-            editorContent: state.editorContent(),
-            savedContent: state.savedContent(),
-            html: state.html(),
-            frontmatter: state.frontmatter(),
-          });
-        }
-      }
-    })();
+        // Activate after content is loaded
+        const tabId = tabStore.tabs().find((t) => t.filePath === activeEntry!.path && t.rootId === activeRootId)?.id;
+        if (tabId) handleActivateTab(tabId);
+      })();
+    } else if (tabStore.tabs().length > 0) {
+      // No active tab from session — activate the first
+      void handleActivateTab(tabStore.tabs()[0]!.id);
+    }
   });
 
   // Snapshot active tab before app hides (close-to-tray)

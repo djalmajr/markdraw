@@ -345,23 +345,28 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     );
   }
 
+  let persistTimer: ReturnType<typeof setTimeout> | undefined;
+
   function persistSession(): void {
-    const tabs = tabList();
-    if (tabs.length === 0) {
-      localStorage.removeItem("asciimark-tab-session");
-      return;
-    }
-    setTabSession({
-      tabs: tabs.map((t) => ({
-        id: t.id,
-        filePath: t.filePath,
-        rootId: t.rootId,
-        fileName: t.fileName,
-        isPinned: true,
-        editorMode: t.editorMode,
-      })),
-      activeTabId: activeId(),
-    });
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      const tabs = tabList();
+      if (tabs.length === 0) {
+        localStorage.removeItem("asciimark-tab-session");
+        return;
+      }
+      setTabSession({
+        tabs: tabs.map((t) => ({
+          id: t.id,
+          filePath: t.filePath,
+          rootId: t.rootId,
+          fileName: t.fileName,
+          isPinned: true,
+          editorMode: t.editorMode,
+        })),
+        activeTabId: activeId(),
+      });
+    }, 500);
   }
 
   function getPersistedSession(): PersistedTabSession | null {

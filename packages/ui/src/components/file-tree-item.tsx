@@ -71,7 +71,7 @@ function isValidFilename(name: string): boolean {
 
 export function FileTreeItem(props: FileTreeItemProps) {
   const app = useApp();
-  const [expanded, setExpanded] = createSignal(props.depth < 1);
+  const [expanded, setExpanded] = createSignal(true);
   let itemRef: HTMLDivElement | undefined;
   let nameRef: HTMLSpanElement | undefined;
   let lastExpandVersion = 0;
