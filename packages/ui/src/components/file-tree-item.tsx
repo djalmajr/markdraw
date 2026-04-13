@@ -41,6 +41,8 @@ interface FileTreeItemProps {
   depth: number;
   entry: FSEntry;
   expandAction: ExpandAction;
+  isExpanded: (path: string) => boolean;
+  onSetExpanded: (path: string, expanded: boolean) => void;
   focusedPath: string | null;
   forceExpand?: boolean;
   rootId: string;
@@ -71,19 +73,21 @@ function isValidFilename(name: string): boolean {
 
 export function FileTreeItem(props: FileTreeItemProps) {
   const app = useApp();
-  const [expanded, setExpanded] = createSignal(props.depth < 1);
   let itemRef: HTMLDivElement | undefined;
   let nameRef: HTMLSpanElement | undefined;
   let lastExpandVersion = 0;
   // Whether a rename is currently in flight (to avoid double-commits via blur).
   let busyRename = false;
 
+  const expanded = () => props.isExpanded(props.entry.path);
+  const setExpanded = (value: boolean) => props.onSetExpanded(props.entry.path, value);
+
   // Auto-expand directories that contain the selected file
   createEffect(() => {
     const sel = props.selectedPath;
     if (sel && props.entry.kind === "directory") {
       const dirPrefix = props.entry.path + "/";
-      if (sel.startsWith(dirPrefix)) {
+      if (sel.startsWith(dirPrefix) && !expanded()) {
         setExpanded(true);
       }
     }
@@ -397,6 +401,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
               depth={props.depth + 1}
               entry={child}
               expandAction={props.expandAction}
+              isExpanded={props.isExpanded}
+              onSetExpanded={props.onSetExpanded}
               focusedPath={props.focusedPath}
               forceExpand={props.forceExpand}
               rootId={props.rootId}

@@ -127,6 +127,20 @@ export function FileTree(props: FileTreeProps) {
   const [focusedPath, setFocusedPath] = createSignal<string | null>(null);
   const [expandActions, setExpandActions] = createSignal<Record<string, ExpandAction>>({});
   const [activeDragRootId, setActiveDragRootId] = createSignal<string | null>(null);
+  // Expanded state lives outside FileTreeItem so it survives entry reconciliation.
+  // Mutable Set for O(1) read/write, signal counter for reactivity.
+  const expandedSets = new Map<string, Set<string>>();
+  const [expandedVersion, setExpandedVersion] = createSignal(0);
+
+  function getExpandedSet(rootId: string): Set<string> {
+    let set = expandedSets.get(rootId);
+    if (!set) {
+      set = new Set();
+      expandedSets.set(rootId, set);
+    }
+    return set;
+  }
+
   let suppressRootClickUntil = 0;
   let navRef: HTMLDivElement | undefined;
 
@@ -321,6 +335,12 @@ export function FileTree(props: FileTreeProps) {
                 depth={1}
                 entry={entry}
                 expandAction={expandActions()[propsRoot.root.id] ?? defaultExpandAction}
+                isExpanded={(path) => { expandedVersion(); return getExpandedSet(propsRoot.root.id).has(path); }}
+                onSetExpanded={(path, exp) => {
+                  const set = getExpandedSet(propsRoot.root.id);
+                  if (exp) set.add(path); else set.delete(path);
+                  setExpandedVersion((v) => v + 1);
+                }}
                 focusedPath={propsRoot.rootFocusedPath()}
                 forceExpand={isFiltering()}
                 rootId={propsRoot.root.id}
