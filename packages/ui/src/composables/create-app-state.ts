@@ -432,11 +432,41 @@ export function createAppState(config: AppStateConfig) {
     setRootOrder(validIds);
   }
 
+  /**
+   * Reconcile new entries with existing ones to preserve object references
+   * where possible. This prevents SolidJS from recreating FileTreeItem
+   * components (and losing expanded state) on directory refresh.
+   */
+  function reconcileEntries(oldEntries: FSEntry[], newEntries: FSEntry[]): FSEntry[] {
+    const oldMap = new Map(oldEntries.map((e) => [e.path, e]));
+    let changed = oldEntries.length !== newEntries.length;
+
+    const result = newEntries.map((newEntry) => {
+      const old = oldMap.get(newEntry.path);
+      if (!old) { changed = true; return newEntry; }
+      if (old.kind !== newEntry.kind || old.name !== newEntry.name) { changed = true; return newEntry; }
+      // Reconcile children recursively for directories
+      if (newEntry.kind === "directory" && newEntry.children && old.children) {
+        const reconciledChildren = reconcileEntries(old.children, newEntry.children);
+        if (reconciledChildren === old.children) return old;
+        changed = true;
+        return { ...old, children: reconciledChildren };
+      }
+      if (newEntry.kind === "directory" && !old.children && newEntry.children) { changed = true; return newEntry; }
+      return old;
+    });
+
+    return changed ? result : oldEntries;
+  }
+
   function updateRootEntries(rootId: string, entries: FSEntry[]) {
     setRoots((prev) => {
       const next = new Map(prev);
       const existing = next.get(rootId);
-      if (existing) next.set(rootId, { ...existing, entries });
+      if (!existing) return prev;
+      const reconciled = reconcileEntries(existing.entries, entries);
+      if (reconciled === existing.entries) return prev;
+      next.set(rootId, { ...existing, entries: reconciled });
       return next;
     });
   }
