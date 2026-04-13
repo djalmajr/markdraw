@@ -196,6 +196,21 @@ export function FrontmatterPanel(props: FrontmatterPanelProps) {
         return renderChips([value.trim()]);
       }
     }
+    // Nested objects: render as key: value list
+    if (typeof value === "object") {
+      return (
+        <div class="frontmatter-nested">
+          <For each={Object.entries(value as Record<string, unknown>)}>
+            {([k, v]) => (
+              <div class="frontmatter-nested-row">
+                <span class="frontmatter-nested-key">{k}:</span>
+                <span class="frontmatter-nested-value">{renderValue(k, v)}</span>
+              </div>
+            )}
+          </For>
+        </div>
+      );
+    }
     return <span class="frontmatter-text">{String(value)}</span>;
   }
 

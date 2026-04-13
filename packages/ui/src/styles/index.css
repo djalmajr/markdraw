@@ -1423,6 +1423,28 @@ mark.search-highlight.search-active {
   font-style: italic;
 }
 
+.frontmatter-nested {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.frontmatter-nested-row {
+  display: flex;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.frontmatter-nested-key {
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+
+.frontmatter-nested-value {
+  flex: 1;
+  min-width: 0;
+}
+
 .frontmatter-chips {
   display: flex;
   flex-wrap: wrap;
