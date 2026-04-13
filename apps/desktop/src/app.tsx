@@ -15,7 +15,7 @@ import { createFileLoader } from "./lib/file-loader.ts";
 import { createNavigation } from "./lib/navigation.ts";
 import { createFolder } from "./lib/folder.ts";
 import { isSupportedFile } from "@asciimark/core/utils.ts";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { confirm } from "@asciimark/ui/components/confirm-dialog.tsx";
 import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
 import { setupTray } from "./lib/tray.ts";
@@ -464,10 +464,11 @@ export function App() {
       : tab.editorContent !== tab.savedContent;
 
     if (isDirty) {
-      const discard = await ask(
-        `"${tab.fileName}" has unsaved changes. Discard them?`,
-        { title: "Close Tab", kind: "warning", okLabel: "Discard", cancelLabel: "Cancel" },
-      );
+      const discard = await confirm({
+        title: "Close Tab",
+        description: `"${tab.fileName}" has unsaved changes. Discard them?`,
+        confirmLabel: "Discard",
+      });
       if (!discard) return;
     }
 
@@ -600,10 +601,11 @@ export function App() {
       onRename={folder.handleRename}
       onDelete={async (entry, rootId) => {
         const label = entry.kind === "directory" ? "folder" : "file";
-        const confirmed = await ask(
-          `Move "${entry.name}" to Trash?`,
-          { title: `Delete ${label}`, kind: "warning", okLabel: "Move to Trash", cancelLabel: "Cancel" },
-        );
+        const confirmed = await confirm({
+          title: `Delete ${label}`,
+          description: `Move "${entry.name}" to Trash?`,
+          confirmLabel: "Move to Trash",
+        });
         if (confirmed) {
           await folder.handleDelete(entry, rootId);
           // Close tabs for deleted files

@@ -13,6 +13,7 @@ import { Preview } from "./preview.tsx";
 import { Editor } from "./editor.tsx";
 import { EmptyState } from "./empty-state.tsx";
 import { Toaster } from "./ui/toast.tsx";
+import { ConfirmDialog } from "./confirm-dialog.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -185,6 +186,7 @@ export function AppShell(props: AppShellProps) {
   return (
     <AppProvider state={props.state}>
       <Toaster />
+      <ConfirmDialog />
       <div
         class="app"
         classList={{
