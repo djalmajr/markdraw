@@ -477,7 +477,13 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .resize-handle:hover {
-  background: hsl(var(--primary));
+  background: linear-gradient(
+    to right,
+    transparent calc(50% - 1px),
+    hsl(var(--primary)) calc(50% - 1px),
+    hsl(var(--primary)) calc(50% + 1px),
+    transparent calc(50% + 1px)
+  );
 }
 
 /* === File Tree === */
