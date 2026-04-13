@@ -1,4 +1,5 @@
 import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
+import { createStore, produce } from "solid-js/store";
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/solid";
 import { FileTreeItem } from "./file-tree-item.tsx";
 import {
@@ -128,17 +129,19 @@ export function FileTree(props: FileTreeProps) {
   const [expandActions, setExpandActions] = createSignal<Record<string, ExpandAction>>({});
   const [activeDragRootId, setActiveDragRootId] = createSignal<string | null>(null);
   // Expanded state lives outside FileTreeItem so it survives entry reconciliation.
-  // Mutable Set for O(1) read/write, signal counter for reactivity.
-  const expandedSets = new Map<string, Set<string>>();
-  const [expandedVersion, setExpandedVersion] = createSignal(0);
+  // Using createStore for reactive map-like access (granular updates).
+  const [expanded, setExpanded] = createStore<Record<string, Record<string, boolean>>>({});
 
-  function getExpandedSet(rootId: string): Set<string> {
-    let set = expandedSets.get(rootId);
-    if (!set) {
-      set = new Set();
-      expandedSets.set(rootId, set);
-    }
-    return set;
+  function isPathExpanded(rootId: string, path: string): boolean {
+    return !!expanded[rootId]?.[path];
+  }
+
+  function setPathExpanded(rootId: string, path: string, value: boolean) {
+    setExpanded(produce((s) => {
+      if (!s[rootId]) s[rootId] = {};
+      if (value) s[rootId]![path] = true;
+      else delete s[rootId]![path];
+    }));
   }
 
   // When selection changes (e.g. tab activation), ensure all ancestor
@@ -146,19 +149,16 @@ export function FileTree(props: FileTreeProps) {
   createEffect(() => {
     const sel = props.selectedPath;
     const rootId = props.selectedRootId;
-    if (!sel || !rootId) return;
-    const set = getExpandedSet(rootId);
-    let changed = false;
-    const parts = sel.split("/");
-    // Add each ancestor path: "a", "a/b", "a/b/c" for "a/b/c/file.md"
-    for (let i = 1; i < parts.length; i++) {
-      const ancestor = parts.slice(0, i).join("/");
-      if (!set.has(ancestor)) {
-        set.add(ancestor);
-        changed = true;
+    if (!sel || !rootId || !sel.includes("/")) return;
+
+    setExpanded(produce((s) => {
+      if (!s[rootId]) s[rootId] = {};
+      const parts = sel.split("/");
+      for (let i = 1; i < parts.length; i++) {
+        const ancestor = parts.slice(0, i).join("/");
+        s[rootId]![ancestor] = true;
       }
-    }
-    if (changed) setExpandedVersion((v) => v + 1);
+    }));
   });
 
   let suppressRootClickUntil = 0;
@@ -355,12 +355,8 @@ export function FileTree(props: FileTreeProps) {
                 depth={1}
                 entry={entry}
                 expandAction={expandActions()[propsRoot.root.id] ?? defaultExpandAction}
-                isExpanded={(path) => { expandedVersion(); return getExpandedSet(propsRoot.root.id).has(path); }}
-                onSetExpanded={(path, exp) => {
-                  const set = getExpandedSet(propsRoot.root.id);
-                  if (exp) set.add(path); else set.delete(path);
-                  setExpandedVersion((v) => v + 1);
-                }}
+                isExpanded={(path) => isPathExpanded(propsRoot.root.id, path)}
+                onSetExpanded={(path, exp) => setPathExpanded(propsRoot.root.id, path, exp)}
                 focusedPath={propsRoot.rootFocusedPath()}
                 forceExpand={isFiltering()}
                 rootId={propsRoot.root.id}
