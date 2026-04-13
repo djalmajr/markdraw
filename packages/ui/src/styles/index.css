@@ -469,8 +469,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 /* === Resize Handle === */
 .resize-handle {
-  width: 4px;
-  margin-left: -4px;
+  width: 3px;
+  margin-left: -3px;
   cursor: col-resize;
   flex-shrink: 0;
   z-index: 2;
