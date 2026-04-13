@@ -1,4 +1,4 @@
-import { createSignal, createEffect, Show, For, onMount, onCleanup } from "solid-js";
+import { createSignal, createEffect, createMemo, Show, For, onMount, onCleanup } from "solid-js";
 import type { FSEntry } from "@asciimark/core/types.ts";
 import type { ExpandAction } from "./file-tree.tsx";
 import IconChevronRight from "~icons/lucide/chevron-right";
@@ -79,7 +79,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
   // Whether a rename is currently in flight (to avoid double-commits via blur).
   let busyRename = false;
 
-  const expanded = () => props.isExpanded(props.entry.path);
+  const expanded = createMemo(() => props.isExpanded(props.entry.path));
   const setExpanded = (value: boolean) => props.onSetExpanded(props.entry.path, value);
 
   // Auto-expand handled centrally in FileTree when selectedPath changes.
