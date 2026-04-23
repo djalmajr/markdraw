@@ -5,7 +5,6 @@ import type { AppState } from "../composables/create-app-state.ts";
 import type { TabStore } from "../composables/create-tab-store.ts";
 import { AppProvider } from "../context/app-context.tsx";
 import { Toolbar } from "./toolbar.tsx";
-import { WindowControls } from "./window-controls.tsx";
 import { TabBar } from "./tab-bar.tsx";
 import { ContentToolbar } from "./content-toolbar.tsx";
 import { EditorToolbar } from "./editor-toolbar.tsx";
@@ -37,9 +36,11 @@ interface AppShellProps {
   showPdfExport?: boolean;
   showSidebar: boolean;
   /**
-   * Render in-app caption buttons (minimize/maximize/close) in the top-right.
-   * Enabled only on Windows, where the native titlebar is hidden via
-   * `decorations: false` so the toolbar can occupy the title row.
+   * Flag indicating the app is drawing its own caption buttons in the
+   * top-right (currently Windows with `decorations: false`). Used to
+   * route the toolbar controls to the left so they don't overlap.
+   * The actual caption button component is rendered by the host app,
+   * since it depends on Tauri APIs not available in packages/ui.
    */
   showWindowControls?: boolean;
   windowFrameToolbar?: boolean;
@@ -193,9 +194,6 @@ export function AppShell(props: AppShellProps) {
     <AppProvider state={props.state}>
       <Toaster />
       <ConfirmDialog />
-      <Show when={props.showWindowControls}>
-        <WindowControls />
-      </Show>
       <div
         class="app"
         classList={{

@@ -20,6 +20,7 @@ import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
 import { setupTray } from "./lib/tray.ts";
 import { checkForAppUpdates } from "./lib/updater.ts";
+import { WindowControls } from "./components/window-controls.tsx";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 const { convertAdoc, convertMarkdown } = createConverter(new ConvertWorker());
@@ -610,8 +611,12 @@ export function App() {
     onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
   });
 
+  const isWindows = navigator.platform.startsWith("Win");
+
   return (
-    <AppShell
+    <>
+      {isWindows && <WindowControls />}
+      <AppShell
       state={state}
       hasRoot={rootPaths().size > 0}
       showRecentHistory={true}
@@ -668,5 +673,6 @@ export function App() {
       onToggleShowHiddenEntries={(enabled) => folder.refreshAllRoots(enabled)}
       onReorderRoots={(newOrder) => state.reorderRoots(newOrder)}
     />
+    </>
   );
 }
