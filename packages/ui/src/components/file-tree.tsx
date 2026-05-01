@@ -44,70 +44,50 @@ interface FileTreeProps {
 }
 
 /**
- * Filter entries by visibility settings (showAllDirs, showAllFiles).
+ * Walk the tree and produce a Set of paths that should be visible given the
+ * current filter flags and search text.
  *
- * Preserves entry references when nothing is filtered out, so Solid's
- * `<For>` can skip recreating FileTreeItem components on toggle. This is
- * critical for performance — without it, every toggle deep-clones the
- * whole tree and re-renders thousands of items.
+ * Returning a Set instead of transforming the entries keeps every FSEntry
+ * reference stable across toggles — Solid's `<For>` reuses the existing
+ * `FileTreeItem` instances, and we just flip a `Show` per item. Without
+ * this, toggling Show All Files unmounts/remounts every visible item plus
+ * its Kobalte ContextMenu/DropdownMenu, which is what made the screen
+ * freeze on large trees.
  */
-function filterByVisibility(entries: FSEntry[], showAllDirs: boolean, showAllFiles: boolean): FSEntry[] {
-  if (showAllDirs && showAllFiles) return entries;
+function computeVisiblePaths(
+  entries: FSEntry[],
+  showAllDirs: boolean,
+  showAllFiles: boolean,
+  search: string,
+): Set<string> {
+  const result = new Set<string>();
+  const lowerSearch = search ? search.toLowerCase() : "";
 
-  const result: FSEntry[] = [];
-  let changed = false;
-
-  for (const entry of entries) {
-    if (entry.kind === "directory") {
-      const originalChildren = entry.children ?? [];
-      const filteredChildren = filterByVisibility(originalChildren, showAllDirs, showAllFiles);
-      if (showAllDirs || filteredChildren.length > 0) {
-        if (filteredChildren === originalChildren) {
-          // Children unchanged → reuse the original entry reference
-          result.push(entry);
-        } else {
-          result.push({ ...entry, children: filteredChildren });
-          changed = true;
+  function walk(list: FSEntry[]): boolean {
+    let anyVisible = false;
+    for (const entry of list) {
+      if (entry.kind === "directory") {
+        const childrenVisible = entry.children ? walk(entry.children) : false;
+        const dirAllowed = showAllDirs || childrenVisible;
+        const dirMatchesSearch = !lowerSearch || entry.name.toLowerCase().includes(lowerSearch);
+        if (dirAllowed && (!lowerSearch || childrenVisible || dirMatchesSearch)) {
+          result.add(entry.path);
+          anyVisible = true;
         }
       } else {
-        // Directory dropped entirely
-        changed = true;
+        const typeAllowed = showAllFiles || isSupportedFile(entry.name);
+        const matchesSearch = !lowerSearch || entry.name.toLowerCase().includes(lowerSearch);
+        if (typeAllowed && matchesSearch) {
+          result.add(entry.path);
+          anyVisible = true;
+        }
       }
-    } else if (showAllFiles || isSupportedFile(entry.name)) {
-      result.push(entry);
-    } else {
-      // File dropped
-      changed = true;
     }
+    return anyVisible;
   }
 
-  // If nothing actually changed, return the original array so Solid sees
-  // the same reference and doesn't re-render anything.
-  return changed ? result : entries;
-}
-
-function filterBySearch(entries: FSEntry[], text: string): FSEntry[] {
-  if (!text) return entries;
-  const lower = text.toLowerCase();
-
-  return entries.reduce<FSEntry[]>((acc, entry) => {
-    if (entry.kind === "directory" && entry.children) {
-      const filtered = filterBySearch(entry.children, text);
-      if (filtered.length > 0) {
-        acc.push({ ...entry, children: filtered });
-      }
-    } else if (entry.name.toLowerCase().includes(lower)) {
-      acc.push(entry);
-    }
-    return acc;
-  }, []);
-}
-
-interface FilteredRoot {
-  collapsed: boolean;
-  entries: FSEntry[];
-  id: string;
-  name: string;
+  walk(entries);
+  return result;
 }
 
 const ROOT_DND_PREFIX = "root::";
@@ -248,30 +228,33 @@ export function FileTree(props: FileTreeProps) {
   }
 
   interface RootHeaderProps {
-    root: FilteredRoot;
+    rootId: string;
+    root: () => WorkspaceRoot;
+    visiblePaths: () => Set<string>;
     rootFocusedPath: () => string | null;
     rootSelectedPath: () => string | null;
   }
 
   function RootHeader(propsRoot: RootHeaderProps) {
-    const dndId = () => toRootDndId(propsRoot.root.id);
+    const rootId = propsRoot.rootId;
+    const dndId = toRootDndId(rootId);
     const draggable = useDraggable({
-      get id() {
-        return dndId();
+      id: dndId,
+      get disabled() {
+        return !canReorderRoots();
       },
-      disabled: !canReorderRoots(),
     });
     const droppable = useDroppable({
-      get id() {
-        return dndId();
+      id: dndId,
+      get disabled() {
+        return !canReorderRoots();
       },
-      disabled: !canReorderRoots(),
     });
 
     const isDropTarget = () =>
-      droppable.isDropTarget() && activeDragRootId() !== propsRoot.root.id;
-    const isRootCollapsed = () => propsRoot.root.collapsed;
-    const currentExpandAction = () => expandActions()[propsRoot.root.id] ?? null;
+      droppable.isDropTarget() && activeDragRootId() !== rootId;
+    const isRootCollapsed = () => propsRoot.root().collapsed;
+    const currentExpandAction = () => expandActions()[rootId] ?? null;
 
     const nextRootBulkAction = (): ExpandAction["action"] => {
       const current = currentExpandAction();
@@ -279,7 +262,7 @@ export function FileTree(props: FileTreeProps) {
       return current.action === "expand" ? "collapse" : "expand";
     };
 
-    function triggerRootExpandAll(rootId: string) {
+    function triggerRootExpandAll() {
       setExpandActions((prev) => {
         const current = prev[rootId] ?? defaultExpandAction;
         return {
@@ -289,7 +272,7 @@ export function FileTree(props: FileTreeProps) {
       });
     }
 
-    function triggerRootCollapseAll(rootId: string) {
+    function triggerRootCollapseAll() {
       setExpandActions((prev) => {
         const current = prev[rootId] ?? defaultExpandAction;
         return {
@@ -311,19 +294,19 @@ export function FileTree(props: FileTreeProps) {
         <div
           class="workspace-root-header"
           classList={{
-            "workspace-root-active": props.selectedRootId === propsRoot.root.id,
+            "workspace-root-active": props.selectedRootId === rootId,
             "draggable-root": canReorderRoots(),
           }}
           ref={draggable.ref}
           onClick={() => {
             if (Date.now() < suppressRootClickUntil) return;
             setExpandActions((prev) => {
-              if (!(propsRoot.root.id in prev)) return prev;
+              if (!(rootId in prev)) return prev;
               const next = { ...prev };
-              delete next[propsRoot.root.id];
+              delete next[rootId];
               return next;
             });
-            props.onToggleRootCollapsed?.(propsRoot.root.id);
+            props.onToggleRootCollapsed?.(rootId);
           }}
         >
           <div class="workspace-root-main">
@@ -338,12 +321,12 @@ export function FileTree(props: FileTreeProps) {
             </Show>
             <span
               class="workspace-root-chevron"
-              classList={{ "workspace-root-chevron-open": !propsRoot.root.collapsed }}
+              classList={{ "workspace-root-chevron-open": !propsRoot.root().collapsed }}
             >
               <IconChevronRight width={14} height={14} />
             </span>
             <IconFolderOpen width={14} height={14} class="workspace-root-icon" />
-            <span class="workspace-root-name">{propsRoot.root.name}</span>
+            <span class="workspace-root-name">{propsRoot.root().name}</span>
           </div>
           <div class="workspace-root-actions">
             <button
@@ -355,13 +338,13 @@ export function FileTree(props: FileTreeProps) {
                 const action = nextRootBulkAction();
 
                 if (action === "expand" && isRootCollapsed()) {
-                  props.onToggleRootCollapsed?.(propsRoot.root.id);
+                  props.onToggleRootCollapsed?.(rootId);
                 }
 
                 if (action === "expand") {
-                  triggerRootExpandAll(propsRoot.root.id);
+                  triggerRootExpandAll();
                 } else {
-                  triggerRootCollapseAll(propsRoot.root.id);
+                  triggerRootCollapseAll();
                 }
               }}
             >
@@ -376,7 +359,7 @@ export function FileTree(props: FileTreeProps) {
                 title="Close"
                 onClick={(e: MouseEvent) => {
                   e.stopPropagation();
-                  props.onCloseRoot!(propsRoot.root.id);
+                  props.onCloseRoot!(rootId);
                 }}
               >
                 <IconX width={14} height={14} />
@@ -384,25 +367,26 @@ export function FileTree(props: FileTreeProps) {
             </Show>
           </div>
         </div>
-        <Show when={!propsRoot.root.collapsed}>
-          <For each={propsRoot.root.entries}>
+        <Show when={!propsRoot.root().collapsed}>
+          <For each={propsRoot.root().entries}>
             {(entry) => (
               <FileTreeItem
                 depth={1}
                 entry={entry}
-                expandAction={expandActions()[propsRoot.root.id] ?? defaultExpandAction}
-                isExpanded={(path) => isPathExpanded(propsRoot.root.id, path)}
-                onSetExpanded={(path, exp) => setPathExpanded(propsRoot.root.id, path, exp)}
+                visiblePaths={propsRoot.visiblePaths}
+                expandAction={expandActions()[rootId] ?? defaultExpandAction}
+                isExpanded={(path) => isPathExpanded(rootId, path)}
+                onSetExpanded={(path, exp) => setPathExpanded(rootId, path, exp)}
                 focusedPath={propsRoot.rootFocusedPath()}
                 forceExpand={isFiltering()}
-                rootId={propsRoot.root.id}
+                rootId={rootId}
                 selectedPath={propsRoot.rootSelectedPath()}
                 onCopyPath={props.onCopyPath}
                 onRename={props.onRename}
                 onDelete={props.onDelete}
-                onSelect={(e) => props.onSelect(e, propsRoot.root.id)}
-                onOpenInNewTab={props.onOpenInNewTab ? (e) => props.onOpenInNewTab!(e, propsRoot.root.id) : undefined}
-                onDoubleClickFile={props.onDoubleClickFile ? (e) => props.onDoubleClickFile!(e, propsRoot.root.id) : undefined}
+                onSelect={(e) => props.onSelect(e, rootId)}
+                onOpenInNewTab={props.onOpenInNewTab ? (e) => props.onOpenInNewTab!(e, rootId) : undefined}
+                onDoubleClickFile={props.onDoubleClickFile ? (e) => props.onDoubleClickFile!(e, rootId) : undefined}
               />
             )}
           </For>
@@ -419,21 +403,29 @@ export function FileTree(props: FileTreeProps) {
     if (sel) setFocusedPath(sel);
   });
 
-  const filteredRoots = createMemo((): FilteredRoot[] =>
-    props.roots.map((root) => {
-      const visible = filterByVisibility(root.entries, props.showAllDirs ?? false, props.showAllFiles ?? false);
-      const filtered = filterBySearch(visible, filterText());
-      return { collapsed: root.collapsed, entries: filtered, id: root.id, name: root.name };
-    })
-  );
+  const rootIds = createMemo(() => props.roots.map((r) => r.id));
+
+  function findRoot(rootId: string): WorkspaceRoot | undefined {
+    return props.roots.find((r) => r.id === rootId);
+  }
 
   const isFiltering = () => filterText().length > 0;
 
-  const hasAnyEntries = () => filteredRoots().some((r) => r.entries.length > 0);
+  const hasAnyEntries = createMemo(() => {
+    const showAllDirs = props.showAllDirs ?? false;
+    const showAllFiles = props.showAllFiles ?? false;
+    const text = filterText();
+    return props.roots.some(
+      (r) => computeVisiblePaths(r.entries, showAllDirs, showAllFiles, text).size > 0,
+    );
+  });
 
   function getVisibleItems(): HTMLElement[] {
     if (!navRef) return [];
-    return Array.from(navRef.querySelectorAll<HTMLElement>(".tree-item"));
+    // offsetParent is null when the element (or any ancestor) has display:none,
+    // which is how we hide entries that don't pass the current filter.
+    return Array.from(navRef.querySelectorAll<HTMLElement>(".tree-item"))
+      .filter((el) => el.offsetParent !== null);
   }
 
   function findFocusedIndex(items: HTMLElement[]): number {
@@ -643,18 +635,33 @@ export function FileTree(props: FileTreeProps) {
             onDragStart={handleProviderDragStart}
             onDragEnd={handleProviderDragEnd}
           >
-            <For each={filteredRoots()}>
-              {(root) => {
-                const isActiveRoot = () => props.selectedRootId === root.id;
+            <For each={rootIds()}>
+              {(rootId) => {
+                const root = createMemo(() => findRoot(rootId)!);
+                const visiblePaths = createMemo(() => {
+                  const r = root();
+                  if (!r) return new Set<string>();
+                  return computeVisiblePaths(
+                    r.entries,
+                    props.showAllDirs ?? false,
+                    props.showAllFiles ?? false,
+                    filterText(),
+                  );
+                });
+                const isActiveRoot = () => props.selectedRootId === rootId;
                 const rootSelectedPath = () => isActiveRoot() ? props.selectedPath : null;
                 const rootFocusedPath = () => isActiveRoot() ? focusedPath() : null;
 
                 return (
-                  <RootHeader
-                    root={root}
-                    rootFocusedPath={rootFocusedPath}
-                    rootSelectedPath={rootSelectedPath}
-                  />
+                  <Show when={root()}>
+                    <RootHeader
+                      rootId={rootId}
+                      root={root}
+                      visiblePaths={visiblePaths}
+                      rootFocusedPath={rootFocusedPath}
+                      rootSelectedPath={rootSelectedPath}
+                    />
+                  </Show>
                 );
               }}
             </For>

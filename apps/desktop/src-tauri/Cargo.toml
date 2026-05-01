@@ -25,6 +25,11 @@ tauri-plugin-single-instance = "2.4.1"
 tauri-plugin-opener = "2"
 trash = "5"
 
+# Dev-only: registered with #[cfg(debug_assertions)] in lib.rs so release
+# builds get stripped by LTO. Lets AI agents drive the running app via the
+# tauri-mcp-server tools (screenshots, JS exec, IPC monitoring).
+tauri-plugin-mcp-bridge = "0.11"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 

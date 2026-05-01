@@ -40,6 +40,14 @@ const COPY_SHORTCUT_LABEL = IS_MAC ? "⇧⌘C" : "Alt+Shift+C";
 interface FileTreeItemProps {
   depth: number;
   entry: FSEntry;
+  /**
+   * Set of paths that should currently be visible. Passed down so each item
+   * can decide on its own whether to render — this lets us keep entry refs
+   * stable across visibility toggles, so Solid's `<For>` reuses every
+   * existing item instead of unmounting and remounting (which would
+   * recreate the Kobalte ContextMenu/DropdownMenu and freeze the UI).
+   */
+  visiblePaths: () => Set<string>;
   expandAction: ExpandAction;
   isExpanded: (path: string) => boolean;
   onSetExpanded: (path: string, expanded: boolean) => void;
@@ -261,8 +269,10 @@ export function FileTreeItem(props: FileTreeItemProps) {
     document.execCommand("insertText", false, cleaned);
   }
 
+  const isVisible = () => props.visiblePaths().has(props.entry.path);
+
   return (
-    <div class="tree-item-wrapper">
+    <div class="tree-item-wrapper" style={isVisible() ? undefined : { display: "none" }}>
       <ContextMenu>
         <ContextMenuTrigger
           as="div"
@@ -391,6 +401,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
             <FileTreeItem
               depth={props.depth + 1}
               entry={child}
+              visiblePaths={props.visiblePaths}
               expandAction={props.expandAction}
               isExpanded={props.isExpanded}
               onSetExpanded={props.onSetExpanded}

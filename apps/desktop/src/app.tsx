@@ -84,6 +84,27 @@ export function App() {
     state,
   });
 
+  // Dev-only: expose APIs so the MCP bridge can drive workspaces and toggles
+  // from outside (avoids the native open-dialog when AI agents test the app).
+  if (import.meta.env.DEV) {
+    (window as unknown as { __DEV__?: Record<string, unknown> }).__DEV__ = {
+      openFolder: folder.openFolderPath,
+      toggleShowAllFiles: () => state.setShowAllFiles((v) => !v),
+      toggleShowAllDirs: () => state.setShowAllDirs((v) => !v),
+      toggleShowHidden: () => {
+        const next = !state.showHiddenEntries();
+        state.setShowHiddenEntries(next);
+        return folder.refreshAllRoots(next);
+      },
+      getState: () => ({
+        showAllFiles: state.showAllFiles(),
+        showAllDirs: state.showAllDirs(),
+        showHidden: state.showHiddenEntries(),
+        roots: state.rootsList().map((r) => ({ id: r.id, entries: r.entries.length })),
+      }),
+    };
+  }
+
   // Toggle auto-refresh (only when roots are open)
   createEffect(() => {
     if (rootPaths().size === 0) return;
