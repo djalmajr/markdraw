@@ -1,30 +1,8 @@
+import * as v from "valibot";
+import { RecentFolderSchema, type RecentFolder, tryParse } from "./schemas.ts";
+
 const STORAGE_KEY = "asciimark-recent-folders-v1";
 const MAX_RECENT = 10;
-
-interface RecentFolder {
-  name: string;
-  path: string;
-}
-
-function isStringField(value: object, fieldName: string): boolean {
-  return typeof Reflect.get(value, fieldName) === "string";
-}
-
-function parseRecentFolder(value: unknown): RecentFolder | null {
-  if (typeof value !== "object" || value === null) return null;
-  if (!isStringField(value, "name")) return null;
-  if (!isStringField(value, "path")) return null;
-
-  const name = Reflect.get(value, "name");
-  const path = Reflect.get(value, "path");
-  if (typeof name !== "string") return null;
-  if (typeof path !== "string") return null;
-
-  return {
-    name,
-    path,
-  };
-}
 
 function readRecentFolders(): RecentFolder[] {
   try {
@@ -36,12 +14,9 @@ function readRecentFolders(): RecentFolder[] {
 
     const folders: RecentFolder[] = [];
     for (const item of parsed) {
-      const recentFolder = parseRecentFolder(item);
-      if (recentFolder) {
-        folders.push(recentFolder);
-      }
+      const folder = tryParse(RecentFolderSchema, item);
+      if (folder) folders.push(folder);
     }
-
     return folders.slice(0, MAX_RECENT);
   } catch {
     return [];
@@ -53,11 +28,12 @@ function getRecentFolders(): RecentFolder[] {
 }
 
 function addRecentFolder(folder: RecentFolder): RecentFolder[] {
+  const validated = v.parse(RecentFolderSchema, folder);
   const folders = readRecentFolders().filter((recentFolder) => {
-    return recentFolder.path !== folder.path;
+    return recentFolder.path !== validated.path;
   });
 
-  folders.unshift(folder);
+  folders.unshift(validated);
   const trimmed = folders.slice(0, MAX_RECENT);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
   return trimmed;
@@ -67,7 +43,6 @@ function removeRecentFolder(path: string): RecentFolder[] {
   const folders = readRecentFolders().filter((recentFolder) => {
     return recentFolder.path !== path;
   });
-
   localStorage.setItem(STORAGE_KEY, JSON.stringify(folders));
   return folders;
 }

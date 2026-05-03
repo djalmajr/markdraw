@@ -8,7 +8,9 @@
     "dev:frontend": "vite",
     "build": "tauri build",
     "build:frontend": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test e2e/specs",
+    "test:e2e": "bun test e2e/specs"
   },
   "dependencies": {
     "@asciimark/core": "workspace:*",

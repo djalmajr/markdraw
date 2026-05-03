@@ -1,0 +1,14 @@
+---
+title: Sample guide
+---
+= Sample guide
+
+A short AsciiDoc file used by the desktop E2E harness.
+
+== First section
+
+Body paragraph with _emphasis_.
+
+== Second section
+
+include::partials/intro.adoc[]

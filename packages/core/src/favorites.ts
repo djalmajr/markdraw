@@ -1,11 +1,7 @@
-const STORAGE_KEY = "asciimark-favorites";
+import * as v from "valibot";
+import { FavoriteFileSchema, type FavoriteFile, tryParse } from "./schemas.ts";
 
-interface FavoriteFile {
-  name: string;
-  path: string;
-  rootName: string;
-  rootPath: string;
-}
+const STORAGE_KEY = "asciimark-favorites";
 
 function readFavorites(): FavoriteFile[] {
   try {
@@ -13,15 +9,12 @@ function readFavorites(): FavoriteFile[] {
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item: unknown): item is FavoriteFile =>
-        typeof item === "object" &&
-        item !== null &&
-        typeof (item as FavoriteFile).name === "string" &&
-        typeof (item as FavoriteFile).path === "string" &&
-        typeof (item as FavoriteFile).rootName === "string" &&
-        typeof (item as FavoriteFile).rootPath === "string",
-    );
+    const out: FavoriteFile[] = [];
+    for (const item of parsed) {
+      const fav = tryParse(FavoriteFileSchema, item);
+      if (fav) out.push(fav);
+    }
+    return out;
   } catch {
     return [];
   }
@@ -32,10 +25,11 @@ function getFavorites(): FavoriteFile[] {
 }
 
 function addFavorite(file: FavoriteFile): FavoriteFile[] {
+  const validated = v.parse(FavoriteFileSchema, file);
   const favorites = readFavorites().filter(
-    (f) => !(f.path === file.path && f.rootPath === file.rootPath),
+    (f) => !(f.path === validated.path && f.rootPath === validated.rootPath),
   );
-  favorites.unshift(file);
+  favorites.unshift(validated);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(favorites));
   return favorites;
 }

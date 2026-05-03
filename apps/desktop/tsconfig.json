@@ -9,5 +9,9 @@
       "@asciimark/ui/*": ["../../packages/ui/src/*"]
     }
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "../../packages/ui/src/icons.d.ts",
+    "../../packages/core/src/ambient.d.ts"
+  ]
 }

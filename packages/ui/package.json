@@ -6,6 +6,13 @@
   "exports": {
     "./*": "./src/*"
   },
+  "scripts": {
+    "test": "bun test && vitest run --config vitest.config.ts",
+    "test:bun": "bun test",
+    "test:vitest": "vitest run --config vitest.config.ts",
+    "test:vitest:watch": "vitest --config vitest.config.ts",
+    "test:coverage": "bun test --coverage && vitest run --config vitest.config.ts --coverage"
+  },
   "dependencies": {
     "@asciimark/core": "workspace:*",
     "@codemirror/commands": "^6.8.1",
@@ -26,6 +33,15 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "@iconify/json": "^2.2.441",
+    "@solidjs/testing-library": "^0.8.10",
+    "@testing-library/jest-dom": "^6.5.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "happy-dom": "^17.0.0",
+    "typescript": "^5.9.3",
+    "unplugin-icons": "^23.0.1",
+    "vite": "^7.3.1",
+    "vite-plugin-solid": "^2.11.10",
+    "vitest": "^2.1.9"
   }
 }

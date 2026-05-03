@@ -1,4 +1,11 @@
 import type { Frontmatter } from "./frontmatter.ts";
+import {
+  PersistedTabSchema,
+  PersistedTabSessionSchema,
+  type PersistedTab,
+  type PersistedTabSession,
+  tryParse,
+} from "./schemas.ts";
 
 export type TabId = string;
 
@@ -20,19 +27,7 @@ export interface TabState {
   needsLoad: boolean;
 }
 
-export interface PersistedTab {
-  id: TabId;
-  filePath: string;
-  rootId: string;
-  fileName: string;
-  isPinned: boolean;
-  editorMode: "edit" | "split" | "preview";
-}
-
-export interface PersistedTabSession {
-  tabs: PersistedTab[];
-  activeTabId: TabId | null;
-}
+export type { PersistedTab, PersistedTabSession };
 
 export function makeTabId(rootId: string, filePath: string): TabId {
   return `${rootId}::${filePath}`;
@@ -46,38 +41,36 @@ export function parseTabId(tabId: TabId): { rootId: string; filePath: string } {
 
 const STORAGE_KEY = "asciimark-tab-session";
 
-function isPersistedTab(item: unknown): item is PersistedTab {
-  if (typeof item !== "object" || item === null) return false;
-  const t = item as Record<string, unknown>;
-  return (
-    typeof t.id === "string" &&
-    typeof t.filePath === "string" &&
-    typeof t.rootId === "string" &&
-    typeof t.fileName === "string" &&
-    typeof t.isPinned === "boolean" &&
-    (t.editorMode === "edit" || t.editorMode === "split" || t.editorMode === "preview")
-  );
-}
-
 export function getTabSession(): PersistedTabSession | null {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return null;
-    const parsed = JSON.parse(stored);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const tabs = Array.isArray(parsed.tabs) ? parsed.tabs.filter(isPersistedTab) : [];
+
+    // Validate the wrapper, but tolerate individual broken tabs by filtering
+    // them out instead of rejecting the entire session.
+    const raw = JSON.parse(stored);
+    if (typeof raw !== "object" || raw === null) return null;
+
+    const tabs = Array.isArray((raw as { tabs?: unknown }).tabs)
+      ? ((raw as { tabs: unknown[] }).tabs
+          .map((t) => tryParse(PersistedTabSchema, t))
+          .filter((t): t is PersistedTab => t !== null))
+      : [];
+
     if (tabs.length === 0) return null;
-    return {
-      tabs,
-      activeTabId: typeof parsed.activeTabId === "string" ? parsed.activeTabId : null,
-    };
+    const activeTabId = typeof (raw as { activeTabId?: unknown }).activeTabId === "string"
+      ? (raw as { activeTabId: string }).activeTabId
+      : null;
+    return { tabs, activeTabId };
   } catch {
     return null;
   }
 }
 
 export function setTabSession(session: PersistedTabSession): void {
-  const persisted: PersistedTabSession = {
+  // Normalize through the schema so accidental extra runtime fields
+  // never reach storage.
+  const normalized: PersistedTabSession = {
     tabs: session.tabs.map((t) => ({
       id: t.id,
       filePath: t.filePath,
@@ -88,7 +81,12 @@ export function setTabSession(session: PersistedTabSession): void {
     })),
     activeTabId: session.activeTabId,
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+  // Throws on caller-side bugs that would otherwise corrupt storage silently.
+  const validated = tryParse(PersistedTabSessionSchema, normalized);
+  if (!validated) {
+    throw new Error("setTabSession: invalid PersistedTabSession");
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(validated));
 }
 
 export function clearTabSession(): void {

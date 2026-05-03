@@ -10,6 +10,19 @@ dist
 coverage
 *.lcov
 
+# bench results (machine-specific)
+**/__bench__/last-run.json
+
+# stryker mutation testing
+**/.stryker-tmp
+**/stryker-tmp
+**/reports/mutation
+packages/*/reports
+
+# fuzzing artifacts
+**/fuzz/findings
+**/fuzz/corpus
+
 # logs
 logs
 _.log
@@ -32,6 +45,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Tauri
 apps/desktop/src-tauri/target
+apps/desktop/src-tauri/llvm-cov-target
 
 # Finder (MacOS) folder config
 .DS_Store

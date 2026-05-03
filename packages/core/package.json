@@ -6,6 +6,17 @@
   "exports": {
     "./*": "./src/*"
   },
+  "scripts": {
+    "test": "bun test",
+    "test:coverage": "bun test --coverage",
+    "test:bench": "bun run src/__bench__/conversion.bench.ts",
+    "test:mutation": "stryker run",
+    "fuzz:frontmatter": "jazzer fuzz/frontmatter.fuzz.ts -- -timeout=30",
+    "fuzz:scan-includes": "jazzer fuzz/scan-includes.fuzz.ts -- -timeout=30",
+    "fuzz:xrefs": "jazzer fuzz/xrefs.fuzz.ts -- -timeout=30",
+    "fuzz:schemas": "jazzer fuzz/schemas.fuzz.ts -- -timeout=30",
+    "fuzz:ci": "bun run fuzz:frontmatter && bun run fuzz:scan-includes && bun run fuzz:xrefs && bun run fuzz:schemas"
+  },
   "dependencies": {
     "@asciidoctor/core": "^3.0.4",
     "@mdit/plugin-alert": "^0.22.4",
@@ -25,12 +36,16 @@
     "markdown-it-sub": "^2.0.0",
     "markdown-it-sup": "^2.0.0",
     "markdown-it-task-lists": "^2.1.1",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "valibot": "^1.1.0"
   },
   "devDependencies": {
+    "@jazzer.js/core": "^2.1.0",
+    "@stryker-mutator/core": "^8.7.1",
     "@types/js-yaml": "^4.0.9",
     "@types/markdown-it": "^14.1.2",
     "@types/markdown-it-anchor": "^7.0.0",
+    "fast-check": "^3.23.2",
     "typescript": "^5.9.3"
   }
 }

@@ -84,6 +84,12 @@ interface AppShellProps {
    */
   resolveImageSrc?: (src: string) => string | null;
   onToggleShowHiddenEntries?: (enabled: boolean) => void | Promise<void>;
+  /**
+   * Force-reload a single workspace root from disk. Optional — currently
+   * wired by the extension to recover from stale handles after a permission
+   * regrant. Desktop relies on the watcher and does not pass this.
+   */
+  onRefreshRoot?: (rootId: string) => void | Promise<void>;
   onReorderRoots?: (newOrder: string[]) => void;
   tabStore?: TabStore;
   onActivateTab?: (tabId: string) => void;

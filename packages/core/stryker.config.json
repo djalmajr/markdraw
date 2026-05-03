@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-js/master/packages/core/schema/stryker-schema.json",
+  "_comment": "Mutation testing for the core package. Stryker has no first-party Bun runner, so we use the command runner that delegates to `bun test`. Slow — designed to run nightly or under a label, not on every commit.",
+  "packageManager": "npm",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "bun test src --bail"
+  },
+  "tempDirName": "stryker-tmp",
+  "cleanTempDir": true,
+  "concurrency": 4,
+  "timeoutMS": 30000,
+  "mutate": [
+    "src/utils.ts",
+    "src/frontmatter.ts",
+    "src/tabs.ts",
+    "src/recent-files.ts",
+    "src/recent-folders.ts",
+    "src/favorites.ts",
+    "src/editor-prefs.ts",
+    "src/font-prefs.ts",
+    "src/markdown.ts",
+    "src/asciidoc.ts",
+    "src/kroki.ts"
+  ],
+  "_comment_ignore": "ignorePatterns controls files COPIED to the sandbox; tests must be copied so the runner can execute them. Only exclude truly heavy directories.",
+  "ignorePatterns": [
+    "**/__bench__/**",
+    "node_modules",
+    "stryker-tmp",
+    "reports",
+    "dist",
+    "coverage"
+  ],
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": 0
+  },
+  "reporters": ["clear-text", "html", "progress"],
+  "htmlReporter": {
+    "fileName": "reports/mutation/index.html"
+  },
+  "disableTypeChecks": true
+}

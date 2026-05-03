@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 #[derive(Serialize, Clone)]
 pub struct DirEntry {
@@ -23,7 +23,7 @@ pub struct WatchEvent {
 /// These are caches/build artifacts/dependencies that would freeze the tree
 /// (and any subsequent re-renders) if we walked them. The user can still
 /// access them outside the app.
-const ALWAYS_IGNORED_DIRS: &[&str] = &[
+pub const ALWAYS_IGNORED_DIRS: &[&str] = &[
     "node_modules",
     "dist",
     "build",
@@ -39,7 +39,7 @@ const ALWAYS_IGNORED_DIRS: &[&str] = &[
 
 /// Hidden tooling directories that are skipped *only* when "show hidden" is
 /// off. With show hidden enabled the user expects to see them.
-const HIDDEN_TOOL_DIRS: &[&str] = &[
+pub const HIDDEN_TOOL_DIRS: &[&str] = &[
     ".git",
     ".next",
     ".nuxt",
@@ -53,7 +53,7 @@ const HIDDEN_TOOL_DIRS: &[&str] = &[
     ".nyc_output",
 ];
 
-fn read_dir_recursive(dir: &Path, base: &Path, include_hidden_entries: bool) -> Result<Vec<DirEntry>, String> {
+pub fn read_dir_recursive(dir: &Path, base: &Path, include_hidden_entries: bool) -> Result<Vec<DirEntry>, String> {
     let mut entries = Vec::new();
     let read = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
 
@@ -136,21 +136,12 @@ async fn read_file(path: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn read_file_relative(root: String, relative_path: String) -> Result<String, String> {
-    let full = PathBuf::from(&root).join(&relative_path);
-    std::fs::read_to_string(&full).map_err(|e| e.to_string())
+    read_file_relative_impl(&PathBuf::from(&root), &relative_path)
 }
 
 #[tauri::command]
 async fn read_files_relative(root: String, paths: Vec<String>) -> Result<std::collections::HashMap<String, String>, String> {
-    let root = PathBuf::from(&root);
-    let mut result = std::collections::HashMap::new();
-    for rel_path in paths {
-        let full = root.join(&rel_path);
-        if let Ok(content) = std::fs::read_to_string(&full) {
-            result.insert(rel_path, content);
-        }
-    }
-    Ok(result)
+    Ok(read_files_relative_impl(&PathBuf::from(&root), &paths))
 }
 
 #[tauri::command]
@@ -164,12 +155,61 @@ async fn rename_file(
     old_relative: String,
     new_relative: String,
 ) -> Result<(), String> {
-    let root_path = PathBuf::from(&root);
-    let from = root_path.join(&old_relative);
-    let to = root_path.join(&new_relative);
+    rename_file_impl(&PathBuf::from(&root), &old_relative, &new_relative)
+}
 
-    // Sanity: source and destination must resolve inside the workspace root
-    let root_canon = std::fs::canonicalize(&root_path).map_err(|e| e.to_string())?;
+#[tauri::command]
+async fn trash_path(root: String, relative: String) -> Result<(), String> {
+    let target_canon = resolve_within_root(&PathBuf::from(&root), &relative)?;
+    trash::delete(&target_canon).map_err(|e| e.to_string())
+}
+
+/// Read a file by joining `relative` to `root`. Public for testing.
+pub fn read_file_relative_impl(root: &Path, relative: &str) -> Result<String, String> {
+    let full = root.join(relative);
+    std::fs::read_to_string(&full).map_err(|e| e.to_string())
+}
+
+/// Read multiple files relative to root, silently skipping unreadable ones.
+pub fn read_files_relative_impl(
+    root: &Path,
+    paths: &[String],
+) -> std::collections::HashMap<String, String> {
+    let mut result = std::collections::HashMap::new();
+    for rel_path in paths {
+        let full = root.join(rel_path);
+        if let Ok(content) = std::fs::read_to_string(&full) {
+            result.insert(rel_path.clone(), content);
+        }
+    }
+    result
+}
+
+/// Resolve `relative` against `root` and confirm the result still lives
+/// inside the canonicalized root. Returns the canonicalized target on
+/// success; rejects symlink escapes, `..` traversal, and absolute paths
+/// pointing outside the workspace.
+pub fn resolve_within_root(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let target = root.join(relative);
+    let root_canon = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let target_canon = std::fs::canonicalize(&target).map_err(|e| e.to_string())?;
+    if !target_canon.starts_with(&root_canon) {
+        return Err("path escapes workspace root".into());
+    }
+    Ok(target_canon)
+}
+
+/// Move a file inside a workspace root, validating that both endpoints stay
+/// inside `root` and refusing to clobber an existing destination.
+pub fn rename_file_impl(
+    root: &Path,
+    old_relative: &str,
+    new_relative: &str,
+) -> Result<(), String> {
+    let from = root.join(old_relative);
+    let to = root.join(new_relative);
+
+    let root_canon = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
     let from_canon = std::fs::canonicalize(&from).map_err(|e| e.to_string())?;
     if !from_canon.starts_with(&root_canon) {
         return Err("rename source escapes workspace root".into());
@@ -188,21 +228,6 @@ async fn rename_file(
     std::fs::rename(&from, &to).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-async fn trash_path(root: String, relative: String) -> Result<(), String> {
-    let root_path = PathBuf::from(&root);
-    let target = root_path.join(&relative);
-
-    // Sanity: target must resolve inside the workspace root
-    let root_canon = std::fs::canonicalize(&root_path).map_err(|e| e.to_string())?;
-    let target_canon = std::fs::canonicalize(&target).map_err(|e| e.to_string())?;
-    if !target_canon.starts_with(&root_canon) {
-        return Err("path escapes workspace root".into());
-    }
-
-    trash::delete(&target_canon).map_err(|e| e.to_string())
-}
-
 struct WatcherHolder(
     Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>>,
 );
@@ -211,8 +236,46 @@ struct DirWatcherHolder(
     Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>>,
 );
 
+/// Build a debouncing watcher over `paths`. `recursive` selects RecursiveMode
+/// (false → just the file/dir itself; true → all descendants). `on_change`
+/// receives the list of changed paths (forward-slash normalized) per debounced
+/// batch. Returns the debouncer so the caller keeps it alive.
+pub fn make_watcher<F>(
+    paths: &[String],
+    debounce: Duration,
+    recursive: bool,
+    on_change: F,
+) -> Result<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>, String>
+where
+    F: Fn(Vec<String>) + Send + 'static,
+{
+    let mut debouncer = new_debouncer(debounce, move |events: Result<Vec<DebouncedEvent>, notify::Error>| {
+        if let Ok(events) = events {
+            let changed: Vec<String> = events
+                .iter()
+                .map(|e| e.path.to_string_lossy().replace('\\', "/"))
+                .collect();
+            on_change(changed);
+        }
+    })
+    .map_err(|e| e.to_string())?;
+
+    let mode = if recursive {
+        notify::RecursiveMode::Recursive
+    } else {
+        notify::RecursiveMode::NonRecursive
+    };
+
+    let watcher = debouncer.watcher();
+    for p in paths {
+        let _ = watcher.watch(Path::new(p), mode);
+    }
+
+    Ok(debouncer)
+}
+
 #[tauri::command]
-async fn watch_paths(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+async fn watch_paths<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> Result<(), String> {
     // Stop existing watcher
     if let Some(state) = app.try_state::<WatcherHolder>() {
         let mut lock = state.0.lock().map_err(|e| e.to_string())?;
@@ -220,25 +283,14 @@ async fn watch_paths(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
     }
 
     let app_clone = app.clone();
-    let mut debouncer = new_debouncer(
+    let debouncer = make_watcher(
+        &paths,
         Duration::from_millis(500),
-        move |events: Result<Vec<DebouncedEvent>, notify::Error>| {
-            if let Ok(events) = events {
-                let changed: Vec<String> = events
-                    .iter()
-                    .map(|e| e.path.to_string_lossy().replace('\\', "/"))
-                    .collect();
-                let _ = app_clone.emit("fs-change", WatchEvent { paths: changed });
-            }
+        false,
+        move |changed| {
+            let _ = app_clone.emit("fs-change", WatchEvent { paths: changed });
         },
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Watch each path
-    let watcher = debouncer.watcher();
-    for p in &paths {
-        let _ = watcher.watch(Path::new(p), notify::RecursiveMode::NonRecursive);
-    }
+    )?;
 
     // Store to prevent drop
     if let Some(state) = app.try_state::<WatcherHolder>() {
@@ -250,7 +302,7 @@ async fn watch_paths(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn stop_watching(app: AppHandle) -> Result<(), String> {
+async fn stop_watching<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     if let Some(state) = app.try_state::<WatcherHolder>() {
         let mut lock = state.0.lock().map_err(|e| e.to_string())?;
         *lock = None;
@@ -259,31 +311,21 @@ async fn stop_watching(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn watch_dirs(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+async fn watch_dirs<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> Result<(), String> {
     if let Some(state) = app.try_state::<DirWatcherHolder>() {
         let mut lock = state.0.lock().map_err(|e| e.to_string())?;
         *lock = None;
     }
 
     let app_clone = app.clone();
-    let mut debouncer = new_debouncer(
+    let debouncer = make_watcher(
+        &paths,
         Duration::from_millis(800),
-        move |events: Result<Vec<DebouncedEvent>, notify::Error>| {
-            if let Ok(events) = events {
-                let changed: Vec<String> = events
-                    .iter()
-                    .map(|e| e.path.to_string_lossy().replace('\\', "/"))
-                    .collect();
-                let _ = app_clone.emit("fs-tree-change", WatchEvent { paths: changed });
-            }
+        true,
+        move |changed| {
+            let _ = app_clone.emit("fs-tree-change", WatchEvent { paths: changed });
         },
-    )
-    .map_err(|e| e.to_string())?;
-
-    let watcher = debouncer.watcher();
-    for p in &paths {
-        let _ = watcher.watch(Path::new(p), notify::RecursiveMode::Recursive);
-    }
+    )?;
 
     if let Some(state) = app.try_state::<DirWatcherHolder>() {
         let mut lock = state.0.lock().map_err(|e| e.to_string())?;
@@ -294,7 +336,7 @@ async fn watch_dirs(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn stop_watching_dirs(app: AppHandle) -> Result<(), String> {
+async fn stop_watching_dirs<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     if let Some(state) = app.try_state::<DirWatcherHolder>() {
         let mut lock = state.0.lock().map_err(|e| e.to_string())?;
         *lock = None;
@@ -589,4 +631,670 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn touch(path: &Path) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, b"").unwrap();
+    }
+
+    fn names(entries: &[DirEntry]) -> Vec<&str> {
+        entries.iter().map(|e| e.name.as_str()).collect()
+    }
+
+    #[test]
+    fn read_dir_returns_directories_before_files_alphabetically() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("zebra.md"));
+        touch(&root.join("apple.md"));
+        fs::create_dir(root.join("zfolder")).unwrap();
+        fs::create_dir(root.join("alpha-folder")).unwrap();
+
+        let entries = read_dir_recursive(root, root, false).unwrap();
+        assert_eq!(names(&entries), vec!["alpha-folder", "zfolder", "apple.md", "zebra.md"]);
+        assert!(entries[0].children.is_some(), "directories should carry a children vec");
+        assert!(entries[2].children.is_none(), "files must not carry children");
+    }
+
+    #[test]
+    fn read_dir_skips_dotfiles_when_hidden_flag_is_off() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join(".secret"));
+        touch(&root.join("README.md"));
+
+        let entries = read_dir_recursive(root, root, false).unwrap();
+        assert_eq!(names(&entries), vec!["README.md"]);
+
+        let entries = read_dir_recursive(root, root, true).unwrap();
+        assert_eq!(names(&entries), vec![".secret", "README.md"]);
+    }
+
+    #[test]
+    fn read_dir_always_skips_bulky_dirs_even_with_hidden_on() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        for ignored in ALWAYS_IGNORED_DIRS {
+            fs::create_dir(root.join(ignored)).unwrap();
+            touch(&root.join(ignored).join("inside.md"));
+        }
+        touch(&root.join("README.md"));
+
+        let entries = read_dir_recursive(root, root, true).unwrap();
+        assert_eq!(names(&entries), vec!["README.md"]);
+    }
+
+    #[test]
+    fn read_dir_hidden_tool_dirs_appear_only_when_hidden_flag_is_on() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir(root.join(".git")).unwrap();
+        fs::create_dir(root.join(".vscode")).unwrap();
+        touch(&root.join("README.md"));
+
+        let entries = read_dir_recursive(root, root, false).unwrap();
+        assert_eq!(names(&entries), vec!["README.md"]);
+
+        let entries = read_dir_recursive(root, root, true).unwrap();
+        let entry_names = names(&entries);
+        assert!(entry_names.contains(&".git"));
+        assert!(entry_names.contains(&".vscode"));
+        assert!(entry_names.contains(&"README.md"));
+    }
+
+    #[test]
+    fn read_dir_returns_relative_paths_with_forward_slashes() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir(root.join("docs")).unwrap();
+        touch(&root.join("docs").join("guide.adoc"));
+
+        let entries = read_dir_recursive(root, root, false).unwrap();
+        let docs = entries.iter().find(|e| e.name == "docs").unwrap();
+        let children = docs.children.as_ref().unwrap();
+        assert_eq!(children.len(), 1);
+        let guide = &children[0];
+        assert_eq!(guide.path, "docs/guide.adoc");
+        assert!(!guide.path.contains('\\'));
+    }
+
+    #[test]
+    fn read_dir_recurses_into_nested_directories() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let deep = root.join("a").join("b").join("c");
+        fs::create_dir_all(&deep).unwrap();
+        touch(&deep.join("leaf.md"));
+
+        let entries = read_dir_recursive(root, root, false).unwrap();
+        let a = entries.iter().find(|e| e.name == "a").unwrap();
+        let b = a.children.as_ref().unwrap().iter().find(|e| e.name == "b").unwrap();
+        let c = b.children.as_ref().unwrap().iter().find(|e| e.name == "c").unwrap();
+        let leaf = &c.children.as_ref().unwrap()[0];
+        assert_eq!(leaf.kind, "file");
+        assert_eq!(leaf.path, "a/b/c/leaf.md");
+    }
+
+    #[test]
+    fn read_dir_returns_error_on_missing_directory() {
+        let dir = tempdir().unwrap();
+        let bogus = dir.path().join("does-not-exist");
+        let result = read_dir_recursive(&bogus, &bogus, false);
+        assert!(result.is_err());
+    }
+
+    /// Performance gate: a flat directory of 5,000 files MUST complete in
+    /// under 1 second on any reasonable machine. The bench at
+    /// `benches/read_dir.rs` gives finer-grained timings; this test only
+    /// guards against accidental O(n²) regressions and stack overflows.
+    /// Marked `#[ignore]` so cold runs of `cargo test` stay fast — opt in
+    /// with `cargo test -- --ignored`.
+    #[test]
+    #[ignore]
+    fn read_dir_handles_5000_files_under_1s() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        for i in 0..5_000 {
+            fs::write(root.join(format!("note-{i:05}.md")), b"# x\n").unwrap();
+        }
+
+        let start = std::time::Instant::now();
+        let entries = read_dir_recursive(root, root, false).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(entries.len(), 5_000, "all files should be visible");
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "5k flat files took {elapsed:?} — possible regression",
+        );
+    }
+
+    /// Validates the IGNORED_DIRS filter is the early-exit path the bench
+    /// assumes: 10k files inside `node_modules` must NOT contribute to the
+    /// walked file count, otherwise the function would degrade to O(N) on
+    /// the dependency directory rather than skip it in O(1).
+    #[test]
+    #[ignore]
+    fn read_dir_skips_node_modules_in_o1() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("README.md"), b"# top\n").unwrap();
+
+        let nm = root.join("node_modules");
+        fs::create_dir(&nm).unwrap();
+        for i in 0..10_000 {
+            fs::write(nm.join(format!("pkg-{i:05}.json")), b"{}\n").unwrap();
+        }
+
+        let start = std::time::Instant::now();
+        let entries = read_dir_recursive(root, root, false).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(entries.len(), 1, "only README.md should be visible");
+        assert!(
+            elapsed < std::time::Duration::from_millis(50),
+            "skipping node_modules took {elapsed:?} — filter regressed",
+        );
+    }
+
+    // ── Watcher tests (no AppHandle needed) ──────────────────────────────
+    //
+    // The make_watcher function is the testable core: it accepts a callback
+    // and a mode flag. We exercise it directly with a Vec<Vec<String>>
+    // collector so we don't need a Tauri runtime to validate that file events
+    // really do propagate through the debouncer.
+
+    use std::sync::{Arc, Mutex as StdMutex};
+
+    fn collect_changes()
+    -> (Arc<StdMutex<Vec<Vec<String>>>>, impl Fn(Vec<String>) + Send + 'static + Clone) {
+        let buf: Arc<StdMutex<Vec<Vec<String>>>> = Arc::new(StdMutex::new(Vec::new()));
+        let buf_clone = buf.clone();
+        let cb = move |changed: Vec<String>| {
+            buf_clone.lock().unwrap().push(changed);
+        };
+        (buf, cb)
+    }
+
+    fn wait_for_event(buf: &Arc<StdMutex<Vec<Vec<String>>>>, timeout: Duration) -> bool {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if !buf.lock().unwrap().is_empty() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    #[test]
+    #[ignore]
+    fn make_watcher_dispatches_changes_with_short_debounce() {
+        let dir = tempdir().unwrap();
+        let watched = dir.path().to_path_buf();
+
+        let (buf, cb) = collect_changes();
+        let _debouncer = make_watcher(
+            &[watched.to_string_lossy().into()],
+            Duration::from_millis(100),
+            false,
+            cb,
+        )
+        .unwrap();
+
+        // Give the OS-level watcher a moment to attach before mutating.
+        std::thread::sleep(Duration::from_millis(150));
+        fs::write(watched.join("hello.md"), b"# new\n").unwrap();
+
+        assert!(
+            wait_for_event(&buf, Duration::from_secs(3)),
+            "expected at least one change event within 3s",
+        );
+        let batches = buf.lock().unwrap();
+        let any_path = batches.iter().flatten().any(|p| p.contains("hello.md"));
+        assert!(any_path, "change event must include the modified path; got {batches:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn make_watcher_recursive_picks_up_nested_changes() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let sub = root.join("sub");
+        fs::create_dir(&sub).unwrap();
+
+        let (buf, cb) = collect_changes();
+        let _debouncer = make_watcher(
+            &[root.to_string_lossy().into()],
+            Duration::from_millis(100),
+            true,
+            cb,
+        )
+        .unwrap();
+
+        std::thread::sleep(Duration::from_millis(150));
+        fs::write(sub.join("nested.md"), b"# nested\n").unwrap();
+
+        assert!(
+            wait_for_event(&buf, Duration::from_secs(3)),
+            "recursive mode must surface descendant changes",
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn make_watcher_non_recursive_ignores_grandchild_changes() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let sub = root.join("sub");
+        fs::create_dir(&sub).unwrap();
+
+        let (buf, cb) = collect_changes();
+        let _debouncer = make_watcher(
+            &[root.to_string_lossy().into()],
+            Duration::from_millis(100),
+            false,
+            cb,
+        )
+        .unwrap();
+
+        std::thread::sleep(Duration::from_millis(150));
+        // Write inside the subdir. Non-recursive mode watches only `root`
+        // itself; modifying a grandchild should NOT raise an event.
+        fs::write(sub.join("nested.md"), b"# nested\n").unwrap();
+
+        // Wait long enough that any deferred event would have fired.
+        std::thread::sleep(Duration::from_millis(400));
+        let batches = buf.lock().unwrap();
+        let any_nested = batches
+            .iter()
+            .flatten()
+            .any(|p| p.contains("nested.md"));
+        assert!(
+            !any_nested,
+            "non-recursive watcher leaked a descendant event: {batches:?}",
+        );
+    }
+
+    #[test]
+    fn make_watcher_dropping_debouncer_stops_callbacks() {
+        let dir = tempdir().unwrap();
+        let watched = dir.path().to_path_buf();
+        let (buf, cb) = collect_changes();
+
+        {
+            let _debouncer = make_watcher(
+                &[watched.to_string_lossy().into()],
+                Duration::from_millis(100),
+                false,
+                cb,
+            )
+            .unwrap();
+            // Drop happens here.
+        }
+
+        std::thread::sleep(Duration::from_millis(150));
+        fs::write(watched.join("after-drop.md"), b"# after\n").unwrap();
+        std::thread::sleep(Duration::from_millis(400));
+
+        let batches = buf.lock().unwrap();
+        let any_after = batches
+            .iter()
+            .flatten()
+            .any(|p| p.contains("after-drop.md"));
+        assert!(
+            !any_after,
+            "watcher must be inert after debouncer is dropped: {batches:?}",
+        );
+    }
+
+    // ── Mock-runtime tests (state lifecycle through Tauri's IPC) ─────────
+    //
+    // We exercise the holder pattern via a real (mocked) app: invoking the
+    // commands through Tauri's IPC layer is what production does, so the
+    // state-lifecycle bugs that hide in `app.try_state::<...>()` only show
+    // up when called from a managed AppHandle.
+
+    use tauri::test::{mock_app, MockRuntime};
+    use tauri::{Listener, Manager};
+
+    fn build_test_app() -> tauri::App<MockRuntime> {
+        let app = mock_app();
+        app.manage(WatcherHolder(Mutex::new(None)));
+        app.manage(DirWatcherHolder(Mutex::new(None)));
+        app
+    }
+
+    #[test]
+    fn watch_paths_command_stores_debouncer_and_stop_clears_it() {
+        let app = build_test_app();
+        let dir = tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+
+        let handle = app.handle().clone();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            watch_paths(handle.clone(), vec![path.clone()]).await.unwrap();
+        });
+        {
+            let holder = app.state::<WatcherHolder>();
+            assert!(holder.0.lock().unwrap().is_some(), "debouncer must be stored");
+        }
+
+        runtime.block_on(async {
+            stop_watching(handle.clone()).await.unwrap();
+        });
+        {
+            let holder = app.state::<WatcherHolder>();
+            assert!(holder.0.lock().unwrap().is_none(), "stop must clear state");
+        }
+    }
+
+    #[test]
+    fn watch_dirs_command_uses_separate_state_holder() {
+        let app = build_test_app();
+        let dir = tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+
+        let handle = app.handle().clone();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            watch_dirs(handle.clone(), vec![path.clone()]).await.unwrap();
+        });
+        // Both holders coexist, but only DirWatcherHolder should be populated.
+        let dir_holder = app.state::<DirWatcherHolder>();
+        let path_holder = app.state::<WatcherHolder>();
+        assert!(dir_holder.0.lock().unwrap().is_some());
+        assert!(
+            path_holder.0.lock().unwrap().is_none(),
+            "watch_dirs must NOT touch the path-watcher slot",
+        );
+
+        runtime.block_on(async {
+            stop_watching_dirs(handle.clone()).await.unwrap();
+        });
+        assert!(dir_holder.0.lock().unwrap().is_none());
+    }
+
+    #[test]
+    #[ignore]
+    fn watch_paths_command_emits_fs_change_event_on_modification() {
+        let app = build_test_app();
+        let dir = tempdir().unwrap();
+        let watched = dir.path().to_path_buf();
+        let received: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let received_clone = received.clone();
+
+        app.listen("fs-change", move |event| {
+            let payload = event.payload().to_string();
+            received_clone.lock().unwrap().push(payload);
+        });
+
+        let handle = app.handle().clone();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            watch_paths(
+                handle.clone(),
+                vec![watched.to_string_lossy().into()],
+            )
+            .await
+            .unwrap();
+        });
+
+        // The default debounce is 500 ms. Wait a beat for the OS watcher to
+        // attach, then mutate.
+        std::thread::sleep(Duration::from_millis(200));
+        fs::write(watched.join("a.md"), b"# new\n").unwrap();
+
+        // 500 ms debounce + slack. Macos fsevent occasionally takes longer
+        // on the first event after attach.
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(3) {
+            if !received.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let events = received.lock().unwrap();
+        assert!(
+            events.iter().any(|p| p.contains("a.md")),
+            "expected a fs-change event payload mentioning a.md; got {events:?}",
+        );
+    }
+
+    /// Deep recursion must not stack-overflow. Use 100 levels with very short
+    /// names to stay under macOS PATH_MAX (~1 KiB) while still proving the
+    /// recursion isn't unbounded.
+    #[test]
+    #[ignore]
+    fn read_dir_survives_100_levels_deep() {
+        let dir = tempdir().unwrap();
+        let mut path = dir.path().to_path_buf();
+        for _ in 0..100 {
+            path = path.join("d");
+            fs::create_dir(&path).unwrap();
+        }
+        fs::write(path.join("leaf.md"), b"# leaf\n").unwrap();
+
+        let result = read_dir_recursive(dir.path(), dir.path(), false);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn read_dir_sort_is_case_insensitive() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("Banana.md"));
+        touch(&root.join("apple.md"));
+        touch(&root.join("Cherry.md"));
+
+        let entries = read_dir_recursive(root, root, false).unwrap();
+        assert_eq!(names(&entries), vec!["apple.md", "Banana.md", "Cherry.md"]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ease_out_cubic_clamped_to_endpoints() {
+        use macos_maximize::ease_out_cubic;
+        assert!((ease_out_cubic(0.0) - 0.0).abs() < 1e-9);
+        assert!((ease_out_cubic(1.0) - 1.0).abs() < 1e-9);
+        // monotonic increasing
+        let mut prev = 0.0;
+        for i in 1..=10 {
+            let v = ease_out_cubic(i as f64 / 10.0);
+            assert!(v > prev);
+            prev = v;
+        }
+    }
+
+    #[test]
+    fn read_file_relative_returns_content() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("note.md"), "hello").unwrap();
+        let content = read_file_relative_impl(root, "note.md").unwrap();
+        assert_eq!(content, "hello");
+    }
+
+    #[test]
+    fn read_file_relative_returns_err_for_missing_file() {
+        let dir = tempdir().unwrap();
+        let result = read_file_relative_impl(dir.path(), "missing.md");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn read_files_relative_silently_skips_missing_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("a.md"), "A").unwrap();
+        fs::write(root.join("b.md"), "B").unwrap();
+        let map = read_files_relative_impl(
+            root,
+            &["a.md".into(), "missing.md".into(), "b.md".into()],
+        );
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get("a.md"), Some(&"A".to_string()));
+        assert_eq!(map.get("b.md"), Some(&"B".to_string()));
+        assert!(!map.contains_key("missing.md"));
+    }
+
+    #[test]
+    fn resolve_within_root_accepts_in_root_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("file.md"), "x").unwrap();
+        let resolved = resolve_within_root(root, "file.md").unwrap();
+        assert!(resolved.ends_with("file.md"));
+    }
+
+    #[test]
+    fn resolve_within_root_rejects_dotdot_escape() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path();
+        let root = parent.join("workspace");
+        fs::create_dir(&root).unwrap();
+        // Place a sibling file OUTSIDE the workspace; canonicalize would resolve
+        // `../sibling.md` to it. The contract is: must reject.
+        fs::write(parent.join("sibling.md"), "secret").unwrap();
+        let result = resolve_within_root(&root, "../sibling.md");
+        assert!(matches!(result, Err(ref msg) if msg.contains("escapes workspace root")));
+    }
+
+    #[test]
+    fn resolve_within_root_rejects_absolute_paths_pointing_elsewhere() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        // /etc on macOS canonicalizes to a real path that does not start with the
+        // tmp root. PathBuf::join with an absolute path replaces the base, which
+        // is exactly the attack we must defeat.
+        let result = resolve_within_root(root, "/etc/hosts");
+        // Either the path resolves outside (rejected with our message) or
+        // canonicalize fails. Both are acceptable — the invariant is "never
+        // returns a path that bypasses the root".
+        match result {
+            Err(msg) => assert!(msg.contains("escapes workspace root") || !msg.is_empty()),
+            Ok(canon) => panic!("expected rejection, got {canon:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_within_root_rejects_symlink_escapes() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path();
+        let root = parent.join("workspace");
+        fs::create_dir(&root).unwrap();
+        let outside = parent.join("outside.md");
+        fs::write(&outside, "secret").unwrap();
+
+        // Best-effort: symlink may fail on filesystems that don't allow it
+        // (e.g., FAT). Skip the assertion in that case.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(&outside, root.join("link.md")).unwrap();
+            let result = resolve_within_root(&root, "link.md");
+            assert!(matches!(result, Err(ref msg) if msg.contains("escapes workspace root")));
+        }
+    }
+
+    #[test]
+    fn rename_file_impl_renames_inside_root() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("a.md"), "content").unwrap();
+        rename_file_impl(root, "a.md", "b.md").unwrap();
+        assert!(!root.join("a.md").exists());
+        assert!(root.join("b.md").exists());
+        assert_eq!(fs::read_to_string(root.join("b.md")).unwrap(), "content");
+    }
+
+    #[test]
+    fn rename_file_impl_rejects_source_outside_root() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path();
+        let root = parent.join("workspace");
+        fs::create_dir(&root).unwrap();
+        fs::write(parent.join("outside.md"), "x").unwrap();
+        let result = rename_file_impl(&root, "../outside.md", "stolen.md");
+        assert!(matches!(result, Err(ref msg) if msg.contains("escapes workspace root")));
+        // Source must still exist — the call must NOT have moved anything.
+        assert!(parent.join("outside.md").exists());
+    }
+
+    #[test]
+    fn rename_file_impl_rejects_destination_outside_root() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path();
+        let root = parent.join("workspace");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("a.md"), "x").unwrap();
+        let result = rename_file_impl(&root, "a.md", "../escaped.md");
+        assert!(result.is_err());
+        // Source unchanged.
+        assert!(root.join("a.md").exists());
+        assert!(!parent.join("escaped.md").exists());
+    }
+
+    #[test]
+    fn rename_file_impl_refuses_to_clobber_existing_destination() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("a.md"), "A").unwrap();
+        fs::write(root.join("b.md"), "B").unwrap();
+        let result = rename_file_impl(root, "a.md", "b.md");
+        assert!(matches!(result, Err(ref msg) if msg.contains("destination already exists")));
+        // Both files unchanged.
+        assert_eq!(fs::read_to_string(root.join("a.md")).unwrap(), "A");
+        assert_eq!(fs::read_to_string(root.join("b.md")).unwrap(), "B");
+    }
+
+    #[test]
+    fn rename_file_impl_returns_err_for_missing_source() {
+        let dir = tempdir().unwrap();
+        let result = rename_file_impl(dir.path(), "missing.md", "renamed.md");
+        assert!(result.is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn interpolate_frame_endpoints() {
+        use macos_maximize::{interpolate_frame, CGPoint, CGRect, CGSize};
+        let a = CGRect {
+            origin: CGPoint { x: 0.0, y: 0.0 },
+            size: CGSize { width: 100.0, height: 100.0 },
+        };
+        let b = CGRect {
+            origin: CGPoint { x: 100.0, y: 100.0 },
+            size: CGSize { width: 300.0, height: 300.0 },
+        };
+        let mid = interpolate_frame(a, b, 0.5);
+        assert!((mid.origin.x - 50.0).abs() < 1e-9);
+        assert!((mid.size.width - 200.0).abs() < 1e-9);
+
+        let end = interpolate_frame(a, b, 1.0);
+        assert!((end.origin.x - 100.0).abs() < 1e-9);
+        assert!((end.size.height - 300.0).abs() < 1e-9);
+    }
 }

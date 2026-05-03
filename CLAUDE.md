@@ -1,6 +1,6 @@
-**CRITICAL**: These instructions are MANDATORY. Read all *.md files inside `.agents/rules` and its subfolders as well as `~/.agents/rules` to get context and rules.
+**CRITICAL**: These instructions are MANDATORY. Also read all *.md files inside `~/.agents/rules` (global rules) before starting any task.
 
-# AGENTS.md - Production-Grade Agent Directives
+# Production-Grade Agent Directives
 
 You are operating within a constrained context window and system prompts
 that bias you toward minimal, fast, often broken output. These directives
@@ -279,3 +279,265 @@ batches via `/batch`. Verify each change in context.
 When a file gets long enough that it's hard to reason about, suggest
 breaking it into smaller focused files. Keep the project navigable.
 
+---
+
+## 10. Test Quality
+
+### Observable Behavior Only
+A test is only accepted if it verifies observable behavior. Tests that
+exercise internals without proving a user-facing or contract-level outcome
+are noise — they slow CI, lock in implementation details, and give false
+confidence.
+
+### Forbidden Test Shapes
+Reject tests that only verify:
+- that something was called (spy assertions with no behavior check);
+- that something is defined / truthy / not undefined;
+- that a function returns "any object" without asserting its shape;
+- large snapshots without a clear intent comment;
+- internal implementation details with no business rule attached.
+
+### Accepted Test Categories
+Every new test must fall into at least one of these:
+- regression for a real bug (link the issue or describe the symptom);
+- domain rule (a stated business invariant);
+- property / invariant (holds for all inputs in a range);
+- API contract (request/response shape, status codes, error semantics);
+- integration with a real dependency (DB, HTTP, filesystem, IPC);
+- critical user flow (golden path of a feature);
+- security / permission boundary (authz, tenant isolation, path traversal);
+- concurrency / idempotency (retries, dedup, ordering, race conditions).
+
+### Mutation-Survival Bar (Critical Code)
+For critical code paths, a test must FAIL when any of these mutations are
+applied to the code under test:
+- swapping `>` for `>=` (and vice versa);
+- removing a validation check;
+- ignoring `tenantId` (or any scoping key);
+- duplicating a webhook delivery;
+- altering the order of states in a state machine;
+- removing a transaction wrapper;
+- removing an `idempotencyKey` (or replaying without it).
+
+If a test cannot detect at least one of these mutations on the code it
+covers, it is not exercising the rule it claims to protect — rewrite it
+or remove it.
+
+---
+
+## 11. Project Conventions
+
+### Solid UI Components
+Source: https://github.com/stefan-karger/solid-ui (Kobalte + corvu, Tailwind).
+When a UI primitive is needed (button, tabs, dropdown, toggle, tooltip, switch,
+accordion, alert, badge, card, checkbox, dialog, dropdown-menu, input, label,
+popover, select, separator, sheet, skeleton, slider, textarea, etc.), ALWAYS
+use the existing solid-ui component if one exists. Never reimplement primitives.
+Components live in `packages/ui/src/components/ui/`.
+
+To install a new component (CLI requires interactive input — create the file
+manually):
+1. Fetch source JSON from
+   `https://github.com/stefan-karger/solid-ui/blob/main/apps/docs/public/r/{component}.json`
+2. Copy the `content` field
+3. Save as `packages/ui/src/components/ui/{component}.tsx`
+4. Replace `~/lib/utils` import with `@asciimark/core/utils.ts`
+
+Registry index: https://github.com/stefan-karger/solid-ui/tree/main/apps/docs/public/r
+
+### GitHub Issues (source of truth for plans)
+
+Repos:
+- `djalmajr/asciimark` (private) — internal issues, development
+- `djalmajr/asciimark-releases` (public) — public issues, releases, site
+
+Required scope label on every issue (one or more):
+`desktop` (Tauri app), `site` (public site), `core` (core package),
+`ui` (UI components), `infra` (CI/CD, build, deploy).
+
+Plan flow:
+1. Plan mode — local draft in `.claude/plans/` (gitignored, throwaway)
+2. Leaving plan mode — open a GitHub issue with the plan body
+3. Implement — reference the issue from commits when relevant
+4. Close — close the issue when done
+
+Create issues with `gh issue create --repo djalmajr/asciimark --title "…"
+--body "…" --label "<scope>"` (chain `--label` for multiple).
+
+Plan-issue body template (markdown):
+```
+## Contexto
+(why this change is needed)
+
+## Arquivos
+(create / modify / remove)
+
+## Detalhamento
+(schemas, endpoints, components, etc.)
+
+## Tarefas
+- [ ] Item 1
+
+## Verificação
+(how to test)
+```
+
+Rules:
+- Issues are the source of truth for plans and tasks.
+- Local docs (`.adoc`, `.md`) are for code architecture / technical reference.
+- Never duplicate content between local docs and issues.
+- No GitHub Projects — labels are sufficient at the current stage.
+
+### Deploy & Pipelines
+
+**Repos:** `djalmajr/asciimark` (private source) and
+`djalmajr/asciimark-releases` (public — releases + GitHub Pages).
+
+**Desktop pipeline (`build-desktop.yml`)** — triggers on `v*` tag push or
+`workflow_dispatch`. Builds macOS arm64/x64, Ubuntu, Windows with signing,
+generates `release-notes.md` from conventional commits, normalizes asset
+names, generates `latest.json` (auto-updater), and publishes to the public
+repo with the release notes.
+
+To release desktop:
+```bash
+bun run bump:app <version>          # 0.6.0 or 0.6.0-rc.0 (prereleases ok)
+git add -u && git commit -m "chore: bump version to <version>"
+git tag v<version>
+git push origin main --tags         # tag triggers the pipeline
+```
+
+Version files MUST stay in sync with the tag (use `bun run bump:app` /
+`bun run bump:ext` — never edit manually):
+`apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json`,
+`apps/desktop/src-tauri/Cargo.toml`. `Cargo.lock` is updated automatically
+by `cargo check` after the bump — include it in the commit.
+
+**Site pipeline (`deploy-site.yml`)** — triggers on push to `main` with
+changes under `apps/site/**`, `packages/ui/src/components/ui/**`, or
+`packages/core/src/**`, or `workflow_dispatch`. Build → copy `index.html`
+as `404.html` (SPA fallback) → deploy to GitHub Pages on the public repo.
+Auto on merge to `main`.
+
+### Tauri Auto-Updater
+
+Enabled via `tauri-plugin-updater`. Each pipeline-published release is
+detected by installed clients on next startup.
+
+Flow: app boots → `check()` 3s later (silent) → if newer version, native
+"Update available" dialog with summarized release notes and "Install and
+restart" / "Later" → on accept, `downloadAndInstall()` → `relaunch()`.
+A manual "Check for updates" item lives in the toolbar `☰` menu.
+Implementation: `apps/desktop/src/lib/updater.ts` (`checkForAppUpdates(silent)`)
+wired in `apps/desktop/src/app.tsx` `onMount` and via `onCheckForUpdates`
+prop reaching `Toolbar` through `AppShell`.
+
+Endpoint:
+`https://github.com/djalmajr/asciimark-releases/releases/latest/download/latest.json`
+
+`latest.json` (generated by the "Normalize assets and generate latest.json"
+step) contains `version`, `notes`, `pub_date`, and a `platforms` map keyed
+by `darwin-aarch64`, `darwin-x86_64`, `linux-x86_64`, `windows-x86_64`,
+each with `signature` (the `.sig` content) and `url` (asset URL).
+
+Update artifact formats (the updater downloads these — NOT the regular
+installer; these are produced when `bundle.createUpdaterArtifacts: true`
+in `tauri.conf.json`):
+
+| Platform     | Update asset           | First-install installer    |
+|--------------|------------------------|----------------------------|
+| macOS arm64  | `*.app.tar.gz`         | `*.dmg`                    |
+| macOS x64    | `*.app.tar.gz`         | `*.dmg`                    |
+| Linux x64    | `*.AppImage.tar.gz`    | `*.AppImage` or `*.deb`    |
+| Windows x64  | `*.nsis.zip`           | `*.msi` or `*-setup.exe`   |
+
+Each update asset has a sibling `.sig` (ed25519 / `minisign`); without it
+the updater rejects the download.
+
+### Tauri Signing Keys
+
+Tauri uses `minisign` (ed25519). Private key lives on the maintainer's
+machine + GitHub secrets. Public key lives in `tauri.conf.json` (committed).
+
+Maintainer paths:
+- `~/.tauri/asciimark.key` — private (NEVER commit, NEVER read or store
+  this file in tools or AI)
+- `~/.tauri/asciimark.key.pub` — public (goes into `tauri.conf.json`)
+
+Generate (one-time): `bun x @tauri-apps/cli signer generate -w ~/.tauri/asciimark.key`
+
+🚨 BACKUP MANDATORY in at least 2 offline locations. If lost, old clients
+PERMANENTLY lose auto-update (signature verification fails forever); the
+only recovery is shipping a new pubkey, which forces every user to
+download the installer manually once (like a first install).
+
+`tauri.conf.json`:
+```jsonc
+"plugins": {
+  "updater": {
+    "active": true,
+    "dialog": false,
+    "endpoints": ["https://github.com/.../latest/download/latest.json"],
+    "pubkey": "<.pub content base64>"
+  }
+}
+```
+
+Local signed build (required to test the updater and for any local build,
+since `bundle.createUpdaterArtifacts: true` requires the envs):
+```bash
+export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/asciimark.key)"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<password>"
+bun run build:app
+```
+Expected output in `apps/desktop/src-tauri/target/release/bundle/macos/`:
+`AsciiMark.app`, `AsciiMark.app.tar.gz` + `.sig`, `AsciiMark_<v>_aarch64.dmg`.
+
+### GitHub Actions Secrets (`djalmajr/asciimark`)
+
+- **`PUBLIC_DIST_TOKEN`** — PAT with write access to
+  `djalmajr/asciimark-releases`. Used by both pipelines to create releases
+  and upload assets.
+- **`TAURI_SIGNING_PRIVATE_KEY`** — full content of `~/.tauri/asciimark.key`
+  (including the `untrusted comment:` lines). Used by `tauri build` in CI
+  to generate `.sig` files.
+- **`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`** — password set during
+  `signer generate`.
+
+Without the last two, the build fails (createUpdaterArtifacts requires the
+envs) or `.sig` files are missing and `latest.json` ships empty. Set the
+private key via stdin (UI is unsafe for it):
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY --repo djalmajr/asciimark < ~/.tauri/asciimark.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo djalmajr/asciimark
+```
+
+### Release Hard Rules
+- NEVER trigger pipelines manually without user confirmation.
+- NEVER create or modify tags without user confirmation.
+- NEVER modify workflows without user confirmation.
+- NEVER change `pubkey` in `tauri.conf.json` without understanding the
+  impact (rotating it breaks auto-update for every existing client).
+- NEVER read or store the private key (`~/.tauri/asciimark.key`) in tools/AI.
+- ALWAYS use `bun run bump:app` / `bun run bump:ext` — never edit version
+  files by hand.
+
+### Troubleshooting
+
+**Pipeline ran but `latest.json` is empty (no `platforms`)** — signing
+envs were not read by some runner; `tauri build` did not produce `.sig`
+files. Check: `gh secret list --repo djalmajr/asciimark` shows all 3
+secrets; the "Build Tauri app" step has `env:` with both `TAURI_SIGNING_*`
+envs; per-platform build logs mention "Signing updater bundle".
+
+**Auto-update not working after a release** —
+1. `curl https://github.com/djalmajr/asciimark-releases/releases/latest/download/latest.json | jq`
+   should show 4 platforms each with non-empty `signature`.
+2. `latest.json` `version` must be greater (semver) than the installed one.
+3. Client `pubkey` must match the private key that signed — rotation
+   permanently breaks old clients.
+
+**"Failed to check for updates" in the app** — endpoint returns 404
+(release missing `latest.json` — pipeline failed); `pubkey` in
+`tauri.conf.json` is incorrect/empty; client offline; client running a
+dev build (no valid semver).
