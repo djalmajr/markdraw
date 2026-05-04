@@ -30,7 +30,11 @@ bun run packages/core/src/__bench__/conversion.bench.ts
 step "7/8 stryker mutation testing on packages/core (~2 min)"
 (cd packages/core && bunx stryker run)
 
-step "8/8 E2E (spawns tauri dev, runs specs, tears down)"
+step "8/9 E2E (spawns tauri dev, runs specs, tears down)"
 bash scripts/run-e2e.sh
+
+step "9/9 dependency audits (advisory: doesn't fail the gate)"
+bun run audit:js || true
+bun run audit:rust || true
 
 printf "\n\033[1;32m✔ release-check passed\033[0m\n"

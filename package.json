@@ -25,6 +25,11 @@
     "test:rust:stress": "cd apps/desktop/src-tauri && cargo test --lib -- --ignored",
     "test:loom": "cd tools/loom-watcher-tests && RUSTFLAGS=\"--cfg loom\" cargo test --release",
     "test:miri": "cd apps/desktop/src-tauri && cargo +nightly miri test --lib interpolate_frame_endpoints",
+    "test:mutation:rust": "cd apps/desktop/src-tauri && cargo mutants --no-shuffle --timeout 60",
+    "audit:js": "bun audit --prod",
+    "audit:rust": "cd apps/desktop/src-tauri && cargo audit",
+    "audit": "bun run audit:js && bun run audit:rust",
+    "type-coverage": "bun run --filter '@asciimark/core' type-coverage",
     "cov:rust": "cd apps/desktop/src-tauri && cargo llvm-cov --lib --html --open",
     "cov:rust:summary": "cd apps/desktop/src-tauri && cargo llvm-cov --lib --summary-only",
     "bench:rust": "cd apps/desktop/src-tauri && cargo bench",
@@ -35,6 +40,7 @@
     "prepare": "lefthook install"
   },
   "devDependencies": {
-    "lefthook": "^1.10.10"
+    "lefthook": "^1.10.10",
+    "type-coverage": "^2.29.7"
   }
 }

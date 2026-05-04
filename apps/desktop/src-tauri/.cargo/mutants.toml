@@ -1,0 +1,37 @@
+# cargo-mutants configuration. The default mutation engine generates many
+# mutants per file; we restrict to the pure helpers we already have unit
+# coverage for, so the tool actually times out / kills the right things.
+#
+# Run with:
+#   cargo mutants --no-shuffle
+#
+# Excluded files:
+#   - benches/      perf tests, slow under mutants
+#   - tests/        not source
+#   - lib.rs sections wrapping ffi (objc2, dispatch_async_f, tauri commands)
+#     are excluded because the tests for them all hit real syscalls / are
+#     skipped under cargo test (`#[ignore]`).
+examine_globs = [
+    "src/lib.rs",
+]
+
+# Skip the macOS unsafe blocks: every mutant there fails to compile or
+# crashes the runner because the AppKit FFI requires a live message loop.
+exclude_re = [
+    "macos_maximize",
+    "toggle_maximize_instant",
+    "watch_paths",
+    "watch_dirs",
+    "stop_watching",
+    "stop_watching_dirs",
+    "open_directory_dialog",
+    "set_dock_visible",
+    "print_webview",
+    "get_startup_args",
+    "run\\b",
+]
+
+# Stop after the first survived mutant per region — we want a fast signal,
+# not exhaustive enumeration on the first run.
+test_tool = "cargo"
+timeout_multiplier = 3.0

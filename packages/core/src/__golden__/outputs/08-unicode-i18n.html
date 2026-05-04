@@ -1,0 +1,38 @@
+<div id="toc" class="toc">
+<div id="toctitle" class="title">Table of Contents</div>
+<ul>
+<li><a href="#unicode--i18n">Unicode &amp; i18n</a>
+<ul>
+<li><a href="#emoji-zwj-sequences">Emoji ZWJ sequences</a></li>
+<li><a href="#cjk-full-width">CJK (full-width)</a></li>
+<li><a href="#rtl-inline-arabic--hebrew">RTL inline (Arabic + Hebrew)</a></li>
+<li><a href="#combining-diacriticals">Combining diacriticals</a></li>
+<li><a href="#surrogate-pairs-in-fences">Surrogate pairs in fences</a></li>
+<li><a href="#greek--math">Greek + math</a></li>
+<li><a href="#right-to-left-override-security-smell--should-not-bypass-escapes">Right-to-left override (security smell — should NOT bypass escapes)</a></li>
+</ul></li>
+</ul>
+</div>
+<h1 id="unicode--i18n" tabindex="-1">Unicode &amp; i18n</h1>
+<h2 id="emoji-zwj-sequences" tabindex="-1">Emoji ZWJ sequences</h2>
+<p>Family: 👨‍👩‍👧‍👦 Person facepalming: 🤦‍♀️<br>
+Pirate flag (joiner sequence): 🏴‍☠️<br>
+Skin-tone modifier on hand: 👋🏽</p>
+<h2 id="cjk-full-width" tabindex="-1">CJK (full-width)</h2>
+<p>中文测试：你好，世界。<br>
+日本語テスト：こんにちは、世界。<br>
+한국어 테스트: 안녕하세요, 세계.</p>
+<h2 id="rtl-inline-arabic--hebrew" tabindex="-1">RTL inline (Arabic + Hebrew)</h2>
+<p>This sentence has Arabic مرحبا بالعالم inside.<br>
+Hebrew sample: שלום עולם — surrounded by LTR.</p>
+<h2 id="combining-diacriticals" tabindex="-1">Combining diacriticals</h2>
+<p>NFC vs NFD: café (single é = U+00E9) vs café (e + U+0301).<br>
+Vietnamese: tiếng Việt.</p>
+<h2 id="surrogate-pairs-in-fences" tabindex="-1">Surrogate pairs in fences</h2>
+<pre><code class="language-text">math: 𝐇𝐞𝐥𝐥𝐨 (Mathematical Bold Latin Capital H = U+1D407)
+emoji: 🚀 → 🚀
+</code></pre>
+<h2 id="greek--math" tabindex="-1">Greek + math</h2>
+<p>α + β = γ. Σ from i=1 to n of i².</p>
+<h2 id="right-to-left-override-security-smell--should-not-bypass-escapes" tabindex="-1">Right-to-left override (security smell — should NOT bypass escapes)</h2>
+<p>Filename‮gnp.exe trailing override marker.</p>

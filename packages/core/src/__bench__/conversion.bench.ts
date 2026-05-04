@@ -1,4 +1,15 @@
-// Standalone bench script. Run with: bun run packages/core/src/__bench__/conversion.bench.ts
+// Standalone bench script with regression gate. Run with:
+//   bun run packages/core/src/__bench__/conversion.bench.ts
+//
+// On the first run with no baseline.json, captures one and exits 0.
+// On subsequent runs, compares mean wall-time per scenario against the
+// committed baseline. Exits 1 if ANY scenario regresses by more than
+// THRESHOLD_PCT (default 25%). The baseline is intentionally machine-
+// scoped: a CI runner will see a different baseline.json than your
+// laptop, so we key the baseline by `${platform}/${runtime}`.
+//
+// To intentionally accept a slowdown / capture a new baseline, run:
+//   BENCH_UPDATE_BASELINE=1 bun run packages/core/src/__bench__/conversion.bench.ts
 import { convertAdoc } from "../asciidoc.ts";
 import { convertMarkdown } from "../markdown.ts";
 
@@ -72,40 +83,127 @@ async function timeIt(name: string, fn: () => Promise<unknown>, iters = 30, warm
   return stats;
 }
 
-async function main(): Promise<void> {
+// ─── Regression gate ────────────────────────────────────────────────────────
+
+const THRESHOLD_PCT = Number(process.env.BENCH_REGRESSION_PCT ?? "25");
+
+interface Baseline {
+  schema: 1;
+  capturedAt: string;
+  scenarios: Record<string, { mean: number; p95: number }>;
+}
+
+interface PlatformBaselines {
+  [platformKey: string]: Baseline;
+}
+
+const baselinePath = `${import.meta.dir}/baseline.json`;
+const platformKey = `${process.platform}-${process.arch}/bun-${Bun.version}`;
+
+async function loadBaselines(): Promise<PlatformBaselines> {
+  try {
+    const text = await Bun.file(baselinePath).text();
+    return JSON.parse(text) as PlatformBaselines;
+  } catch {
+    return {};
+  }
+}
+
+async function saveBaselines(all: PlatformBaselines): Promise<void> {
+  await Bun.write(baselinePath, `${JSON.stringify(all, null, 2)}\n`);
+}
+
+interface Regression {
+  scenario: string;
+  baselineMs: number;
+  actualMs: number;
+  pct: number;
+}
+
+function compareAgainst(prev: Baseline | undefined, current: Record<string, Stats>): Regression[] {
+  if (!prev) return [];
+  const out: Regression[] = [];
+  for (const [scenario, now] of Object.entries(current)) {
+    const before = prev.scenarios[scenario];
+    if (!before) continue;
+    const pct = ((now.mean - before.mean) / before.mean) * 100;
+    if (pct > THRESHOLD_PCT) {
+      out.push({
+        scenario,
+        baselineMs: before.mean,
+        actualMs: now.mean,
+        pct,
+      });
+    }
+  }
+  return out;
+}
+
+async function main(): Promise<number> {
   const mdSmall = buildMarkdownDoc(10, 5);
   const mdLarge = buildMarkdownDoc(80, 10);
   const adocSmall = buildAdocDoc(10, 5);
   const adocLarge = buildAdocDoc(80, 10);
 
+  const results: Record<string, Stats> = {};
+
   console.log("\nMarkdown:");
-  await timeIt("  small  (~10 headings, ~50 paragraphs)", () =>
+  results["markdown:small"] = await timeIt("  small  (~10 headings, ~50 paragraphs)", () =>
     convertMarkdown({ filePath: "doc.md", fileContent: mdSmall, readFile: noopRead }),
   );
-  await timeIt("  large  (~80 headings, ~800 paragraphs)", () =>
+  results["markdown:large"] = await timeIt("  large  (~80 headings, ~800 paragraphs)", () =>
     convertMarkdown({ filePath: "doc.md", fileContent: mdLarge, readFile: noopRead }),
   );
 
   console.log("\nAsciiDoc:");
-  await timeIt("  small  (~10 sections)", () =>
+  results["asciidoc:small"] = await timeIt("  small  (~10 sections)", () =>
     convertAdoc({ filePath: "doc.adoc", fileContent: adocSmall, readFile: noopRead }),
   );
-  await timeIt(
+  results["asciidoc:large"] = await timeIt(
     "  large  (~80 sections)",
     () => convertAdoc({ filePath: "doc.adoc", fileContent: adocLarge, readFile: noopRead }),
     15,
   );
 
-  // Persist a baseline so CI / future runs can compare regressions.
-  const baseline = {
-    timestamp: new Date().toISOString(),
-    runtime: `bun ${Bun.version}`,
-    platform: `${process.platform}-${process.arch}`,
-  };
-  await Bun.write(
-    `${import.meta.dir}/last-run.json`,
-    JSON.stringify(baseline, null, 2),
-  );
+  const all = await loadBaselines();
+  const prev = all[platformKey];
+  const regressions = compareAgainst(prev, results);
+  const update = process.env.BENCH_UPDATE_BASELINE === "1";
+  const isFirstRun = !prev;
+
+  if (update || isFirstRun) {
+    all[platformKey] = {
+      schema: 1,
+      capturedAt: new Date().toISOString(),
+      scenarios: Object.fromEntries(
+        Object.entries(results).map(([k, v]) => [k, { mean: v.mean, p95: v.p95 }]),
+      ),
+    };
+    await saveBaselines(all);
+    if (isFirstRun) {
+      console.log(`\n[bench] No baseline for ${platformKey}; captured a fresh one.`);
+    } else {
+      console.log(`\n[bench] BENCH_UPDATE_BASELINE=1 — overwrote baseline for ${platformKey}.`);
+    }
+    return 0;
+  }
+
+  if (regressions.length > 0) {
+    console.log(`\n\x1b[1;31m✖ Regressions over +${THRESHOLD_PCT}% vs baseline (${platformKey}):\x1b[0m`);
+    for (const r of regressions) {
+      console.log(
+        `   ${r.scenario.padEnd(20)} ${r.baselineMs.toFixed(2)}ms → ${r.actualMs.toFixed(2)}ms (+${r.pct.toFixed(1)}%)`,
+      );
+    }
+    console.log(
+      "\nIf this slowdown is intentional, accept it with:\n  BENCH_UPDATE_BASELINE=1 bun run packages/core/src/__bench__/conversion.bench.ts",
+    );
+    return 1;
+  }
+
+  console.log(`\n[bench] no regressions vs baseline (${platformKey}).`);
+  return 0;
 }
 
-await main();
+const code = await main();
+process.exit(code);

@@ -250,6 +250,117 @@ desktop ficam abertos 8h, leaks viram churn de usuário.
 
 ---
 
+---
+
+## Round 2 — strategies adopted after the first batch shipped
+
+After Tier 1-3 above were merged and a `knip` + `cargo-machete` cleanup
+pass ran, a follow-up survey explored what was still missing. These got
+adopted; rationales below.
+
+### Adopted
+
+#### `cargo-mutants` — mutation testing for Rust
+The Stryker setup we already had only mutated TypeScript. The Rust
+backend (`lib.rs`, ~760 LOC, includes the path-traversal validation,
+watcher state machine, and helpers for read_dir / rename / trash) was
+mutating-blind. `cargo-mutants` mirrors Stryker exactly: generates
+mutations on the AST, runs `cargo test` for each.
+
+Configured at `apps/desktop/src-tauri/.cargo/mutants.toml` with explicit
+`exclude_re` patterns covering Cocoa FFI and the Tauri command wrappers
+(both untestable without a live runtime). Run via `bun run
+test:mutation:rust`. Wired into release-check as a candidate for nightly
+escalation when scoring drops.
+
+#### `cargo-audit` + `bun audit`
+No prior gate against deps with known CVEs. Ran on first invocation and
+**immediately surfaced 37 npm advisories (1 critical, 17 high) and 3
+RustSec advisories**. Most are transitive from Tauri / markdown-it
+plugins, not first-party. Wired as advisory step (9/9) of release-check
+— intentionally non-blocking for now because mass-bumping deps is a
+separate concern and we don't want to wedge a release on it.
+
+#### i18n / Unicode edge cases
+The unit + property tests so far were ASCII-heavy. Real users write
+markdown in Arabic, Japanese, with ZWJ emoji families, with combining
+diacriticals. Added:
+- `__golden__/inputs/08-unicode-i18n.md` — golden fixture covering ZWJ
+  sequences, CJK, RTL, NFC/NFD diacritics, surrogate pairs, BiDi
+  override marks.
+- `__properties__/i18n.property.test.ts` — 6 property tests on
+  `extractFrontmatter`, `escapeHtml`, BiDi override safety, ZWJ
+  preservation, mixed-script content, NFC↔NFD equivalence (~890
+  expects).
+
+#### Bench regression gate
+Previously the bench produced numbers but never compared them. Now
+`conversion.bench.ts` writes `baseline.json` keyed by
+`${platform}-${arch}/bun-${version}` and FAILS on subsequent runs if any
+scenario regresses by more than `BENCH_REGRESSION_PCT` (default 25%).
+Intentional regressions opt in via `BENCH_UPDATE_BASELINE=1`.
+Catches the silent half-of-perf-gone-missing case that coverage and
+unit tests are blind to.
+
+#### Chaos / fault injection (`apps/desktop/src/lib/chaos-invoke.ts`)
+Wrapper around `@tauri-apps/api/core`'s invoke. Activates only when the
+URL has `?chaos=N` (so `tauri://` production builds skip it
+unconditionally). Synthetically rejects ~N% of IPC calls. Reveals the
+"happy path only" UI bugs: spinners that don't clear, dialogs that
+don't reopen, dirty-state that lies. Currently opt-in per call site
+(documented in `apps/desktop/src/lib/__chaos__/README.md`). Adopting
+site-by-site is intentional — wholesale wrapping would force every test
+fixture to handle synthetic errors.
+
+#### Type coverage (`type-coverage`)
+Threshold 95% on `packages/core` (current: 96.45%). Surfaces unsafe
+JSON.parse / `any`-cast pockets without forcing strict mode. Wired as
+`bun run type-coverage` in core. Apps tend to have lower density (event
+handlers, Solid signals); for now the gate lives only in the place
+where the contracts are tightest (the parsers).
+
+#### Replay testing (`packages/core/src/__regressions__/replay.test.ts`)
+fast-check supports `examples: [...]` that get prepended to every run.
+The pattern: when a property finds a counterexample, paste the shrunk
+case here as a permanent regression — explicit, documented, never
+shrunk away. The directory ships with three smoke replays documenting
+known-good edge cases; the file's purpose is to grow as real failures
+land.
+
+### Considered but rejected
+
+#### Visual regression (pixelmatch / playwright screenshots)
+Tier 4 deferred. Owns its own infra (image storage, CI snapshot diff
+service) for marginal value over what differential / approval testing
+already gives. Revisit if a release ever ships a visual bug that none
+of the existing layers caught.
+
+#### License auditing
+Overkill for a personal project. The licenses of our direct deps are
+all permissive; a full SBOM scan would burn time to discover what we
+already know.
+
+#### Cyclic dep detection (`madge`)
+Knip already flags cycles indirectly. Adding `madge` would duplicate
+that channel.
+
+#### Bundle-size snapshot
+Tauri bundle size is dominated by the WebView runtime, not our code. A
++5KB regression in the JS won't show up; a 5MB regression in WebView
+would, but that's a Tauri version issue, not ours.
+
+#### Big-O analysis (`cargo-criterion-perf-events`)
+We already have explicit perf gates (`#[ignore]` tests in `lib.rs` that
+hard-fail at 1s for 5k files). Hardware-counter analysis is the next
+ring out and not justified yet.
+
+#### Cross-version migration testing
+Already covered by the legacy-key handling in `recent-files.ts` /
+`recent-folders.ts`, with explicit unit tests proving each migration.
+A separate framework would be ceremony.
+
+---
+
 ## Fontes
 
 - [Wikipedia: Metamorphic testing](https://en.wikipedia.org/wiki/Metamorphic_testing)

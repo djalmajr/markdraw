@@ -11,6 +11,7 @@
     "test:coverage": "bun test --coverage",
     "test:bench": "bun run src/__bench__/conversion.bench.ts",
     "test:mutation": "stryker run",
+    "type-coverage": "bunx type-coverage --strict --at-least 95 --ignore-files \"**/*.test.ts\" --ignore-files \"**/__bench__/**\" --ignore-files \"**/fuzz/**\" --ignore-files \"**/__properties__/**\" --ignore-files \"**/__diff__/**\" --ignore-files \"**/__golden__/**\" --ignore-files \"**/__metamorphic__/**\" --ignore-files \"**/__conformance__/**\"",
     "fuzz:frontmatter": "jazzer fuzz/frontmatter.fuzz.ts -- -timeout=30",
     "fuzz:scan-includes": "jazzer fuzz/scan-includes.fuzz.ts -- -timeout=30",
     "fuzz:xrefs": "jazzer fuzz/xrefs.fuzz.ts -- -timeout=30",
