@@ -361,6 +361,99 @@ A separate framework would be ceremony.
 
 ---
 
+## Round 3 — operational hardening
+
+### Adopted
+
+#### `proptest` (Rust property-based testing)
+Symmetric counterpart to `fast-check` on the JS side. Three properties
+in `apps/desktop/src-tauri/src/lib.rs` covering:
+- `resolve_within_root` — never returns a path outside the canonicalized
+  root for ANY randomized relative input (including `..` traversals).
+- `read_dir_recursive` — sort invariant: directories before files,
+  case-insensitive ascending within each group, for any randomly
+  generated tree.
+- `rename_file_impl` — atomicity: success implies source-gone +
+  destination-exists; failure implies source-intact.
+
+Each runs 200 randomized cases per invocation.
+
+#### `cargo clippy --all-targets -- -D warnings`
+Wired into pre-commit (`clippy` job, glob on
+`apps/desktop/src-tauri/**/*.rs`). On adoption, fixed two warnings:
+`redundant_closure` in `benches/read_dir.rs` and `type_complexity` in
+the test helper for `make_watcher` change-buffer signature.
+
+#### `release:smoke` — fast pre-tag gate
+`scripts/release-smoke.sh`, ~30s vs `release:check`'s ~3min. Steps:
+typecheck → bun test → cargo test → clippy → vitest → IPC contract.
+Skips the heavy gates (Stryker, E2E, audit) — those stay in
+`release:check` for the actual tag-time run.
+
+#### `coverage:snapshot` — coverage regression detection
+`scripts/coverage-snapshot.sh` captures Bun + Rust coverage into
+`packages/core/__coverage__/last-run.json`, diffs against the
+committed `baseline.json`, fails if any metric drops by more than
+2 percentage points. Accept a new floor with
+`COVERAGE_UPDATE_BASELINE=1`.
+
+#### Single-page operations runbook
+`wiki/testing/operations.md` (this directory) is the "how do I run X"
+lookup. Strategies (this file) is the rationale. They split because
+mixing them made each long page worse at its job.
+
+#### `cargo-mutants` — Rust mutation testing
+Configured at `.cargo/mutants.toml`. Excludes Cocoa FFI and command
+wrappers (untestable without a runtime). Run via
+`bun run test:mutation:rust`.
+
+#### `bun audit` + `cargo audit`
+Wired as advisory step 9/9 of `release:check`. First run after the
+critical-CVE bump (commit `1e2b725`) reports 23 advisories — all
+moderate, all transitive in dev tooling. happy-dom RCE, vite file-read,
+mermaid DOMPurify chain were resolved.
+
+#### Render coverage on the three highest-stakes UI components
+`packages/ui/src/components/{file-tree,editor,preview}.vtest.tsx`
+(17 tests). file-tree covers empty / single / multi-root, click→select
+dispatch, filter behavior verified against `.tree-item-wrapper`
+display-style scan. editor covers CodeMirror mount, search overlay
+visibility under `searchOpen`. preview covers HTML rendering,
+`<script>` stripping, javascript:-URL neutering, `<iframe>`
+sanitization, frontmatter panel surfacing.
+
+#### Wiki + QMD bootstrap
+`/wiki-init` configured the **local** `./wiki` topology (NOT the
+sibling `../knowledge-base` repo, which holds unrelated other-project
+docs). QMD collection `asciimark` indexes only `./wiki/**/*.md`:
+8 documents, 19 embedded chunks. `.wiki-guardrails.yml` points at
+`./wiki`; the wiki-init's auto-suggested sibling path was overridden.
+
+### Rejected (this round)
+
+#### Specta typed bindings (over the IPC contract)
+Replaced with the lighter `scripts/check-ipc-contract.sh` regex-based
+drift detector. Specta + tauri-specta has a fragile version matrix
+against tauri 2.x; the grep-based approach gets ~80% of the value at
+1% of the maintenance cost. Revisit if drift becomes frequent.
+
+#### `bun update --latest` for ALL deps
+Running it would resolve more advisories but cascades breaking
+changes (Vitest 3, mermaid 11→12, etc). Bumped only the ones with
+critical/high CVEs and verified each path stayed green; the
+moderate transitives wait for a focused dependency update branch.
+
+#### Validate E2E roundtrip in this environment
+The Claude Code Bash sandbox kills child processes (`tauri dev`,
+`bun run dev:app`, even `nohup ... & disown`) when the tool returns.
+Tested 4× with progressively more aggressive detachment strategies;
+none survived. The specs are correct on inspection (the
+`bridge.ts` WebSocket protocol matches `tauri-plugin-mcp-bridge`'s
+`execute_js` handler) but the validation has to happen in a real
+shell. Captured in `BACKLOG.md`.
+
+---
+
 ## Fontes
 
 - [Wikipedia: Metamorphic testing](https://en.wikipedia.org/wiki/Metamorphic_testing)

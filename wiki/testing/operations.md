@@ -1,8 +1,8 @@
 # Testing — how to run everything
 
 Single page that lists every gate this repo ships with. Conceptual
-rationale lives in [`docs/testing/STRATEGIES.md`](docs/testing/STRATEGIES.md);
-this file is the operations reference.
+rationale lives in [strategies](strategies.md); this file is the
+operations reference.
 
 > If a gate isn't listed here, it doesn't exist.
 > If a script isn't here, treat it as deprecated.
@@ -12,7 +12,7 @@ this file is the operations reference.
 | Command | Time | What it covers |
 |---|---|---|
 | `bun test` | <1s | Unit + properties + metamorphic + diff + conformance + golden + replay (188 tests) |
-| `bun run test:vitest` *(in `packages/ui`)* | ~1s | Solid render tests (31) |
+| `bun run test:vitest` *(in `packages/ui`)* | ~1.5s | Solid render tests (48): 11 primitives + EmptyState + 17 cobrindo editor / preview / file-tree |
 | `bun run test:rust` | <1s warm | Cargo unit + mock_app + proptest (28 tests, 7 ignored) |
 | `bun run typecheck` | ~3s | tsc strict in all workspaces |
 | `bun run lint:rust` | ~2s warm | clippy --all-targets -D warnings |
@@ -36,7 +36,7 @@ The `pre-commit` hook runs **all of the above in parallel** (~3s). See
 | `bun run coverage:snapshot` | ~2min | Capture Bun + Rust coverage snapshot, diff against `packages/core/__coverage__/baseline.json`. Fails if any metric drops > 2pp |
 | `COVERAGE_UPDATE_BASELINE=1 bun run coverage:snapshot` | ~2min | Accept new coverage as the floor |
 | `bun run type-coverage` | ~10s | Strict-mode type coverage on `packages/core` (threshold 95%) |
-| `bun run audit` | ~3s | `bun audit --prod` + `cargo audit`. Currently surfaces 37 npm + 3 RustSec advisories (all transitive) |
+| `bun run audit` | ~3s | `bun audit --prod` + `cargo audit`. Last run surfaced 23 advisories (all moderate, all transitive in dev tooling) — no critical/high. The `happy-dom < 20.0.0` RCE, `vite ≤ 7.3.1` file-read, and `mermaid <= 11.x` DOMPurify chain were all bumped on commit `1e2b725`. |
 
 ## Mutation, fuzzing, soak
 
@@ -65,7 +65,7 @@ The `pre-commit` hook runs **all of the above in parallel** (~3s). See
 | Command | Time | When |
 |---|---|---|
 | `bun run release:smoke` | ~30s | Before `git tag v…`. Typecheck + bun test + cargo test + clippy + vitest + IPC contract |
-| `bun run release:check` | ~3min | Full gate, 9 steps. Adds bench, mutation, E2E, audit |
+| `bun run release:check` | ~3min | Full gate, 9 steps: typecheck → bun test → cargo test (incl. `--ignored` perf gates) → vitest → cargo-llvm-cov summary → conversion benchmarks (vs baseline) → StrykerJS mutation testing → E2E (spawns `tauri dev`) → `bun audit` + `cargo audit` (advisory) |
 
 ## CI
 
