@@ -32,10 +32,11 @@
     "dist",
     "coverage"
   ],
+  "_comment_thresholds": "Lifted from break=0 to break=55 — the suite measured 65.63% on the full core. We want regressions under 55% to fail the gate (release-check.sh, step 7). Targeted per-file goals are tracked in BACKLOG.md.",
   "thresholds": {
     "high": 80,
     "low": 60,
-    "break": 0
+    "break": 55
   },
   "reporters": ["clear-text", "html", "progress"],
   "htmlReporter": {

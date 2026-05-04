@@ -21,6 +21,9 @@ pre-commit:
       glob: "packages/ui/**/*.{ts,tsx}"
       root: "packages/ui"
       run: bunx vitest run --config vitest.config.ts
+    contract-ipc:
+      glob: "{apps/desktop/src-tauri/src/**/*.rs,apps/desktop/src/**/*.{ts,tsx}}"
+      run: bash scripts/check-ipc-contract.sh
 
 pre-push:
   parallel: false

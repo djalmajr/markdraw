@@ -10,7 +10,8 @@
     "build:frontend": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "bun test e2e/specs",
-    "test:e2e": "bun test e2e/specs"
+    "test:e2e": "bun test e2e/specs",
+    "test:memlab": "bunx memlab run --scenario e2e/memory/scenario.cjs"
   },
   "dependencies": {
     "@asciimark/core": "workspace:*",
@@ -28,6 +29,7 @@
     "@iconify/json": "^2.2.441",
     "@tauri-apps/cli": "^2",
     "@types/bun": "latest",
+    "memlab": "^1.1.59",
     "@types/node": "^25.3.0",
     "autoprefixer": "^10.4.24",
     "postcss": "^8.5.6",

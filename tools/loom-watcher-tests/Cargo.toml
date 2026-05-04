@@ -1,0 +1,11 @@
+[package]
+name = "loom-watcher-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Stand-alone Loom concurrency permutation tests for the WatcherHolder pattern. Kept out of the tauri crate so tauri's dependencies don't compete with the loom-shimmed std types."
+
+[dependencies]
+# loom is the dep itself — no std::sync allowed in the test code,
+# everything routes through loom::sync.
+loom = "0.7"

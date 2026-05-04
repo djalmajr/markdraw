@@ -1,0 +1,19 @@
+# Miri configuration deferred — see docs/testing/STRATEGIES.md for status.
+#
+# Status (validated 2026-05): cargo +nightly miri fails to compile our
+# dependency tree because tauri-plugin-mcp-bridge (transitive) uses the
+# `ctor` macro which is incompatible with Miri's interpreter. Skipping it
+# requires either:
+#   - removing the bridge plugin (loses dev-time IPC monitoring)
+#   - extracting pure-Rust helpers into a sub-crate Miri can interpret
+#     without pulling tauri's deps (similar to tools/loom-watcher-tests)
+#
+# Pure-arithmetic helpers in macos_maximize (interpolate_frame,
+# ease_out_cubic) and the Valibot-equivalent path-traversal logic in
+# resolve_within_root would be the natural targets. Today Miri's marginal
+# value is small here anyway — every `unsafe` block is FFI into AppKit
+# (objc2 msg_send, dispatch_async_f), which Miri DOES NOT model.
+#
+# Tests that touch the filesystem or rely on real-time timing are already
+# guarded with `#[cfg_attr(miri, ignore)]` in src/lib.rs so a future Miri
+# run, once the deps are unblocked, only exercises pure-Rust paths.

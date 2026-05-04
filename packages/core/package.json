@@ -46,6 +46,7 @@
     "@types/markdown-it": "^14.1.2",
     "@types/markdown-it-anchor": "^7.0.0",
     "fast-check": "^3.23.2",
+    "marked": "^15.0.7",
     "typescript": "^5.9.3"
   }
 }

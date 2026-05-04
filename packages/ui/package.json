@@ -37,6 +37,7 @@
     "@solidjs/testing-library": "^0.8.10",
     "@testing-library/jest-dom": "^6.5.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "fast-check": "^3.23.2",
     "happy-dom": "^17.0.0",
     "typescript": "^5.9.3",
     "unplugin-icons": "^23.0.1",
