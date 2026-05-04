@@ -336,8 +336,12 @@ export async function convertMarkdown(opts: ConvertOptions): Promise<ConvertResu
 
   const md = getMd();
 
-  // Parse tokens to extract headings for TOC
-  const tokens = md.parse(processed, {});
+  // Parse once and reuse the token stream for both TOC extraction and HTML
+  // render. Calling md.render(processed) here would re-parse from scratch,
+  // which roughly doubles total time on large docs (parse dominates ~96%
+  // of the markdown-it pipeline).
+  const env: Record<string, unknown> = {};
+  const tokens = md.parse(processed, env);
   const tocEntries: TocEntry[] = [];
 
   for (let i = 0; i < tokens.length; i++) {
@@ -353,13 +357,9 @@ export async function convertMarkdown(opts: ConvertOptions): Promise<ConvertResu
     }
   }
 
-  // Render HTML
-  const bodyHtml = md.render(processed);
-
-  // Build TOC and prepend it (same structure as AsciiDoc's toc=left)
+  const bodyHtml = md.renderer.render(tokens, md.options, env);
   const tocHtml = buildTocHtml(tocEntries);
 
-  // Combine: TOC first (for right sidebar), then body
   return { html: tocHtml + bodyHtml, frontmatter };
 }
 
