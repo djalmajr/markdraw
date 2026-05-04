@@ -3,7 +3,7 @@ set -euo pipefail
 
 INPUT="$(cat)"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-WIKI_DIR="$(cd "$ROOT/../knowledge-base" 2>/dev/null && pwd -P || printf '%s\n' "$ROOT/../knowledge-base")"
+WIKI_DIR="$(cd "$ROOT/./wiki" 2>/dev/null && pwd -P || printf '%s\n' "$ROOT/./wiki")"
 QMD_COMMAND="/Users/djalmajr/.local/share/essential-skills/qmd/wrappers/asciimark-qmd"
 
 TOOL="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')"
@@ -17,7 +17,7 @@ while IFS= read -r file; do
   [ -n "$file" ] || continue
   case "$file" in *.md) ;; *) continue ;; esac
   case "$file" in
-    "$WIKI_DIR"/*|"$ROOT/../knowledge-base/"*|../knowledge-base/*|*"/$(basename "$WIKI_DIR")/"*)
+    "$WIKI_DIR"/*|"$ROOT/./wiki/"*|./wiki/*|*"/$(basename "$WIKI_DIR")/"*)
       changed_wiki_md=true
       break
       ;;

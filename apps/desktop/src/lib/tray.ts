@@ -1,7 +1,7 @@
 import { TrayIcon } from "@tauri-apps/api/tray";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { Image } from "@tauri-apps/api/image";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./chaos-invoke.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/plugin-process";
 

@@ -1,6 +1,6 @@
-wiki_path: "../knowledge-base"
+wiki_path: "./wiki"
 qmd_index: "asciimark"
-wiki_collection: "knowledge-base"
+wiki_collection: "asciimark"
 language: "pt-BR"
 query_language: "pt-BR"
 qmd_command: "/Users/djalmajr/.local/share/essential-skills/qmd/wrappers/asciimark-qmd"

@@ -91,7 +91,7 @@ wiki_abs_path() {
 }
 
 WIKI_PATH="$(guardrail_scalar wiki_path || true)"
-[ -n "$WIKI_PATH" ] || WIKI_PATH="../knowledge-base"
+[ -n "$WIKI_PATH" ] || WIKI_PATH="./wiki"
 WIKI_BASE="$(wiki_abs_path "$WIKI_PATH")"
 WIKI_DIR="$(cd "$WIKI_BASE" 2>/dev/null && pwd -P || printf '%s\n' "$WIKI_BASE")"
 WIKI_REL="$(repo_relative_wiki_path "$WIKI_PATH" || true)"
@@ -154,14 +154,14 @@ done < <(payload_entries)
 if [ -n "$warned_existing" ]; then
   cat >&2 <<EOF_WARN
 wiki-policy: edit in markdown outside .wiki-guardrails.yml allowlist (legacy drift, not blocked):${warned_existing}
-Consider moving canonical content to ../knowledge-base via /wiki-ingest.
+Consider moving canonical content to ./wiki via /wiki-ingest.
 EOF_WARN
 fi
 
 if [ -n "$blocked_new" ]; then
   cat >&2 <<EOF_BLOCK
 wiki-policy: blocked markdown outside .wiki-guardrails.yml allowlist:${blocked_new}
-Canonical docs/rules belong in ../knowledge-base or the project allowlist must be updated intentionally.
+Canonical docs/rules belong in ./wiki or the project allowlist must be updated intentionally.
 EOF_BLOCK
   exit 2
 fi

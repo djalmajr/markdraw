@@ -545,7 +545,7 @@ dev build (no valid semver).
 <!-- wiki-init:start -->
 ## LLM Wiki
 
-Before answering or acting on durable project knowledge, consult the wiki at `../knowledge-base`.
+Before answering or acting on durable project knowledge, consult the wiki at `./wiki`.
 
 Order:
 
@@ -556,3 +556,4 @@ Order:
 
 Hooks in this repo are guardrails, not a guarantee. They catch path-visible drift; semantic decisions from conversation and debugging still belong to the agent.
 <!-- wiki-init:end -->
+

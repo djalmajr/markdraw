@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./chaos-invoke.ts";
 import type { FSEntry } from "@asciimark/core/types.ts";
 
 export type { FSEntry };

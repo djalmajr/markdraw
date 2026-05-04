@@ -77,7 +77,7 @@ repo_relative_wiki_path() {
 }
 
 WIKI_PATH="$(guardrail_scalar wiki_path || true)"
-[ -n "$WIKI_PATH" ] || WIKI_PATH="../knowledge-base"
+[ -n "$WIKI_PATH" ] || WIKI_PATH="./wiki"
 WIKI_REL="$(repo_relative_wiki_path "$WIKI_PATH" || true)"
 
 is_wiki_markdown() {

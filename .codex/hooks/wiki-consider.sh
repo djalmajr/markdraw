@@ -74,7 +74,7 @@ echo "$NOW" > "$STAMP_FILE"
 cat >&2 <<EOF_CONSIDER
 Wiki ingest consideration: sensitive paths changed.${lines}
 Before final response, decide whether this creates or changes a canonical rule, contract, schema, gotcha, dependency quirk, cross-project convention, or operational/business constraint.
-If yes, update ../knowledge-base and let wiki-reindex run.
+If yes, update ./wiki and let wiki-reindex run.
 EOF_CONSIDER
 
 exit 0

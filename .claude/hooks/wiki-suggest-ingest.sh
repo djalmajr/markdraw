@@ -64,7 +64,7 @@ touch "$STATE_FILE"
 reason="Touched ${count} sensitive path(s) from .wiki-guardrails.yml. Evaluate whether this deserves wiki ingest before finalizing:
 
 ${match}
-If yes, update ../knowledge-base and log it. If no, respond explicitly with \"sem ingest\"."
+If yes, update ./wiki and log it. If no, respond explicitly with \"sem ingest\"."
 
 jq -n --arg reason "$reason" '{ decision: "block", reason: $reason }'
 exit 0
