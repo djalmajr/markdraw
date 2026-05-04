@@ -76,28 +76,43 @@ jobs:
           tauriScript: bunx tauri
           args: ${{ matrix.args }}
 
+      # `@actions/glob` (used by upload-artifact's path matching) silently
+      # drops multi-dot extensions like `.AppImage.tar.gz` and `.nsis.zip`.
+      # v0.7.0 shipped without those updater artifacts on Linux/Windows for
+      # this reason. We work around it by listing files via `find -name`
+      # (which DOES handle multi-dot suffixes correctly) into a `stage/`
+      # tree that mirrors `target/`'s structure, then uploading the stage
+      # with a plain `**`. Path structure is preserved so the publish step
+      # can still disambiguate macOS arm64 vs x64 by their target subdir.
+      - name: Stage release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd apps/desktop/src-tauri
+          while IFS= read -r f; do
+            mkdir -p "stage/$(dirname "${f#target/}")"
+            cp -p "$f" "stage/${f#target/}"
+          done < <(find target -type f \( \
+            -name "*.dmg" -o \
+            -name "*.app.tar.gz" -o \
+            -name "*.app.tar.gz.sig" -o \
+            -name "*.deb" -o \
+            -name "*.AppImage" -o \
+            -name "*.AppImage.tar.gz" -o \
+            -name "*.AppImage.tar.gz.sig" -o \
+            -name "*.msi" -o \
+            -name "*-setup.exe" -o \
+            -name "*.nsis.zip" -o \
+            -name "*.nsis.zip.sig" \
+          \))
+          echo "── stage contents ──"
+          find stage -type f | sort
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
           name: binaries-${{ matrix.platform }}-${{ matrix.rust_targets || 'default' }}
-          # `@actions/glob` silently drops multi-dot extensions (e.g.
-          # `.AppImage.tar.gz`, `.nsis.zip`) under both `*` and `*.x.y`
-          # patterns. Directory-based globs (`bundle/nsis/*`) didn't help
-          # either — the updater artifacts ended up missing from the
-          # downloaded artifact, producing a `latest.json` with only the
-          # macOS platforms. Enumerate each expected filename explicitly.
-          path: |
-            apps/desktop/src-tauri/target/**/bundle/dmg/*.dmg
-            apps/desktop/src-tauri/target/**/bundle/macos/*.app.tar.gz
-            apps/desktop/src-tauri/target/**/bundle/macos/*.app.tar.gz.sig
-            apps/desktop/src-tauri/target/**/bundle/deb/*.deb
-            apps/desktop/src-tauri/target/**/bundle/appimage/*.AppImage
-            apps/desktop/src-tauri/target/**/bundle/appimage/*.AppImage.tar.gz
-            apps/desktop/src-tauri/target/**/bundle/appimage/*.AppImage.tar.gz.sig
-            apps/desktop/src-tauri/target/**/bundle/msi/*.msi
-            apps/desktop/src-tauri/target/**/bundle/nsis/*-setup.exe
-            apps/desktop/src-tauri/target/**/bundle/nsis/*.nsis.zip
-            apps/desktop/src-tauri/target/**/bundle/nsis/*.nsis.zip.sig
+          path: apps/desktop/src-tauri/stage/**
           if-no-files-found: ignore
 
   publish-public-release:
