@@ -63,27 +63,33 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
+      # Why not `tauri-apps/tauri-action@v0.6`?
+      # When that action finishes without a `releaseId`/`tagName` to upload
+      # to, it deletes the updater bundles (`*.AppImage.tar.gz`,
+      # `*.nsis.zip`, and their `.sig` siblings) on Linux/Windows before we
+      # get to upload them ourselves. v0.7.0 and v0.7.1 both shipped with
+      # macOS-only auto-update for this reason — `tauri build` generates
+      # the updater bundles correctly, but the action sweeps them up
+      # immediately afterwards. Calling `bunx tauri build` directly leaves
+      # everything where the bundler put it.
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0.6
+        shell: bash
+        working-directory: apps/desktop
         env:
           # Used by `tauri build` to sign the updater artifacts. When these
           # secrets are missing the build still succeeds, but the .sig files
           # won't be generated and the latest.json step will fail later.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          projectPath: apps/desktop
-          tauriScript: bunx tauri
-          args: ${{ matrix.args }}
+        run: bunx tauri build ${{ matrix.args }}
 
       # `@actions/glob` (used by upload-artifact's path matching) silently
       # drops multi-dot extensions like `.AppImage.tar.gz` and `.nsis.zip`.
-      # v0.7.0 shipped without those updater artifacts on Linux/Windows for
-      # this reason. We work around it by listing files via `find -name`
-      # (which DOES handle multi-dot suffixes correctly) into a `stage/`
-      # tree that mirrors `target/`'s structure, then uploading the stage
-      # with a plain `**`. Path structure is preserved so the publish step
-      # can still disambiguate macOS arm64 vs x64 by their target subdir.
+      # We work around it by listing files via `find -name` (which DOES
+      # handle multi-dot suffixes correctly) into a `stage/` tree that
+      # mirrors `target/`'s structure, then uploading the stage with a
+      # plain `**`. Path structure is preserved so the publish step can
+      # still disambiguate macOS arm64 vs x64 by their target subdir.
       - name: Stage release artifacts
         shell: bash
         run: |
