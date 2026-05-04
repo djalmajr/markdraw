@@ -63,15 +63,13 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
-      # Why not `tauri-apps/tauri-action@v0.6`?
-      # When that action finishes without a `releaseId`/`tagName` to upload
-      # to, it deletes the updater bundles (`*.AppImage.tar.gz`,
-      # `*.nsis.zip`, and their `.sig` siblings) on Linux/Windows before we
-      # get to upload them ourselves. v0.7.0 and v0.7.1 both shipped with
-      # macOS-only auto-update for this reason — `tauri build` generates
-      # the updater bundles correctly, but the action sweeps them up
-      # immediately afterwards. Calling `bunx tauri build` directly leaves
-      # everything where the bundler put it.
+      # We invoke `tauri build` directly via bunx instead of using
+      # `tauri-apps/tauri-action`. The action wraps the same call with
+      # extra release-creation logic that we don't need (we publish to a
+      # separate public repo via gh CLI in the publish-public-release job
+      # below) and its assumptions about asset layout don't match our
+      # multi-target macOS matrix. Direct invocation keeps the artifact
+      # tree intact for the Stage step to consume.
       - name: Build Tauri app
         shell: bash
         working-directory: apps/desktop
@@ -84,12 +82,19 @@ jobs:
         run: bunx tauri build ${{ matrix.args }}
 
       # `@actions/glob` (used by upload-artifact's path matching) silently
-      # drops multi-dot extensions like `.AppImage.tar.gz` and `.nsis.zip`.
-      # We work around it by listing files via `find -name` (which DOES
-      # handle multi-dot suffixes correctly) into a `stage/` tree that
-      # mirrors `target/`'s structure, then uploading the stage with a
-      # plain `**`. Path structure is preserved so the publish step can
-      # still disambiguate macOS arm64 vs x64 by their target subdir.
+      # drops multi-dot extensions like `.app.tar.gz`. We work around it by
+      # listing files via `find -name` (which DOES handle multi-dot suffixes
+      # correctly) into a `stage/` tree that mirrors `target/`'s structure,
+      # then uploading the stage with a plain `**`. Path structure is
+      # preserved so the publish step can still disambiguate macOS arm64 vs
+      # x64 by their target subdir.
+      #
+      # Tauri 2.x with `createUpdaterArtifacts: true` produces v2-format
+      # updater bundles (the installer is its own update asset; only the
+      # signature is separate):
+      #   macOS:   *.app.tar.gz + *.app.tar.gz.sig
+      #   Linux:   *.AppImage   + *.AppImage.sig
+      #   Windows: *-setup.exe  + *-setup.exe.sig (and *.msi + *.msi.sig)
       - name: Stage release artifacts
         shell: bash
         run: |
@@ -104,12 +109,11 @@ jobs:
             -name "*.app.tar.gz.sig" -o \
             -name "*.deb" -o \
             -name "*.AppImage" -o \
-            -name "*.AppImage.tar.gz" -o \
-            -name "*.AppImage.tar.gz.sig" -o \
+            -name "*.AppImage.sig" -o \
             -name "*.msi" -o \
+            -name "*.msi.sig" -o \
             -name "*-setup.exe" -o \
-            -name "*.nsis.zip" -o \
-            -name "*.nsis.zip.sig" \
+            -name "*-setup.exe.sig" \
           \))
           echo "── stage contents ──"
           find stage -type f | sort
@@ -289,21 +293,36 @@ jobs:
               lambda key: key.endswith(".exe") and ("installer" in key or "setup" in key),
           )
 
-          # ── Updater artifacts: pick the .tar.gz/.zip + matching .sig per platform ──
+          # ── Updater artifacts (Tauri 2.x v2 format) ──
+          # macOS still ships a separate update bundle (.app.tar.gz). On
+          # Linux and Windows the *installer itself* is the update asset
+          # — we just need to ship the matching .sig alongside the asset
+          # we already copied above. So `pick_update` covers two shapes:
+          #   1. macOS: copy the .app.tar.gz under a release-friendly name,
+          #      then its .sig.
+          #   2. Linux/Windows: the installer was already copied by the
+          #      "Normal installers" block above; here we only add the .sig
+          #      with a name that matches the installer's release name.
           update_targets = []  # [(asset_name, sig_name, platform_key)]
 
-          def pick_update(asset_name, platform_key, predicate):
+          def pick_update(asset_name, platform_key, predicate, *, copy_asset=True):
               candidates = [path for path in files if predicate(file_keys[path])]
               if not candidates:
                   print(f"WARN: no updater asset for {platform_key} ({asset_name})")
                   return
               candidates.sort(key=lambda p: len(p.name))
               source = candidates[0]
-              destination = output_dir / asset_name
-              shutil.copy2(source, destination)
-              print(f"Mapped (update) {source} -> {destination.name}")
+              if copy_asset:
+                  destination = output_dir / asset_name
+                  shutil.copy2(source, destination)
+                  print(f"Mapped (update) {source} -> {destination.name}")
+              else:
+                  # Asset was already copied by the installer block; we just
+                  # need to ensure it's present and locate its .sig.
+                  if not (output_dir / asset_name).exists():
+                      print(f"ERROR: expected installer {asset_name} not found in output_dir")
+                      return
 
-              # Sibling .sig — try same dir first, then any matching .sig in tree
               sig_source = source.with_name(source.name + ".sig")
               if not sig_source.exists():
                   sig_candidates = [p for p in files if p.name == source.name + ".sig"]
@@ -327,15 +346,21 @@ jobs:
               "darwin-x86_64",
               lambda key: key.endswith(".app.tar.gz") and "aarch64" not in key and "arm64" not in key,
           )
+          # Linux: the AppImage installer IS the update asset. We only
+          # need to attach its .sig under the same release name.
           pick_update(
-              "AsciiMark-linux-x64.AppImage.tar.gz",
+              "AsciiMark-linux-x64.AppImage",
               "linux-x86_64",
-              lambda key: key.endswith(".appimage.tar.gz"),
+              lambda key: key.endswith(".appimage"),
+              copy_asset=False,
           )
+          # Windows: the *-setup.exe installer IS the update asset. Same
+          # treatment — only the .sig needs to be added.
           pick_update(
-              "AsciiMark-windows-x64.nsis.zip",
+              "AsciiMark-windows-x64.exe",
               "windows-x86_64",
-              lambda key: key.endswith(".nsis.zip"),
+              lambda key: key.endswith("-setup.exe"),
+              copy_asset=False,
           )
 
           # ── Generate latest.json ──
