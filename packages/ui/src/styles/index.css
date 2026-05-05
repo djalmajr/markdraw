@@ -733,8 +733,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .tree-item-wrapper {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
 }
 
 .workspace-root-actions {
@@ -818,8 +817,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   gap: 4px;
-  width: max-content;
-  min-width: calc(100% - 8px);
+  width: calc(100% - 8px);
   padding: 4px 8px;
   cursor: pointer;
   user-select: none;
@@ -862,9 +860,10 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .tree-name {
-  flex: 0 0 auto;
-  overflow: visible;
-  text-overflow: clip;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   /*
    * Reserve a 1px border slot ALWAYS, even at rest. The negative margin
@@ -886,6 +885,10 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   cursor: text;
   user-select: text;
   -webkit-user-select: text;
+  /* Renaming needs the full name visible (otherwise the caret would
+   * scroll out of view); the row's truncation only applies at rest. */
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .tree-dirty {
