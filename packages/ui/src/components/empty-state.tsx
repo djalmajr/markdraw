@@ -9,6 +9,8 @@ import IconX from "~icons/lucide/x";
 import IconUpload from "~icons/lucide/upload";
 import IconKeyboard from "~icons/lucide/keyboard";
 import IconStar from "~icons/lucide/star";
+import * as m from "@asciimark/i18n";
+import { useLocale } from "@asciimark/i18n/solid";
 import { Button } from "./ui/button.tsx";
 
 interface RecentItem {
@@ -122,19 +124,19 @@ export function EmptyState(props: EmptyStateProps) {
           <div class="empty-home">
             <div class="drop-zone" onClick={props.onOpenFolder}>
               <IconUpload width={32} height={32} />
-              <span>Drop a folder/file here or click to open</span>
-              <p class="empty-hint">Supports .adoc and .md files</p>
+              <span>{(useLocale(), m.empty_dropzone_title())}</span>
+              <p class="empty-hint">{(useLocale(), m.empty_dropzone_hint())}</p>
             </div>
             <Show when={showRecentHistory()}>
               <div class="recent-history">
                 <div class="recent-section-header">
-                  <h3>Recent</h3>
+                  <h3>{(useLocale(), m.empty_recent_heading())}</h3>
                   <Button
                     size="sm"
                     variant="ghost"
                     onClick={() => props.onClearRecentHistory?.()}
                   >
-                    Clear
+                    {(useLocale(), m.empty_recent_clear())}
                   </Button>
                 </div>
                 <ul class="recent-list">
@@ -187,18 +189,18 @@ export function EmptyState(props: EmptyStateProps) {
         <div class="empty-icon">
           <IconFileText width={64} height={64} />
         </div>
-        <h2>Select a file</h2>
-        <p>Choose an .adoc file from the sidebar to preview it.</p>
+        <h2>{(useLocale(), m.empty_select_file_title())}</h2>
+        <p>{(useLocale(), m.empty_select_file_hint())}</p>
       </Show>
       <Show when={!props.hasRoot && props.onShowShortcutsHelp}>
         <button
-          aria-label="Show keyboard shortcuts"
+          aria-label={(useLocale(), m.empty_shortcuts_hint())}
           class="empty-shortcuts-hint"
           type="button"
           onClick={() => props.onShowShortcutsHelp?.()}
         >
           <IconKeyboard width={14} height={14} />
-          <span>Keyboard shortcuts</span>
+          <span>{(useLocale(), m.empty_shortcuts_hint())}</span>
         </button>
       </Show>
     </div>

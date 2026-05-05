@@ -1,0 +1,24 @@
+{
+  "name": "@asciimark/i18n",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/paraglide/messages.js",
+    "./solid": "./src/solid.ts",
+    "./runtime": "./src/paraglide/runtime.js"
+  },
+  "scripts": {
+    "compile": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --strategy globalVariable preferredLanguage baseLocale",
+    "prepare": "bun run compile",
+    "typecheck": "bun run compile && tsc --noEmit"
+  },
+  "peerDependencies": {
+    "solid-js": "^1.9.0"
+  },
+  "devDependencies": {
+    "@inlang/paraglide-js": "^2.0.0",
+    "solid-js": "^1.9.11",
+    "typescript": "^5.6.3"
+  }
+}

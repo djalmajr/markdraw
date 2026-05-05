@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@asciimark/i18n": "workspace:*",
     "@asciimark/ui": "workspace:*",
     "@tanstack/history": "^1.132.31",
     "@tanstack/solid-router": "^1.132.31",
