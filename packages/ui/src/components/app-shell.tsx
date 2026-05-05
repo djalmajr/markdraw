@@ -148,6 +148,11 @@ interface AppShellProps {
   ) => Promise<FileMatch[]>;
   onFindInFilesClose?: () => void;
 
+  /** Move a tab from `fromPaneIndex` to the other pane. When omitted,
+   *  the "Move to Other Pane" context menu item is hidden. Host wires
+   *  the actual cross-pane open + close orchestration. */
+  onMoveTab?: (tabId: string, fromPaneIndex: number) => void;
+
   // Platform-specific content (extension: FileAccessWarning wrapper)
   contentWrapper?: (content: JSX.Element) => JSX.Element;
 
@@ -292,6 +297,14 @@ export function AppShell(props: AppShellProps) {
             hasRoot={props.hasRoot}
             onCheckForUpdates={props.onCheckForUpdates}
             onShortcutsHelp={props.onShortcutsHelpOpen}
+            isSplit={s.paneManager.panes().length > 1}
+            onToggleSplit={() => {
+              if (s.paneManager.panes().length > 1) {
+                s.paneManager.collapseRightPane();
+              } else {
+                s.paneManager.splitFromActive();
+              }
+            }}
             supportsPreview={s.previewSupported()}
             inWindowFrame={!!props.windowFrameToolbar}
             controlsOnLeft={!!props.showWindowControls}
@@ -378,6 +391,12 @@ export function AppShell(props: AppShellProps) {
                       onActivateTab={props.onActivateTab}
                       onCloseTab={props.onCloseTab}
                       onNewTab={props.onNewTab}
+                      onMoveTab={props.onMoveTab}
+                      moveTabLabel={
+                        s.paneManager.panes().length > 1
+                          ? "Move to Other Pane"
+                          : "Open in Split Pane"
+                      }
                       onOpenFolder={props.onOpenFolder}
                       onOpenRecentFile={props.onOpenRecentFile}
                       onOpenRecentFolder={props.onOpenRecentFolder}

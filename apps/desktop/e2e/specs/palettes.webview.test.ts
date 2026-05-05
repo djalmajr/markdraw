@@ -390,6 +390,96 @@ describe("desktop palettes (Cmd/Ctrl+P family)", () => {
     );
   });
 
+  it("toolbar split button toggles the second pane (mirrors Cmd/Ctrl+\\\\)", async () => {
+    if (!bridge) return;
+    await clickFirstSupportedFile(bridge);
+    await expectEventually(async () =>
+      ((await bridge!.evalJs(`document.querySelectorAll(".pane-view").length`)) as number) === 1,
+    );
+
+    // Click the toolbar split button.
+    await bridge.evalJs(
+      `document.querySelector('[aria-label="Toggle split editor"]')?.click()`,
+    );
+    await expectEventually(async () =>
+      ((await bridge!.evalJs(`document.querySelectorAll(".pane-view").length`)) as number) === 2,
+    );
+    // Pressed state reflects the split.
+    const pressed = (await bridge.evalJs(
+      `document.querySelector('[aria-label="Toggle split editor"]')?.getAttribute("data-pressed")`,
+    )) as string | null;
+    expect(pressed).toBe("");
+
+    // Click again → collapse.
+    await bridge.evalJs(
+      `document.querySelector('[aria-label="Toggle split editor"]')?.click()`,
+    );
+    await expectEventually(async () =>
+      ((await bridge!.evalJs(`document.querySelectorAll(".pane-view").length`)) as number) === 1,
+    );
+  });
+
+  it("'Move to Other Pane' opens the file in the second pane and removes it from the first", async () => {
+    if (!bridge) return;
+    // Open a file, then split so we have 2 panes with the file in pane 0.
+    await clickFirstSupportedFile(bridge);
+    const isMac = (await bridge.evalJs("navigator.platform.startsWith('Mac')")) === true;
+    await bridge.evalJs(
+      `window.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "\\\\", metaKey: ${isMac}, ctrlKey: ${!isMac}, bubbles: true, cancelable: true,
+      }))`,
+    );
+    await expectEventually(async () =>
+      ((await bridge!.evalJs(`document.querySelectorAll(".pane-view").length`)) as number) === 2,
+    );
+
+    // Pane 0 has the file we clicked; pane 1 is empty (split-from-active
+    // creates an empty new pane). Verify before the move.
+    const before = (await bridge.evalJs(
+      `({
+        pane0Tabs: document.querySelector('[data-pane-index="0"]')?.querySelectorAll(".tab-bar-item").length,
+        pane1Tabs: document.querySelector('[data-pane-index="1"]')?.querySelectorAll(".tab-bar-item").length,
+      })`,
+    )) as { pane0Tabs: number; pane1Tabs: number };
+    expect(before.pane0Tabs).toBe(1);
+    expect(before.pane1Tabs).toBe(0);
+
+    // Trigger the move via __DEV__.moveTab. Kobalte ContextMenu's onSelect
+    // is non-trivial to fire from happy-dom; the menu *wiring* (the entry
+    // appears with the right label, clicking it forwards the tabId) is
+    // covered by `tab-bar.vtest.tsx`. Here we exercise the host
+    // orchestration end-to-end (open in target, close in source, focus
+    // shifts) on the live app.
+    const tabIdInPane0 = (await bridge.evalJs(
+      `document.querySelector('[data-pane-index="0"] [data-tab-id]')?.dataset?.tabId ?? null`,
+    )) as string | null;
+    expect(tabIdInPane0).not.toBeNull();
+    await bridge.evalJs(
+      `window.__DEV__.moveTab(${JSON.stringify(tabIdInPane0)}, 0)`,
+    );
+
+    // After the move: pane 0 has 0 tabs, pane 1 has 1 tab.
+    await expectEventually(async () => {
+      const after = (await bridge!.evalJs(
+        `({
+          pane0Tabs: document.querySelector('[data-pane-index="0"]')?.querySelectorAll(".tab-bar-item").length ?? 0,
+          pane1Tabs: document.querySelector('[data-pane-index="1"]')?.querySelectorAll(".tab-bar-item").length ?? 0,
+        })`,
+      )) as { pane0Tabs: number; pane1Tabs: number };
+      return after.pane0Tabs === 0 && after.pane1Tabs === 1;
+    }, 4000);
+
+    // Cleanup: collapse the split.
+    await bridge.evalJs(
+      `window.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "\\\\", metaKey: ${isMac}, ctrlKey: ${!isMac}, bubbles: true, cancelable: true,
+      }))`,
+    );
+    await expectEventually(async () =>
+      ((await bridge!.evalJs(`document.querySelectorAll(".pane-view").length`)) as number) === 1,
+    );
+  });
+
   it("Cmd/Ctrl+1 / Cmd/Ctrl+2 switch focus between split panes", async () => {
     if (!bridge) return;
 

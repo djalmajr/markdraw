@@ -61,6 +61,17 @@ Operations on this wiki, newest first.
   "Focus First Pane", "Focus Second Pane") and 3 entries in the
   Shortcuts Help modal.
 
+### UI affordances added (follow-up)
+- Toolbar split toggle button (lucide `columns-2` icon) — clicks
+  call the same `splitFromActive` / `collapseRightPane` path as
+  the keyboard shortcut. Pressed state mirrors `isSplit`.
+- Tab context menu entry "Move to Other Pane" — right-click any
+  tab while split is open to send it across. When only one pane
+  exists the entry reads "Open in Split Pane" and triggers
+  `splitFromActive` first. The host orchestrates open-in-target +
+  close-in-source via `handleMoveTab` (exposed on `__DEV__` for
+  E2E coverage).
+
 ## [2026-05-04] feature | Quick Open (Cmd/Ctrl+P fuzzy file finder)
 
 ### Pages updated

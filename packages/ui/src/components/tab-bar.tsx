@@ -21,6 +21,14 @@ interface TabBarProps {
   onActivateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onNewTab?: () => void;
+  /** When provided, the tab context menu shows a "Move to Other Pane"
+   *  item. The label flips to "Open in Split Pane" when only one pane
+   *  exists (the host then auto-splits). When omitted (single-pane
+   *  hosts like the extension), the entry is hidden. */
+  onMoveToOtherPane?: (tabId: string) => void;
+  /** Label for the move-to-other-pane menu item. Caller supplies it
+   *  so the wording reflects the current number of panes. */
+  moveToOtherPaneLabel?: string;
 }
 
 const TAB_DND_PREFIX = "tab::";
@@ -47,6 +55,8 @@ function DraggableTab(props: {
   onCloseOthers: () => void;
   onCloseAll: () => void;
   onCloseToRight: () => void;
+  onMove?: () => void;
+  moveLabel?: string;
 }) {
   const dndId = () => toTabDndId(props.tab.id);
   const draggable = useDraggable({
@@ -102,6 +112,12 @@ function DraggableTab(props: {
           <ContextMenuItem onSelect={props.onCloseToRight}>Close to the Right</ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={props.onCloseAll}>Close All</ContextMenuItem>
+          <Show when={props.onMove}>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => props.onMove?.()}>
+              {props.moveLabel ?? "Move to Other Pane"}
+            </ContextMenuItem>
+          </Show>
         </ContextMenuContent>
       </ContextMenu>
       <TooltipContent>{props.tab.rootId}/{props.tab.filePath}</TooltipContent>
@@ -250,6 +266,8 @@ export function TabBar(props: TabBarProps) {
                 onCloseOthers={() => props.tabStore.closeOtherTabs(tab.id)}
                 onCloseAll={() => props.tabStore.closeAllTabs()}
                 onCloseToRight={() => props.tabStore.closeTabsToRight(tab.id)}
+                onMove={props.onMoveToOtherPane ? () => props.onMoveToOtherPane!(tab.id) : undefined}
+                moveLabel={props.moveToOtherPaneLabel}
               />
             )}
           </For>

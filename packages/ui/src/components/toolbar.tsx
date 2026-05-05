@@ -13,6 +13,7 @@ import IconListTree from "~icons/lucide/list-tree";
 import IconMonitor from "~icons/lucide/monitor";
 import IconMoon from "~icons/lucide/moon";
 import IconPanelLeft from "~icons/lucide/panel-left";
+import IconColumns from "~icons/lucide/columns-2";
 import IconMenu from "~icons/lucide/menu";
 import IconSun from "~icons/lucide/sun";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.tsx";
@@ -60,6 +61,13 @@ interface ToolbarProps {
   /** Open the keyboard shortcuts help modal. Wired to a menu item; if
    *  omitted the item is hidden. */
   onShortcutsHelp?: () => void;
+  /** Toggle the split editor (open second pane / collapse). When
+   *  omitted, the toolbar split button is hidden — handy for
+   *  platforms that don't support the feature. */
+  onToggleSplit?: () => void;
+  /** Truthy when there are 2 panes open. Drives the Toggle's pressed
+   *  state on the toolbar split button. */
+  isSplit?: boolean;
   onExportPdf?: () => void;
   onGoBack?: () => void;
   onGoForward?: () => void;
@@ -108,6 +116,23 @@ export function Toolbar(props: ToolbarProps) {
           <IconListTree width={16} height={16} />
         </TooltipTrigger>
         <TooltipContent>Toggle table of contents</TooltipContent>
+      </Tooltip>
+    </Show>
+  );
+
+  const renderSplitToggle = () => (
+    <Show when={props.onToggleSplit && props.hasRoot}>
+      <Tooltip>
+        <TooltipTrigger
+          as={Toggle}
+          size="sm"
+          pressed={!!props.isSplit}
+          onChange={() => props.onToggleSplit?.()}
+          aria-label="Toggle split editor"
+        >
+          <IconColumns width={16} height={16} />
+        </TooltipTrigger>
+        <TooltipContent>Split editor</TooltipContent>
       </Tooltip>
     </Show>
   );
@@ -238,6 +263,7 @@ export function Toolbar(props: ToolbarProps) {
           {renderMenu()}
           {renderSidebarToggle()}
           {renderTocToggle()}
+          {renderSplitToggle()}
         </Show>
         <Show when={props.showNavButtons}>
           <Tooltip>
@@ -294,6 +320,7 @@ export function Toolbar(props: ToolbarProps) {
         <Show when={!props.controlsOnLeft}>
           {renderSidebarToggle()}
           {renderTocToggle()}
+          {renderSplitToggle()}
           {renderMenu()}
         </Show>
       </div>

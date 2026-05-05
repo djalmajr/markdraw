@@ -47,6 +47,11 @@ export interface PaneViewProps {
   onActivateTab?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void;
   onNewTab?: () => void;
+  /** Move the given tab from this pane to the other one. The host
+   *  resolves which pane is "other" (and may auto-split if there's
+   *  currently only one pane). Hidden when undefined. */
+  onMoveTab?: (tabId: string, fromPaneIndex: number) => void;
+  moveTabLabel?: string;
   onOpenFolder?: () => void;
   onOpenRecentFile?: (recentFile: RecentFile) => void | Promise<void>;
   onOpenRecentFolder?: (path: string) => void | Promise<void>;
@@ -179,6 +184,12 @@ export function PaneView(props: PaneViewProps) {
           onActivateTab={props.onActivateTab ?? (() => {})}
           onCloseTab={props.onCloseTab ?? (() => {})}
           onNewTab={props.onNewTab}
+          onMoveToOtherPane={
+            props.onMoveTab
+              ? (tabId) => props.onMoveTab!(tabId, props.paneIndex)
+              : undefined
+          }
+          moveToOtherPaneLabel={props.moveTabLabel}
         />
       </Show>
       <div class="content-panels">

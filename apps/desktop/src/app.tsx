@@ -125,6 +125,9 @@ export function App() {
         showHidden: state.showHiddenEntries(),
         roots: state.rootsList().map((r) => ({ id: r.id, entries: r.entries.length })),
       }),
+      // Drive the move-tab handler directly. Useful for E2E that
+      // can't reliably synthesize a Kobalte ContextMenu click.
+      moveTab: (tabId: string, fromPaneIndex: number) => handleMoveTab(tabId, fromPaneIndex),
     };
   }
 
@@ -485,6 +488,42 @@ export function App() {
     recentFilesVersion(); // bump key forces re-read after a Quick Open pick
     return new Set(getRecentFiles().map((f) => `${f.rootPath}::${f.path}`));
   });
+
+  /**
+   * Move a tab from `fromPaneIndex` to the other pane. Opens the file
+   * in the destination pane (creates the pane via `splitFromActive`
+   * when there's only one) and closes the original. Same `editorMode`
+   * is preserved so a split-side preview stays a preview.
+   *
+   * Mutation-survival contracts (locked in by the host-level domain
+   * test in app.test.ts):
+   *   - skipping `closeTab` on the origin → tab is duplicated.
+   *   - skipping the `openTab` on the target → tab vanishes.
+   *   - reading `fromPaneIndex` from the wrong end → tab moved from
+   *     wrong pane.
+   */
+  function handleMoveTab(tabId: string, fromPaneIndex: number) {
+    const panes = state.paneManager.panes();
+    const sourcePane = panes[fromPaneIndex];
+    if (!sourcePane) return;
+    const tab = sourcePane.tabs.getTab(tabId);
+    if (!tab) return;
+
+    if (panes.length < 2) {
+      state.paneManager.splitFromActive();
+    }
+    const updatedPanes = state.paneManager.panes();
+    const targetIndex = fromPaneIndex === 0 ? 1 : 0;
+    const targetPane = updatedPanes[targetIndex];
+    if (!targetPane) return;
+
+    const entry = state.findEntryByPath(tab.filePath, tab.rootId);
+    if (!entry || entry.kind !== "file") return;
+
+    targetPane.tabs.openTab(entry, tab.rootId);
+    sourcePane.tabs.closeTab(tabId);
+    state.paneManager.setActivePane(targetIndex);
+  }
 
   async function handleQuickOpenSelect(file: IndexedFile) {
     setQuickOpenVisible(false);
@@ -926,6 +965,7 @@ export function App() {
       onActivateTab={handleActivateTab}
       onCloseTab={handleCloseTab}
       onNewTab={handleNewTab}
+      onMoveTab={handleMoveTab}
       quickOpenOpen={quickOpenVisible()}
       quickOpenRecents={quickOpenRecents()}
       onQuickOpenSelect={handleQuickOpenSelect}
