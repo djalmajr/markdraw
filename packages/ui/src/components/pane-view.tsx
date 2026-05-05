@@ -66,6 +66,11 @@ export interface PaneViewProps {
    *  currently only one pane). Hidden when undefined. */
   onMoveTab?: (tabId: string, fromPaneIndex: number) => void;
   moveTabLabel?: string;
+  /** Where the Preview should mount its TOC. AppShell hosts a single
+   *  shared <aside class="toc-panel"> and only the active pane gets
+   *  the ref — otherwise two Previews would fight over the same DOM
+   *  target. Pass undefined for non-active panes. */
+  tocContainer?: HTMLElement;
   onOpenFolder?: () => void;
   onOpenRecentFile?: (recentFile: RecentFile) => void | Promise<void>;
   onOpenRecentFolder?: (path: string) => void | Promise<void>;
@@ -167,7 +172,7 @@ export function PaneView(props: PaneViewProps) {
           syncScrollTargetRatio={previewSyncTargetRatio()}
           syncScrollTargetVersion={previewSyncTargetVersion()}
           tocVisible={s.tocVisible()}
-          tocContainer={undefined}
+          tocContainer={props.tocContainer}
           currentFilePath={pane().selectedFile()?.path ?? null}
           pendingFragment={s.pendingFragment()}
           previewOverlayHost={previewPanelRef}

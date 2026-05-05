@@ -461,6 +461,16 @@ export function AppShell(props: AppShellProps) {
                         }
                         state={s}
                         flexBasis={paneFlexBasis(i(), visiblePanes().length, s.paneManager.splitRatio())}
+                        tocContainer={
+                          // Only the active pane mounts its TOC into
+                          // the shared aside.toc-panel — keeps both
+                          // Previews from racing over the same node.
+                          (visiblePanes().length === 1
+                            ? i() === 0
+                            : i() === s.paneManager.activePaneIndex())
+                            ? tocContainerRef
+                            : undefined
+                        }
                         showToolbar={props.showToolbar}
                         showEditorTabs={props.showEditorTabs}
                         showRecentHistory={props.showRecentHistory}
