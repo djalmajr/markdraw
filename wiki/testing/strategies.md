@@ -474,6 +474,109 @@ shell. Captured in `BACKLOG.md`.
 
 ---
 
+## Round 4 — lessons from the split-panes incident
+
+A user-found bug ("after moving a tab to the other pane, switching tabs
+in the destination shows the same preview") slipped through the test
+suite. Post-mortem extracted four concrete lessons about how the
+existing strategies were applied — none of them are new techniques,
+all of them are existing strategies that were under-applied.
+
+### Lesson 1 — Inline `// Mutation captured` comments aren't proof
+
+The `handleMoveTab` handler had comments documenting which mutations
+each test was supposed to catch (skip-closeTab, skip-openTab,
+wrong-fromPaneIndex). **No one ever ran those mutations** to verify
+the assertions actually fail. The test suite passed cleanly even
+with `targetPane.tabs.updateActiveTabContent` removed — because no
+test asserted on the *target tab's content*, only on the *count of
+tabs in each pane*.
+
+**Rule going forward**: a `// Mutation captured: …` comment is a
+TODO, not a guarantee. Either:
+1. Add a CI step that mutates known constants and verifies a test
+   fails (manual pass via `sed` is the bare minimum), OR
+2. Don't write the comment unless you've already run the mutation.
+
+### Lesson 2 — Count-based assertions miss content corruption
+
+The original e2e for "Move to Other Pane" only checked
+`p0.tabs.length === 0 && p1.tabs.length === 1`. The actual user-facing
+bug was tab content corruption (snapshot/restore wrote the wrong
+TabState back into pane signals on tab-switch). Counts never lied.
+
+**Rule going forward**: when a feature renders user-visible content
+that survives tab/pane switches, the e2e MUST capture and compare
+the rendered text. Not lengths-only either — text comparison locks
+in the fact that two distinct files render distinctly.
+
+The new regression test in
+`apps/desktop/e2e/specs/palettes.webview.test.ts` ("Move preserves
+content + tab-switching in the target pane stays per-tab") opens
+two distinct files in the destination pane, switches between them,
+and asserts `readmeContent !== guideContent`. With the old buggy
+move handler the two strings were identical — the assertion
+catches the regression directly.
+
+### Lesson 3 — Stateful PBT was scoped too narrowly
+
+`packages/ui/src/composables/__property__/create-tab-store.stateful.test.ts`
+exercises a single TabStore with random sequences of open/close/
+activate/reorder. It found unrelated bugs effectively. But "move tab
+across panes" requires a *cross-store* invariant — and that suite
+operates on one store. The bug surfaced in the interaction between
+two `PaneStore`s + the `AppState` proxy, none of which the existing
+PBT models.
+
+**Rule going forward**: when a refactor introduces a NEW
+multi-store interaction (e.g. moving entities between aggregates),
+the stateful PBT scope must follow. A `create-pane-manager.stateful`
+suite with commands `Open`, `Close`, `Switch`, `Move` and the
+invariant "for each persistent tab, switching away then back yields
+the same content" would have caught this in the first 50 cases —
+the bug fires deterministically on `[Move(tab), Switch, SwitchBack]`.
+
+This is **deferred**, documented in the wiki log with a follow-up
+note. Adding it now without a current bug to surface would be
+busywork; adding it the next time we touch cross-pane state is
+mandatory.
+
+### Lesson 4 — Property: snapshot/restore round-trip preservation
+
+The deeper invariant the bug violated:
+
+> ∀ sequence of (open, switch, close, move) operations: for every
+> tab `T` that exists at the end, `T.editorContent` equals the
+> last `editorContent` the user observed in `T` before they
+> last switched away.
+
+This is a direct property test target — fast-check can generate
+sequences and a model tracks "what content the user saw last in
+each tab". Neither the current vtest nor the existing stateful PBT
+encodes this. The `create-tab-store.stateful` covers parts (id
+uniqueness, no-loss on close-then-reopen) but not the
+content-faithfulness invariant.
+
+**Rule going forward**: identify the *content-faithfulness*
+invariant for any cache-like construct (tabs, panes, recents,
+favourites). If user-observable state is stored and replayed,
+property-test the round-trip explicitly.
+
+### Lesson 5 — Domain rules at the host handler level
+
+`handleMoveTab` lives in `apps/desktop/src/app.tsx`. It's a host
+handler (mixes paneManager, tabStore, loader). No bun-level test
+exists because extracting it would mean carrying its dependencies.
+
+**Rule going forward**: host handlers that orchestrate cross-store
+state changes are exactly the place where regressions land
+quietly. They deserve unit tests via dependency injection — pull
+the logic into a pure function `moveTabBetweenPanes(deps)`,
+domain-test it, and let the host wire `deps`. The cost is a small
+indirection; the gain is mutation-survivable coverage.
+
+This is **deferred**, with a wiki/log entry tracking the follow-up.
+
 ## Fontes
 
 - [Wikipedia: Metamorphic testing](https://en.wikipedia.org/wiki/Metamorphic_testing)

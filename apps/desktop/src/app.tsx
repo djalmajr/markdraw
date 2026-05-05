@@ -520,9 +520,56 @@ export function App() {
     const entry = state.findEntryByPath(tab.filePath, tab.rootId);
     if (!entry || entry.kind !== "file") return;
 
-    targetPane.tabs.openTab(entry, tab.rootId);
-    sourcePane.tabs.closeTab(tabId);
+    // The TabState carries everything the editor/preview need to
+    // render the moved file without reloading from disk. Snapshot
+    // off the source tab itself (NOT the source pane's live signals
+    // — those reflect whichever tab is currently active in the
+    // source pane, which may not be the one being moved).
+    const snapshot = {
+      editorContent: tab.editorContent,
+      savedContent: tab.savedContent,
+      html: tab.html,
+      frontmatter: tab.frontmatter,
+      editorMode: tab.editorMode,
+    };
+
+    // Activate the target pane BEFORE writing through the AppState
+    // proxy, so `state.setHtml` etc. land in the target pane's
+    // signals. Without this, the proxy still points at the source
+    // pane and the moved file would render in the wrong column.
     state.paneManager.setActivePane(targetIndex);
+
+    // Open the file in the target pane's tab list. `openTab` (non-
+    // background) sets the new tab active inside the target pane.
+    targetPane.tabs.openTab(entry, tab.rootId);
+
+    // Push the source's content into the new tab's TabState so
+    // future tab-switches inside the target pane snapshot/restore
+    // the correct content (otherwise the new tab is empty until the
+    // user reloads from disk and tab-switches show stale content).
+    targetPane.tabs.updateActiveTabContent({
+      editorContent: snapshot.editorContent,
+      savedContent: snapshot.savedContent,
+      html: snapshot.html,
+      frontmatter: snapshot.frontmatter,
+    });
+
+    // Mirror the snapshot through the AppState proxy so the editor
+    // and preview update immediately for the user — restoreActiveTab
+    // already runs inside `openTab` but reads from the freshly-empty
+    // TabState (we hadn't written the content yet at that point).
+    state.setEditorContent(snapshot.editorContent);
+    state.setSavedContent(snapshot.savedContent);
+    state.setHtml(snapshot.html);
+    state.setFrontmatter(snapshot.frontmatter);
+    state.setEditorMode(snapshot.editorMode);
+    state.setSelectedFile(entry);
+    state.setSelectedRootId(tab.rootId);
+
+    // Finally remove the tab from the source pane. closeTab handles
+    // the case where this was the last tab (clears source signals)
+    // or activates a sibling (restores its content into source).
+    sourcePane.tabs.closeTab(tabId);
   }
 
   async function handleQuickOpenSelect(file: IndexedFile) {

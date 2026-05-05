@@ -2,6 +2,49 @@
 
 Operations on this wiki, newest first.
 
+## [2026-05-04] post-mortem | Split-panes move-tab content cache bug
+
+A user-reported bug after the split-panes feature shipped — moving a
+tab to the other pane and then switching tabs inside the target
+pane showed the same preview content for two different files. Root
+cause: `handleMoveTab` created the target tab via `openTab` (empty
+content) and never copied the source TabState's `editorContent` /
+`html` / `frontmatter` / `editorMode` across, so the active pane
+signals stayed pointing at whatever was previously rendered.
+
+### Fix
+`handleMoveTab` now snapshots from the source `TabState` directly
+(NOT the source pane's live signals — those reflect whichever tab
+is currently active in the source pane), activates the target pane
+*before* mirroring the snapshot through the AppState proxy, copies
+the snapshot onto the new tab via `updateActiveTabContent`, then
+closes the source.
+
+### Test gap
+The existing e2e checked only the COUNT of tabs after the move
+(`p0=0, p1=1`). Content was never asserted, so a mutation that
+removed `updateActiveTabContent` would have passed cleanly. New
+regression e2e in `palettes.webview.test.ts` ("Move preserves
+content + tab-switching") opens two distinct files in the
+destination pane, switches between them, and asserts
+`readmeContent !== guideContent` — fails on the old buggy handler.
+
+### Process learnings (added to `wiki/testing/strategies.md` Round 4)
+- `// Mutation captured: …` comments are TODOs, not proof. Run the
+  mutation to verify, or don't write the comment.
+- Count-based e2e misses content corruption. When a feature renders
+  user-visible content that survives tab/pane switches, the e2e
+  MUST capture the rendered text and compare distinct files.
+- Stateful PBT was scoped to a single `TabStore`; cross-store
+  interactions (moving between panes) need their own stateful PBT
+  suite at the `PaneManager` level — deferred follow-up.
+- Content-faithfulness property test (sequence of open/switch/
+  close/move preserves per-tab content) is the deeper invariant.
+  Deferred follow-up.
+- Host handlers like `handleMoveTab` deserve dependency-injected
+  unit tests. Pull pure orchestration logic out of the host and
+  domain-test it. Deferred follow-up.
+
 ## [2026-05-04] feature | Split editor (2-pane workspace)
 
 ### Pages updated

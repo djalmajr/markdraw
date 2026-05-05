@@ -419,6 +419,23 @@ describe("desktop palettes (Cmd/Ctrl+P family)", () => {
     );
   });
 
+  // [Deferred regression] "Move preserves content + tab-switching"
+  //
+  // Manual reproduction (via Tauri MCP debug script) confirms the fix:
+  // after `__DEV__.moveTab`, pane 1's `.content article` shows the
+  // moved file's content (376 chars for README.md), and switching
+  // between tabs in pane 1 flips the preview correctly.
+  //
+  // The intended e2e was deferred because the reload-and-reconnect
+  // pattern needed to isolate this test from prior test state was
+  // brittle: the bridge handle gets killed by `window.location.reload()`
+  // and reconnecting mid-suite raced against the dev:app's HMR. The
+  // assertion at the end (`readmeAgain !== guideAgain`) is the right
+  // shape — it just needs harness work to land reliably.
+  //
+  // See `wiki/testing/strategies.md` Round 4 (lessons 2 + 5) for the
+  // process learnings extracted from this gap.
+
   it("'Move to Other Pane' opens the file in the second pane and removes it from the first", async () => {
     if (!bridge) return;
     // Open a file, then split so we have 2 panes with the file in pane 0.
