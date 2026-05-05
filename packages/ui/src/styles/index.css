@@ -2043,6 +2043,42 @@ kbd.shortcuts-help-key {
   padding: 48px;
   cursor: default;
   user-select: none;
+  /*
+   * Anchor for the absolute-positioned `.empty-shortcuts-hint` ghost
+   * button in the bottom-right corner. Without this the button would
+   * escape to the nearest positioned ancestor (the pane root).
+   */
+  position: relative;
+}
+
+/*
+ * Discoverability hint on the welcome screen. Ghost button with no
+ * background at rest, only a subtle outline on hover. Sits in the
+ * bottom-right so it doesn't compete with the dropzone but is still
+ * visible to a first-time user looking around.
+ */
+.empty-shortcuts-hint {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.empty-shortcuts-hint:hover {
+  opacity: 1;
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--border));
 }
 
 .empty-state h2 {

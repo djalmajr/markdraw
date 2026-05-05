@@ -77,6 +77,10 @@ export interface PaneViewProps {
   onWindowDragStart?: () => void | Promise<void>;
   onNavigate?: (path: string, fragment?: string | null) => void;
   onOpenExternal?: (url: string) => void;
+  /** Called when the EmptyState's discoverability ghost button is
+   *  clicked. The host opens the shortcuts modal — same handler as
+   *  Cmd+/. Hidden when omitted. */
+  onShowShortcutsHelp?: () => void;
 }
 
 /**
@@ -153,6 +157,7 @@ export function PaneView(props: PaneViewProps) {
             onClearRecentHistory={s.handleClearRecentHistory}
             onRemoveRecentFile={s.handleRemoveRecentFile}
             onRemoveRecentFolder={s.handleRemoveRecentFolder}
+            onShowShortcutsHelp={props.onShowShortcutsHelp}
             onToggleFavorite={s.handleToggleFavorite}
             onWindowDragStart={props.onWindowDragStart}
             recentFiles={s.recentFiles()}

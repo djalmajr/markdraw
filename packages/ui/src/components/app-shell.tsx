@@ -535,6 +535,7 @@ export function AppShell(props: AppShellProps) {
                         onWindowDragStart={props.onWindowDragStart}
                         onNavigate={props.onNavigate}
                         onOpenExternal={props.onOpenExternal}
+                        onShowShortcutsHelp={props.onShortcutsHelpOpen}
                         onActivate={() => s.paneManager.setActivePane(i())}
                       />
                     </>

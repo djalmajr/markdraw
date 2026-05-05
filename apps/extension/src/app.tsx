@@ -42,6 +42,11 @@ export function App() {
   const [urlFileName, setUrlFileName] = createSignal("");
   const [, setUrlError] = createSignal<string | null>(null);
   const [fileAccessDenied, setFileAccessDenied] = createSignal(false);
+  // Shortcuts-help modal toggle. The extension doesn't bind Cmd+/ to
+  // open it (no global keydown handler here), so the only entry points
+  // are the toolbar menu's "Keyboard shortcuts" item and the
+  // discoverability ghost button on the welcome screen.
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = createSignal(false);
 
   // File watcher (folder mode only — watches current file + includes)
   const watcher = new FileWatcher(() => {
@@ -172,6 +177,9 @@ export function App() {
       onCopySource={isUrlMode ? handleCopySource : undefined}
       onOpenFolder={!isUrlMode ? folder.handleOpenFolder : undefined}
       onReload={handleReload}
+      shortcutsHelpOpen={shortcutsHelpOpen()}
+      onShortcutsHelpOpen={() => setShortcutsHelpOpen(true)}
+      onShortcutsHelpClose={() => setShortcutsHelpOpen(false)}
       toolbarFilePath={isUrlMode ? displayPathFromUrl(sourceUrl!) : (state.selectedFile()?.path ?? null)}
       toolbarRootName={isUrlMode ? "" : state.rootName()}
       contentWrapper={(content) => (

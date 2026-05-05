@@ -7,6 +7,7 @@ import IconFolderOpen from "~icons/lucide/folder-open";
 import IconFileText from "~icons/lucide/file-text";
 import IconX from "~icons/lucide/x";
 import IconUpload from "~icons/lucide/upload";
+import IconKeyboard from "~icons/lucide/keyboard";
 import IconStar from "~icons/lucide/star";
 import { Button } from "./ui/button.tsx";
 
@@ -34,6 +35,14 @@ interface EmptyStateProps {
   onRemoveRecentFolder?: (path: string) => void;
   onToggleFavorite?: (file: FavoriteFile) => void;
   onWindowDragStart?: () => void | Promise<void>;
+  /**
+   * Open the keyboard-shortcuts help modal. When supplied, a discreet
+   * ghost button shows in the bottom-right corner of the welcome
+   * screen — first-time users have something to click to discover
+   * the available shortcuts. Hidden when omitted (extension passes
+   * undefined when there's no Cmd+/ keydown wired).
+   */
+  onShowShortcutsHelp?: () => void;
 }
 
 export function EmptyState(props: EmptyStateProps) {
@@ -180,6 +189,17 @@ export function EmptyState(props: EmptyStateProps) {
         </div>
         <h2>Select a file</h2>
         <p>Choose an .adoc file from the sidebar to preview it.</p>
+      </Show>
+      <Show when={!props.hasRoot && props.onShowShortcutsHelp}>
+        <button
+          aria-label="Show keyboard shortcuts"
+          class="empty-shortcuts-hint"
+          type="button"
+          onClick={() => props.onShowShortcutsHelp?.()}
+        >
+          <IconKeyboard width={14} height={14} />
+          <span>Keyboard shortcuts</span>
+        </button>
       </Show>
     </div>
   );
