@@ -910,10 +910,26 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   opacity: 0;
   flex-shrink: 0;
   transition: opacity 0.1s;
+  /*
+   * Sticky-pin the dropdown trigger to the right edge of the file-tree's
+   * scroll viewport. Truncation usually keeps the row inside the sidebar,
+   * but deep nesting (long padding-left) on a narrow sidebar can still
+   * push the row past the viewport. Sticky makes the button visible at
+   * the right edge regardless. The opaque background hides anything that
+   * scrolls under it.
+   */
+  position: sticky;
+  right: 4px;
+  background: hsl(var(--sidebar-bg));
 }
 
 .tree-item:hover .tree-item-more {
   opacity: 1;
+  background: hsl(var(--bg-hover));
+}
+
+.tree-item.selected .tree-item-more {
+  background: hsl(var(--bg-selected));
 }
 
 .tree-item-more:hover {

@@ -432,6 +432,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
               onSelect={props.onSelect}
               onOpenInNewTab={props.onOpenInNewTab}
               onDoubleClickFile={props.onDoubleClickFile}
+              showItemMenu={props.showItemMenu}
             />
           )}
         </For>
