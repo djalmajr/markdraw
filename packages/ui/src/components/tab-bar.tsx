@@ -1,5 +1,5 @@
-import { For, Show, createMemo, createSignal, createEffect, onCleanup } from "solid-js";
-import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/solid";
+import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
+import { useDraggable, useDroppable } from "@dnd-kit/solid";
 import type { TabStore } from "../composables/create-tab-store.ts";
 import type { TabState } from "@asciimark/core/tabs.ts";
 import {
@@ -17,6 +17,10 @@ import IconChevronRight from "~icons/lucide/chevron-right";
 
 interface TabBarProps {
   tabStore: TabStore;
+  /** Pane index this bar belongs to. Encoded into the dnd id so the
+   *  cross-pane DragDropProvider in AppShell can route reorders
+   *  (same pane) vs moves (different pane). */
+  paneIndex: number;
   activeTabDirty?: boolean;
   onActivateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
@@ -34,22 +38,32 @@ interface TabBarProps {
 const TAB_DND_PREFIX = "tab::";
 const SCROLL_STEP = 150;
 
-function toTabDndId(tabId: string): string {
-  return `${TAB_DND_PREFIX}${tabId}`;
+/** Build the dnd id for a tab, encoding both pane index + tab id. */
+export function toTabDndId(paneIndex: number, tabId: string): string {
+  return `${TAB_DND_PREFIX}${paneIndex}::${tabId}`;
 }
 
-function fromTabDndId(dndId: unknown): string | null {
+/** Parse a tab dnd id back into its pane index + tab id. Returns null
+ *  for non-tab ids. Exported so the AppShell-level DragDropProvider
+ *  can route cross-pane drops correctly. */
+export function fromTabDndId(dndId: unknown): { paneIndex: number; tabId: string } | null {
   if (typeof dndId !== "string") return null;
   if (!dndId.startsWith(TAB_DND_PREFIX)) return null;
-  return dndId.slice(TAB_DND_PREFIX.length);
+  const rest = dndId.slice(TAB_DND_PREFIX.length);
+  const sep = rest.indexOf("::");
+  if (sep < 0) return null;
+  const paneIndex = Number(rest.slice(0, sep));
+  if (!Number.isInteger(paneIndex)) return null;
+  return { paneIndex, tabId: rest.slice(sep + 2) };
 }
 
 function DraggableTab(props: {
   tab: TabState;
+  paneIndex: number;
   isActive: boolean;
   isDirty: boolean;
   displayName: string;
-  canReorder: boolean;
+  canDrag: boolean;
   onActivate: () => void;
   onClose: () => void;
   onCloseOthers: () => void;
@@ -58,14 +72,14 @@ function DraggableTab(props: {
   onMove?: () => void;
   moveLabel?: string;
 }) {
-  const dndId = () => toTabDndId(props.tab.id);
+  const dndId = () => toTabDndId(props.paneIndex, props.tab.id);
   const draggable = useDraggable({
     get id() { return dndId(); },
-    get disabled() { return !props.canReorder; },
+    get disabled() { return !props.canDrag; },
   });
   const droppable = useDroppable({
     get id() { return dndId(); },
-    get disabled() { return !props.canReorder; },
+    get disabled() { return !props.canDrag; },
   });
 
   return (
@@ -107,17 +121,17 @@ function DraggableTab(props: {
           </ContextMenuTrigger>
         </TooltipTrigger>
         <ContextMenuContent class="min-w-40">
+          <Show when={props.onMove}>
+            <ContextMenuItem onSelect={() => props.onMove?.()}>
+              {props.moveLabel ?? "Move to Other Pane"}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </Show>
           <ContextMenuItem onSelect={props.onClose}>Close</ContextMenuItem>
           <ContextMenuItem onSelect={props.onCloseOthers}>Close Others</ContextMenuItem>
           <ContextMenuItem onSelect={props.onCloseToRight}>Close to the Right</ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={props.onCloseAll}>Close All</ContextMenuItem>
-          <Show when={props.onMove}>
-            <ContextMenuSeparator />
-            <ContextMenuItem onSelect={() => props.onMove?.()}>
-              {props.moveLabel ?? "Move to Other Pane"}
-            </ContextMenuItem>
-          </Show>
         </ContextMenuContent>
       </ContextMenu>
       <TooltipContent>{props.tab.rootId}/{props.tab.filePath}</TooltipContent>
@@ -128,8 +142,11 @@ function DraggableTab(props: {
 export function TabBar(props: TabBarProps) {
   const tabs = () => props.tabStore.tabs();
   const activeTabId = () => props.tabStore.activeTabId();
-  const canReorder = () => tabs().length > 1;
-  const [activeDragTabId, setActiveDragTabId] = createSignal<string | null>(null);
+  // Drag is enabled even when there's a single tab, because cross-pane
+  // moves are useful with one tab too. Reorder (in-pane) is the only
+  // case that legitimately requires `tabs.length > 1`, and the
+  // AppShell-level handler short-circuits a tab-onto-itself drop.
+  const canDrag = () => true;
   const [hasOverflow, setHasOverflow] = createSignal(false);
   const [canScrollLeft, setCanScrollLeft] = createSignal(false);
   const [canScrollRight, setCanScrollRight] = createSignal(false);
@@ -191,45 +208,6 @@ export function TabBar(props: TabBarProps) {
     return result;
   });
 
-  let suppressClickUntil = 0;
-
-  function handleDragStart(event: any) {
-    if (!canReorder()) return;
-    const sourceTabId = fromTabDndId(event?.operation?.source?.id);
-    setActiveDragTabId(sourceTabId);
-  }
-
-  function handleDragEnd(event: any) {
-    const sourceTabId =
-      fromTabDndId(event?.operation?.source?.id) ??
-      activeDragTabId();
-    const targetTabId = fromTabDndId(event?.operation?.target?.id);
-    setActiveDragTabId(null);
-
-    if (sourceTabId) {
-      suppressClickUntil = Date.now() + 150;
-    }
-
-    if (event?.canceled) return;
-    if (!sourceTabId || !targetTabId || sourceTabId === targetTabId) return;
-
-    const currentOrder = tabs().map((t) => t.id);
-    const sourceIdx = currentOrder.indexOf(sourceTabId);
-    const targetIdx = currentOrder.indexOf(targetTabId);
-    if (sourceIdx === -1 || targetIdx === -1) return;
-
-    const newOrder = [...currentOrder];
-    newOrder[sourceIdx] = currentOrder[targetIdx]!;
-    newOrder[targetIdx] = currentOrder[sourceIdx]!;
-    props.tabStore.reorderTabs(newOrder);
-  }
-
-  function getTabNameByDndId(dndId: unknown): string {
-    const tabId = fromTabDndId(dndId);
-    if (!tabId) return "";
-    return displayNames().get(tabId) ?? "";
-  }
-
   return (
     <div class="tab-bar">
       <Show when={hasOverflow()}>
@@ -241,47 +219,31 @@ export function TabBar(props: TabBarProps) {
           <IconChevronLeft width={14} height={14} />
         </button>
       </Show>
-      <DragDropProvider
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
+      <div
+        class="tab-bar-list"
+        ref={listRef}
+        onScroll={updateScrollState}
       >
-        <div
-          class="tab-bar-list"
-          ref={listRef}
-          onScroll={updateScrollState}
-        >
-          <For each={tabs()}>
-            {(tab) => (
-              <DraggableTab
-                tab={tab}
-                isActive={tab.id === activeTabId()}
-                isDirty={tab.id === activeTabId() ? (props.activeTabDirty ?? false) : tab.editorContent !== tab.savedContent}
-                displayName={displayNames().get(tab.id) ?? tab.fileName}
-                canReorder={canReorder()}
-                onActivate={() => {
-                  if (Date.now() < suppressClickUntil) return;
-                  props.onActivateTab(tab.id);
-                }}
-                onClose={() => props.onCloseTab(tab.id)}
-                onCloseOthers={() => props.tabStore.closeOtherTabs(tab.id)}
-                onCloseAll={() => props.tabStore.closeAllTabs()}
-                onCloseToRight={() => props.tabStore.closeTabsToRight(tab.id)}
-                onMove={props.onMoveToOtherPane ? () => props.onMoveToOtherPane!(tab.id) : undefined}
-                moveLabel={props.moveToOtherPaneLabel}
-              />
-            )}
-          </For>
-        </div>
-        <DragOverlay>
-          {(draggable) => (
-            <div class="tab-bar-item tab-bar-item-active tab-bar-drag-overlay">
-              <span class="tab-bar-item-name">
-                {getTabNameByDndId(draggable?.id)}
-              </span>
-            </div>
+        <For each={tabs()}>
+          {(tab) => (
+            <DraggableTab
+              tab={tab}
+              paneIndex={props.paneIndex}
+              isActive={tab.id === activeTabId()}
+              isDirty={tab.id === activeTabId() ? (props.activeTabDirty ?? false) : tab.editorContent !== tab.savedContent}
+              displayName={displayNames().get(tab.id) ?? tab.fileName}
+              canDrag={canDrag()}
+              onActivate={() => props.onActivateTab(tab.id)}
+              onClose={() => props.onCloseTab(tab.id)}
+              onCloseOthers={() => props.tabStore.closeOtherTabs(tab.id)}
+              onCloseAll={() => props.tabStore.closeAllTabs()}
+              onCloseToRight={() => props.tabStore.closeTabsToRight(tab.id)}
+              onMove={props.onMoveToOtherPane ? () => props.onMoveToOtherPane!(tab.id) : undefined}
+              moveLabel={props.moveToOtherPaneLabel}
+            />
           )}
-        </DragOverlay>
-      </DragDropProvider>
+        </For>
+      </div>
       <Show when={hasOverflow()}>
         <button
           class="tab-bar-scroll tab-bar-scroll-right"

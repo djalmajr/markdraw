@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { DragDropProvider, DragOverlay } from "@dnd-kit/solid";
 import type { FSEntry } from "@asciimark/core/types.ts";
 import type { RecentFile } from "@asciimark/core/recent-files.ts";
 import { flattenWorkspace, type IndexedFile } from "@asciimark/core/file-index.ts";
@@ -11,8 +12,9 @@ import { FileTree } from "./file-tree.tsx";
 import { EmptyState } from "./empty-state.tsx";
 import { Toaster } from "./ui/toast.tsx";
 import { ConfirmDialog } from "./confirm-dialog.tsx";
-import { PaneView } from "./pane-view.tsx";
+import { PaneView, fromPaneDropDndId } from "./pane-view.tsx";
 import { PaneSplitter } from "./pane-splitter.tsx";
+import { fromTabDndId } from "./tab-bar.tsx";
 import { QuickOpen } from "./quick-open.tsx";
 import { ShortcutsHelp } from "./shortcuts-help.tsx";
 import { CommandPalette } from "./command-palette.tsx";
@@ -177,6 +179,64 @@ export function AppShell(props: AppShellProps) {
   function paneFlexBasis(index: number, count: number, ratio: number): number {
     if (count <= 1) return 1;
     return index === 0 ? ratio : 1 - ratio;
+  }
+
+  /**
+   * Single drag handler for the cross-pane DragDropProvider. Three
+   * cases the user can produce by dragging a tab:
+   *   1. Same-pane reorder — drop on a sibling tab; we swap them.
+   *   2. Cross-pane move (onto a tab) — call `onMoveTab` so the host
+   *      duplicates the tab to the target pane and closes the source.
+   *   3. Cross-pane move (onto pane drop zone) — same as (2). The
+   *      drop zone covers empty panes that have no tab to land on.
+   *
+   * Mutation-survival contracts (covered by the live e2e + the unit
+   * tests on `handleMoveTab` in app.tsx):
+   *   - Skipping the same-pane check would route a sibling-tab drop
+   *     into `onMoveTab`, losing the file altogether on the same pane.
+   *   - Reading targetPane from a wrong place sends the tab to the
+   *     wrong pane.
+   */
+  // Use `any` because `@dnd-kit/solid`'s emitted shapes for the drag
+  // event aren't exported as a single nameable type — the runtime
+  // shape we care about is `event.operation.{source,target}.id`.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function handleTabDragEnd(event: any) {
+    if (event?.canceled) return;
+    const sourceId = event?.operation?.source?.id;
+    const targetId = event?.operation?.target?.id;
+
+    const source = fromTabDndId(sourceId);
+    if (!source) return;
+
+    const sourcePane = s.paneManager.panes()[source.paneIndex];
+    if (!sourcePane) return;
+
+    // Case A: target is a tab (could be in the same pane or another).
+    const targetTab = fromTabDndId(targetId);
+    if (targetTab) {
+      if (targetTab.paneIndex === source.paneIndex) {
+        // Same-pane reorder: swap source and target inside the bar.
+        const order = sourcePane.tabs.tabs().map((t) => t.id);
+        const sIdx = order.indexOf(source.tabId);
+        const tIdx = order.indexOf(targetTab.tabId);
+        if (sIdx === -1 || tIdx === -1 || sIdx === tIdx) return;
+        const next = [...order];
+        next[sIdx] = order[tIdx]!;
+        next[tIdx] = order[sIdx]!;
+        sourcePane.tabs.reorderTabs(next);
+        return;
+      }
+      // Cross-pane: move via the host handler.
+      props.onMoveTab?.(source.tabId, source.paneIndex);
+      return;
+    }
+
+    // Case B: target is a pane drop zone.
+    const targetPaneIdx = fromPaneDropDndId(targetId);
+    if (targetPaneIdx !== null && targetPaneIdx !== source.paneIndex) {
+      props.onMoveTab?.(source.tabId, source.paneIndex);
+    }
   }
 
   function setTocExpanded(expanded: boolean) {
@@ -363,52 +423,67 @@ export function AppShell(props: AppShellProps) {
             <div class="resize-handle" onDblClick={s.onResizeReset} onMouseDown={(e) => s.onResizeStart(e, appRef)} />
           </Show>
           <div class="content-area">
-            <div class="panes-container" ref={panesContainerRef}>
-              <For each={s.paneManager.panes()}>
-                {(pane, i) => (
-                  <>
-                    <Show when={i() > 0}>
-                      <PaneSplitter
-                        ratio={s.paneManager.splitRatio()}
-                        container={() => panesContainerRef}
-                        onResize={s.paneManager.setSplitRatio}
+            <DragDropProvider onDragEnd={handleTabDragEnd}>
+              <div class="panes-container" ref={panesContainerRef}>
+                <For each={s.paneManager.panes()}>
+                  {(pane, i) => (
+                    <>
+                      <Show when={i() > 0}>
+                        <PaneSplitter
+                          ratio={s.paneManager.splitRatio()}
+                          container={() => panesContainerRef}
+                          onResize={s.paneManager.setSplitRatio}
+                        />
+                      </Show>
+                      <PaneView
+                        pane={pane}
+                        paneIndex={i()}
+                        isActive={i() === s.paneManager.activePaneIndex()}
+                        state={s}
+                        flexBasis={paneFlexBasis(i(), s.paneManager.panes().length, s.paneManager.splitRatio())}
+                        showToolbar={props.showToolbar}
+                        showEditorTabs={props.showEditorTabs}
+                        showRecentHistory={props.showRecentHistory}
+                        hasRoot={props.hasRoot}
+                        contentWrapper={props.contentWrapper}
+                        resolveImageSrc={props.resolveImageSrc}
+                        onLoadFile={props.onLoadFile}
+                        onOpenInNewTab={props.onOpenInNewTab}
+                        onActivateTab={props.onActivateTab}
+                        onCloseTab={props.onCloseTab}
+                        onNewTab={props.onNewTab}
+                        onMoveTab={props.onMoveTab}
+                        moveTabLabel={
+                          s.paneManager.panes().length > 1
+                            ? "Move to Other Pane"
+                            : "Open in Split Pane"
+                        }
+                        onOpenFolder={props.onOpenFolder}
+                        onOpenRecentFile={props.onOpenRecentFile}
+                        onOpenRecentFolder={props.onOpenRecentFolder}
+                        onWindowDragStart={props.onWindowDragStart}
+                        onNavigate={props.onNavigate}
+                        onOpenExternal={props.onOpenExternal}
+                        onActivate={() => s.paneManager.setActivePane(i())}
                       />
-                    </Show>
-                    <PaneView
-                      pane={pane}
-                      paneIndex={i()}
-                      isActive={i() === s.paneManager.activePaneIndex()}
-                      state={s}
-                      flexBasis={paneFlexBasis(i(), s.paneManager.panes().length, s.paneManager.splitRatio())}
-                      showToolbar={props.showToolbar}
-                      showEditorTabs={props.showEditorTabs}
-                      showRecentHistory={props.showRecentHistory}
-                      hasRoot={props.hasRoot}
-                      contentWrapper={props.contentWrapper}
-                      resolveImageSrc={props.resolveImageSrc}
-                      onLoadFile={props.onLoadFile}
-                      onOpenInNewTab={props.onOpenInNewTab}
-                      onActivateTab={props.onActivateTab}
-                      onCloseTab={props.onCloseTab}
-                      onNewTab={props.onNewTab}
-                      onMoveTab={props.onMoveTab}
-                      moveTabLabel={
-                        s.paneManager.panes().length > 1
-                          ? "Move to Other Pane"
-                          : "Open in Split Pane"
-                      }
-                      onOpenFolder={props.onOpenFolder}
-                      onOpenRecentFile={props.onOpenRecentFile}
-                      onOpenRecentFolder={props.onOpenRecentFolder}
-                      onWindowDragStart={props.onWindowDragStart}
-                      onNavigate={props.onNavigate}
-                      onOpenExternal={props.onOpenExternal}
-                      onActivate={() => s.paneManager.setActivePane(i())}
-                    />
-                  </>
-                )}
-              </For>
-            </div>
+                    </>
+                  )}
+                </For>
+              </div>
+              <DragOverlay>
+                {(draggable) => {
+                  const parsed = draggable ? fromTabDndId(draggable.id) : null;
+                  if (!parsed) return null;
+                  const sourcePane = s.paneManager.panes()[parsed.paneIndex];
+                  const tab = sourcePane?.tabs.getTab(parsed.tabId);
+                  return (
+                    <div class="tab-bar-item tab-bar-item-active tab-bar-drag-overlay">
+                      <span class="tab-bar-item-name">{tab?.fileName ?? ""}</span>
+                    </div>
+                  );
+                }}
+              </DragOverlay>
+            </DragDropProvider>
           </div>
           <aside
             class="toc-panel"

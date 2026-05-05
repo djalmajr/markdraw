@@ -1,4 +1,5 @@
 import { Show, createEffect, createSignal, type JSX } from "solid-js";
+import { useDroppable } from "@dnd-kit/solid";
 import type { FSEntry } from "@asciimark/core/types.ts";
 import type { RecentFile } from "@asciimark/core/recent-files.ts";
 import type { RecentFolder } from "@asciimark/core/recent-folders.ts";
@@ -11,6 +12,19 @@ import { EditorToolbar } from "./editor-toolbar.tsx";
 import { EmptyState } from "./empty-state.tsx";
 import { Preview } from "./preview.tsx";
 import { TabBar } from "./tab-bar.tsx";
+
+/** Build the dnd id for the pane-level drop zone. Tabs from a different
+ *  pane that drop here trigger a move (no exact tab target needed —
+ *  empty panes still receive). */
+export function toPaneDropDndId(paneIndex: number): string {
+  return `pane::${paneIndex}`;
+}
+
+export function fromPaneDropDndId(dndId: unknown): number | null {
+  if (typeof dndId !== "string" || !dndId.startsWith("pane::")) return null;
+  const parsed = Number(dndId.slice("pane::".length));
+  return Number.isInteger(parsed) ? parsed : null;
+}
 
 export interface PaneViewProps {
   /** The pane this view is bound to. All per-document signals
@@ -92,6 +106,14 @@ export function PaneView(props: PaneViewProps) {
   let editorPanelRef: HTMLDivElement | undefined;
   let previewPanelRef: HTMLDivElement | undefined;
 
+  // Pane-level droppable so a tab dragged from the OTHER pane can land
+  // here even when this pane has zero tabs (the empty splitter case).
+  // The visual highlight (`.pane-view-drop-target`) only kicks in when
+  // a foreign tab is being dragged over.
+  const paneDroppable = useDroppable({
+    get id() { return toPaneDropDndId(props.paneIndex); },
+  });
+
   // Sync scroll: only when this pane is in split mode AND the user
   // enabled it AND a file is loaded. Other panes don't influence.
   const syncScrollActive = () =>
@@ -166,8 +188,12 @@ export function PaneView(props: PaneViewProps) {
 
   return (
     <div
+      ref={paneDroppable.ref}
       class="pane-view"
-      classList={{ "pane-view-active": props.isActive }}
+      classList={{
+        "pane-view-active": props.isActive,
+        "pane-view-drop-target": paneDroppable.isDropTarget(),
+      }}
       data-pane-index={props.paneIndex}
       style={props.flexBasis !== undefined ? { flex: props.flexBasis } : undefined}
       onMouseDown={() => props.onActivate?.()}
@@ -175,6 +201,7 @@ export function PaneView(props: PaneViewProps) {
       <Show when={props.showEditorTabs && pane().tabs.tabs().length > 0}>
         <TabBar
           tabStore={pane().tabs}
+          paneIndex={props.paneIndex}
           activeTabDirty={
             (() => {
               const active = pane().tabs.getActiveTab();
