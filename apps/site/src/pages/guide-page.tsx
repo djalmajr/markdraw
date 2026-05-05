@@ -24,6 +24,66 @@ const sectionLinks: GuideSectionLink[] = [
   { href: "#diagrams", label: "Diagrams" },
   { href: "#export", label: "Export" },
   { href: "#shortcuts", label: "Keyboard Shortcuts" },
+  { href: "#screenshots", label: "Screenshots" },
+];
+
+interface GuideScreenshot {
+  alt: string;
+  caption: string;
+  src: string;
+}
+
+const guideScreenshots: GuideScreenshot[] = [
+  {
+    src: "/screenshots/desktop-welcome.png",
+    alt: "AsciiMark welcome screen with drop zone and keyboard shortcuts hint",
+    caption: "Welcome screen — drop a folder or click to open. The keyboard hint in the corner opens the shortcuts modal.",
+  },
+  {
+    src: "/screenshots/desktop-workspace-preview.png",
+    alt: "AsciiMark workspace with file tree, tabs, preview, and TOC",
+    caption: "A loaded workspace: sidebar tree, tab bar, live preview, and table of contents.",
+  },
+  {
+    src: "/screenshots/desktop-split-panes.png",
+    alt: "Two files open in split panes side by side",
+    caption: "Split panes (Cmd/Ctrl+\\) — read or compare two documents at the same time.",
+  },
+  {
+    src: "/screenshots/desktop-edit-preview.png",
+    alt: "Editor and preview synced inside a single pane",
+    caption: "Edit + Preview mode — write Markdown/AsciiDoc on the left and see the rendering on the right.",
+  },
+  {
+    src: "/screenshots/desktop-quick-open.png",
+    alt: "Cmd/Ctrl+P fuzzy file picker showing matched files",
+    caption: "Quick Open (Cmd/Ctrl+P) — fuzzy-match files across all open workspaces.",
+  },
+  {
+    src: "/screenshots/desktop-command-palette.png",
+    alt: "Cmd/Ctrl+Shift+P command palette listing actions",
+    caption: "Command Palette (Cmd/Ctrl+Shift+P) — every action in one place, including theme and editor mode.",
+  },
+  {
+    src: "/screenshots/desktop-symbol-palette.png",
+    alt: "Cmd/Ctrl+Shift+O heading navigator showing the document outline",
+    caption: "Go to Heading (Cmd/Ctrl+Shift+O) — jump anywhere in the current document.",
+  },
+  {
+    src: "/screenshots/desktop-find-in-files.png",
+    alt: "Cmd/Ctrl+Shift+F search across the workspace with grouped results",
+    caption: "Find in Files (Cmd/Ctrl+Shift+F) — search across the workspace; jump to any match.",
+  },
+  {
+    src: "/screenshots/desktop-shortcuts-help.png",
+    alt: "Keyboard shortcuts modal listing every binding",
+    caption: "Shortcuts Help (Cmd/Ctrl+/) — discover bindings without leaving the app.",
+  },
+  {
+    src: "/screenshots/desktop-dark-theme.png",
+    alt: "AsciiMark in dark theme showing a rendered Markdown document",
+    caption: "Dark theme — switch via the menu or Command Palette.",
+  },
 ];
 
 export function GuidePage() {
@@ -177,12 +237,12 @@ export function GuidePage() {
                 openImageModal({
                   alt: "Sidebar file tree after loading a folder",
                   caption: "Loaded folder tree in the left sidebar.",
-                  src: "/screenshots/guide-crop-sidebar-tree.png",
+                  src: "/screenshots/desktop-workspace-preview.png",
                 })
               }
               type="button"
             >
-              <img alt="Sidebar file tree after loading a folder" src="/screenshots/guide-crop-sidebar-tree.png" />
+              <img alt="Sidebar file tree after loading a folder" src="/screenshots/desktop-workspace-preview.png" />
             </button>
             <figcaption>Loaded folder tree in the left sidebar.</figcaption>
           </figure>
@@ -241,12 +301,12 @@ export function GuidePage() {
                 openImageModal({
                   alt: "Table of contents panel",
                   caption: "TOC panel with clickable document sections.",
-                  src: "/screenshots/guide-crop-toc-panel.png",
+                  src: "/screenshots/desktop-workspace-preview.png",
                 })
               }
               type="button"
             >
-              <img alt="Table of contents panel" src="/screenshots/guide-crop-toc-panel.png" />
+              <img alt="Table of contents panel" src="/screenshots/desktop-workspace-preview.png" />
             </button>
             <figcaption>TOC panel with clickable document sections.</figcaption>
           </figure>
@@ -289,12 +349,12 @@ export function GuidePage() {
                 openImageModal({
                   alt: "Settings menu options",
                   caption: "Appearance and export controls in the settings menu.",
-                  src: "/screenshots/guide-crop-settings-menu.png",
+                  src: "/screenshots/desktop-dark-theme.png",
                 })
               }
               type="button"
             >
-              <img alt="Settings menu options" src="/screenshots/guide-crop-settings-menu.png" />
+              <img alt="Settings menu options" src="/screenshots/desktop-dark-theme.png" />
             </button>
             <figcaption>Appearance and export controls in the settings menu.</figcaption>
           </figure>
@@ -350,26 +410,100 @@ export function GuidePage() {
 
         <section class="content-panel" id="shortcuts">
           <h2>Keyboard Shortcuts</h2>
+          <p>
+            On macOS use <code>Cmd</code>; on Linux and Windows use <code>Ctrl</code>. Press
+            {" "}
+            <code>Cmd/Ctrl+/</code>
+            {" "}
+            anywhere in the app to open the live shortcuts reference.
+          </p>
           <table class="guide-table">
             <thead>
               <tr>
                 <th>Shortcut</th>
-                <th>Status</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td>
-                  <code>Ctrl+F</code>
-                </td>
-                <td>Search inside preview</td>
+                <td><code>Cmd/Ctrl+P</code></td>
+                <td>Quick Open — fuzzy-find a file across all open workspaces</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+Shift+P</code></td>
+                <td>Command Palette — every action in one place</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+Shift+O</code></td>
+                <td>Go to Heading — jump anywhere in the current document</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+Shift+F</code></td>
+                <td>Find in Files — search across the workspace</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+/</code></td>
+                <td>Open the keyboard-shortcuts modal</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+\\</code></td>
+                <td>Toggle the second pane (split / collapse)</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+1</code> / <code>Cmd/Ctrl+2</code></td>
+                <td>Focus the first / second pane</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+T</code></td>
+                <td>New tab in the active pane</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+W</code></td>
+                <td>Close the active tab</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+Shift+T</code></td>
+                <td>Reopen the last closed tab</td>
+              </tr>
+              <tr>
+                <td><code>Ctrl+Tab</code> / <code>Ctrl+Shift+Tab</code></td>
+                <td>Cycle tabs forward / backward</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+S</code></td>
+                <td>Save the active document (when permissions allow)</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+F</code></td>
+                <td>Find inside the current preview / editor</td>
               </tr>
             </tbody>
           </table>
+        </section>
+
+        <section class="content-panel" id="screenshots">
+          <h2>Screenshots</h2>
           <p>
-            Today, this is the only dedicated shortcut implemented globally. The other actions are
-            available through toolbar and menu controls.
+            Captured from the desktop app. The Chrome extension shares the same UI in a smaller window.
           </p>
+          <div class="screenshot-grid">
+            <For each={guideScreenshots}>
+              {(item) => (
+                <figure class="screenshot-card">
+                  <button
+                    class="screenshot-button"
+                    onClick={() =>
+                      openImageModal({ alt: item.alt, caption: item.caption, src: item.src })
+                    }
+                    type="button"
+                  >
+                    <img alt={item.alt} class="screenshot-image" loading="lazy" src={item.src} />
+                  </button>
+                  <figcaption>{item.caption}</figcaption>
+                </figure>
+              )}
+            </For>
+          </div>
         </section>
 
         <Show when={activeImage()}>

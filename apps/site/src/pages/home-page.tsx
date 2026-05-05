@@ -36,59 +36,29 @@ const featureItems: FeatureItem[] = [
       "Renders both formats with admonitions, includes, frontmatter, and reusable partials in a single viewer.",
   },
   {
-    title: "Split panes",
+    title: "Split panes + tabs",
     description:
-      "Open two files side by side. Drag tabs across panes, persist layout between sessions, focus with Cmd/Ctrl+1/2.",
+      "Open files side by side, drag tabs across panes, and keep the layout between sessions.",
   },
   {
-    title: "Quick navigation",
+    title: "Keyboard-first navigation",
     description:
-      "Cmd/Ctrl+P to open a file, Cmd/Ctrl+Shift+P for the command palette, Cmd/Ctrl+Shift+O to jump to a heading, Cmd/Ctrl+Shift+F to search across the workspace.",
-  },
-  {
-    title: "Multi-root workspaces",
-    description:
-      "Drop several folders into the sidebar and reorder them — useful when reading docs spread across repos.",
+      "Quick Open, Command Palette, Go-to-Heading, and Find-in-Files — all one shortcut away.",
   },
   {
     title: "Diagrams and math",
     description:
-      "Mermaid, PlantUML, Graphviz via Kroki, plus KaTeX for inline and display math. Renders inside the preview, no extra setup.",
+      "Mermaid, PlantUML, Graphviz, and KaTeX render inside the preview without extra setup.",
   },
   {
-    title: "Edit + Live preview",
+    title: "Edit + live preview",
     description:
-      "CodeMirror editor with sync scroll, find-in-file, configurable indent and line numbers — all wired to the live preview pane.",
+      "CodeMirror editor with sync scroll, find-in-file, and configurable formatting.",
   },
   {
-    title: "Themes and typography",
+    title: "Local-first, auto-update",
     description:
-      "Light, dark, and system themes. Pick from a curated set of editor and preview fonts and adjust size on the fly.",
-  },
-  {
-    title: "Export to PDF",
-    description:
-      "Print-ready PDF export from the preview, with the same fonts and theme you see on screen.",
-  },
-  {
-    title: "Local-first",
-    description:
-      "Files never leave your machine. The desktop app and extension both read directly from the filesystem.",
-  },
-  {
-    title: "Auto-update",
-    description:
-      "Tauri's updater pulls signed releases from GitHub on startup. Skip the App Store, install once, stay current.",
-  },
-  {
-    title: "Desktop + Extension",
-    description:
-      "Run as a Tauri desktop app on macOS, Linux, and Windows — or install the Chrome extension to preview .adoc/.md files inline.",
-  },
-  {
-    title: "Keyboard-first",
-    description:
-      "Every action exposed via the command palette and discoverable from the welcome screen's shortcuts hint.",
+      "Files stay on your machine; signed releases land via the auto-updater on startup.",
   },
 ];
 
@@ -122,59 +92,6 @@ const downloadItems: DownloadItem[] = [
     platform: "Windows (alt)",
     helper: "EXE installer",
     asset: "AsciiMark-windows-x64.exe",
-  },
-];
-
-const screenshotItems: ScreenshotItem[] = [
-  {
-    path: "/screenshots/desktop-welcome.png",
-    alt: "AsciiMark welcome screen with drop zone and keyboard shortcuts hint",
-    caption: "Welcome screen — drop a folder or click to open",
-  },
-  {
-    path: "/screenshots/desktop-workspace-preview.png",
-    alt: "AsciiMark with a Markdown file rendered alongside the file tree and TOC",
-    caption: "Live preview with sidebar tree and table of contents",
-  },
-  {
-    path: "/screenshots/desktop-split-panes.png",
-    alt: "Two files open in split panes side by side",
-    caption: "Split panes — read two files at the same time",
-  },
-  {
-    path: "/screenshots/desktop-edit-preview.png",
-    alt: "Editor and preview panes side by side with sync scroll",
-    caption: "Edit + Preview — write and see the rendered output instantly",
-  },
-  {
-    path: "/screenshots/desktop-quick-open.png",
-    alt: "Cmd/Ctrl+P fuzzy file picker showing matched files",
-    caption: "Quick Open (Cmd/Ctrl+P) — fuzzy-find any file",
-  },
-  {
-    path: "/screenshots/desktop-command-palette.png",
-    alt: "Cmd/Ctrl+Shift+P command palette listing actions",
-    caption: "Command Palette (Cmd/Ctrl+Shift+P) — every action in one place",
-  },
-  {
-    path: "/screenshots/desktop-symbol-palette.png",
-    alt: "Cmd/Ctrl+Shift+O heading navigator showing the document outline",
-    caption: "Go to Heading (Cmd/Ctrl+Shift+O) — jump anywhere in the document",
-  },
-  {
-    path: "/screenshots/desktop-find-in-files.png",
-    alt: "Cmd/Ctrl+Shift+F search across the workspace with grouped results",
-    caption: "Find in Files (Cmd/Ctrl+Shift+F) — search across the workspace",
-  },
-  {
-    path: "/screenshots/desktop-shortcuts-help.png",
-    alt: "Keyboard shortcuts modal listing every binding",
-    caption: "Shortcuts Help (Cmd/Ctrl+/) — discover bindings as you go",
-  },
-  {
-    path: "/screenshots/desktop-dark-theme.png",
-    alt: "AsciiMark in dark theme showing a rendered Markdown document",
-    caption: "Dark theme — easy on the eyes for late-night reading",
   },
 ];
 
@@ -343,6 +260,14 @@ export function HomePage() {
               </article>
             )}
           </For>
+          <Link class="feature-card feature-card-more" to="/guide">
+            <h3>…and much more</h3>
+            <p>
+              Multi-root workspaces, themes, PDF export, Chrome extension,
+              auto-update, and the full keyboard map. See the guide for
+              screenshots and details.
+            </p>
+          </Link>
         </div>
       </section>
 
@@ -368,29 +293,6 @@ export function HomePage() {
                   {item.asset}
                 </Button>
               </article>
-            )}
-          </For>
-        </div>
-      </section>
-
-      <section class="grid-panel">
-        <h2 class="section-title">Screenshots</h2>
-        <p class="section-subtitle">
-          Captured from the desktop app. The Chrome extension shares the same UI in a smaller window.
-        </p>
-        <div class="screenshot-grid">
-          <For each={screenshotItems}>
-            {(item) => (
-              <figure class="screenshot-card">
-                <button
-                  class="screenshot-button"
-                  onClick={() => openScreenshotModal(item)}
-                  type="button"
-                >
-                  <img alt={item.alt} class="screenshot-image" loading="lazy" src={item.path} />
-                </button>
-                <figcaption>{item.caption}</figcaption>
-              </figure>
             )}
           </For>
         </div>
