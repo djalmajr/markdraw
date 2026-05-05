@@ -96,8 +96,19 @@ function initMermaid(force = false) {
   mermaidInitialized = true;
 }
 
-/** Monotonically increasing render generation — used to cancel stale renders */
-let renderGen = 0;
+/**
+ * Per-render cancellation token. Each `Preview` instance owns its own
+ * monotonic counter (see `renderGen` declared inside the component
+ * body) — module-level state was shared across split panes, and a
+ * file switch in pane 1 was incrementing the counter that pane 0's
+ * in-flight microtasks were watching, causing them to abort stale
+ * (and leaving pane 1 with an empty article when its own microtask
+ * hit a stale check on the way back).
+ *
+ * The async post-processors (highlight / mermaid / kroki) take a
+ * predicate they call between awaits to decide whether to bail out.
+ */
+type IsStaleFn = (gen: number) => boolean;
 
 /** Placeholder for code-block post-processing (kept for render pipeline symmetry) */
 const LANGUAGE_ALIASES: Record<string, string> = {
@@ -129,11 +140,15 @@ function detectCodeLanguage(codeEl: HTMLElement): string | null {
     : null;
 }
 
-async function highlightCodeBlocks(container: HTMLElement, gen: number): Promise<void> {
-  if (gen !== renderGen) return;
+async function highlightCodeBlocks(
+  container: HTMLElement,
+  gen: number,
+  isStale: IsStaleFn,
+): Promise<void> {
+  if (isStale(gen)) return;
   const blocks = container.querySelectorAll<HTMLElement>("pre code");
   for (const codeEl of blocks) {
-    if (gen !== renderGen) return;
+    if (isStale(gen)) return;
 
     const language = detectCodeLanguage(codeEl);
     if (!language) continue;
@@ -149,7 +164,11 @@ async function highlightCodeBlocks(container: HTMLElement, gen: number): Promise
   }
 }
 
-async function renderMermaidBlocks(container: HTMLElement, gen: number): Promise<void> {
+async function renderMermaidBlocks(
+  container: HTMLElement,
+  gen: number,
+  isStale: IsStaleFn,
+): Promise<void> {
   const blocks = container.querySelectorAll<HTMLElement>("div.mermaid");
   if (blocks.length === 0) return;
 
@@ -159,7 +178,7 @@ async function renderMermaidBlocks(container: HTMLElement, gen: number): Promise
   let idx = 0;
   for (const block of blocks) {
     // Bail out if a newer render has started (navigation happened mid-render)
-    if (gen !== renderGen) return;
+    if (isStale(gen)) return;
 
     if (block.getAttribute("data-processed")) continue;
 
@@ -170,11 +189,11 @@ async function renderMermaidBlocks(container: HTMLElement, gen: number): Promise
       const id = `mermaid-${gen}-${idx++}`;
       const { svg } = await mermaid.render(id, source);
       // Check again after await — DOM may have been replaced
-      if (gen !== renderGen) return;
+      if (isStale(gen)) return;
       // mermaid.render returns sanitized SVG — safe to inject
       block.innerHTML = svg;
     } catch (e: any) {
-      if (gen !== renderGen) return;
+      if (isStale(gen)) return;
       const errMsg = e?.message || "Unknown error";
       const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       // Error message is escaped above — safe to inject
@@ -231,10 +250,14 @@ function wrapTablesForScroll(container: HTMLElement): void {
 }
 
 /** Render Kroki diagram blocks (plantuml, graphviz, ditaa, etc.) */
-async function renderKrokiBlocks(container: HTMLElement, gen: number): Promise<void> {
+async function renderKrokiBlocks(
+  container: HTMLElement,
+  gen: number,
+  isStale: IsStaleFn,
+): Promise<void> {
   const blocks = container.querySelectorAll<HTMLElement>("div.kroki");
   for (const block of blocks) {
-    if (gen !== renderGen) return;
+    if (isStale(gen)) return;
     if (block.getAttribute("data-processed") === "true") continue;
     block.setAttribute("data-processed", "true");
 
@@ -248,13 +271,13 @@ async function renderKrokiBlocks(container: HTMLElement, gen: number): Promise<v
 
     try {
       const svg = await renderKroki(type, source);
-      if (gen !== renderGen) return;
+      if (isStale(gen)) return;
       block.style.color = "";
       block.style.fontStyle = "";
       // renderKroki returns SVG from an external service, sanitize before inject
       block.innerHTML = sanitizeHtmlFragment(svg);
     } catch (e: any) {
-      if (gen !== renderGen) return;
+      if (isStale(gen)) return;
       const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       // Error message is escaped above
       block.innerHTML = `<pre class="mermaid-error">Kroki error (${type}): ${e?.message || "Unknown"}\n\n${escaped}</pre>`;
@@ -555,6 +578,15 @@ export function Preview(props: PreviewProps) {
   let cleanupToc: (() => void) | undefined;
   let suppressScrollCallback = false;
 
+  // Per-instance render-cancellation token. Two `Preview` components
+  // coexist in split-pane mode — they MUST NOT share state, otherwise
+  // a file switch in pane 1 cancels pane 0's still-in-flight microtask
+  // (or vice versa) and the article ends up empty. Bumped on every new
+  // render attempt; the predicate is what async post-processors call
+  // to decide whether to bail.
+  let renderGen = 0;
+  const isStale: IsStaleFn = (gen) => gen !== renderGen;
+
   function computeScrollRatio(scrollTop: number, scrollHeight: number, clientHeight: number): number {
     const maxScrollTop = scrollHeight - clientHeight;
     if (maxScrollTop <= 0) return 0;
@@ -834,14 +866,14 @@ export function Preview(props: PreviewProps) {
       if (props.resolveImageSrc) rewriteImageSources(buffer, props.resolveImageSrc);
 
       queueMicrotask(async () => {
-        await highlightCodeBlocks(buffer, gen);
-        if (gen !== renderGen) return;
+        await highlightCodeBlocks(buffer, gen, isStale);
+        if (isStale(gen)) return;
 
-        await renderMermaidBlocks(buffer, gen);
-        if (gen !== renderGen) return;
+        await renderMermaidBlocks(buffer, gen, isStale);
+        if (isStale(gen)) return;
 
-        await renderKrokiBlocks(buffer, gen);
-        if (gen !== renderGen) return;
+        await renderKrokiBlocks(buffer, gen, isStale);
+        if (isStale(gen)) return;
 
         const scrollContainer = articleRef!.closest(".content");
         const prevScrollTop = scrollContainer?.scrollTop ?? 0;
@@ -861,13 +893,13 @@ export function Preview(props: PreviewProps) {
       afterSwap(articleRef!, false, tocVis);
 
       queueMicrotask(async () => {
-        await highlightCodeBlocks(articleRef!, gen);
-        if (gen !== renderGen) return;
+        await highlightCodeBlocks(articleRef!, gen, isStale);
+        if (isStale(gen)) return;
 
-        await renderMermaidBlocks(articleRef!, gen);
-        if (gen !== renderGen) return;
+        await renderMermaidBlocks(articleRef!, gen, isStale);
+        if (isStale(gen)) return;
 
-        await renderKrokiBlocks(articleRef!, gen);
+        await renderKrokiBlocks(articleRef!, gen, isStale);
       });
     }
   });
