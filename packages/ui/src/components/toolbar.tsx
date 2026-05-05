@@ -10,6 +10,7 @@ import IconFileDown from "~icons/lucide/file-down";
 import IconFileText from "~icons/lucide/file-text";
 import IconFolder from "~icons/lucide/folder-open";
 import IconKeyboard from "~icons/lucide/keyboard";
+import IconLink from "~icons/lucide/link-2";
 import IconListTree from "~icons/lucide/list-tree";
 import IconMonitor from "~icons/lucide/monitor";
 import IconMoon from "~icons/lucide/moon";
@@ -92,6 +93,11 @@ interface ToolbarProps {
    * extension in URL mode. Hidden when omitted.
    */
   onCopySource?: () => void;
+  /**
+   * Copy the raw text content (markdown/asciidoc source) of the active
+   * document to the clipboard. Hidden when omitted.
+   */
+  onCopyContent?: () => void;
 }
 
 export function Toolbar(props: ToolbarProps) {
@@ -150,42 +156,6 @@ export function Toolbar(props: ToolbarProps) {
     </Show>
   );
 
-  // Cycle System → Light → Dark → System. The dropdown menu still
-  // exposes the explicit selection; this button is just the fast path.
-  function nextTheme(): "system" | "light" | "dark" {
-    return props.themeMode === "system"
-      ? "light"
-      : props.themeMode === "light"
-        ? "dark"
-        : "system";
-  }
-
-  const renderThemeButton = () => (
-    <Tooltip>
-      <TooltipTrigger
-        as="button"
-        class="inline-flex items-center justify-center rounded-md h-7 w-7 text-sm hover:bg-accent hover:text-accent-foreground"
-        aria-label={`Theme: ${props.themeMode}`}
-        onClick={() => props.onThemeChange(nextTheme())}
-      >
-        <Show
-          when={props.themeMode === "system"}
-          fallback={
-            <Show
-              when={props.darkMode}
-              fallback={<IconSun width={16} height={16} />}
-            >
-              <IconMoon width={16} height={16} />
-            </Show>
-          }
-        >
-          <IconMonitor width={16} height={16} />
-        </Show>
-      </TooltipTrigger>
-      <TooltipContent>Cycle theme ({props.themeMode})</TooltipContent>
-    </Tooltip>
-  );
-
   const renderReload = () => (
     <Show when={props.onReload && props.hasFile}>
       <Tooltip>
@@ -211,9 +181,25 @@ export function Toolbar(props: ToolbarProps) {
           aria-label="Copy source URL"
           onClick={props.onCopySource}
         >
-          <IconCopy width={16} height={16} />
+          <IconLink width={16} height={16} />
         </TooltipTrigger>
         <TooltipContent>Copy source URL</TooltipContent>
+      </Tooltip>
+    </Show>
+  );
+
+  const renderCopyContent = () => (
+    <Show when={props.onCopyContent && props.hasFile}>
+      <Tooltip>
+        <TooltipTrigger
+          as="button"
+          class="inline-flex items-center justify-center rounded-md h-7 w-7 text-sm hover:bg-accent hover:text-accent-foreground"
+          aria-label="Copy document content"
+          onClick={props.onCopyContent}
+        >
+          <IconCopy width={16} height={16} />
+        </TooltipTrigger>
+        <TooltipContent>Copy document content</TooltipContent>
       </Tooltip>
     </Show>
   );
@@ -366,7 +352,7 @@ export function Toolbar(props: ToolbarProps) {
           {renderSplitToggle()}
           {renderReload()}
           {renderCopySource()}
-          {renderThemeButton()}
+          {renderCopyContent()}
         </Show>
         <Show when={props.showNavButtons}>
           <Tooltip>
@@ -423,8 +409,8 @@ export function Toolbar(props: ToolbarProps) {
         <Show when={!props.controlsOnLeft}>
           {renderOpenFolderButton()}
           {renderReload()}
+          {renderCopyContent()}
           {renderCopySource()}
-          {renderThemeButton()}
           {renderSidebarToggle()}
           {renderTocToggle()}
           {renderSplitToggle()}

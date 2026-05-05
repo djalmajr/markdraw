@@ -127,11 +127,33 @@ export function App() {
     }
   }
 
-  // Copy the source URL to the clipboard. Falls back silently if the
-  // clipboard API isn't available (older Chromium / restricted contexts).
+  // Copy the source URL to the clipboard. Strips query parameters so
+  // ephemeral auth tokens (e.g. GitHub's `?token=GHSAT...` on raw URLs
+  // from private repos) don't get pasted into chat messages, issues,
+  // or shared docs. Reasoning: a token in the URL is short-lived but
+  // still grants read access to the underlying file while it's alive,
+  // and copy/paste is the most common way it gets shared by accident.
   function handleCopySource() {
     if (!isUrlMode || !sourceUrl) return;
-    void navigator.clipboard?.writeText(sourceUrl);
+    let toCopy = sourceUrl;
+    try {
+      const u = new URL(sourceUrl);
+      u.search = "";
+      u.hash = "";
+      toCopy = u.toString();
+    } catch {
+      // sourceUrl isn't a valid URL — fall back to the raw value.
+    }
+    void navigator.clipboard?.writeText(toCopy);
+  }
+
+  // Copy the raw text content (markdown/asciidoc source) — what was
+  // fetched from the URL or read from disk. Useful for pasting into
+  // editors or chat without going through the original source.
+  function handleCopyContent() {
+    const content = state.editorContent();
+    if (!content) return;
+    void navigator.clipboard?.writeText(content);
   }
 
   return (
@@ -145,6 +167,7 @@ export function App() {
       showRecentHistory={!isUrlMode}
       showSidebar={!isUrlMode && state.sidebarVisible() && hasRoot()}
       showToolbar={true}
+      onCopyContent={handleCopyContent}
       onCopySource={isUrlMode ? handleCopySource : undefined}
       onOpenFolder={!isUrlMode ? folder.handleOpenFolder : undefined}
       onReload={handleReload}

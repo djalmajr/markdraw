@@ -179,6 +179,9 @@ interface AppShellProps {
   /** Copy the source URL of the active document. Used by the extension
    *  in URL mode for share/bookmark workflows. Hidden when omitted. */
   onCopySource?: () => void;
+  /** Copy the raw text content (markdown/asciidoc source) of the active
+   *  document. Hidden when omitted. */
+  onCopyContent?: () => void;
 }
 
 export function AppShell(props: AppShellProps) {
@@ -421,6 +424,7 @@ export function AppShell(props: AppShellProps) {
             onToggleToc={() => s.setTocVisible((v) => !v)}
             onReload={props.onReload}
             onCopySource={props.onCopySource}
+            onCopyContent={props.onCopyContent}
             onWindowDragStart={props.onWindowDragStart}
             onWindowTitleDoubleClick={props.onWindowTitleDoubleClick}
           />
