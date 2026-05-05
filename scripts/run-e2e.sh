@@ -66,5 +66,12 @@ else
   echo "▶ Bridge healthy after ${WAITED}s"
 fi
 
+# TCP-up isn't enough — Solid mounts after the plugin's socket binds, so
+# specs that immediately call `window.__DEV__.openFolder(...)` fail with
+# "DEV helper not exposed" if the frontend hasn't finished hydrating.
+# Poll until __DEV__ is actually an object.
+echo "▶ Waiting for frontend (window.__DEV__) to be exposed (timeout 30s)"
+bun scripts/wait-app-ready.ts
+
 echo "▶ Running E2E specs"
 (cd apps/desktop && bun test e2e/specs)
