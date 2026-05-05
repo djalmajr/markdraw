@@ -90,16 +90,19 @@ async function openFixtureWorkspace(b: Bridge): Promise<void> {
 }
 
 async function clickFirstSupportedFile(b: Bridge): Promise<string> {
+  // The click handler lives on the inner `.tree-item` (the wrapper is just
+  // a positional container), so we have to fire the synthetic events on
+  // that exact element — events dispatched on the wrapper bubble UP and
+  // never reach the child `.tree-item`.
   const picked = (await b.evalJs(
     `(() => {
       const wrappers = Array.from(document.querySelectorAll(".tree-item-wrapper"));
       for (const wrapper of wrappers) {
         const name = wrapper.querySelector(".tree-name")?.textContent?.trim() ?? "";
         if (name.endsWith(".md") || name.endsWith(".adoc")) {
-          // Some click handlers listen to mousedown, others to click.
-          // Fire both so the test isn't sensitive to that choice.
+          const target = wrapper.querySelector(".tree-item") ?? wrapper;
           for (const type of ["mousedown", "mouseup", "click"]) {
-            wrapper.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 }));
+            target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 }));
           }
           return name;
         }

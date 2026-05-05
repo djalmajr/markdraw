@@ -1,6 +1,5 @@
 import { createSignal } from "solid-js";
 import type { FSEntry } from "@asciimark/core/types.ts";
-import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
 import {
   type TabId,
   type TabState,
@@ -9,7 +8,7 @@ import {
   getTabSession,
   setTabSession,
 } from "@asciimark/core/tabs.ts";
-import type { AppState } from "./create-app-state.ts";
+import type { PaneViewSlice } from "./create-pane-store.ts";
 
 export interface TabStore {
   tabs: () => TabState[];
@@ -45,11 +44,15 @@ export interface TabStore {
 }
 
 interface TabStoreConfig {
-  state: AppState;
+  /** The per-pane signal slice the tab store snapshots into and
+   *  restores from. Tab content lives on the tabs themselves; the
+   *  pane signals are the working copy that the editor + preview
+   *  components actually read. */
+  pane: PaneViewSlice;
 }
 
 export function createTabStore(config: TabStoreConfig): TabStore {
-  const { state } = config;
+  const { pane } = config;
 
   const [tabList, setTabList] = createSignal<TabState[]>([]);
   const [activeId, setActiveId] = createSignal<TabId | null>(null);
@@ -79,11 +82,11 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     const id = activeId();
     if (!id) return;
 
-    const currentContent = state.editorContent();
-    const currentSaved = state.savedContent();
-    const currentHtml = state.html();
-    const currentFrontmatter = state.frontmatter();
-    const currentMode = state.editorMode();
+    const currentContent = pane.editorContent();
+    const currentSaved = pane.savedContent();
+    const currentHtml = pane.html();
+    const currentFrontmatter = pane.frontmatter();
+    const currentMode = pane.editorMode();
 
     setTabList((prev) =>
       prev.map((t) => {
@@ -106,11 +109,11 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     const tab = getActiveTab();
     if (!tab) return;
 
-    state.setEditorContent(tab.editorContent);
-    state.setSavedContent(tab.savedContent);
-    state.setHtml(tab.html);
-    state.setFrontmatter(tab.frontmatter);
-    state.setEditorMode(tab.editorMode);
+    pane.setEditorContent(tab.editorContent);
+    pane.setSavedContent(tab.savedContent);
+    pane.setHtml(tab.html);
+    pane.setFrontmatter(tab.frontmatter);
+    pane.setEditorMode(tab.editorMode);
   }
 
   function createTabState(entry: FSEntry, rootId: string, needsLoad = false): TabState {
@@ -222,13 +225,13 @@ export function createTabStore(config: TabStoreConfig): TabStore {
       const remaining = tabs.filter((t) => t.id !== tabId);
       if (remaining.length === 0) {
         setActiveId(null);
-        state.setSelectedFile(null);
-        state.setSelectedRootId(null);
-        state.setHtml("");
-        state.setFrontmatter(null);
-        state.setEditorContent("");
-        state.setSavedContent("");
-        state.setEditorMode("preview");
+        pane.setSelectedFile(null);
+        pane.setSelectedRootId(null);
+        pane.setHtml("");
+        pane.setFrontmatter(null);
+        pane.setEditorContent("");
+        pane.setSavedContent("");
+        pane.setEditorMode("preview");
       } else {
         const nextIdx = Math.min(idx, remaining.length - 1);
         setActiveId(remaining[nextIdx]!.id);
@@ -252,13 +255,13 @@ export function createTabStore(config: TabStoreConfig): TabStore {
   function closeAllTabs(): void {
     setTabList([]);
     setActiveId(null);
-    state.setSelectedFile(null);
-    state.setSelectedRootId(null);
-    state.setHtml("");
-    state.setFrontmatter(null);
-    state.setEditorContent("");
-    state.setSavedContent("");
-    state.setEditorMode("preview");
+    pane.setSelectedFile(null);
+    pane.setSelectedRootId(null);
+    pane.setHtml("");
+    pane.setFrontmatter(null);
+    pane.setEditorContent("");
+    pane.setSavedContent("");
+    pane.setEditorMode("preview");
     persistSession();
   }
 

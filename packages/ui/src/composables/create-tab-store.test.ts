@@ -1,46 +1,20 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { createRoot, createSignal } from "solid-js";
+import { createRoot } from "solid-js";
 import type { FSEntry } from "@asciimark/core/types.ts";
-import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
 import { installLocalStorageMock } from "@asciimark/core/test-utils.ts";
 import { createTabStore } from "./create-tab-store.ts";
-import type { AppState } from "./create-app-state.ts";
+import { createPaneStore } from "./create-pane-store.ts";
 
 installLocalStorageMock();
-
-function createAppStateStub() {
-  const [editorContent, setEditorContent] = createSignal("");
-  const [savedContent, setSavedContent] = createSignal("");
-  const [html, setHtml] = createSignal("");
-  const [frontmatter, setFrontmatter] = createSignal<Frontmatter | null>(null);
-  const [editorMode, setEditorMode] = createSignal<"edit" | "split" | "preview">("preview");
-  const [selectedFile, setSelectedFile] = createSignal<FSEntry | null>(null);
-  const [selectedRootId, setSelectedRootId] = createSignal<string | null>(null);
-
-  return {
-    editorContent,
-    savedContent,
-    html,
-    frontmatter,
-    editorMode,
-    selectedFile,
-    selectedRootId,
-    setEditorContent,
-    setSavedContent,
-    setHtml,
-    setFrontmatter,
-    setEditorMode,
-    setSelectedFile,
-    setSelectedRootId,
-  } as unknown as AppState;
-}
 
 function entry(name: string, path = name): FSEntry {
   return { name, path, kind: "file" };
 }
 
 function withStore<T>(fn: (store: ReturnType<typeof createTabStore>) => T): T {
-  return createRoot(() => fn(createTabStore({ state: createAppStateStub() })));
+  // The TabStore now binds to a PaneStore (the per-pane signal slice).
+  // Tests that don't care about the pane just use a fresh one.
+  return createRoot(() => fn(createTabStore({ pane: createPaneStore("test") })));
 }
 
 describe("createTabStore", () => {

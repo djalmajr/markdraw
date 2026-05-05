@@ -38,7 +38,11 @@ export function App() {
     printPage: () => invoke("print_webview"),
   });
 
-  const tabStore = createTabStore({ state });
+  // TabStore now binds to a PaneStore-shaped slice. Until Phase 1c
+  // (split panes wiring), AppState still owns those signals directly,
+  // and structurally satisfies the PaneViewSlice contract — so we
+  // pass it as the pane.
+  const tabStore = createTabStore({ pane: state });
 
   const [rootPaths, setRootPaths] = createSignal<Map<string, string>>(new Map());
 

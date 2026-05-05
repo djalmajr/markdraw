@@ -7,40 +7,19 @@
 // isolation; this suite finds bugs in the *interactions* between them.
 import { beforeEach, describe, expect, it } from "bun:test";
 import fc from "fast-check";
-import { createRoot, createSignal } from "solid-js";
+import { createRoot } from "solid-js";
 import type { FSEntry } from "@asciimark/core/types.ts";
-import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
 import { installLocalStorageMock } from "@asciimark/core/test-utils.ts";
 import { createTabStore } from "../create-tab-store.ts";
-import type { AppState } from "../create-app-state.ts";
+import { createPaneStore } from "../create-pane-store.ts";
 
 installLocalStorageMock();
 
-function makeStub(): AppState {
-  const [editorContent, setEditorContent] = createSignal("");
-  const [savedContent, setSavedContent] = createSignal("");
-  const [html, setHtml] = createSignal("");
-  const [frontmatter, setFrontmatter] = createSignal<Frontmatter | null>(null);
-  const [editorMode, setEditorMode] = createSignal<"edit" | "split" | "preview">("preview");
-  const [selectedFile, setSelectedFile] = createSignal<FSEntry | null>(null);
-  const [selectedRootId, setSelectedRootId] = createSignal<string | null>(null);
-
-  return {
-    editorContent,
-    savedContent,
-    html,
-    frontmatter,
-    editorMode,
-    selectedFile,
-    selectedRootId,
-    setEditorContent,
-    setSavedContent,
-    setHtml,
-    setFrontmatter,
-    setEditorMode,
-    setSelectedFile,
-    setSelectedRootId,
-  } as unknown as AppState;
+function makeStub() {
+  // The TabStore now snapshots into a PaneStore. For PBT we just need a
+  // fresh PaneStore per command sequence — the reactive signals don't
+  // need any special wiring beyond their default initial state.
+  return createPaneStore("stateful-test");
 }
 
 function entry(name: string, path = name): FSEntry {
@@ -230,7 +209,7 @@ describe("createTabStore stateful (property)", () => {
       fc.property(fc.array(cmdArb, { minLength: 1, maxLength: 30 }), (cmds) => {
         localStorage.clear();
         return createRoot(() => {
-          const store = createTabStore({ state: makeStub() });
+          const store = createTabStore({ pane: makeStub() });
           const model: State = { expectedTabIds: new Set(), rootIds: [] };
           const trace: string[] = [];
           for (const cmd of cmds) {
@@ -252,7 +231,7 @@ describe("createTabStore stateful (property)", () => {
       fc.property(fc.array(fileNameArb, { minLength: 1, maxLength: 25 }), (names) => {
         localStorage.clear();
         return createRoot(() => {
-          const store = createTabStore({ state: makeStub() });
+          const store = createTabStore({ pane: makeStub() });
           for (const n of names) store.openTab(entry(n), "r1");
           store.closeAllTabs();
           // closeAll wipes the list AND clears active id; the closed-stack
@@ -279,7 +258,7 @@ describe("createTabStore stateful (property)", () => {
         (names) => {
           localStorage.clear();
           return createRoot(() => {
-            const store = createTabStore({ state: makeStub() });
+            const store = createTabStore({ pane: makeStub() });
             for (const n of names) store.openTab(entry(n), "r1");
             const before = new Set(store.tabs().map((t) => t.id));
             const ids = store.tabs().map((t) => t.id);
