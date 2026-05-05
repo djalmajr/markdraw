@@ -21,9 +21,15 @@ import Icons from "unplugin-icons/vite";
 // the post-build assertion in `verify-extension-bundle` below — the
 // build fails if any known CDN fragment survives.
 const REMOTE_FRAGMENTS_TO_STRIP = [
+  // CDN hosts asciidoctor.js can emit. Listed defensively — we'd
+  // rather drop a host that isn't currently used than miss one in
+  // the next asciidoctor.js update.
   "cdnjs.cloudflare.com",
   "fonts.googleapis.com",
   "googleapis.com",
+  "cdn.mathjax.org",
+  "cdn.jsdelivr.net",
+  "unpkg.com",
 ] as const;
 
 const REMOTE_PATTERNS_TO_REWRITE: Array<[RegExp, string]> = [
@@ -35,6 +41,14 @@ const REMOTE_PATTERNS_TO_REWRITE: Array<[RegExp, string]> = [
   [/\/ajax\/libs\/highlight\.js\/[0-9.]+/g, "/disabled-highlightjs"],
   [/highlight\.min\.js/g, "disabled.txt"],
   [/highlight\.pack\.min\.js/g, "disabled.txt"],
+  // Asciidoctor's MathJax integration emits ${cdn}/mathjax/${VERSION}/
+  // MathJax.js?config=… — same fragment-concatenation pattern as
+  // highlight.js. The host was already stripped above, so the URL
+  // skeleton would be `/mathjax/<v>/MathJax.js` — still scary to
+  // a static analyzer. Rewrite the path tokens so nothing recognizable
+  // remains.
+  [/\/mathjax\//g, "/disabled-mathjax/"],
+  [/MathJax\.js/g, "disabled.js"],
 ];
 
 interface BundleEntry {
@@ -52,11 +66,16 @@ function hardenBundledJs(code: string): string {
   for (const [pattern, replacement] of REMOTE_PATTERNS_TO_REWRITE) {
     out = out.replace(pattern, replacement);
   }
+  // Catch every `<script` / `</script` / `<\/script` (escaped) regardless
+  // of attributes. The previous version listed `<script src="`,
+  // `<script>` etc. as exact strings and missed `<script type="..."`
+  // (the MathJax inline config and various asciidoctor docinfo blocks
+  // use that shape). The regex form is exhaustive — `(?=[\s>])` makes
+  // sure we don't accidentally match `<scripture>` or similar.
   return out
-    .replaceAll("<script src=\"", "<x-script src=\"")
-    .replaceAll("<script>", "<x-script>")
-    .replaceAll("<\\/script>", "</x-script>")
-    .replaceAll("</script>", "</x-script>");
+    .replace(/<\/script>/g, "</x-script>")
+    .replace(/<\\\/script>/g, "<\\/x-script>")
+    .replace(/<script(?=[\s>])/g, "<x-script");
 }
 
 function stripAsciidoctorHighlightJsCdn() {
