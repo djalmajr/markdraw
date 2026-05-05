@@ -41,6 +41,11 @@ interface FileTreeProps {
   onToggleShowHiddenEntries?: () => void;
   onToggleShowAllDirs?: () => void;
   onToggleShowAllFiles?: () => void;
+  /** Forwarded to each `FileTreeItem`. Hides the per-item three-dot
+   *  dropdown and the right-click context menu when false. Used by the
+   *  extension where the only menu entry would be "Copy path" of a
+   *  workspace-relative string. Defaults to true. */
+  showItemMenu?: boolean;
 }
 
 /**
@@ -387,6 +392,7 @@ export function FileTree(props: FileTreeProps) {
                 onSelect={(e) => props.onSelect(e, rootId)}
                 onOpenInNewTab={props.onOpenInNewTab ? (e) => props.onOpenInNewTab!(e, rootId) : undefined}
                 onDoubleClickFile={props.onDoubleClickFile ? (e) => props.onDoubleClickFile!(e, rootId) : undefined}
+                showItemMenu={props.showItemMenu}
               />
             )}
           </For>

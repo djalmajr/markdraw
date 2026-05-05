@@ -68,6 +68,15 @@ interface FileTreeItemProps {
   onOpenInNewTab?: (entry: FSEntry) => void;
   /** Double-click on file — pin the tab. */
   onDoubleClickFile?: (entry: FSEntry) => void;
+  /**
+   * Render the per-item context menu and the three-dot dropdown
+   * (Copy path / Rename / Delete / Open in New Tab). When false, the
+   * tree shows pure rows — no menus. Used by the browser extension
+   * where the only action that would be available is "Copy path"
+   * (a workspace-relative string) and a single-item menu is more
+   * noise than value. Defaults to true so desktop keeps the menu.
+   */
+  showItemMenu?: boolean;
 }
 
 /** Reject empty, traversal segments, and characters disallowed on common filesystems. */
@@ -270,6 +279,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
   }
 
   const isVisible = () => props.visiblePaths().has(props.entry.path);
+  const menuEnabled = () => props.showItemMenu !== false;
 
   return (
     <div class="tree-item-wrapper" style={isVisible() ? undefined : { display: "none" }}>
@@ -327,7 +337,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
           <Show when={!isEditing() && app.isDirty() && app.selectedFile()?.path === props.entry.path}>
             <span class="tree-dirty">*</span>
           </Show>
-          <Show when={!isEditing()}>
+          <Show when={!isEditing() && menuEnabled()}>
             <DropdownMenu>
               <DropdownMenuTrigger
                 as="button"
@@ -369,8 +379,14 @@ export function FileTreeItem(props: FileTreeItemProps) {
          * `min-w-44` (176px) to give that headroom — the menu can still grow
          * for longer items, but never shrinks past this minimum, so even the
          * widest item has visible separation.
+         *
+         * `Show` here keeps the right-click menu out of the DOM entirely
+         * when the host platform disables item menus (e.g. extension), so
+         * a contextmenu event on a tree row reverts to the browser default
+         * instead of opening an empty Kobalte popover.
          */}
-        <ContextMenuContent class="tree-context-menu min-w-48">
+        <Show when={menuEnabled()}>
+          <ContextMenuContent class="tree-context-menu min-w-48">
           <Show when={!isDirectory() && props.onOpenInNewTab}>
             <ContextMenuItem class="justify-between gap-3" onSelect={() => props.onOpenInNewTab?.(props.entry)}>
               <span class="flex items-center gap-2"><IconExternalLink width={14} height={14} /> Open in New Tab</span>
@@ -393,7 +409,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
               <IconTrash width={14} height={14} /> Move to Trash
             </ContextMenuItem>
           </Show>
-        </ContextMenuContent>
+          </ContextMenuContent>
+        </Show>
       </ContextMenu>
       <Show when={isDirectory() && (expanded() || props.forceExpand) && props.entry.children}>
         <For each={props.entry.children}>

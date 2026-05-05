@@ -164,6 +164,7 @@ export function App() {
       showEditorTabs={false}
       showNavButtons={!isUrlMode && hasRoot()}
       showPdfExport={false}
+      showFileTreeItemMenu={false}
       showRecentHistory={!isUrlMode}
       showSidebar={!isUrlMode && state.sidebarVisible() && hasRoot()}
       showToolbar={true}

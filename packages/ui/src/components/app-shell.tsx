@@ -182,6 +182,12 @@ interface AppShellProps {
   /** Copy the raw text content (markdown/asciidoc source) of the active
    *  document. Hidden when omitted. */
   onCopyContent?: () => void;
+
+  /** Render per-row menus in the file tree (three-dot dropdown +
+   *  right-click context menu). Defaults to true; the extension turns
+   *  this off because Copy path is the only meaningful entry there
+   *  and a single-item menu just adds noise. */
+  showFileTreeItemMenu?: boolean;
 }
 
 export function AppShell(props: AppShellProps) {
@@ -433,6 +439,7 @@ export function AppShell(props: AppShellProps) {
           <Show when={props.showSidebar}>
             <aside class="sidebar" style={{ width: `${s.sidebarWidth()}px` }}>
               <FileTree
+                showItemMenu={props.showFileTreeItemMenu}
                 roots={s.rootsList()}
                 selectedPath={s.selectedFile()?.path ?? null}
                 selectedRootId={s.selectedRootId()}
