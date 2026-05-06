@@ -15,8 +15,11 @@ interface GuideSectionLink {
 const sectionLinks: GuideSectionLink[] = [
   { href: "#installation", label: "Installation" },
   { href: "#opening-files", label: "Opening Files" },
+  { href: "#tabs", label: "Tabs" },
   { href: "#navigation", label: "Navigation" },
-  { href: "#toc", label: "Table of Contents" },
+  { href: "#toc", label: "TOC and References" },
+  { href: "#workspace-symbols", label: "Workspace Symbols" },
+  { href: "#reader-mode", label: "Reader Mode" },
   { href: "#search", label: "Search" },
   { href: "#editor", label: "Editor" },
   { href: "#appearance", label: "Appearance" },
@@ -47,7 +50,32 @@ const guideScreenshots: GuideScreenshot[] = [
   {
     src: "/screenshots/desktop-split-panes.png",
     alt: "Two files open in split panes side by side",
-    caption: "Split panes (Cmd/Ctrl+\\) — read or compare two documents at the same time.",
+    caption: "Split panes (Cmd/Ctrl+\\) — read or compare two documents at the same time. Each pane has its own tab list and TOC.",
+  },
+  {
+    src: "/screenshots/desktop-preview-tabs.png",
+    alt: "Active workspace with one pinned tab and one preview tab in italic",
+    caption: "VSCode-style tabs — single-click opens the file in the preview slot (italic title); edit, double-click, or drag pins it.",
+  },
+  {
+    src: "/screenshots/desktop-toc-segmented.png",
+    alt: "Right gutter segmented into Summary and References tabs",
+    caption: "Right gutter is segmented into Summary (TOC) and References (workspace backlinks). Status bar shows live word count + reading time.",
+  },
+  {
+    src: "/screenshots/desktop-backlinks-panel.png",
+    alt: "References tab listing five workspace files that reference the active doc",
+    caption: "Backlinks — every workspace file that links to the active doc via Markdown link, AsciiDoc xref, or include::. Click a row to navigate.",
+  },
+  {
+    src: "/screenshots/desktop-workspace-symbols.png",
+    alt: "Workspace symbol palette listing headings across every doc",
+    caption: "Workspace Symbol Search (Cmd/Ctrl+Alt+O) — fuzzy-match headings across every doc in the workspace and jump in one click.",
+  },
+  {
+    src: "/screenshots/desktop-reader-mode.png",
+    alt: "Reader mode rendering only the centered preview without chrome",
+    caption: "Reader / Zen mode (Cmd/Ctrl+.) — chrome collapses, preview centers at a comfortable reading width.",
   },
   {
     src: "/screenshots/desktop-edit-preview.png",
@@ -262,6 +290,36 @@ export function GuidePage() {
           </ul>
         </section>
 
+        <section class="content-panel" id="tabs">
+          <h2>Tabs — preview vs pinned</h2>
+          <p>
+            Single-click in the file tree opens the file in the <strong>preview slot</strong> — the
+            tab title shows in italic. Click another file and the preview is replaced. Double-click,
+            drag, or just start editing to <strong>pin</strong> the tab; pinned tabs stay until you
+            close them.
+          </p>
+          <p>
+            The invariant: at most one preview tab per pane. Middle-click and "Open in New Tab"
+            always create a pinned tab.
+          </p>
+          <figure class="guide-media">
+            <button
+              class="guide-media-button"
+              onClick={() =>
+                openImageModal({
+                  alt: "Active workspace with one pinned tab and one preview tab in italic",
+                  caption: "VSCode-style tabs — pinned title is upright, preview is italic.",
+                  src: "/screenshots/desktop-preview-tabs.png",
+                })
+              }
+              type="button"
+            >
+              <img alt="Active workspace with one pinned tab and one preview tab in italic" src="/screenshots/desktop-preview-tabs.png" />
+            </button>
+            <figcaption>VSCode-style tabs — pinned upright, preview italic.</figcaption>
+          </figure>
+        </section>
+
         <section class="content-panel" id="navigation">
           <h2>Navigation</h2>
           <ul>
@@ -289,26 +347,104 @@ export function GuidePage() {
         </section>
 
         <section class="content-panel" id="toc">
-          <h2>Table of Contents</h2>
+          <h2>TOC and References</h2>
           <p>
-            The TOC panel is generated from heading hierarchy and helps quick section jumps in long
-            documents.
+            The right gutter is segmented into two tabs:
+          </p>
+          <ul>
+            <li><strong>Summary</strong> — the rendered document's table of contents. Scroll position drives the active heading highlight.</li>
+            <li><strong>References</strong> — every other workspace doc that links to the current file via Markdown link, AsciiDoc xref, or include. The count badge tells you upfront whether the active doc is referenced.</li>
+          </ul>
+          <p>
+            Both tabs stay mounted regardless of which is visible — switching is instant.
           </p>
           <figure class="guide-media guide-media-compact">
             <button
               class="guide-media-button"
               onClick={() =>
                 openImageModal({
-                  alt: "Table of contents panel",
-                  caption: "TOC panel with clickable document sections.",
-                  src: "/screenshots/desktop-workspace-preview.png",
+                  alt: "Right gutter segmented into Summary and References tabs",
+                  caption: "Summary tab shows the document TOC; the count on References indicates inbound links.",
+                  src: "/screenshots/desktop-toc-segmented.png",
                 })
               }
               type="button"
             >
-              <img alt="Table of contents panel" src="/screenshots/desktop-workspace-preview.png" />
+              <img alt="Right gutter segmented into Summary and References tabs" src="/screenshots/desktop-toc-segmented.png" />
             </button>
-            <figcaption>TOC panel with clickable document sections.</figcaption>
+            <figcaption>Summary tab shows the document TOC; the count on References indicates inbound links.</figcaption>
+          </figure>
+          <figure class="guide-media guide-media-compact">
+            <button
+              class="guide-media-button"
+              onClick={() =>
+                openImageModal({
+                  alt: "References tab listing five workspace files that reference the active doc",
+                  caption: "References — workspace backlinks for the active file.",
+                  src: "/screenshots/desktop-backlinks-panel.png",
+                })
+              }
+              type="button"
+            >
+              <img alt="References tab listing five workspace files that reference the active doc" src="/screenshots/desktop-backlinks-panel.png" />
+            </button>
+            <figcaption>References — workspace backlinks for the active file.</figcaption>
+          </figure>
+        </section>
+
+        <section class="content-panel" id="workspace-symbols">
+          <h2>Workspace Symbol Search</h2>
+          <p>
+            <code>Cmd/Ctrl+Alt+O</code> opens a fuzzy-match palette over every heading in every doc
+            of the workspace — not just the active file. Type the heading text or the file path to
+            scope; pick a row and the file opens, scrolled to the right line, with the TOC active
+            highlight already on the matching item.
+          </p>
+          <figure class="guide-media guide-media-compact">
+            <button
+              class="guide-media-button"
+              onClick={() =>
+                openImageModal({
+                  alt: "Workspace symbol palette listing headings across every doc",
+                  caption: "Cmd/Ctrl+Alt+O — workspace-wide heading search.",
+                  src: "/screenshots/desktop-workspace-symbols.png",
+                })
+              }
+              type="button"
+            >
+              <img alt="Workspace symbol palette listing headings across every doc" src="/screenshots/desktop-workspace-symbols.png" />
+            </button>
+            <figcaption>Cmd/Ctrl+Alt+O — workspace-wide heading search.</figcaption>
+          </figure>
+        </section>
+
+        <section class="content-panel" id="reader-mode">
+          <h2>Reader / Zen mode</h2>
+          <p>
+            <code>Cmd/Ctrl+.</code> (or <em>View → Toggle Reader Mode</em> in the Command Palette)
+            collapses the toolbar, sidebar, TOC, and status bar — leaving only the rendered preview
+            centered at a comfortable reading width. Press the same shortcut to come back.
+          </p>
+          <p>
+            <code>F11</code> is accepted as a fallback on platforms where it isn't already taken by
+            the OS. macOS Mission Control swallows <code>F11</code> by default — use the period
+            chord there.
+          </p>
+          <figure class="guide-media">
+            <button
+              class="guide-media-button"
+              onClick={() =>
+                openImageModal({
+                  alt: "Reader mode rendering only the centered preview without chrome",
+                  caption: "Reader / Zen mode — focused preview without distractions.",
+                  src: "/screenshots/desktop-reader-mode.png",
+                })
+              }
+              type="button"
+            >
+              <img alt="Reader mode rendering only the centered preview without chrome" src="/screenshots/desktop-reader-mode.png" />
+            </button>
+            <figcaption>Reader / Zen mode — focused preview without distractions.</figcaption>
           </figure>
         </section>
 
@@ -438,8 +574,16 @@ export function GuidePage() {
                 <td>Go to Heading — jump anywhere in the current document</td>
               </tr>
               <tr>
+                <td><code>Cmd/Ctrl+Alt+O</code></td>
+                <td>Go to Symbol in Workspace — fuzzy-match headings across every doc</td>
+              </tr>
+              <tr>
                 <td><code>Cmd/Ctrl+Shift+F</code></td>
                 <td>Find in Files — search across the workspace</td>
+              </tr>
+              <tr>
+                <td><code>Cmd/Ctrl+.</code></td>
+                <td>Toggle Reader / Zen mode (chrome-less, centered preview)</td>
               </tr>
               <tr>
                 <td><code>Cmd/Ctrl+/</code></td>

@@ -129,20 +129,18 @@ export function Toolbar(props: ToolbarProps) {
   );
 
   const renderTocToggle = () => (
-    <Show when={props.hasFile}>
-      <Tooltip>
-        <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={props.tocVisible}
-          onChange={props.onToggleToc}
-          aria-label={(useLocale(), m.toolbar_toggle_toc())}
-        >
-          <IconListTree width={16} height={16} />
-        </TooltipTrigger>
-        <TooltipContent>{(useLocale(), m.toolbar_toggle_toc())}</TooltipContent>
-      </Tooltip>
-    </Show>
+    <Tooltip>
+      <TooltipTrigger
+        as={Toggle}
+        size="sm"
+        pressed={props.tocVisible}
+        onChange={props.onToggleToc}
+        aria-label={(useLocale(), m.toolbar_toggle_toc())}
+      >
+        <IconListTree width={16} height={16} />
+      </TooltipTrigger>
+      <TooltipContent>{(useLocale(), m.toolbar_toggle_toc())}</TooltipContent>
+    </Tooltip>
   );
 
   const renderSplitToggle = () => (
@@ -231,115 +229,125 @@ export function Toolbar(props: ToolbarProps) {
 
   const renderMenu = () => (
     <DropdownMenu>
-        {/* No Tooltip here: Kobalte tooltips open on focus (a11y) and the
+      {/* No Tooltip here: Kobalte tooltips open on focus (a11y) and the
             trigger receives focus when the dropdown opens, so tooltip +
             menu would appear together. The icon + aria-label are enough. */}
-        <DropdownMenuTrigger
-          aria-label={(useLocale(), m.toolbar_menu())}
-          class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-accent hover:text-accent-foreground h-8 w-8"
-        >
-          <IconMenu width={16} height={16} />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent class="w-48">
-          <Show when={props.onOpenFolder}>
-            <DropdownMenuItem onSelect={props.onOpenFolder}>
-              <IconFolder width={14} height={14} />
-              {(useLocale(), m.menu_open_folder())}
-            </DropdownMenuItem>
-          </Show>
-          <Show when={hasRecentItems()}>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <IconClock width={14} height={14} />
-                {(useLocale(), m.menu_open_recent())}
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent class="w-56 max-h-64 overflow-y-auto">
-                <Show when={(props.recentFolders?.length ?? 0) > 0}>
-                  <For each={props.recentFolders}>
-                    {(folder) => (
-                      <DropdownMenuItem onSelect={() => props.onOpenRecentFolder?.(folder.path)}>
-                        <IconFolder width={14} height={14} />
-                        {folder.name}
-                      </DropdownMenuItem>
-                    )}
-                  </For>
-                </Show>
-                <Show when={(props.recentFolders?.length ?? 0) > 0 && (props.recentFiles?.length ?? 0) > 0}>
-                  <DropdownMenuSeparator />
-                </Show>
-                <Show when={(props.recentFiles?.length ?? 0) > 0}>
-                  <For each={props.recentFiles}>
-                    {(file) => (
-                      <DropdownMenuItem onSelect={() => props.onOpenRecentFile?.(file)}>
-                        <IconFileText width={14} height={14} />
-                        {file.name}
-                      </DropdownMenuItem>
-                    )}
-                  </For>
-                </Show>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          </Show>
-          <Show when={props.onOpenFolder || hasRecentItems()}>
-            <DropdownMenuSeparator />
-          </Show>
+      <DropdownMenuTrigger
+        aria-label={(useLocale(), m.toolbar_menu())}
+        class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-accent hover:text-accent-foreground h-8 w-8"
+      >
+        <IconMenu width={16} height={16} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent class="w-48">
+        <Show when={props.onOpenFolder}>
+          <DropdownMenuItem onSelect={props.onOpenFolder}>
+            <IconFolder width={14} height={14} />
+            {(useLocale(), m.menu_open_folder())}
+          </DropdownMenuItem>
+        </Show>
+        <Show when={hasRecentItems()}>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <Show when={props.darkMode} fallback={<IconSun width={14} height={14} />}>
-                <IconMoon width={14} height={14} />
-              </Show>
-              {(useLocale(), m.menu_theme())}
+              <IconClock width={14} height={14} />
+              {(useLocale(), m.menu_open_recent())}
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent class="w-40">
-              <DropdownMenuRadioGroup
-                value={props.themeMode}
-                onChange={props.onThemeChange}
-              >
-                <DropdownMenuRadioItem value="system">
-                  <IconMonitor width={14} height={14} />
-                  {(useLocale(), m.menu_theme_system())}
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="light">
-                  <IconSun width={14} height={14} />
-                  {(useLocale(), m.menu_theme_light())}
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="dark">
-                  <IconMoon width={14} height={14} />
-                  {(useLocale(), m.menu_theme_dark())}
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
+            <DropdownMenuSubContent class="w-56 max-h-64 overflow-y-auto">
+              <Show when={(props.recentFolders?.length ?? 0) > 0}>
+                <For each={props.recentFolders}>
+                  {(folder) => (
+                    <DropdownMenuItem onSelect={() => props.onOpenRecentFolder?.(folder.path)}>
+                      <IconFolder width={14} height={14} />
+                      {folder.name}
+                    </DropdownMenuItem>
+                  )}
+                </For>
+              </Show>
+              <Show when={(props.recentFolders?.length ?? 0) > 0 && (props.recentFiles?.length ?? 0) > 0}>
+                <DropdownMenuSeparator />
+              </Show>
+              <Show when={(props.recentFiles?.length ?? 0) > 0}>
+                <For each={props.recentFiles}>
+                  {(file) => (
+                    <DropdownMenuItem onSelect={() => props.onOpenRecentFile?.(file)}>
+                      <IconFileText width={14} height={14} />
+                      {file.name}
+                    </DropdownMenuItem>
+                  )}
+                </For>
+              </Show>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
-          <Show when={props.hasFile && props.onExportPdf}>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={props.onExportPdf}>
-              <IconFileDown width={14} height={14} />
-              {(useLocale(), m.menu_export_pdf())}
-            </DropdownMenuItem>
-          </Show>
-          <Show when={props.onShortcutsHelp}>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={props.onShortcutsHelp}>
-              <IconKeyboard width={14} height={14} />
-              {(useLocale(), m.menu_keyboard_shortcuts())}
-            </DropdownMenuItem>
-          </Show>
-          <Show when={props.onCheckForUpdates}>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={props.onCheckForUpdates}>
-              <IconDownload width={14} height={14} />
-              {(useLocale(), m.menu_check_for_updates())}
-            </DropdownMenuItem>
-          </Show>
-          <Show when={props.onAbout}>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={props.onAbout}>
-              <IconInfo width={14} height={14} />
-              {(useLocale(), m.menu_about())}
-            </DropdownMenuItem>
-          </Show>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </Show>
+        <Show when={props.onOpenFolder || hasRecentItems()}>
+          <DropdownMenuSeparator />
+        </Show>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Show when={props.darkMode} fallback={<IconSun width={14} height={14} />}>
+              <IconMoon width={14} height={14} />
+            </Show>
+            {(useLocale(), m.menu_theme())}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent class="w-40">
+            <DropdownMenuRadioGroup
+              value={props.themeMode}
+              onChange={props.onThemeChange}
+            >
+              <DropdownMenuRadioItem value="system">
+                <IconMonitor width={14} height={14} />
+                {(useLocale(), m.menu_theme_system())}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="light">
+                <IconSun width={14} height={14} />
+                {(useLocale(), m.menu_theme_light())}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="dark">
+                <IconMoon width={14} height={14} />
+                {(useLocale(), m.menu_theme_dark())}
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        {/* Action group — Export, Shortcuts, Updates, About all
+              belong to "things you do from the menu" so they read as
+              a single block. One separator before the group divides
+              it from the open/recent/theme cluster above; items
+              inside the group are flat. */}
+        <Show when={
+          (props.hasFile && props.onExportPdf)
+          || props.onShortcutsHelp
+          || props.onCheckForUpdates
+          || props.onAbout
+        }>
+          <DropdownMenuSeparator />
+        </Show>
+        <Show when={props.hasFile && props.onExportPdf}>
+          <DropdownMenuItem onSelect={props.onExportPdf}>
+            <IconFileDown width={14} height={14} />
+            {(useLocale(), m.menu_export_pdf())}
+          </DropdownMenuItem>
+        </Show>
+        <Show when={props.onShortcutsHelp}>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={props.onShortcutsHelp}>
+            <IconKeyboard width={14} height={14} />
+            {(useLocale(), m.menu_keyboard_shortcuts())}
+          </DropdownMenuItem>
+        </Show>
+        <Show when={props.onCheckForUpdates}>
+          <DropdownMenuItem onSelect={props.onCheckForUpdates}>
+            <IconDownload width={14} height={14} />
+            {(useLocale(), m.menu_check_for_updates())}
+          </DropdownMenuItem>
+        </Show>
+        <Show when={props.onAbout}>
+          <DropdownMenuItem onSelect={props.onAbout}>
+            <IconInfo width={14} height={14} />
+            {(useLocale(), m.menu_about())}
+          </DropdownMenuItem>
+        </Show>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 
   return (

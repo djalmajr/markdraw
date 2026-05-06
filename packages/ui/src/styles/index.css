@@ -106,6 +106,11 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* Without this, an intrinsically-tall child (large TOC, very long
+     file tree) pushes the body past 100vh — the page scrolls and the
+     toolbar disappears off the top. The cap forces overflow into the
+     scrollable inner panels (toc-panel-content, file-tree, etc.). */
+  overflow: hidden;
 }
 
 /* Disable text selection across the app UI by default. */
@@ -133,6 +138,28 @@
   box-shadow: inset 0 0 0 3px hsl(var(--primary));
 }
 
+/* Reader / Zen mode — F11 toggles. Hides every chrome surface so
+   only the rendered preview shows. The `<Show>` blocks for the
+   panels still hold their state in memory; this is purely visual. */
+.app.reader-mode > .toolbar,
+.app.reader-mode .sidebar,
+.app.reader-mode .toc-panel,
+.app.reader-mode .status-bar,
+.app.reader-mode .tab-bar,
+.app.reader-mode .content-toolbar,
+.app.reader-mode .editor-toolbar {
+  display: none;
+}
+
+/* When chrome collapses, center the preview column at a comfortable
+   reading width — the visible delta between "default" and "reader"
+   should feel like opening a magazine. */
+.app.reader-mode .preview-panel .content {
+  max-width: 760px;
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+
 .app.resizing .content,
 .app.resizing .toc-panel,
 .app.resizing .editor-panel {
@@ -148,6 +175,11 @@
 .main {
   display: flex;
   flex: 1;
+  /* `min-height: 0` is required on every flex item that contains a
+     scrollable child — without it, the item's intrinsic content
+     bypasses the parent's flex sizing and the layout grows past
+     100vh. Same fix applies to .toc-panel below. */
+  min-height: 0;
   overflow: hidden;
   -webkit-transform: translateZ(0);
   transform: translateZ(0);
@@ -370,6 +402,14 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   text-overflow: ellipsis;
 }
 
+/* VSCode-style preview tab — italic title until the user pins it
+   (double-click, drag, or first edit). Lives on the wrapper so the
+   `data-preview` attribute set in tab-bar.tsx drives both rules
+   without a class swap. */
+.tab-bar-item[data-preview="true"] .tab-bar-item-name {
+  font-style: italic;
+}
+
 .tab-bar-item-dirty {
   width: 8px;
   height: 8px;
@@ -470,6 +510,10 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .status-bar {
   display: flex;
   align-items: center;
+  /* Breadcrumb on the left, metrics on the right — push them apart
+     so neither truncates the other unless the window is genuinely
+     too narrow. */
+  justify-content: space-between;
   height: 24px;
   padding: 0 12px;
   background: hsl(var(--toolbar-bg));
@@ -486,6 +530,16 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+
+.status-metrics {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .status-root {
@@ -1106,6 +1160,10 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .toc-panel {
   width: 260px;
   flex-shrink: 0;
+  /* See `.main` above — without `min-height: 0`, a TOC tree taller
+     than the viewport leaks the gutter past `.app`'s 100vh and
+     scrolls the body. */
+  min-height: 0;
   overflow: hidden;
   background: hsl(var(--secondary));
   border-left: 1px solid hsl(var(--border));
@@ -1113,22 +1171,6 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   font-size: 13px;
   display: flex;
   flex-direction: column;
-}
-
-.toc-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 4px;
-  margin-bottom: 8px;
-}
-
-.toc-panel-title {
-  font-weight: 600;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: hsl(var(--muted-foreground));
 }
 
 .toc-panel-options {
@@ -1150,11 +1192,142 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   background: hsl(var(--bg-hover));
 }
 
-.toc-panel-content {
+.toc-panel-tree {
+  /* Direct child of .toc-panel-content; receives the moved #toc node
+     from Preview. Defined as a separate wrapper so the empty-state
+     message (sibling) survives Preview's `textContent = ""` reset. */
+}
+
+.toc-panel-empty {
+  margin: 8px 4px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+  line-height: 1.4;
+}
+
+/* Segmented control wrapper — uses the shared solid-ui `Tabs`
+   primitive. Centers the segment in the gutter so it visually
+   aligns with the editor-mode segment in the toolbar above. */
+.toc-panel-tabs {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+/* Per-pane section header — sits BELOW the segment row, mirrors the
+   uppercase-title + action-button layout used by the editor toolbar
+   sub-panels. Each tab pane carries its own header so the action
+   (TOC's gear menu, future backlinks actions) targets only the
+   active tab. Header itself is non-scrolling — only the inner
+   `.toc-panel-scroll` of each pane scrolls, so there's no chance
+   for tree rows to peek through a translucent sticky edge. */
+.toc-panel-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: 0 4px;
+  margin-bottom: 4px;
+}
+
+.toc-panel-section-title {
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: hsl(var(--muted-foreground));
+}
+
+.toc-panel-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 14px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: hsl(var(--secondary));
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-selected] .toc-panel-tab-count {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* Container for both tab panes — fills the remaining vertical space
+   below the segment row. Each pane stretches to fill it and manages
+   its own internal scroll. */
+.toc-panel-panes {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.toc-panel-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.toc-panel-pane[hidden] {
+  display: none;
+}
+
+/* Inner scroll container — only this scrolls. Header above stays
+   put while the tree slides; the gutter is opaque so nothing peeks
+   through. */
+.toc-panel-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0 4px 32px;
+  padding-bottom: 32px;
+}
+
+.backlinks-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.backlinks-item {
+  display: block;
+}
+
+.backlinks-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 3px 4px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backlinks-link:hover {
+  background: hsl(var(--bg-hover));
+}
+
+.backlinks-empty {
+  margin: 4px 4px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+  line-height: 1.4;
 }
 
 .toc-panel.toc-hidden {
@@ -1322,17 +1495,10 @@ mark.search-highlight.search-active {
   opacity: 0.6;
 }
 
-.pane-view-active::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: hsl(var(--primary));
-  pointer-events: none;
-  z-index: 1;
-}
+/* Pane focus is signalled purely by the opacity dim on the inactive
+   sibling (see `.panes-container:has(.pane-view-active) …` above) —
+   no extra stripe. A coloured indicator competed visually with the
+   active tab's top stripe and the user reading dropped a level. */
 
 .pane-splitter {
   position: relative;
@@ -1455,7 +1621,6 @@ mark.search-highlight.search-active {
 
 .quick-open-row-name {
   font-size: 13px;
-  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1473,7 +1638,6 @@ mark.search-highlight.search-active {
 }
 
 .quick-open-row-root {
-  font-weight: 600;
   color: hsl(var(--muted-foreground));
 }
 
@@ -1486,7 +1650,6 @@ mark.quick-open-hit {
   color: inherit;
   border-radius: 2px;
   padding: 0;
-  font-weight: 700;
 }
 
 .dark mark.quick-open-hit {
@@ -1501,8 +1664,15 @@ mark.quick-open-hit {
 }
 
 .command-palette-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: hsl(var(--secondary));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
+  font-weight: 400;
   color: hsl(var(--muted-foreground));
 }
 

@@ -14,8 +14,13 @@ export interface TabStore {
   tabs: () => TabState[];
   activeTabId: () => TabId | null;
 
-  /** Create a new tab (used by "Open in New Tab", middle-click, etc.) */
-  openTab(entry: FSEntry, rootId: string, opts?: { background?: boolean; append?: boolean }): TabId;
+  /** Create a new tab (used by "Open in New Tab", middle-click,
+   *  file-tree double-click, etc.). The result is **pinned by
+   *  default** — explicit-open gestures are how the user signals
+   *  "keep this around"; only `loadInActiveTab` creates the
+   *  ephemeral preview slot. Pass `preview: true` if a caller
+   *  genuinely wants a non-pinned tab (rare). */
+  openTab(entry: FSEntry, rootId: string, opts?: { background?: boolean; append?: boolean; preview?: boolean }): TabId;
   /** Replace the active tab's file (used by single-click in file tree). Creates a tab if none exist. */
   loadInActiveTab(entry: FSEntry, rootId: string): TabId;
   closeTab(tabId: TabId): boolean;
@@ -27,6 +32,10 @@ export interface TabStore {
   reorderTabs(newOrder: TabId[]): void;
   /** Reopen the most recently closed tab. Returns the tab or undefined if stack is empty. */
   reopenClosedTab(): TabState | undefined;
+  /** Pin a tab so it's no longer treated as a preview slot — VSCode
+   *  semantics: pinned tabs are permanent (their italic name turns
+   *  back to upright) and `loadInActiveTab` won't replace them. */
+  pinTab(tabId: TabId): void;
 
   snapshotActiveTab(scrollPositions?: { editorScrollTop: number; previewScrollTop: number }): void;
   restoreActiveTab(): void;
@@ -133,7 +142,10 @@ export function createTabStore(config: TabStoreConfig): TabStore {
       editorMode: "preview",
       editorScrollTop: 0,
       previewScrollTop: 0,
-      isPinned: true,
+      // New tabs land in the "preview" slot — italic in the tab bar,
+      // replaced by the next single-click. Promoted via `pinTab` on
+      // double-click or the first edit (see Editor's onChange).
+      isPinned: false,
       includePaths: [],
       needsLoad,
     };
@@ -158,22 +170,38 @@ export function createTabStore(config: TabStoreConfig): TabStore {
       return tabId;
     }
 
-    // Replace the active tab's identity with the new file
-    const currentActiveId = activeId();
-    if (currentActiveId) {
+    // VSCode parity: there is **at most one preview slot per pane**,
+    // regardless of which tab is currently active. So we recycle any
+    // existing preview (`!isPinned`) tab — even when it isn't the
+    // active one, e.g. the user opened A as preview, middle-clicked
+    // B (pinned, becomes active), then single-clicks C: C must
+    // replace the dormant preview A, not stack as a second preview.
+    const previewIdx = tabList().findIndex((t) => !t.isPinned);
+    if (previewIdx >= 0) {
+      const previewTab = tabList()[previewIdx]!;
+      // Snapshot the active tab's working buffer first — if the
+      // active tab IS the preview we're about to recycle, the
+      // snapshot keeps any in-flight content from being silently
+      // dropped on the way out.
       snapshotActiveTab();
       const newTab = createTabState(entry, rootId);
-      setTabList((prev) => prev.map((t) => (t.id === currentActiveId ? newTab : t)));
+      setTabList((prev) => prev.map((t) => (t.id === previewTab.id ? newTab : t)));
       setActiveId(tabId);
+      persistSession();
+      return tabId;
     }
 
-    persistSession();
-    return tabId;
+    // No preview slot exists — create one fresh. `preview: true` is
+    // critical here: the default `openTab` behaviour is to pin
+    // (used by middle-click, tree dblclick, "Open in New Tab");
+    // this is the only path that legitimately creates a preview.
+    return openTab(entry, rootId, { preview: true });
   }
 
-  function openTab(entry: FSEntry, rootId: string, opts?: { background?: boolean; append?: boolean }): TabId {
+  function openTab(entry: FSEntry, rootId: string, opts?: { background?: boolean; append?: boolean; preview?: boolean }): TabId {
     const background = opts?.background ?? false;
     const append = opts?.append ?? false;
+    const preview = opts?.preview ?? false;
     let tabId = makeTabId(rootId, entry.path);
 
     // If already open, generate a unique ID for the duplicate
@@ -182,7 +210,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
       tabId = `${tabId}#${tabCounter}`;
     }
 
-    const newTab = { ...createTabState(entry, rootId), id: tabId };
+    const newTab = { ...createTabState(entry, rootId), id: tabId, isPinned: !preview };
 
     if (!background && activeId()) {
       snapshotActiveTab();
@@ -352,6 +380,15 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     );
   }
 
+  function pinTab(tabId: TabId): void {
+    const tab = getTab(tabId);
+    if (!tab || tab.isPinned) return;
+    setTabList((prev) =>
+      prev.map((t) => (t.id === tabId ? { ...t, isPinned: true } : t)),
+    );
+    persistSession();
+  }
+
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
 
   function persistSession(): void {
@@ -373,7 +410,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
             filePath: t.filePath,
             rootId: t.rootId,
             fileName: t.fileName,
-            isPinned: true,
+            isPinned: t.isPinned,
             editorMode: t.editorMode,
           })),
           activeTabId: activeId(),
@@ -401,6 +438,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     activateTab,
     reorderTabs,
     reopenClosedTab,
+    pinTab,
 
     snapshotActiveTab,
     restoreActiveTab,

@@ -81,6 +81,8 @@
   "find_placeholder": "Type a file name…",
   "find_command_placeholder": "Type a command…",
   "find_heading_placeholder": "Type a heading…",
+  "find_workspace_heading_placeholder": "Type a heading or file…",
+  "command_workspace_symbols": "Go to Symbol in Workspace…",
   "find_in_files_placeholder": "Search in files…",
   "find_in_files_case_sensitive": "Case sensitive",
   "find_in_files_results_summary": "{count} matches in {fileCount} files",
@@ -90,6 +92,7 @@
   "toc_expand_all": "Expand All",
   "toc_collapse_all": "Collapse All",
   "toc_show_levels": "Show {n} Level",
+  "toc_no_headings": "No headings found in this document.",
   "update_available_title": "Update available",
   "update_available_subtitle": "AsciiMark {version} is available (current: {current}).",
   "update_available_no_notes": "No release notes were published with this update.",
@@ -105,5 +108,10 @@
   "about_report_issue": "Report an issue",
   "about_close": "Close",
   "command_about": "Help: About AsciiMark",
+  "command_toggle_reader_mode": "View: Toggle Reader Mode",
+  "backlinks_title": "Backlinks",
+  "backlinks_empty": "No other documents reference this file.",
+  "toc_tab_summary": "Summary",
+  "toc_tab_references": "References",
   "menu_about": "About AsciiMark"
 }

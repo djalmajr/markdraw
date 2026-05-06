@@ -21,6 +21,13 @@ import { createFileLoader } from "./lib/file-loader.ts";
 import { createNavigation } from "./lib/navigation.ts";
 import { createFolder } from "./lib/folder.ts";
 import { isSupportedFile } from "@asciimark/core/utils.ts";
+import { buildBacklinkIndex } from "@asciimark/core/backlinks.ts";
+import { flattenWorkspace } from "@asciimark/core/file-index.ts";
+import { readFileContent } from "./lib/fs.ts";
+import {
+  buildWorkspaceSymbols,
+  type WorkspaceSymbol,
+} from "@asciimark/core/workspace-symbols.ts";
 import { confirm } from "@asciimark/ui/components/confirm-dialog.tsx";
 import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
@@ -64,6 +71,10 @@ export function App() {
   const [commandPaletteVisible, setCommandPaletteVisible] = createSignal(false);
   // Symbol palette (Cmd/Ctrl+Shift+O).
   const [symbolPaletteVisible, setSymbolPaletteVisible] = createSignal(false);
+  // Workspace-wide symbol palette (Cmd/Ctrl+T). Shares the
+  // open-only mutual-exclusion with the other overlays — the local
+  // symbol palette is a sibling, not a sub-mode.
+  const [workspaceSymbolPaletteVisible, setWorkspaceSymbolPaletteVisible] = createSignal(false);
   // Find in Files (Cmd/Ctrl+Shift+F).
   const [findInFilesVisible, setFindInFilesVisible] = createSignal(false);
 
@@ -400,6 +411,54 @@ export function App() {
     await handleLoadFileWithTab(entry, recentFile.rootPath);
   }
 
+  // ── Workspace indices (backlinks + symbols) ───────────────────────
+  // Rebuild together whenever the roots tree changes (folder open,
+  // refresh, watcher tick that re-reads dirs). Reads each indexed
+  // `.md`/`.adoc` from disk once and feeds the same content into
+  // both index builders — re-reading per index would double the
+  // I/O for every workspace event.
+  const [workspaceSymbols, setWorkspaceSymbols] = createSignal<readonly WorkspaceSymbol[]>([]);
+  let workspaceBuildToken = 0;
+  createEffect(() => {
+    const roots = state.rootsList();
+    const paths = rootPaths();
+    if (roots.length === 0 || paths.size === 0) {
+      state.setBacklinkIndex(new Map());
+      setWorkspaceSymbols([]);
+      return;
+    }
+    const token = ++workspaceBuildToken;
+    void (async () => {
+      const indexed = flattenWorkspace(roots).filter((f) => isSupportedFile(f.path));
+      const filesForBacklinks: { path: string; content: string }[] = [];
+      const filesForSymbols: {
+        rootId: string;
+        rootName: string;
+        path: string;
+        content: string;
+      }[] = [];
+      for (const file of indexed) {
+        const root = paths.get(file.rootId);
+        if (!root) continue;
+        try {
+          const content = await readFileContent(`${root}/${file.path}`);
+          filesForBacklinks.push({ path: file.path, content });
+          filesForSymbols.push({
+            rootId: file.rootId,
+            rootName: file.rootName,
+            path: file.path,
+            content,
+          });
+        } catch {
+          // Permission / deleted between scan and read — skip silently.
+        }
+      }
+      if (token !== workspaceBuildToken) return; // newer build started
+      state.setBacklinkIndex(buildBacklinkIndex(filesForBacklinks));
+      setWorkspaceSymbols(buildWorkspaceSymbols(filesForSymbols));
+    })();
+  });
+
   // ── Tab session restore ──────────────────────────────────────────────────
   // Restore tabs when roots become available after startup.
   let sessionRestored = false;
@@ -489,11 +548,23 @@ export function App() {
     });
   }
 
-  /** Open in New Tab / middle-click / double-click: always create a new tab. */
+  /** Open in New Tab / middle-click / file-tree double-click. The
+   *  resulting tab is **pinned** — these are the explicit "I want
+   *  this around" gestures. If the file is already open in this
+   *  pane, activate + pin in place rather than duplicating (VSCode
+   *  semantics). */
   async function handleOpenInNewTab(entry: import("@asciimark/core/types.ts").FSEntry, rootId: string) {
-    tabStore().openTab(entry, rootId);
+    const store = tabStore();
+    const existing = store.findTabByFile(entry.path, rootId);
+    if (existing) {
+      store.activateTab(existing.id);
+      store.pinTab(existing.id);
+      await loader.loadFileContent(entry, true, false, rootId);
+      return;
+    }
+    store.openTab(entry, rootId);
     await loader.loadFileContent(entry, true, false, rootId);
-    tabStore().updateActiveTabContent({
+    store.updateActiveTabContent({
       editorContent: state.editorContent(),
       savedContent: state.savedContent(),
       html: state.html(),
@@ -777,6 +848,23 @@ export function App() {
         title: m.command_about(),
         run: () => { setAboutOpen(true); },
       },
+      {
+        id: "view.toggleReaderMode",
+        group: "View",
+        title: m.command_toggle_reader_mode(),
+        shortcut: { mac: ["⌘", "."], other: ["Ctrl", "."] },
+        run: () => state.setReaderMode((v) => !v),
+      },
+      {
+        id: "navigate.workspaceSymbols",
+        group: "Workspace",
+        title: m.command_workspace_symbols(),
+        shortcut: { mac: ["⌘", "⌥", "O"], other: ["Ctrl", "Alt", "O"] },
+        run: () => {
+          if (rootPaths().size === 0) return;
+          setWorkspaceSymbolPaletteVisible(true);
+        },
+      },
       // Language switcher — reads from the i18n package's locale list so
       // adding a new locale to `packages/i18n` automatically surfaces it
       // here. Each entry sets the locale via the Solid adapter, which
@@ -951,10 +1039,11 @@ export function App() {
       // siblings before toggling its own — without this, hitting
       // Cmd+Shift+P while Cmd+Shift+O is up stacks two palettes on
       // screen (the second one renders over the first).
-      function openOnly(target: "quick" | "command" | "symbol" | "find" | "help") {
+      function openOnly(target: "quick" | "command" | "symbol" | "wsymbol" | "find" | "help") {
         if (target !== "quick") setQuickOpenVisible(false);
         if (target !== "command") setCommandPaletteVisible(false);
         if (target !== "symbol") setSymbolPaletteVisible(false);
+        if (target !== "wsymbol") setWorkspaceSymbolPaletteVisible(false);
         if (target !== "find") setFindInFilesVisible(false);
         if (target !== "help") setShortcutsHelpVisible(false);
         switch (target) {
@@ -966,6 +1055,9 @@ export function App() {
             break;
           case "symbol":
             setSymbolPaletteVisible((v) => !v);
+            break;
+          case "wsymbol":
+            setWorkspaceSymbolPaletteVisible((v) => !v);
             break;
           case "find":
             setFindInFilesVisible((v) => !v);
@@ -1000,6 +1092,16 @@ export function App() {
         e.preventDefault();
         if (!state.selectedFile()) return;
         openOnly("symbol");
+      }
+
+      // Cmd/Ctrl+Alt+O: workspace-wide symbol search. Requires a
+      // workspace; no-op on the dropzone home screen. Note: macOS
+      // sends `ø` as the e.key when Option+O is pressed because the
+      // option key composes diacritics — accept both forms.
+      if (mod && e.altKey && (e.key === "o" || e.key === "O" || e.key === "ø" || e.key === "Ø")) {
+        e.preventDefault();
+        if (rootPaths().size === 0) return;
+        openOnly("wsymbol");
       }
 
       // Cmd/Ctrl+Shift+F: open the Find in Files panel. Requires a workspace.
@@ -1043,6 +1145,16 @@ export function App() {
         if (reopened) {
           void handleActivateTab(reopened.id);
         }
+      }
+
+      // Cmd/Ctrl+.: toggle Reader / Zen mode. F11 is hijacked by
+      // macOS Mission Control / Show Desktop and never reaches the
+      // webview reliably, so the primary binding is the period
+      // chord. F11 is still accepted as a fallback for keyboards
+      // that map it independently.
+      if ((mod && !e.shiftKey && e.key === ".") || (e.key === "F11" && !mod && !e.shiftKey)) {
+        e.preventDefault();
+        state.setReaderMode((v) => !v);
       }
 
       // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs
@@ -1104,6 +1216,9 @@ export function App() {
       onCommandPaletteClose={() => setCommandPaletteVisible(false)}
       symbolPaletteOpen={symbolPaletteVisible()}
       onSymbolPaletteClose={() => setSymbolPaletteVisible(false)}
+      workspaceSymbolPaletteOpen={workspaceSymbolPaletteVisible()}
+      workspaceSymbols={workspaceSymbols()}
+      onWorkspaceSymbolPaletteClose={() => setWorkspaceSymbolPaletteVisible(false)}
       findInFilesOpen={findInFilesVisible()}
       findInFilesSearch={(rootId, query, opts) =>
         findInFiles(rootId, query, { caseSensitive: opts.caseSensitive })

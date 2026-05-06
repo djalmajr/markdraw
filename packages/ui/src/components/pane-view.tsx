@@ -180,6 +180,8 @@ export function PaneView(props: PaneViewProps) {
           tocContainer={props.tocContainer}
           currentFilePath={pane().selectedFile()?.path ?? null}
           pendingFragment={s.pendingFragment()}
+          pendingHeadingText={s.pendingHeadingText()}
+          onHeadingHandled={() => s.setPendingHeadingText(null)}
           previewOverlayHost={previewPanelRef}
           onScrollRatioChange={(ratio) => {
             if (!syncScrollActive()) return;
@@ -288,6 +290,14 @@ export function PaneView(props: PaneViewProps) {
                 // to THIS pane's signals.
                 props.onActivate?.();
                 const entry = pane().selectedFile();
+                // VSCode parity: the first keystroke promotes the
+                // active preview tab to a pinned tab so it's no
+                // longer eligible for replacement on the next
+                // file-tree click. `pinTab` is a no-op once pinned.
+                const active = pane().tabs.getActiveTab();
+                if (active && !active.isPinned) {
+                  pane().tabs.pinTab(active.id);
+                }
                 if (entry) {
                   s.debouncedConvert(content, entry.path, s._readFile ?? (() => Promise.resolve(null)));
                 }

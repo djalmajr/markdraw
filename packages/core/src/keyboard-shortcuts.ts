@@ -95,6 +95,12 @@ export const SHORTCUTS: readonly ShortcutDescriptor[] = [
     description: "Find in Files: search content across the workspace",
     keys: { mac: ["⌘", "⇧", "F"], other: ["Ctrl", "Shift", "F"] },
   },
+  {
+    id: "nav.workspaceSymbols",
+    group: "Navigation",
+    description: "Go to Symbol in Workspace: jump to a heading across all docs",
+    keys: { mac: ["⌘", "⌥", "O"], other: ["Ctrl", "Alt", "O"] },
+  },
   // Split editor — second pane side by side with independent tabs +
   // editor mode. Toggle: with one pane open, splits; with two open,
   // collapses back to single-pane.
@@ -115,6 +121,13 @@ export const SHORTCUTS: readonly ShortcutDescriptor[] = [
     group: "Tabs",
     description: "Focus the second pane",
     keys: { mac: ["⌘", "2"], other: ["Ctrl", "2"] },
+  },
+  // ── View ────────────────────────────────────────────────────────────────
+  {
+    id: "view.toggleReaderMode",
+    group: "Help",
+    description: "Toggle Reader / Zen mode (hide chrome, center preview)",
+    keys: { mac: ["⌘", "."], other: ["Ctrl", "."] },
   },
   // ── Help ────────────────────────────────────────────────────────────────
   {

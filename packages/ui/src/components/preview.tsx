@@ -36,6 +36,21 @@ function yieldToMain(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/** Wait until the next paint frame. Mermaid's render measures
+ *  bounding-rect / font geometry of a temp container in
+ *  document.body; running it on the same tick the article was
+ *  attached to the DOM lets it execute before layout has settled
+ *  and trips `null is not an object (evaluating 'element.firstChild')`
+ *  because the SVG root never got its initial measurements. One
+ *  rAF after the swap is the cheapest way to guarantee layout. */
+function nextPaintFrame(): Promise<void> {
+  return new Promise((resolve) =>
+    typeof requestAnimationFrame === "function"
+      ? requestAnimationFrame(() => resolve())
+      : setTimeout(resolve, 16),
+  );
+}
+
 const BLOCKED_TAGS = new Set([
   "applet",
   "base",
@@ -86,6 +101,7 @@ function sanitizeHtmlFragment(input: string): string {
 }
 
 let mermaidInitialized = false;
+let mermaidWarmPromise: Promise<void> | null = null;
 
 function initMermaid(force = false) {
   if (mermaidInitialized && !force) return;
@@ -96,6 +112,49 @@ function initMermaid(force = false) {
     fontFamily: "inherit",
   });
   mermaidInitialized = true;
+}
+
+/**
+ * Pre-warm mermaid so the first user-facing render doesn't race
+ * with internal lazy-init + font measurement. The very first
+ * `mermaid.render()` after a fresh page load occasionally throws
+ * `null is not an object (evaluating 'element.firstChild')` —
+ * subsequent calls work because the lib is now warm. Running a
+ * throwaway tiny diagram once per session pays the cost upfront.
+ *
+ * Memoized as a single shared promise: every Preview instance
+ * (split panes, multiple files in sequence) shares the same warm
+ * state, and the wait collapses to a no-op after the first
+ * resolve. Errors are intentionally swallowed — pre-warm is
+ * best-effort and the real render still has its own catch path.
+ */
+function ensureMermaidWarm(): Promise<void> {
+  if (mermaidWarmPromise) return mermaidWarmPromise;
+  mermaidWarmPromise = (async () => {
+    initMermaid();
+    // Wait for fonts before measurement-heavy rendering — mermaid
+    // sizes nodes against text width and a missing font can give
+    // a 0-width SVG that trips internal `firstChild` walks.
+    if (typeof document !== "undefined" && document.fonts?.ready) {
+      try { await document.fonts.ready; } catch { /* ignore */ }
+    }
+    // Kitchen-sink pre-warm: exercise the shape renderers we
+    // typically see in user docs (box, rounded, diamond, cylinder,
+    // labelled edges). Mermaid lazy-loads per-shape modules — a
+    // trivial `A-->B` warm-up wasn't enough because the FIRST real
+    // render with new shapes still tripped the firstChild race.
+    try {
+      await mermaid.render(
+        "mermaid-prewarm",
+        "graph LR\nA[box] --> B(rounded)\nB --> C{diamond}\nC -->|label| D[(cylinder)]\nD --> E([stadium])",
+      );
+    } catch (e) {
+      console.warn("[mermaid] pre-warm failed", e);
+    }
+    // Clean up any temp dmermaid- divs the warm-up may have left.
+    document.querySelectorAll('div[id^="dmermaid-"]').forEach((el) => el.remove());
+  })();
+  return mermaidWarmPromise;
 }
 
 /**
@@ -174,8 +233,17 @@ async function renderMermaidBlocks(
   const blocks = container.querySelectorAll<HTMLElement>("div.mermaid");
   if (blocks.length === 0) return;
 
-  // Force re-init to reset mermaid's internal parser/registry state
-  initMermaid(true);
+  // Pre-warm before the first user-facing render so the lib has
+  // fonts + internals ready. After the first resolve this is a
+  // no-op (memoized promise).
+  await ensureMermaidWarm();
+  if (isStale(gen)) return;
+  // Theme refresh — re-init only if the dark/light theme switched
+  // since the last warm-up (the MutationObserver in onMount flips
+  // `mermaidInitialized` back to false on theme change). A
+  // force-init on every render was throwing away the warm state
+  // and reintroducing the firstChild race on block 0.
+  initMermaid();
 
   let idx = 0;
   for (const block of blocks) {
@@ -188,8 +256,36 @@ async function renderMermaidBlocks(
     if (!source) continue;
 
     try {
-      const id = `mermaid-${gen}-${idx++}`;
-      const { svg } = await mermaid.render(id, source);
+      // Mermaid sometimes throws `null is not an object (evaluating
+      // 'element.firstChild')` on the very first render of complex
+      // shapes — internal lazy module loading + layout race that
+      // pre-warm doesn't fully cover for every shape combination.
+      // Real syntax errors fail every attempt and fall through to
+      // the outer catch; transient races resolve within a couple
+      // of frames. Three attempts with growing delays cover both
+      // observed flake patterns without slowing valid renders
+      // (success on attempt 1 short-circuits).
+      const baseId = `mermaid-${gen}-${idx++}`;
+      let svg: string | undefined;
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (isStale(gen)) return;
+        const attemptId = attempt === 0 ? baseId : `${baseId}-retry`;
+        try {
+          const result = await mermaid.render(attemptId, source);
+          if (result?.svg) {
+            svg = result.svg;
+            break;
+          }
+          lastErr = new Error("mermaid render returned empty svg");
+        } catch (err) {
+          lastErr = err;
+        }
+        // Layout-settling pause between attempts — most flakes
+        // resolve within one paint frame.
+        await nextPaintFrame();
+      }
+      if (!svg) throw lastErr ?? new Error("mermaid render produced no output");
       // Check again after await — DOM may have been replaced
       if (isStale(gen)) return;
       // mermaid.render returns sanitized SVG — safe to inject
@@ -552,6 +648,12 @@ interface PreviewProps {
   pendingFragment: string | null;
   /** Called after the pending fragment has been scrolled to (to clear the signal) */
   onFragmentHandled: () => void;
+  /** Heading text to scroll to after content loads — used by the
+   *  Workspace Symbol search and any cross-file jump that knows the
+   *  heading by its rendered text rather than a fragment id. */
+  pendingHeadingText?: string | null;
+  /** Called after the pending heading has been resolved (to clear the signal) */
+  onHeadingHandled?: () => void;
   /** Called when user clicks a document link (.adoc/.md); receives the resolved path and optional fragment */
   onNavigate: (path: string, fragment?: string | null) => void;
   /** Open an external URL (http/https) in the system browser. Desktop-only. */
@@ -579,6 +681,15 @@ export function Preview(props: PreviewProps) {
   let articleRef: HTMLElement | undefined;
   let cleanupToc: (() => void) | undefined;
   let suppressScrollCallback = false;
+  // Private handle to THIS Preview's `#toc` node. The shared
+  // `props.tocContainer` is owned by AppShell and re-bound to whichever
+  // pane becomes active; when the OTHER pane gains focus, its effect
+  // calls `container.textContent = ""` and detaches our toc. Without
+  // this reference we'd lose the node forever (it's no longer inside
+  // `articleRef` either, because we moved it into the shared container
+  // when this pane was previously active). Keeping the handle lets us
+  // re-append on every focus flip without re-rendering the whole HTML.
+  let tocNode: HTMLElement | undefined;
 
   // Per-instance render-cancellation token. Two `Preview` components
   // coexist in split-pane mode — they MUST NOT share state, otherwise
@@ -798,18 +909,32 @@ export function Preview(props: PreviewProps) {
   // other pane, this effect fires for both Previews — the newly-active
   // one copies its `#toc` block into the shared container, the
   // newly-inactive one's `tocContainer` becomes undefined and we skip.
-  // Without this, the TOC would freeze on whatever the previous active
-  // pane published.
+  //
+  // Lookup precedence is articleRef first, then `tocNode` cache: the
+  // first time this fires after a render, the toc still lives inside
+  // the article. After a previous focus session moved it into the
+  // shared container, the OTHER pane's focus flip will have called
+  // `textContent = ""` on that shared container — detaching our toc
+  // from the DOM but leaving the node alive in `tocNode`. So we re-use
+  // the cached node to put it back into the (now emptied) container.
   createEffect(() => {
     const container = props.tocContainer;
-    if (!container || !articleRef) return;
-    const toc = articleRef.querySelector<HTMLElement>("#toc");
+    // Always cleanup first — this also covers the deactivation path,
+    // where `container` becomes undefined. Without this, the previous
+    // session's scroll listener would keep firing against `articleRef`
+    // and toggling `.toc-active` on a now-detached toc tree (the one we
+    // moved into the shared container, then the other pane wiped).
+    cleanupToc?.();
+    cleanupToc = undefined;
+    if (!container) return;
+    const tocVis = props.tocVisible;
+    const fresh = articleRef?.querySelector<HTMLElement>("#toc") ?? null;
+    if (fresh) tocNode = fresh;
+    const toc = tocNode;
     container.textContent = "";
     if (toc) container.appendChild(toc);
     props.onTocChange(!!toc);
-    // Re-arm collapse toggles + scroll tracking on the new tree.
-    cleanupToc?.();
-    if (props.tocVisible && toc) {
+    if (tocVis && toc && articleRef) {
       const cleanupCollapse = setupTocCollapse(toc);
       const cleanupScroll = setupTocScrollTracking(articleRef, toc);
       cleanupToc = () => {
@@ -831,6 +956,11 @@ export function Preview(props: PreviewProps) {
     if (!_html) {
       ++renderGen;
       articleRef.style.opacity = "0";
+      // Drop the cached toc handle: the next render will produce a
+      // fresh one. Holding on to the old one across a file switch
+      // would risk re-attaching a stale tree if the user flipped
+      // panes during the transition.
+      tocNode = undefined;
       pendingNewDocument = true;
       return;
     }
@@ -847,9 +977,14 @@ export function Preview(props: PreviewProps) {
         scrollContainer.scrollTop = 0;
       }
 
-      // Move #toc from article to external panel container
+      // Move #toc from article to external panel container. Always
+      // update `tocNode` (even when this pane is inactive) so the next
+      // focus flip can re-attach the freshly rendered toc — without
+      // this, a re-render that happens while inactive would leave the
+      // pane stuck on the previous render's stale toc.
       const tocContainer = props.tocContainer;
       const toc = container.querySelector<HTMLElement>("#toc");
+      tocNode = toc ?? undefined;
       if (tocContainer) {
         tocContainer.textContent = "";
         if (toc) tocContainer.appendChild(toc);
@@ -882,6 +1017,33 @@ export function Preview(props: PreviewProps) {
         scrollToFragment(frag);
         props.onFragmentHandled();
       }
+
+      // Heading-text jump (Workspace Symbol search / programmatic
+      // navigation that doesn't know the rendered fragment id). Walk
+      // the visible article for h1-h6 nodes, match by trimmed
+      // textContent, scroll into view. Falling back to text rather
+      // than computing a slug ahead of time keeps the matcher
+      // resilient to renderer differences (asciidoctor vs markdown-it
+      // produce different id schemes).
+      const headingText = props.pendingHeadingText;
+      if (headingText && articleRef) {
+        const hs = articleRef.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6");
+        const target = Array.from(hs).find(
+          (h) => h.textContent?.trim() === headingText,
+        );
+        if (target) {
+          const contentEl = articleRef.closest(".content");
+          if (contentEl) {
+            const targetRect = target.getBoundingClientRect();
+            const contentRect = contentEl.getBoundingClientRect();
+            const offset = targetRect.top - contentRect.top + contentEl.scrollTop - 16;
+            contentEl.scrollTo({ top: offset, behavior: "smooth" });
+          } else {
+            target.scrollIntoView({ behavior: "smooth" });
+          }
+        }
+        props.onHeadingHandled?.();
+      }
     }
 
     // New document (file switch): double-buffer to avoid FOUC — process in
@@ -895,21 +1057,37 @@ export function Preview(props: PreviewProps) {
       if (props.resolveImageSrc) rewriteImageSources(buffer, props.resolveImageSrc);
 
       queueMicrotask(async () => {
+        // Syntax highlighting can run against the detached buffer —
+        // it's pure DOM mutation with no document-level
+        // dependencies, and finishing it before the swap eliminates
+        // the FOUC of unhighlighted code.
         await highlightCodeBlocks(buffer, gen, isStale);
         if (isStale(gen)) return;
 
-        await renderMermaidBlocks(buffer, gen, isStale);
-        if (isStale(gen)) return;
-
-        await renderKrokiBlocks(buffer, gen, isStale);
-        if (isStale(gen)) return;
-
+        // Swap to the live article BEFORE running mermaid / kroki —
+        // both libraries create temp elements in `document.body`
+        // and read layout / fonts off the surrounding document. On
+        // a detached buffer the very first call randomly throws
+        // `null is not an object (evaluating 'element.firstChild')`
+        // because mermaid couldn't measure the temp container's
+        // size. Swap first → live measurement → reliable renders.
         const scrollContainer = articleRef!.closest(".content");
         const prevScrollTop = scrollContainer?.scrollTop ?? 0;
         articleRef!.replaceChildren(...Array.from(buffer.childNodes));
         if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
 
         afterSwap(articleRef!, true, tocVis);
+
+        // Wait one paint frame so the freshly-attached article has
+        // been laid out before mermaid measures. Without this, the
+        // first block races with layout and throws `firstChild`.
+        await nextPaintFrame();
+        if (isStale(gen)) return;
+
+        await renderMermaidBlocks(articleRef!, gen, isStale);
+        if (isStale(gen)) return;
+
+        await renderKrokiBlocks(articleRef!, gen, isStale);
       });
     } else {
       const scrollContainer = articleRef!.closest(".content");

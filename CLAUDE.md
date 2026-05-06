@@ -323,6 +323,78 @@ If a test cannot detect at least one of these mutations on the code it
 covers, it is not exercising the rule it claims to protect — rewrite it
 or remove it.
 
+### Name the Mutation
+Every non-trivial test gets a one-line comment naming the source mutation
+it would catch. If you can't name a code change that would flip the test
+from green to red, the test has no value — delete it.
+
+```tsx
+// Mutation captured: dropping the onChange prop on the Toggle would
+// leave the click silent and the spy never fires.
+it("clicking the TOC toggle invokes onToggleToc exactly once", () => { ... });
+```
+
+### Extract for Testability
+When a piece of UI is hard to cover because the host (page-level
+component, app shell, etc.) is too large to mount in a vtest, that's a
+**signal to refactor, not a license to skip the test**. Extract a child
+component with a small prop surface, move the rules into it, and cover
+those props with vtest cases that name the mutation each one kills. See
+`wiki/testing/strategies.md` (Round 6) and
+`wiki/testing/conventions.md` for the canonical pattern.
+
+### Document New Strategies in the Wiki
+When you discover a new testing technique, anti-pattern, or
+incident-driven lesson:
+1. Append a new "Round N" section to `wiki/testing/strategies.md`
+   describing what the bug taught you (incident → lesson → pattern →
+   anti-pattern).
+2. If the lesson translates into a *rule*, add it to
+   `wiki/testing/conventions.md` so future PRs check against it.
+3. Update `wiki/log.md` with a one-line entry pointing at both.
+
+The bar is "would a future engineer be able to apply this lesson without
+talking to me?" — if no, the wiki entry isn't done.
+
+### Keyboard shortcuts — three-source rule
+Every keybinding MUST land in three parallel surfaces in the same
+change:
+
+1. The **catalog** (`packages/core/src/keyboard-shortcuts.ts`
+   `SHORTCUTS` array) — drives the Cmd/Ctrl+/ help modal.
+2. The **handler** in `apps/desktop/src/app.tsx`'s global keydown
+   (or wherever the listener lives for that context).
+3. The **command palette entry** in `commandCatalog` with a
+   matching `shortcut: { mac, other }` field — Cmd/Ctrl+Shift+P
+   search needs a name to find the binding by keyword.
+
+A binding present in only one or two surfaces is a regression trap —
+power users discover features by name, not by changelog. See
+`wiki/architecture/keyboard-shortcuts.md` for the full rule, the
+OS-reserved-keys table, and the checklist.
+
+### Preview pipeline — mermaid/kroki need attached DOM + paint frame
+For changes that touch the AsciiDoc/Markdown preview rendering path
+(diagrams, post-processing, scroll sync):
+
+- Mermaid and Kroki **must** run against the live `articleRef`, not
+  a detached buffer — both libs measure layout in `document.body`,
+  and the first call against a detached node trips
+  `null is not an object (evaluating 'element.firstChild')`.
+- After swapping into `articleRef`, `await nextPaintFrame()` before
+  running them so layout has settled.
+- `initMermaid(true)` (force) wipes the pre-warm cache — only
+  re-init on theme change. The `MutationObserver` in `Preview` does
+  this by flipping `mermaidInitialized = false`.
+- Cross-file navigation that needs the TOC active highlight to
+  follow MUST also scroll the preview (not just the editor) — set
+  `s.setPendingHeadingText(text)` so Preview's `afterSwap` walks
+  `h1-h6` by text and scrolls. The scroll then drives
+  `setupTocScrollTracking` automatically.
+
+See `wiki/architecture/preview-pipeline.md` for the full pipeline
+diagram, the abandoned approaches, and the retry strategy.
+
 ---
 
 ## 11. Project Conventions

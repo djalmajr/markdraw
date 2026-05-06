@@ -13,6 +13,20 @@ import {
   applyCodeTheme,
 } from "@asciimark/core/code-theme.ts";
 import {
+  computeReadingMetrics,
+  computeReadingMetricsFromHtml,
+  formatReadingTime,
+  type ReadingMetrics,
+} from "@asciimark/core/reading-metrics.ts";
+import {
+  getReaderMode,
+  setReaderMode as persistReaderMode,
+} from "@asciimark/core/reader-mode.ts";
+import {
+  type BacklinkIndex,
+  findBacklinks,
+} from "@asciimark/core/backlinks.ts";
+import {
   type RecentFile,
   addRecentFile,
   clearRecentFiles,
@@ -205,6 +219,12 @@ export function createAppState(config: AppStateConfig) {
 
   // ── Navigation state ────────────────────────────────────────────────────
 
+  // Preview heading-target — set when the Workspace Symbol search
+  // (or similar cross-file jumps) navigates to a specific heading.
+  // Preview's afterSwap walks the rendered article's h1-h6 nodes
+  // and scrolls the matching one into view, then the TOC scroll
+  // tracker auto-updates the active highlight.
+  const [pendingHeadingText, setPendingHeadingText] = createSignal<string | null>(null);
   const [pendingFragment, setPendingFragment] = createSignal<string | null>(
     null,
   );
@@ -224,6 +244,40 @@ export function createAppState(config: AppStateConfig) {
   const hasFile = () => !!selectedFile();
   const [hasToc, setHasToc] = createSignal(false);
   const isDirty = () => editorContent() !== savedContent();
+  /** Word count + reading-time pill for the status bar. Counts the
+   *  rendered HTML when available (asciidoc `include::` / markdown
+   *  transcludes are expanded by then — the user reads the result,
+   *  not the literal directive in the source). Falls back to raw
+   *  `editorContent` while a load is in flight or for non-preview
+   *  formats with no rendered output. */
+  const readingMetrics = (): ReadingMetrics => {
+    const renderedHtml = html();
+    if (renderedHtml) return computeReadingMetricsFromHtml(renderedHtml);
+    return computeReadingMetrics(editorContent());
+  };
+  const readingTimeLabel = (): string => formatReadingTime(readingMetrics().readingTimeMs);
+  // Reader / Zen mode — collapses every chrome surface (toolbar,
+  // sidebar, TOC, status bar) so only the rendered preview shows.
+  // Restored from localStorage so a reload preserves the focus
+  // session.
+  const [readerMode, setReaderModeSignal] = createSignal<boolean>(getReaderMode());
+  function setReaderMode(value: boolean | ((v: boolean) => boolean)): void {
+    setReaderModeSignal((prev) => {
+      const next = typeof value === "function" ? value(prev) : value;
+      persistReaderMode(next);
+      return next;
+    });
+  }
+  // Backlink index — host (desktop / extension) builds it by reading
+  // every workspace file. AppState owns the signal so the right
+  // gutter can read incoming-references for the active doc without
+  // bothering with rebuild scheduling. Empty Map = "not built yet".
+  const [backlinkIndex, setBacklinkIndex] = createSignal<BacklinkIndex>(new Map());
+  const activeBacklinks = (): string[] => {
+    const f = selectedFile();
+    if (!f) return [];
+    return findBacklinks(f.path, backlinkIndex());
+  };
   /**
    * Whether the currently selected file can be previewed (markdown or
    * asciidoc). Other formats (json, txt, yaml, …) are edit-only.
@@ -713,6 +767,8 @@ export function createAppState(config: AppStateConfig) {
     navIndex,
     navStack,
     pendingFragment,
+    pendingHeadingText,
+    setPendingHeadingText,
     previewSearchOpen,
     previewFindTrigger,
     favorites,
@@ -791,6 +847,13 @@ export function createAppState(config: AppStateConfig) {
     hasToc,
     isDirty,
     previewSupported,
+    readingMetrics,
+    readingTimeLabel,
+    readerMode,
+    setReaderMode,
+    backlinkIndex,
+    setBacklinkIndex,
+    activeBacklinks,
 
     // Handlers
     addRoot,

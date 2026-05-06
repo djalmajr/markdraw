@@ -18,22 +18,16 @@ import { AboutDialog } from "./about-dialog.tsx";
 import { PaneView, fromPaneDropDndId } from "./pane-view.tsx";
 import { PaneSplitter } from "./pane-splitter.tsx";
 import { fromTabDndId } from "./tab-bar.tsx";
+import { TocPanel } from "./toc-panel.tsx";
+import { BacklinksList, type BacklinkEntry } from "./backlinks-list.tsx";
 import { QuickOpen } from "./quick-open.tsx";
 import { ShortcutsHelp } from "./shortcuts-help.tsx";
 import { CommandPalette } from "./command-palette.tsx";
 import type { Command } from "@asciimark/core/command-palette.ts";
 import { SymbolPalette } from "./symbol-palette.tsx";
+import { WorkspaceSymbolPalette } from "./workspace-symbol-palette.tsx";
 import { extractHeadings, type Heading } from "@asciimark/core/headings.ts";
 import { FindInFiles, type FileMatch, type MatchSelection } from "./find-in-files.tsx";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu.tsx";
-import IconCheck from "~icons/lucide/check";
-import IconSlidersHorizontal from "~icons/lucide/sliders-horizontal";
 
 interface AppShellProps {
   state: AppState;
@@ -140,6 +134,13 @@ interface AppShellProps {
    *  open/close toggle. */
   symbolPaletteOpen?: boolean;
   onSymbolPaletteClose?: () => void;
+
+  /** Workspace-wide symbol palette (Cmd/Ctrl+T). The host builds the
+   *  symbol list (reading every doc's content) and AppShell renders
+   *  + handles the navigation hop. Open/close toggle owned by host. */
+  workspaceSymbolPaletteOpen?: boolean;
+  workspaceSymbols?: ReadonlyArray<import("@asciimark/core/workspace-symbols.ts").WorkspaceSymbol>;
+  onWorkspaceSymbolPaletteClose?: () => void;
 
   /** Find in Files (Cmd/Ctrl+Shift+F). AppShell renders the modal; the
    *  host provides the search function (typically the IPC client) and
@@ -303,6 +304,19 @@ export function AppShell(props: AppShellProps) {
     }
   }
 
+  // When no file is open the active pane unmounts its <Preview>, so
+  // `onTocChange` never gets called to clear `hasToc` — without this
+  // effect the panel keeps showing the previous file's toc tree (left
+  // over from when it was the active doc) instead of the empty-state
+  // message. We also drop the orphan DOM nodes from the shared
+  // container so the `<Show when={!s.hasToc()}>` placeholder gets a
+  // clean canvas to render on.
+  createEffect(() => {
+    if (s.hasFile()) return;
+    s.setHasToc(false);
+    if (tocContainerRef) tocContainerRef.textContent = "";
+  });
+
   // Lazily flatten the workspace only while the Quick Open overlay is open.
   // `state.rootsList` is reactive, so the memo refreshes when files are
   // added or roots change underneath an open overlay.
@@ -388,6 +402,32 @@ export function AppShell(props: AppShellProps) {
         }}
         onClose={() => props.onSymbolPaletteClose?.()}
       />
+      <WorkspaceSymbolPalette
+        open={!!props.workspaceSymbolPaletteOpen}
+        symbols={props.workspaceSymbols ?? []}
+        onSelect={(symbol) => {
+          // Open the file in the active pane (load-in-active-tab
+          // semantics — single-click style).
+          props.onLoadFile?.(
+            { kind: "file", name: symbol.fileName, path: symbol.path },
+            symbol.rootId,
+          );
+          // Two-pronged scroll: editor jumps by line (works in
+          // edit/split modes), preview jumps by heading text after
+          // the html renders (works in preview/split modes).
+          // setPendingHeadingText is read in Preview's afterSwap;
+          // setScrollToLine is consumed by the PaneView wiring.
+          s.setPendingHeadingText(symbol.heading.text);
+          queueMicrotask(() => {
+            const pane = s.paneManager.activePane() as PaneStore & {
+              setScrollToLine?: (line: number) => void;
+            };
+            pane.setScrollToLine?.(symbol.heading.line);
+          });
+          props.onWorkspaceSymbolPaletteClose?.();
+        }}
+        onClose={() => props.onWorkspaceSymbolPaletteClose?.()}
+      />
       <FindInFiles
         open={!!props.findInFilesOpen}
         rootId={s.selectedRootId()}
@@ -400,6 +440,12 @@ export function AppShell(props: AppShellProps) {
         classList={{
           "drag-over": s.dragOver(),
           "window-frame-toolbar": !!props.windowFrameToolbar,
+          // Reader / Zen mode — drives the chrome-collapsing rules
+          // in `index.css`. The `<Show>` blocks below for sidebar /
+          // TOC stay reactive; this class shortcuts the visual
+          // hide without unmounting heavy subtrees so toggling is
+          // instant.
+          "reader-mode": s.readerMode(),
         }}
         ref={appRef}
         onDragOver={props.onDragOver}
@@ -579,60 +625,35 @@ export function AppShell(props: AppShellProps) {
               </DragOverlay>
             </DragDropProvider>
           </div>
-          <aside
-            class="toc-panel"
-            classList={{ "toc-hidden": s.editorMode() === "edit" || !s.tocVisible() || !s.hasFile() || !s.hasToc() }}
-            data-toc-levels={s.tocLevels()}
-            ref={tocPanelRef}
-          >
-            <div class="toc-panel-header">
-              <span class="toc-panel-title">{(useLocale(), m.toc_title())}</span>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  as="button"
-                  class="toc-panel-options"
-                  aria-label="TOC options"
-                  title="TOC options"
-                >
-                  <IconSlidersHorizontal width={16} height={16} />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onSelect={() => setTocExpanded(true)}>
-                    {(useLocale(), m.toc_expand_all())}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => setTocExpanded(false)}>
-                    {(useLocale(), m.toc_collapse_all())}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => s.setTocLevels(1)}>
-                    <span class="flex-1">{(useLocale(), m.toc_show_levels({ n: "1" }))}</span>
-                    <Show when={s.tocLevels() === 1}>
-                      <IconCheck width={14} height={14} />
-                    </Show>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => s.setTocLevels(2)}>
-                    <span class="flex-1">{(useLocale(), m.toc_show_levels({ n: "2" }))}</span>
-                    <Show when={s.tocLevels() === 2}>
-                      <IconCheck width={14} height={14} />
-                    </Show>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => s.setTocLevels(3)}>
-                    <span class="flex-1">{(useLocale(), m.toc_show_levels({ n: "3" }))}</span>
-                    <Show when={s.tocLevels() === 3}>
-                      <IconCheck width={14} height={14} />
-                    </Show>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => s.setTocLevels(4)}>
-                    <span class="flex-1">{(useLocale(), m.toc_show_levels({ n: "4" }))}</span>
-                    <Show when={s.tocLevels() === 4}>
-                      <IconCheck width={14} height={14} />
-                    </Show>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-            <div class="toc-panel-content" ref={tocContainerRef} />
-          </aside>
+          <TocPanel
+            tocVisible={s.tocVisible()}
+            hasRoot={!!props.hasRoot}
+            hasToc={s.hasToc()}
+            tocLevels={s.tocLevels()}
+            setTocLevels={s.setTocLevels}
+            setTocExpanded={setTocExpanded}
+            contentRef={(el) => { tocContainerRef = el; }}
+            panelRef={(el) => { tocPanelRef = el; }}
+            backlinksCount={s.activeBacklinks().length}
+            backlinksSlot={
+              <BacklinksList
+                entries={s.activeBacklinks().map<BacklinkEntry>((path) => ({
+                  path,
+                  label: path.includes("/")
+                    ? path.slice(path.lastIndexOf("/") + 1)
+                    : path,
+                  rootId: s.selectedRootId() ?? undefined,
+                }))}
+                onSelect={(entry) => {
+                  if (!entry.rootId) return;
+                  props.onLoadFile?.(
+                    { kind: "file", name: entry.label, path: entry.path },
+                    entry.rootId,
+                  );
+                }}
+              />
+            }
+          />
         </div>
         <Show when={props.showToolbar && (props.toolbarRootName || props.toolbarFilePath)}>
           <footer class="status-bar no-print">
@@ -647,6 +668,17 @@ export function AppShell(props: AppShellProps) {
                 <span class="status-file">{props.toolbarFilePath}</span>
               </Show>
             </span>
+            <Show when={s.hasFile() && s.readingMetrics().words > 0}>
+              <span class="status-metrics">
+                <span class="status-words">
+                  {s.readingMetrics().words.toLocaleString()} words
+                </span>
+                <Show when={s.readingTimeLabel()}>
+                  <span class="status-sep">·</span>
+                  <span class="status-reading-time">{s.readingTimeLabel()}</span>
+                </Show>
+              </span>
+            </Show>
           </footer>
         </Show>
       </div>

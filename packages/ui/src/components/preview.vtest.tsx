@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createSignal } from "solid-js";
 import { render } from "@solidjs/testing-library";
 import { Preview } from "./preview.tsx";
 import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
@@ -12,6 +13,7 @@ interface BaseProps {
   syncScrollTargetRatio?: number | null;
   syncScrollTargetVersion?: number;
   tocVisible?: boolean;
+  tocContainer?: HTMLElement;
   findTrigger?: number;
   currentFilePath?: string | null;
   pendingFragment?: string | null;
@@ -32,6 +34,7 @@ function withDefaults(p: BaseProps = {}) {
     syncScrollTargetRatio: p.syncScrollTargetRatio ?? null,
     syncScrollTargetVersion: p.syncScrollTargetVersion ?? 0,
     tocVisible: p.tocVisible ?? false,
+    tocContainer: p.tocContainer,
     findTrigger: p.findTrigger ?? 0,
     currentFilePath: p.currentFilePath ?? null,
     pendingFragment: p.pendingFragment ?? null,
@@ -42,6 +45,17 @@ function withDefaults(p: BaseProps = {}) {
     onFragmentHandled: p.onFragmentHandled ?? (() => {}),
   };
 }
+
+const TOC_HTML_A = `
+  <div id="toc" class="toc"><ul class="sectlevel1"><li><a href="#a-section">A section</a></li></ul></div>
+  <h1 id="a-section">A section</h1>
+  <p>body of doc A</p>
+`;
+const TOC_HTML_B = `
+  <div id="toc" class="toc"><ul class="sectlevel1"><li><a href="#b-section">B section</a></li></ul></div>
+  <h1 id="b-section">B section</h1>
+  <p>body of doc B</p>
+`;
 
 describe("Preview", () => {
   it("renders supplied HTML body inside the preview surface", async () => {
@@ -111,6 +125,173 @@ describe("Preview", () => {
     expect(container.querySelector("iframe")).toBeNull();
     expect(container.textContent).toContain("before");
     expect(container.textContent).toContain("after");
+  });
+
+  /**
+   * Regression coverage for the split-pane TOC bug — when the user
+   * cycles focus between two Previews that share the same TOC container,
+   * the previously-active pane's `#toc` node would be detached by the
+   * other pane's `textContent = ""` and then never re-found, leaving the
+   * shared panel empty when focus returned. The Preview now keeps a
+   * private cache of its `#toc` node so it can re-attach on every focus
+   * flip without re-rendering the whole HTML.
+   *
+   * The vtest harness can't mount a real AppShell, so we simulate the
+   * split layout by rendering two Previews against the same shared
+   * container DOM node and toggling each one's `tocContainer` prop the
+   * way AppShell does.
+   */
+  it("re-populates the shared TOC container on every focus flip", async () => {
+    const sharedToc = document.createElement("div");
+    document.body.appendChild(sharedToc);
+
+    // Pane A — starts active and emits #toc into the shared container.
+    const [tocContainerA, setTocContainerA] = createSignal<HTMLElement | undefined>(sharedToc);
+    const onTocA = vi.fn();
+    render(() => (
+      <Preview {...withDefaults({
+        html: TOC_HTML_A,
+        tocVisible: true,
+        get tocContainer() {
+          return tocContainerA();
+        },
+        onTocChange: onTocA,
+      })} />
+    ));
+
+    // Wait for the html effect + microtask post-processing to finish.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sharedToc.querySelector("a[href='#a-section']")).not.toBeNull();
+    expect(onTocA).toHaveBeenLastCalledWith(true);
+
+    // Pane B — different doc, mounts later. Pane A loses the container
+    // (becomes inactive); pane B receives it and clobbers A's toc with
+    // its own.
+    const [tocContainerB, setTocContainerB] = createSignal<HTMLElement | undefined>(undefined);
+    const onTocB = vi.fn();
+    render(() => (
+      <Preview {...withDefaults({
+        html: TOC_HTML_B,
+        tocVisible: true,
+        get tocContainer() {
+          return tocContainerB();
+        },
+        onTocChange: onTocB,
+      })} />
+    ));
+    await new Promise((r) => setTimeout(r, 30));
+
+    setTocContainerA(undefined);
+    setTocContainerB(sharedToc);
+    await new Promise((r) => setTimeout(r, 30));
+
+    // After the focus flip the shared panel must show pane B's toc, not
+    // a stale pane-A entry and not nothing.
+    expect(sharedToc.querySelector("a[href='#b-section']")).not.toBeNull();
+    expect(sharedToc.querySelector("a[href='#a-section']")).toBeNull();
+    expect(onTocB).toHaveBeenLastCalledWith(true);
+
+    // Flip back to pane A. The previously-active session moved A's toc
+    // into the shared container; pane B's focus session then wiped that
+    // container. Without the cached `tocNode`, A's articleRef lookup
+    // returns null here and the shared panel ends up empty — the
+    // regression we're guarding against.
+    setTocContainerB(undefined);
+    setTocContainerA(sharedToc);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(sharedToc.querySelector("a[href='#a-section']")).not.toBeNull();
+    expect(sharedToc.querySelector("a[href='#b-section']")).toBeNull();
+
+    // And one more round-trip — the cache must survive multiple flips,
+    // not just the first.
+    setTocContainerA(undefined);
+    setTocContainerB(sharedToc);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(sharedToc.querySelector("a[href='#b-section']")).not.toBeNull();
+
+    setTocContainerB(undefined);
+    setTocContainerA(sharedToc);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(sharedToc.querySelector("a[href='#a-section']")).not.toBeNull();
+
+    document.body.removeChild(sharedToc);
+  });
+
+  /**
+   * Companion regression: when the inactive pane's html re-renders
+   * (e.g. file edit while focus is on the other pane), the cached
+   * `tocNode` must be refreshed to point at the new tree, otherwise
+   * the next focus flip would re-attach a stale toc that no longer
+   * matches the displayed article.
+   */
+  it("refreshes the cached TOC reference when html re-renders while inactive", async () => {
+    const sharedToc = document.createElement("div");
+    document.body.appendChild(sharedToc);
+
+    const [html, setHtml] = createSignal(TOC_HTML_A);
+    const [tocContainer, setTocContainer] = createSignal<HTMLElement | undefined>(sharedToc);
+
+    render(() => (
+      <Preview {...withDefaults({
+        get html() { return html(); },
+        tocVisible: true,
+        get tocContainer() { return tocContainer(); },
+      })} />
+    ));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sharedToc.querySelector("a[href='#a-section']")).not.toBeNull();
+
+    // Simulate this pane going inactive, then editing the underlying
+    // file (html re-renders to a new document) while inactive.
+    setTocContainer(undefined);
+    await new Promise((r) => setTimeout(r, 10));
+    setHtml(TOC_HTML_B);
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Coming back into focus must show the *new* toc, not a stale A.
+    setTocContainer(sharedToc);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(sharedToc.querySelector("a[href='#b-section']")).not.toBeNull();
+    expect(sharedToc.querySelector("a[href='#a-section']")).toBeNull();
+
+    document.body.removeChild(sharedToc);
+  });
+
+  it("clears the toc cache when html becomes empty (file unload)", async () => {
+    const sharedToc = document.createElement("div");
+    document.body.appendChild(sharedToc);
+
+    const [html, setHtml] = createSignal(TOC_HTML_A);
+    const [tocContainer, setTocContainer] = createSignal<HTMLElement | undefined>(sharedToc);
+    const onTocChange = vi.fn();
+
+    render(() => (
+      <Preview {...withDefaults({
+        get html() { return html(); },
+        tocVisible: true,
+        get tocContainer() { return tocContainer(); },
+        onTocChange,
+      })} />
+    ));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sharedToc.querySelector("a[href='#a-section']")).not.toBeNull();
+
+    // File unload — html clears.
+    setHtml("");
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Switch away and back. With a stale cache the old toc would
+    // resurface; with the cache cleared the panel must stay empty.
+    setTocContainer(undefined);
+    await new Promise((r) => setTimeout(r, 10));
+    setTocContainer(sharedToc);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(sharedToc.querySelector("a[href='#a-section']")).toBeNull();
+    expect(onTocChange).toHaveBeenLastCalledWith(false);
+
+    document.body.removeChild(sharedToc);
   });
 
   it("calls onNavigate when a relative .md anchor is clicked", async () => {

@@ -2,6 +2,62 @@
 
 Operations on this wiki, newest first.
 
+## [2026-05-06] ingest | preview pipeline + OS-reserved keys
+
+In-session learnings (no `raw/` source) — three diagnostic threads
+from the same debugging arc:
+
+- **Mermaid first-render flake** → root cause was running mermaid
+  against a detached buffer + a force-init that threw away the
+  warm state. Documented the corrected pipeline (sanitize →
+  highlight → swap → paint frame → mermaid/kroki), the
+  kitchen-sink pre-warm, and the empty-svg-as-soft-failure retry.
+- **Workspace Symbol → TOC active update** → cross-file navigation
+  needs the preview to scroll, not just the editor — the existing
+  `setupTocScrollTracking` in `preview.tsx` updates `.toc-active`
+  as a side effect of scroll, so `pendingHeadingText` (text-walk
+  through `h1-h6`) closes the loop.
+- **F11 on macOS Mission Control** → bindings reserved by the OS
+  never reach the webview; `Cmd+.` is the new primary for
+  Reader/Zen mode, `F11` accepted as fallback.
+
+Pages created: `wiki/architecture/preview-pipeline.md`.
+Pages updated: `wiki/architecture/keyboard-shortcuts.md` (new
+"Teclas reservadas pelo SO" section + caso real), `wiki/index.md`,
+`CLAUDE.md` (sub-rule pointing back at preview-pipeline page).
+
+## [2026-05-06] doc | keyboard-shortcuts three-source rule
+
+Codified the convention that every keybinding ships in three
+parallel surfaces — descriptor catalog (`SHORTCUTS`), keydown
+handler, command palette entry — in the same change.
+- `wiki/architecture/keyboard-shortcuts.md` — new page with
+  rationale, surface table, and the four-step checklist.
+- `wiki/index.md` — topic added.
+- `CLAUDE.md` § 10 — sub-rule pointing back at the wiki page so
+  agents apply it by default.
+- Backfill: F11 (Reader Mode) and Cmd+Alt+O (Workspace Symbol
+  Search) now have entries in the shortcut catalog and the
+  command palette alongside their keydown handlers.
+
+## [2026-05-06] doc | testing — Round 6 + extract-for-testability rule
+
+After five behaviour iterations on the right-gutter TOC panel,
+`app-shell.tsx` was too large to mount in a vtest, so every fix
+shipped without a regression guard. Resolved by extracting
+`packages/ui/src/components/toc-panel.tsx` (~110 LOC, pure props)
+plus `toc-panel.vtest.tsx` (~10 cases, each naming the mutation
+it kills).
+- `wiki/testing/strategies.md` — added Round 6 (incident → lesson
+  → pattern → anti-pattern), plus a "Forbidden test shapes" section
+  consolidated from CLAUDE.md.
+- `wiki/testing/conventions.md` — codified two new rules: tests
+  must name the mutation they kill, and the extract-for-testability
+  pattern is mandatory when a host component is too heavy to mount.
+- `CLAUDE.md` § 10 — added Name the Mutation, Extract for
+  Testability, Document New Strategies in the Wiki sub-rules so
+  agents apply the policy by default.
+
 ## [2026-05-05] doc | desktop updater modal architecture
 
 Replaced the native Tauri `ask()` dialog used for "Update available"

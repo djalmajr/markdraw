@@ -70,6 +70,7 @@ function DraggableTab(props: {
   onCloseAll: () => void;
   onCloseToRight: () => void;
   onMove?: () => void;
+  onPin?: () => void;
   moveLabel?: string;
 }) {
   const dndId = () => toTabDndId(props.paneIndex, props.tab.id);
@@ -82,6 +83,17 @@ function DraggableTab(props: {
     get disabled() { return !props.canDrag; },
   });
 
+  // Drag pins the preview tab (VSCode parity). Watch the dnd-kit
+  // dragging flag rather than wiring an `onDragStart` — the kit
+  // doesn't expose a direct callback at this layer, but the boolean
+  // flips synchronously when the gesture commits, which is the
+  // exact moment we want to pin.
+  createEffect(() => {
+    if (draggable.isDragging() && !props.tab.isPinned) {
+      props.onPin?.();
+    }
+  });
+
   return (
     <Tooltip openDelay={600}>
       <ContextMenu>
@@ -90,11 +102,13 @@ function DraggableTab(props: {
             as="div"
             class={`tab-bar-item ${props.isActive ? "tab-bar-item-active" : ""}`}
             classList={{ "tab-bar-item-dragging": draggable.isDragging() }}
+            data-preview={!props.tab.isPinned ? "true" : undefined}
             ref={(el: HTMLElement) => {
               draggable.ref(el);
               droppable.ref(el);
             }}
             onClick={() => props.onActivate()}
+            onDblClick={() => props.onPin?.()}
             onMouseDown={(e: MouseEvent) => {
               if (e.button === 1) {
                 e.preventDefault();
@@ -239,6 +253,7 @@ export function TabBar(props: TabBarProps) {
               onCloseAll={() => props.tabStore.closeAllTabs()}
               onCloseToRight={() => props.tabStore.closeTabsToRight(tab.id)}
               onMove={props.onMoveToOtherPane ? () => props.onMoveToOtherPane!(tab.id) : undefined}
+              onPin={() => props.tabStore.pinTab(tab.id)}
               moveLabel={props.moveToOtherPaneLabel}
             />
           )}

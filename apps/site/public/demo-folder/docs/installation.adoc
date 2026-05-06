@@ -1,0 +1,55 @@
+:toc: macro
+:toclevels: 3
+:sectnums:
+
+= Installation
+
+Three install paths depending on your platform — see
+xref:getting-started.adoc[Getting Started] if you haven't opened
+the app yet.
+
+toc::[]
+
+== macOS
+
+=== Apple Silicon
+
+Download `AsciiMark-macos-arm64.dmg`, drag the app into
+Applications, then run:
+
+[source,bash]
+----
+xattr -cr /Applications/AsciiMark.app
+----
+
+The `xattr` step strips the quarantine flag macOS adds to unsigned
+builds. Skip it and Gatekeeper blocks the first launch.
+
+=== Intel
+
+Same flow, but use `AsciiMark-macos-x64.dmg`. Auto-update keeps
+both architectures in sync once installed.
+
+== Linux
+
+=== AppImage
+
+`chmod +x AsciiMark-linux-x64.AppImage` and run it. The binary is
+self-contained — no system packages required.
+
+=== Debian / Ubuntu
+
+`sudo apt install ./AsciiMark-linux-x64.deb`. Adds a desktop
+launcher under "Office" / "Development".
+
+== Windows
+
+The MSI is the recommended path — handles uninstall + auto-update
+cleanly. SmartScreen may prompt on first run; click *More info →
+Run anyway*.
+
+== After installing
+
+Open xref:getting-started.adoc[Getting Started] for the welcome
+flow, or jump straight to xref:usage.adoc[Usage] if you've used
+similar tools before.

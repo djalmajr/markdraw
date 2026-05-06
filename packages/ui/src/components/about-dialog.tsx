@@ -1,4 +1,5 @@
 import IconX from "~icons/lucide/x";
+import IconDot from "~icons/lucide/dot";
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
 import {
@@ -48,7 +49,7 @@ export function AboutDialog(props: AboutDialogProps) {
           <IconX width={16} height={16} />
         </button>
 
-        <div class="flex flex-col items-center gap-3 pb-2">
+        <div class="flex flex-col items-center gap-2 pb-2">
           <img
             alt="AsciiMark"
             class="h-12 w-12"
@@ -59,29 +60,31 @@ export function AboutDialog(props: AboutDialogProps) {
               (e.currentTarget as HTMLImageElement).style.display = "none";
             }}
           />
-          <AlertDialogTitle class="text-lg font-semibold">
-            AsciiMark
-          </AlertDialogTitle>
-          <AlertDialogDescription class="text-center text-sm text-muted-foreground">
+          <div class="flex flex-col items-center gap-0.5">
+            <AlertDialogTitle class="text-lg font-semibold leading-none">
+              AsciiMark
+            </AlertDialogTitle>
+            {/* Version slips in directly under the wordmark — no chip,
+                no label, sized to match the footer link row so the
+                metadata reads as a single subtle layer. */}
+            <span class="text-xs text-muted-foreground">v{props.version}</span>
+          </div>
+          <AlertDialogDescription class="mt-1 text-center text-sm text-muted-foreground">
             {(useLocale(), m.about_tagline())}
           </AlertDialogDescription>
-          <div class="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>{(useLocale(), m.about_version_label())}</span>
-            <code class="rounded bg-secondary px-2 py-0.5 font-mono text-xs">
-              {props.version}
-            </code>
-          </div>
           {props.commit && (
-            <div class="flex items-center gap-2 text-sm text-muted-foreground">
+            <div class="flex items-center gap-1 text-xs text-muted-foreground">
               <span>{(useLocale(), m.about_commit_label())}</span>
-              <code class="rounded bg-secondary px-2 py-0.5 font-mono text-xs">
-                {props.commit}
-              </code>
+              <code class="font-mono">{props.commit}</code>
             </div>
           )}
         </div>
 
-        <div class="mt-4 flex flex-col items-center gap-1.5 text-xs text-muted-foreground">
+        {/* Footer links — single row separated by lucide dot icons
+            so the metadata block reads as one quiet line below the
+            title/tagline. The dots are decorative; `aria-hidden`
+            keeps screen readers from announcing them between names. */}
+        <div class="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <a
             class="text-primary underline-offset-2 hover:underline"
             href="https://asciimark.djalmajr.dev/"
@@ -90,6 +93,12 @@ export function AboutDialog(props: AboutDialogProps) {
           >
             {(useLocale(), m.about_website())}
           </a>
+          <IconDot
+            aria-hidden="true"
+            class="text-muted-foreground/60"
+            width={14}
+            height={14}
+          />
           <a
             class="text-primary underline-offset-2 hover:underline"
             href="https://github.com/djalmajr/asciimark-releases/releases"
@@ -98,6 +107,12 @@ export function AboutDialog(props: AboutDialogProps) {
           >
             {(useLocale(), m.about_releases())}
           </a>
+          <IconDot
+            aria-hidden="true"
+            class="text-muted-foreground/60"
+            width={14}
+            height={14}
+          />
           <a
             class="text-primary underline-offset-2 hover:underline"
             href="https://github.com/djalmajr/asciimark-releases/issues"

@@ -807,6 +807,101 @@ and a real-world incident waiting to happen.
   exactly what we observed. When two pieces of UI on the same
   pane disagree, suspect partial-completion of an async pipeline.
 
+## Forbidden test shapes
+
+Tests in this repo must verify *observable behaviour*. The shapes below
+add CI time, lock in implementation details, and give false confidence —
+**reject them in review and delete on sight**:
+
+- *"x is defined / not undefined / truthy"* without an assertion on its
+  shape or behaviour.
+- *"foo was called"* without checking the effect of the call.
+- *"the component renders"* without asserting any DOM contract.
+- Snapshot tests larger than ~30 lines without an intent comment
+  pointing at the specific business rule they protect.
+- Tests that mock the function under test.
+
+Every test that survives review must fall into at least one bucket: a
+real bug regression (link the symptom), a stated business rule, a
+property/invariant, an API contract, an integration with a real
+dependency, or a permission/concurrency boundary. See [§ Tier 1](#tier-1--alto-roi-encaixa-imediatamente).
+
+Companion rule: **every non-trivial test names the mutation it would
+kill**, in a one-line comment above the `it(…)`. See
+[Test conventions § Tests must name the mutation they kill](./conventions.md#tests-must-name-the-mutation-they-kill).
+
+## Round 6 — extract small components so the regression has somewhere to live
+
+### Incident
+
+The TOC right-gutter went through five behaviour changes in one
+sitting (split-pane lookup losing the `#toc` node, toolbar toggle
+gated on `hasFile`, panel disappearing when the active pane was
+empty, panel showing on the dropzone home screen, stale toc tree
+sticking around after the active pane lost its file). Each tweak was
+a small condition flip in `app-shell.tsx`, but every flip moved the
+goalposts on what "correct" meant — and `app-shell.tsx` is too large
+to mount in a vtest. The bugs only got caught once one of us drove
+the live app through the focus flips manually.
+
+### Lesson
+
+**A component you cannot mount in a unit test does not get covered
+by unit tests.** `app-shell.tsx` ships ~700 lines, drag-and-drop
+providers, several portals, paraglide locale state, and a
+`paneManager` proxy that proxies into per-pane signals. Mounting it
+just to assert "the right gutter has class `toc-hidden`" is the kind
+of test setup that ages into a maintenance burden — so we wrote
+zero. The bugs lived on.
+
+The fix that made the regression bar reachable wasn't another
+condition flip; it was extracting the gutter into a dedicated
+`TocPanel` component:
+
+- `packages/ui/src/components/toc-panel.tsx` (~110 LOC, pure props)
+- `packages/ui/src/components/toc-panel.vtest.tsx` (~10 tests)
+
+The old `app-shell.tsx` just renders `<TocPanel … />`. The new vtest
+asserts every behaviour we shipped fixes for during 0.9.x:
+
+| Test | Mutation it kills |
+|---|---|
+| Hide on home screen | Drop `!props.hasRoot` — gutter pops next to dropzone |
+| Hide on toggle off | Flip the toggle predicate — disable button stops working |
+| Stay visible without headings | Re-add `!hasToc()` to hide rule — gutter flickers between docs |
+| Placeholder OUTSIDE `.toc-panel-tree` | Move `<Show>` inside ref div — Preview's `textContent = ""` wipes it |
+| Placeholder reactive on `hasToc` flip | Swap accessor for static read — placeholder freezes on initial value |
+
+### Pattern
+
+When iteration on a piece of UI is producing more bugs than the
+existing tests can guard, the right move is usually structural:
+
+1. **Find the smallest prop surface that captures the behaviour.**
+   For TocPanel that was 7 props (`tocVisible`, `hasRoot`, `hasToc`,
+   `tocLevels`, two setters, a contentRef). Anything more and you're
+   pulling in dependencies the test doesn't need.
+2. **Extract it into its own file.** Keep it pure (no signals, no
+   reaching into `paneManager`). The host component projects state
+   into the props.
+3. **Cover the props with vtest cases.** Each case names the
+   *mutation* it would kill in a comment — that's the bar for "test
+   with value" (see [Test conventions](./conventions.md#tests-must-name-the-mutation-they-kill)).
+4. **Delete behaviour from the host.** The host shrinks; the new
+   component carries the rules; the tests become the spec.
+
+For UI-heavy projects, this is often the cheapest way to get
+mutation-quality coverage without standing up a full integration
+harness.
+
+### Anti-pattern
+
+`app-shell.tsx` is the canonical example of what *not* to ship more
+features into. If a new behaviour needs ≥3 reactive reads of `s.*`
+or has `if/else` ladders that span >40 LOC inside the JSX, extract
+it. The cost of NOT extracting is invisible: it's the regression
+test you don't write because the setup is too painful.
+
 ## Fontes
 
 - [Wikipedia: Metamorphic testing](https://en.wikipedia.org/wiki/Metamorphic_testing)

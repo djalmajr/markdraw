@@ -210,4 +210,142 @@ describe("createTabStore", () => {
       expect(store.getTab(a)?.needsLoad).toBe(true);
     });
   });
+
+  // ── VSCode-style preview tabs ────────────────────────────────────
+  // Newly opened tabs land in the "preview" slot (`isPinned = false`).
+  // Single-click on another file replaces the preview slot; pinning
+  // (double-click, drag, or the first edit) makes the tab permanent
+  // so subsequent file-tree clicks open a new preview alongside it.
+
+  it("loadInActiveTab creates a tab in the preview slot (not pinned by default)", () => {
+    // Mutation captured: flipping `isPinned: false` back to `true`
+    // in createTabState breaks the entire preview-slot flow — the
+    // first click would already pin the tab and the next click
+    // would never reuse it.
+    withStore((store) => {
+      store.loadInActiveTab(entry("a.md"), "r");
+      const tab = store.getActiveTab();
+      expect(tab?.isPinned).toBe(false);
+    });
+  });
+
+  it("loadInActiveTab replaces the active tab only when it's still a preview", () => {
+    // Mutation captured: dropping the `!currentActive.isPinned`
+    // guard would clobber a pinned tab the user explicitly committed
+    // to (the whole point of pinning).
+    withStore((store) => {
+      store.loadInActiveTab(entry("a.md"), "r");
+      store.loadInActiveTab(entry("b.md"), "r");
+      // Two clicks on preview tabs leave a single tab — the second
+      // file replaced the first because it was still preview.
+      expect(store.tabs()).toHaveLength(1);
+      expect(store.activeTabId()).toBe("r::b.md");
+    });
+  });
+
+  it("loadInActiveTab opens a new tab when the active tab is pinned", () => {
+    // Mutation: removing the `openTab` fallback in the pinned branch
+    // would leave the user unable to open a second file once their
+    // first tab was pinned (regression caught in this exact shape).
+    withStore((store) => {
+      store.loadInActiveTab(entry("a.md"), "r");
+      const aId = store.activeTabId()!;
+      store.pinTab(aId);
+      store.loadInActiveTab(entry("b.md"), "r");
+      expect(store.tabs()).toHaveLength(2);
+      const ids = store.tabs().map((t) => t.id);
+      expect(ids).toContain(aId);
+      expect(store.activeTabId()).toBe("r::b.md");
+    });
+  });
+
+  it("pinTab flips isPinned from false to true and is idempotent thereafter", () => {
+    // Mutation: flipping the early-return condition would corrupt
+    // already-pinned tabs (e.g. resetting them to false), and the
+    // double-click handler would silently undo prior pins.
+    withStore((store) => {
+      const id = store.loadInActiveTab(entry("a.md"), "r");
+      expect(store.getTab(id)?.isPinned).toBe(false);
+      store.pinTab(id);
+      expect(store.getTab(id)?.isPinned).toBe(true);
+      store.pinTab(id);
+      expect(store.getTab(id)?.isPinned).toBe(true);
+    });
+  });
+
+  it("pinTab on a non-existent id is a safe no-op", () => {
+    withStore((store) => {
+      store.pinTab("missing::file");
+      expect(store.tabs()).toHaveLength(0);
+    });
+  });
+
+  it("openTab creates a pinned tab by default — never a second preview slot", () => {
+    // Regression: bug where middle-click / file-tree dblclick alongside
+    // a single-click left two italic preview tabs in the bar at once.
+    // The invariant we hold now: at most one preview tab per pane.
+    // Mutation captured: setting `isPinned: !preview` back to
+    // `false` (or removing the `preview` opt entirely) reintroduces
+    // the duplicate-preview bug.
+    withStore((store) => {
+      store.loadInActiveTab(entry("a.md"), "r");        // preview
+      const aId = store.activeTabId()!;
+      store.openTab(entry("b.md"), "r");                // explicit open → pinned
+      const previews = store.tabs().filter((t) => !t.isPinned);
+      expect(previews).toHaveLength(1);
+      expect(previews[0]!.id).toBe(aId);
+    });
+  });
+
+  it("loadInActiveTab recycles a dormant preview slot even when a different tab is active", () => {
+    // Reproduces the user-reported bug:
+    //   1) single-click A  → preview A (active)
+    //   2) middle-click B  → pinned B (active, A is dormant preview)
+    //   3) single-click C  → preview C SHOULD replace A
+    //                        (NOT stack alongside, leaving 2 previews).
+    // Mutation captured: removing the `findIndex(!isPinned)` recycle
+    // step and falling back to "active tab only" (the previous fix)
+    // brings the two-preview bug back.
+    withStore((store) => {
+      store.loadInActiveTab(entry("a.md"), "r");          // preview A active
+      const aId = store.activeTabId()!;
+      store.openTab(entry("b.md"), "r");                  // pinned B active
+      const bId = store.activeTabId()!;
+      expect(store.getTab(aId)?.isPinned).toBe(false);
+      expect(store.getTab(bId)?.isPinned).toBe(true);
+
+      store.loadInActiveTab(entry("c.md"), "r");          // single-click C
+      const previews = store.tabs().filter((t) => !t.isPinned);
+      // Invariant: at most one preview tab in the bar.
+      expect(previews).toHaveLength(1);
+      // The recycled slot now hosts C, A is gone.
+      expect(previews[0]!.filePath).toBe("c.md");
+      expect(store.getTab(aId)).toBeUndefined();
+      // B remains pinned and untouched.
+      expect(store.getTab(bId)?.isPinned).toBe(true);
+    });
+  });
+
+  it("openTab honours preview:true when a caller explicitly opts in (used by loadInActiveTab fallback)", () => {
+    withStore((store) => {
+      const id = store.openTab(entry("a.md"), "r", { preview: true });
+      expect(store.getTab(id)?.isPinned).toBe(false);
+    });
+  });
+
+  it("loadInActiveTab on a file that's already open just activates it (regardless of pin state)", () => {
+    // Existing behaviour — pinning shouldn't alter the
+    // already-open-just-activate fast path.
+    withStore((store) => {
+      store.loadInActiveTab(entry("a.md"), "r");
+      const aId = store.activeTabId()!;
+      store.pinTab(aId);
+      const bId = store.openTab(entry("b.md"), "r");
+      expect(store.activeTabId()).toBe(bId);
+      // Click a.md again in the tree — should reactivate, not replace.
+      store.loadInActiveTab(entry("a.md"), "r");
+      expect(store.activeTabId()).toBe(aId);
+      expect(store.tabs()).toHaveLength(2);
+    });
+  });
 });

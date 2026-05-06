@@ -67,3 +67,54 @@ describe("Toolbar — split editor toggle", () => {
     expect(btn.getAttribute("data-pressed")).toBe("");
   });
 });
+
+describe("Toolbar — TOC toggle", () => {
+  // Regression: the toggle was previously gated on `hasFile`, hiding
+  // it whenever the active pane was empty (file-less workspace, after
+  // closing all tabs, or when the user clicked an empty pane in
+  // split mode). The user's mental model is that the toggle controls
+  // the right gutter regardless of file state — so it must always
+  // ship in a workspace toolbar.
+
+  it("renders the TOC toggle when no file is open", () => {
+    const { baseElement } = render(() => (
+      <Toolbar {...BASE_PROPS} hasFile={false} hasRoot={true} />
+    ));
+    expect(
+      baseElement.querySelector('[aria-label="Toggle table of contents"]'),
+    ).not.toBeNull();
+  });
+
+  it("renders the TOC toggle when a file is open", () => {
+    const { baseElement } = render(() => (
+      <Toolbar {...BASE_PROPS} hasFile={true} hasRoot={true} />
+    ));
+    expect(
+      baseElement.querySelector('[aria-label="Toggle table of contents"]'),
+    ).not.toBeNull();
+  });
+
+  it("clicking the TOC toggle invokes onToggleToc exactly once", () => {
+    // Mutation captured: dropping the `onChange` prop on the Toggle
+    // makes the click silent and the spy never fires.
+    const onToggleToc = vi.fn();
+    const { baseElement } = render(() => (
+      <Toolbar {...BASE_PROPS} hasFile={false} onToggleToc={onToggleToc} />
+    ));
+    const btn = baseElement.querySelector<HTMLButtonElement>(
+      '[aria-label="Toggle table of contents"]',
+    )!;
+    fireEvent.click(btn);
+    expect(onToggleToc).toHaveBeenCalledTimes(1);
+  });
+
+  it("tocVisible=true puts the toggle in the pressed state", () => {
+    const { baseElement } = render(() => (
+      <Toolbar {...BASE_PROPS} tocVisible={true} />
+    ));
+    const btn = baseElement.querySelector(
+      '[aria-label="Toggle table of contents"]',
+    )!;
+    expect(btn.getAttribute("data-pressed")).toBe("");
+  });
+});

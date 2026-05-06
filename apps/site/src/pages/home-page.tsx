@@ -36,24 +36,34 @@ const featureItems: FeatureItem[] = [
       "Renders both formats with admonitions, includes, frontmatter, and reusable partials in a single viewer.",
   },
   {
-    title: "Split panes + tabs",
+    title: "Split panes + preview tabs",
     description:
-      "Open files side by side, drag tabs across panes, and keep the layout between sessions.",
+      "Open files side by side. Single-click opens preview tabs (italic), edit or double-click pins them — VSCode-style.",
   },
   {
     title: "Keyboard-first navigation",
     description:
-      "Quick Open, Command Palette, Go-to-Heading, and Find-in-Files — all one shortcut away.",
+      "Quick Open, Command Palette, Go-to-Heading, Workspace Symbols, and Find-in-Files — all one shortcut away.",
+  },
+  {
+    title: "Backlinks panel",
+    description:
+      "The right gutter has a References tab listing every doc in the workspace that links to the active file.",
+  },
+  {
+    title: "Workspace symbol search",
+    description:
+      "Cmd/Ctrl+Alt+O fuzzy-matches headings across every doc in the workspace and jumps to the right line.",
+  },
+  {
+    title: "Reader / Zen mode",
+    description:
+      "Cmd/Ctrl+. collapses the chrome and centers the preview at a comfortable reading width. Toggle off the same way.",
   },
   {
     title: "Diagrams and math",
     description:
       "Mermaid, PlantUML, Graphviz, and KaTeX render inside the preview without extra setup.",
-  },
-  {
-    title: "Edit + live preview",
-    description:
-      "CodeMirror editor with sync scroll, find-in-file, and configurable formatting.",
   },
   {
     title: "Multi-root workspaces",
