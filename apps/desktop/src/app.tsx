@@ -36,6 +36,7 @@ import { _devSetPendingUpdate, checkForAppUpdates, dismissUpdate, useUpdate } fr
 import { UpdateAvailableDialog } from "@asciimark/ui/components/update-available-dialog.tsx";
 import { findInFiles } from "./lib/fs.ts";
 import { WindowControls } from "./components/window-controls.tsx";
+import { FigmaCaptureButton } from "./components/figma-capture-button.tsx";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 const { convertAdoc, convertMarkdown } = createConverter(new ConvertWorker());
@@ -1274,6 +1275,7 @@ export function App() {
         void update.install();
       }}
     />
+    {import.meta.env.DEV && <FigmaCaptureButton />}
     </>
   );
 }
