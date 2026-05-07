@@ -2,6 +2,20 @@
 
 Operations on this wiki, newest first.
 
+## [2026-05-06] roadmap | AI integration multi-provider
+
+In-session brainstorm captured as a draft roadmap entry. Not
+implemented; documents proposta, escopo (MVP vs. tiers 2/3),
+arquitetura proposta (`packages/core/src/ai/`, embeddings index
+incremental, painel como 3º segment do right gutter), tradeoffs
+(nicho "Cursor for technical writing" vs. paridade geral), riscos
+(API keys, quotas, complexity creep) e métricas de sucesso.
+
+Pages created: `wiki/roadmap/ai-integration.md`.
+Pages updated: `wiki/index.md` (topic added).
+
+Owner action: run `qmd update` to index the new page.
+
 ## [2026-05-06] release | desktop v0.10.0 + site redeploy
 
 Tag `v0.10.0` pushed. Pipelines:

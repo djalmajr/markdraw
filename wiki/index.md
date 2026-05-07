@@ -12,6 +12,7 @@ QMD semantic search instead of grepping the source tree blindly.
 - [Desktop updater](architecture/desktop-updater.md) — pending-update signal, custom scrollable modal (vs native `ask()`), tray-close coordination
 - [Keyboard shortcuts — three-source rule](architecture/keyboard-shortcuts.md) — every binding lands in catalog + handler + command palette in the same change; OS-reserved keys table
 - [Preview pipeline](architecture/preview-pipeline.md) — render order (sanitize → highlight → swap → paint → mermaid/kroki), mermaid first-render fix, cross-file nav → TOC active sync
+- [Roadmap — AI integration](roadmap/ai-integration.md) — multi-provider chat panel, RAG citado, inline edit assist, diagram-from-text. Highly desired business idea (draft).
 - [Performance targets](performance/targets.md) — perf gates and benches
 - [Release flow](release/flow.md) — desktop: bump → tag → publish (Tauri auto-update)
 - [Extension release](release/extension.md) — Chrome Web Store: bump → build → zip → upload
