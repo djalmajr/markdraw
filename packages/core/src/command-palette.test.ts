@@ -1,9 +1,26 @@
 import { describe, expect, it } from "bun:test";
 import {
+  RECENT_COMMANDS_CAP,
   commandShortcutLabel,
   filterCommands,
+  getRecentCommandIds,
+  recordCommandUse,
   type Command,
+  type RecentCommandsStorage,
 } from "./command-palette.ts";
+
+function memoryStorage(initial: Record<string, string> = {}): RecentCommandsStorage & {
+  data: Record<string, string>;
+} {
+  const data = { ...initial };
+  return {
+    data,
+    getItem: (key) => (key in data ? data[key] : null),
+    setItem: (key, value) => {
+      data[key] = value;
+    },
+  };
+}
 
 function cmd(
   id: string,
@@ -97,6 +114,88 @@ describe("filterCommands", () => {
     const result = filterCommands("o", CATALOG);
     const ids = result.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("filterCommands — MRU recents", () => {
+  it("empty query prepends recent ids in MRU order, then the rest grouped/alpha", () => {
+    // Mutation captured: dropping the recents prepend collapses the
+    // result back to GROUP_RANK + alpha and "theme.dark" no longer
+    // appears first when it was the most-recently used command.
+    const result = filterCommands("", CATALOG, ["theme.dark", "view.toggleSidebar"]);
+    expect(result.slice(0, 2).map((c) => c.id)).toEqual([
+      "theme.dark",
+      "view.toggleSidebar",
+    ]);
+    // remaining commands keep their normal grouped order, with the two
+    // promoted ids removed from their original position.
+    expect(result.slice(2).map((c) => c.id)).toEqual([
+      "file.exportPdf",
+      "file.openFolder",
+      "view.toggleHidden",
+      "theme.light",
+      "file.refresh",
+      "help.shortcuts",
+    ]);
+  });
+
+  it("recent ids that no longer match a visible command are silently skipped", () => {
+    // Mutation captured: pushing unknown ids through would surface them
+    // as undefined items in the palette and crash the renderer.
+    const result = filterCommands("", CATALOG, ["nope.gone", "theme.dark"]);
+    expect(result[0]?.id).toBe("theme.dark");
+    expect(result.find((c) => c.id === "nope.gone")).toBeUndefined();
+  });
+
+  it("non-empty query ignores recents (recents are an empty-state hint)", () => {
+    // Recents only apply to the no-query state; once the user types,
+    // standard tier ranking takes over.
+    const result = filterCommands("open", CATALOG, ["theme.dark"]);
+    expect(result[0]?.title).toBe("Open Folder");
+    expect(result.find((c) => c.id === "theme.dark")).toBeUndefined();
+  });
+});
+
+describe("recordCommandUse / getRecentCommandIds", () => {
+  it("recordCommandUse prepends the id and getRecentCommandIds reads it back MRU-first", () => {
+    const s = memoryStorage();
+    recordCommandUse("a", s);
+    recordCommandUse("b", s);
+    recordCommandUse("c", s);
+    expect(getRecentCommandIds(s)).toEqual(["c", "b", "a"]);
+  });
+
+  it("recording an existing id bumps it to the top instead of duplicating", () => {
+    // Mutation captured: removing the dedup `.filter(...)` would push the
+    // same id twice and the first call's "a" would still be in position 2.
+    const s = memoryStorage();
+    recordCommandUse("a", s);
+    recordCommandUse("b", s);
+    recordCommandUse("a", s);
+    expect(getRecentCommandIds(s)).toEqual(["a", "b"]);
+  });
+
+  it("evicts the oldest entry when capacity is exceeded", () => {
+    // Mutation captured: removing the `.slice(0, RECENT_COMMANDS_CAP)`
+    // would let the array grow unbounded and "a" would still be present
+    // after 6 distinct records.
+    const s = memoryStorage();
+    for (const id of ["a", "b", "c", "d", "e", "f"]) recordCommandUse(id, s);
+    const ids = getRecentCommandIds(s);
+    expect(ids).toHaveLength(RECENT_COMMANDS_CAP);
+    expect(ids).toEqual(["f", "e", "d", "c", "b"]);
+    expect(ids).not.toContain("a");
+  });
+
+  it("getRecentCommandIds tolerates missing / corrupt storage payloads", () => {
+    const empty = memoryStorage();
+    expect(getRecentCommandIds(empty)).toEqual([]);
+
+    const corrupt = memoryStorage({ "asciimark-recent-commands": "{not json" });
+    expect(getRecentCommandIds(corrupt)).toEqual([]);
+
+    const wrongShape = memoryStorage({ "asciimark-recent-commands": JSON.stringify({}) });
+    expect(getRecentCommandIds(wrongShape)).toEqual([]);
   });
 });
 

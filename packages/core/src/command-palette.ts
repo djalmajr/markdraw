@@ -35,6 +35,59 @@ const GROUP_RANK: Record<CommandGroup, number> = {
   Help: 5,
 };
 
+/** Maximum number of recently-used command ids retained in storage. */
+export const RECENT_COMMANDS_CAP = 5;
+const RECENT_COMMANDS_STORAGE_KEY = "asciimark-recent-commands";
+
+/** Minimal storage surface so tests can inject a fake without touching
+ *  `globalThis.localStorage` and so the function works in non-DOM
+ *  environments without throwing. */
+export interface RecentCommandsStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+function defaultStorage(): RecentCommandsStorage | null {
+  if (typeof globalThis === "undefined") return null;
+  const ls = (globalThis as { localStorage?: RecentCommandsStorage }).localStorage;
+  return ls ?? null;
+}
+
+function readRecentIds(storage: RecentCommandsStorage | null): string[] {
+  if (!storage) return [];
+  const raw = storage.getItem(RECENT_COMMANDS_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === "string");
+  } catch {
+    return [];
+  }
+}
+
+/** Returns the MRU command ids (most-recent first), capped at
+ *  `RECENT_COMMANDS_CAP`. Reads from localStorage by default; tests pass
+ *  an in-memory storage. */
+export function getRecentCommandIds(storage?: RecentCommandsStorage | null): string[] {
+  const s = storage === undefined ? defaultStorage() : storage;
+  return readRecentIds(s).slice(0, RECENT_COMMANDS_CAP);
+}
+
+/** Records the given id at the top of the MRU list. Existing occurrences
+ *  are deduped (so reusing a command bumps it to the top instead of
+ *  duplicating). The list is capped at `RECENT_COMMANDS_CAP`. */
+export function recordCommandUse(
+  id: string,
+  storage?: RecentCommandsStorage | null,
+): void {
+  const s = storage === undefined ? defaultStorage() : storage;
+  if (!s) return;
+  const current = readRecentIds(s).filter((existing) => existing !== id);
+  const next = [id, ...current].slice(0, RECENT_COMMANDS_CAP);
+  s.setItem(RECENT_COMMANDS_STORAGE_KEY, JSON.stringify(next));
+}
+
 /**
  * Returns the visible commands for the given query, ordered by:
  *   1. exact title prefix match (case-insensitive)
@@ -48,16 +101,40 @@ const GROUP_RANK: Record<CommandGroup, number> = {
  *   - Letting a `when() === false` command through fails the
  *     "hidden commands are filtered" assertion.
  *   - Returning duplicates by id fails the "ids unique in result" guard.
+ *   - Dropping the `recentIds` prepend leaves the empty-query result
+ *     sorted alphabetically only, breaking MRU recency tests.
+ *
+ * When `query === ""` and `recentIds` are supplied, recent ids are
+ * pulled to the top (most-recent first) and the rest follow grouped
+ * alphabetically. Recents that no longer match a visible command (e.g.
+ * gated by `when()`) are silently skipped.
  */
-export function filterCommands(query: string, commands: readonly Command[]): Command[] {
+export function filterCommands(
+  query: string,
+  commands: readonly Command[],
+  recentIds: readonly string[] = [],
+): Command[] {
   const visible = commands.filter((c) => !c.when || c.when());
 
   if (query === "") {
-    return [...visible].sort((a, b) => {
-      const groupCmp = GROUP_RANK[a.group] - GROUP_RANK[b.group];
-      if (groupCmp !== 0) return groupCmp;
-      return a.title.localeCompare(b.title);
-    });
+    const byId = new Map(visible.map((c) => [c.id, c] as const));
+    const recents: Command[] = [];
+    const seen = new Set<string>();
+    for (const id of recentIds) {
+      const cmd = byId.get(id);
+      if (cmd && !seen.has(id)) {
+        recents.push(cmd);
+        seen.add(id);
+      }
+    }
+    const rest = visible
+      .filter((c) => !seen.has(c.id))
+      .sort((a, b) => {
+        const groupCmp = GROUP_RANK[a.group] - GROUP_RANK[b.group];
+        if (groupCmp !== 0) return groupCmp;
+        return a.title.localeCompare(b.title);
+      });
+    return [...recents, ...rest];
   }
 
   const q = query.toLowerCase();
