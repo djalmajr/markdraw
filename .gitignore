@@ -72,14 +72,11 @@ apps/desktop/src-tauri/llvm-cov-target
 
 .opencode/*
 !.opencode/commands/
-# Allow our project-owned mutation hook scripts (NOT the wiki-init managed
-# files in plugins/ and hooks/, which each dev regenerates locally).
+# Track project-owned plugins and hooks (wiki-init managed files included —
+# every dev should pull a working setup from git instead of having to
+# re-run wiki-init locally).
 !.opencode/plugins/
-.opencode/plugins/*
-!.opencode/plugins/mutation-suggest.js
 !.opencode/hooks/
-.opencode/hooks/*
-!.opencode/hooks/suggest-mutation-test.sh
 
 # CLAUDE.md files (except root)
 **/CLAUDE.md
