@@ -69,4 +69,21 @@ describe("keyboard-shortcuts", () => {
     const groups = new Set(SHORTCUTS.map((s) => s.group));
     expect(groups).toEqual(new Set(["File", "Tabs", "Navigation", "Help"]));
   });
+
+  it("every shortcut exposes a non-empty descriptionKey for the i18n consumer", () => {
+    // Mutation captured: dropping `descriptionKey` from any descriptor (or
+    // setting it to an empty string) would leave ShortcutsHelp rendering
+    // a blank label instead of the translated one.
+    for (const shortcut of SHORTCUTS) {
+      expect(typeof shortcut.descriptionKey).toBe("string");
+      expect(shortcut.descriptionKey.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("descriptionKey values are unique across the catalog", () => {
+    // Two shortcuts sharing a key would mean translators only get one
+    // label for two distinct actions.
+    const keys = SHORTCUTS.map((s) => s.descriptionKey);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
 });

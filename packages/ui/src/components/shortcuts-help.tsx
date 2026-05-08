@@ -12,6 +12,19 @@ import {
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
 
+const messages = m as unknown as Record<string, () => string>;
+
+function resolveMessage(key: string): string {
+  return messages[key]?.() ?? key;
+}
+
+const GROUP_TITLE_KEYS: Record<ShortcutGroup, string> = {
+  File: "shortcuts_section_file",
+  Tabs: "shortcuts_section_tabs",
+  Navigation: "shortcuts_section_navigation",
+  Help: "shortcuts_section_help",
+};
+
 export interface ShortcutsHelpProps {
   open: boolean;
   /** Override the auto-detected platform. Test-only; production callers
@@ -67,7 +80,9 @@ export function ShortcutsHelp(props: ShortcutsHelpProps) {
                 {(groupName) => (
                   <Show when={(grouped().get(groupName)?.length ?? 0) > 0}>
                     <section class="shortcuts-help-group">
-                      <h3 class="shortcuts-help-group-title">{groupName}</h3>
+                      <h3 class="shortcuts-help-group-title">
+                        {(useLocale(), resolveMessage(GROUP_TITLE_KEYS[groupName]))}
+                      </h3>
                       <ul class="shortcuts-help-list">
                         <For each={grouped().get(groupName) ?? []}>
                           {(shortcut) => <Row shortcut={shortcut} platform={platform()} />}
@@ -88,7 +103,9 @@ export function ShortcutsHelp(props: ShortcutsHelpProps) {
 function Row(props: { shortcut: ShortcutDescriptor; platform: Platform }) {
   return (
     <li class="shortcuts-help-row">
-      <span class="shortcuts-help-desc">{props.shortcut.description}</span>
+      <span class="shortcuts-help-desc">
+        {(useLocale(), resolveMessage(props.shortcut.descriptionKey))}
+      </span>
       <span class="shortcuts-help-keys">
         <For each={shortcutKeys(props.shortcut, props.platform)}>
           {(token, index) => (

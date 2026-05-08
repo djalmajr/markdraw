@@ -10,6 +10,8 @@ import {
   ContextMenuTrigger,
 } from "./ui/context-menu.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
+import * as m from "@asciimark/i18n";
+import { useLocale } from "@asciimark/i18n/solid";
 import IconX from "~icons/lucide/x";
 import IconPlus from "~icons/lucide/plus";
 import IconChevronLeft from "~icons/lucide/chevron-left";
@@ -141,11 +143,11 @@ function DraggableTab(props: {
             </ContextMenuItem>
             <ContextMenuSeparator />
           </Show>
-          <ContextMenuItem onSelect={props.onClose}>Close</ContextMenuItem>
-          <ContextMenuItem onSelect={props.onCloseOthers}>Close Others</ContextMenuItem>
-          <ContextMenuItem onSelect={props.onCloseToRight}>Close to the Right</ContextMenuItem>
+          <ContextMenuItem onSelect={props.onClose}>{(useLocale(), m.tab_close())}</ContextMenuItem>
+          <ContextMenuItem onSelect={props.onCloseOthers}>{(useLocale(), m.tab_close_others())}</ContextMenuItem>
+          <ContextMenuItem onSelect={props.onCloseToRight}>{(useLocale(), m.tab_close_to_right())}</ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onSelect={props.onCloseAll}>Close All</ContextMenuItem>
+          <ContextMenuItem onSelect={props.onCloseAll}>{(useLocale(), m.tab_close_all())}</ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
       <TooltipContent>{props.tab.rootId}/{props.tab.filePath}</TooltipContent>

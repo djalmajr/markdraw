@@ -14,7 +14,9 @@ export interface ShortcutDescriptor {
   /** Stable identifier used by tests and analytics. */
   id: string;
   group: ShortcutGroup;
-  description: string;
+  /** Message key resolved by the consumer against the i18n catalog. Kept
+   *  as a plain string so `core` stays decoupled from `@asciimark/i18n`. */
+  descriptionKey: string;
   /** Modifier + key tokens. Modifiers come first; the LAST token is the
    *  bare key (single letter, "Tab", "Enter", etc). The display layer
    *  joins them with the platform-correct separator (` ` on macOS for
@@ -30,75 +32,75 @@ export const SHORTCUTS: readonly ShortcutDescriptor[] = [
   {
     id: "file.openFolder",
     group: "File",
-    description: "Open folder",
+    descriptionKey: "shortcut_file_open_folder",
     keys: { mac: ["⌘", "O"], other: ["Ctrl", "O"] },
   },
   {
     id: "file.save",
     group: "File",
-    description: "Save (auto-save runs 1s after the last edit)",
+    descriptionKey: "shortcut_file_save",
     keys: { mac: ["⌘", "S"], other: ["Ctrl", "S"] },
   },
   // ── Tabs ────────────────────────────────────────────────────────────────
   {
     id: "tab.new",
     group: "Tabs",
-    description: "New tab",
+    descriptionKey: "shortcut_tab_new",
     keys: { mac: ["⌘", "T"], other: ["Ctrl", "T"] },
   },
   {
     id: "tab.close",
     group: "Tabs",
-    description: "Close tab",
+    descriptionKey: "shortcut_tab_close",
     keys: { mac: ["⌘", "W"], other: ["Ctrl", "W"] },
   },
   {
     id: "tab.reopen",
     group: "Tabs",
-    description: "Reopen last closed tab",
+    descriptionKey: "shortcut_tab_reopen",
     keys: { mac: ["⌘", "⇧", "T"], other: ["Ctrl", "Shift", "T"] },
   },
   {
     id: "tab.next",
     group: "Tabs",
-    description: "Cycle to next tab",
+    descriptionKey: "shortcut_tab_next",
     keys: { mac: ["⌃", "Tab"], other: ["Ctrl", "Tab"] },
   },
   {
     id: "tab.prev",
     group: "Tabs",
-    description: "Cycle to previous tab",
+    descriptionKey: "shortcut_tab_prev",
     keys: { mac: ["⌃", "⇧", "Tab"], other: ["Ctrl", "Shift", "Tab"] },
   },
   // ── Navigation ──────────────────────────────────────────────────────────
   {
     id: "nav.quickOpen",
     group: "Navigation",
-    description: "Quick Open: jump to a file by name",
+    descriptionKey: "shortcut_nav_quick_open",
     keys: { mac: ["⌘", "P"], other: ["Ctrl", "P"] },
   },
   {
     id: "nav.commandPalette",
     group: "Navigation",
-    description: "Command Palette: run any command",
+    descriptionKey: "shortcut_nav_command_palette",
     keys: { mac: ["⌘", "⇧", "P"], other: ["Ctrl", "Shift", "P"] },
   },
   {
     id: "nav.goToSymbol",
     group: "Navigation",
-    description: "Go to Symbol: jump to a heading in the current file",
+    descriptionKey: "shortcut_nav_go_to_symbol",
     keys: { mac: ["⌘", "⇧", "O"], other: ["Ctrl", "Shift", "O"] },
   },
   {
     id: "nav.findInFiles",
     group: "Navigation",
-    description: "Find in Files: search content across the workspace",
+    descriptionKey: "shortcut_nav_find_in_files",
     keys: { mac: ["⌘", "⇧", "F"], other: ["Ctrl", "Shift", "F"] },
   },
   {
     id: "nav.workspaceSymbols",
     group: "Navigation",
-    description: "Go to Symbol in Workspace: jump to a heading across all docs",
+    descriptionKey: "shortcut_nav_workspace_symbols",
     keys: { mac: ["⌘", "⌥", "O"], other: ["Ctrl", "Alt", "O"] },
   },
   // Split editor — second pane side by side with independent tabs +
@@ -107,33 +109,33 @@ export const SHORTCUTS: readonly ShortcutDescriptor[] = [
   {
     id: "view.splitEditor",
     group: "Tabs",
-    description: "Split editor (toggle): open a second pane side by side",
+    descriptionKey: "shortcut_view_split_editor",
     keys: { mac: ["⌘", "\\"], other: ["Ctrl", "\\"] },
   },
   {
     id: "view.focusFirstPane",
     group: "Tabs",
-    description: "Focus the first pane",
+    descriptionKey: "shortcut_view_focus_first_pane",
     keys: { mac: ["⌘", "1"], other: ["Ctrl", "1"] },
   },
   {
     id: "view.focusSecondPane",
     group: "Tabs",
-    description: "Focus the second pane",
+    descriptionKey: "shortcut_view_focus_second_pane",
     keys: { mac: ["⌘", "2"], other: ["Ctrl", "2"] },
   },
   // ── View ────────────────────────────────────────────────────────────────
   {
     id: "view.toggleReaderMode",
     group: "Help",
-    description: "Toggle Reader / Zen mode (hide chrome, center preview)",
+    descriptionKey: "shortcut_view_reader_mode",
     keys: { mac: ["⌘", "."], other: ["Ctrl", "."] },
   },
   // ── Help ────────────────────────────────────────────────────────────────
   {
     id: "help.shortcuts",
     group: "Help",
-    description: "Show keyboard shortcuts",
+    descriptionKey: "shortcut_help_shortcuts",
     keys: { mac: ["⌘", "/"], other: ["Ctrl", "/"] },
   },
 ];
