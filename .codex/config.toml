@@ -6,3 +6,9 @@ codex_hooks = true
 command = "/Users/djalmajr/.local/share/skills/qmd/wrappers/asciimark-qmd"
 args = ["mcp"]
 # wiki-init:end
+
+[mcp_servers.linear]
+url = "https://mcp.linear.app/mcp"
+
+[mcp_servers.linear.headers]
+Authorization = "Bearer ${LINEAR_API_KEY}"
