@@ -9,7 +9,7 @@
     "./runtime": "./src/paraglide/runtime.js"
   },
   "scripts": {
-    "compile": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --strategy globalVariable preferredLanguage baseLocale",
+    "compile": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --strategy globalVariable preferredLanguage baseLocale --emit-ts-declarations",
     "prepare": "bun run compile",
     "typecheck": "bun run compile && tsc --noEmit"
   },
