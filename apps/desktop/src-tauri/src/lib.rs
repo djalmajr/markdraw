@@ -1800,4 +1800,187 @@ mod tests {
         let m = &matches[0];
         assert_eq!(&m.line_text[m.column_start..m.column_end], "needle");
     }
+
+    // ── Tauri-command body mutation guards (Linear DJA-43) ─────────────
+    //
+    // Each test below invokes a `#[tauri::command] async fn` directly so
+    // that `cargo mutants` cannot replace its body with `Ok(...)` and have
+    // every helper-level test still pass. The guards close the gap that
+    // surfaced in the 2026-05-08 mutation-testing benchmark (DJA-36):
+    // 11 mutations in this file survived because no test was actually
+    // observing the side-effect or the returned content, only that the
+    // lower-level `_impl` function did the right thing.
+
+    #[tokio::test]
+    async fn read_dir_command_returns_real_entries() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        touch(&root.join("alpha.md"));
+        touch(&root.join("bravo.md"));
+
+        let entries = super::read_dir(root.to_string_lossy().to_string(), None)
+            .await
+            .unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"alpha.md"), "expected alpha.md in {:?}", names);
+        assert!(names.contains(&"bravo.md"), "expected bravo.md in {:?}", names);
+        // Ok(vec![]) mutation would make the assertions above fail.
+        assert!(!entries.is_empty(), "Ok(vec![]) mutation must not pass");
+    }
+
+    #[tokio::test]
+    async fn find_in_files_command_returns_real_matches() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_file(&root.join("a.md"), "needle\n");
+
+        let matches = super::find_in_files(
+            root.to_string_lossy().to_string(),
+            "needle".to_string(),
+            Some(true),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].path, "a.md");
+        assert_eq!(matches[0].line_text, "needle");
+    }
+
+    #[tokio::test]
+    async fn read_file_command_returns_actual_content() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let file_path = root.join("hello.txt");
+        write_file(&file_path, "asciimark-mutation-guard\n");
+
+        let content = super::read_file(file_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
+        assert_eq!(content, "asciimark-mutation-guard\n");
+        assert!(!content.is_empty(), "Ok(String::new()) mutation must not pass");
+        assert_ne!(content, "xyzzy", "Ok(\"xyzzy\".into()) mutation must not pass");
+    }
+
+    #[tokio::test]
+    async fn read_file_relative_command_returns_actual_content() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_file(&root.join("rel.txt"), "relative-content\n");
+
+        let content = super::read_file_relative(
+            root.to_string_lossy().to_string(),
+            "rel.txt".to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(content, "relative-content\n");
+        assert!(!content.is_empty(), "Ok(String::new()) mutation must not pass");
+        assert_ne!(content, "xyzzy", "Ok(\"xyzzy\".into()) mutation must not pass");
+    }
+
+    #[tokio::test]
+    async fn write_file_command_actually_writes_to_disk() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let file_path = root.join("out.txt");
+        let payload = "asciimark-write-guard\n";
+
+        super::write_file(
+            file_path.to_string_lossy().to_string(),
+            payload.to_string(),
+        )
+        .await
+        .unwrap();
+        let read_back = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(read_back, payload, "Ok(()) mutation would skip the write");
+    }
+
+    #[tokio::test]
+    async fn rename_file_command_actually_moves_file() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_file(&root.join("old.md"), "x");
+
+        super::rename_file(
+            root.to_string_lossy().to_string(),
+            "old.md".to_string(),
+            "new.md".to_string(),
+        )
+        .await
+        .unwrap();
+        assert!(!root.join("old.md").exists(), "old path should be gone");
+        assert!(root.join("new.md").exists(), "new path should exist");
+        assert_eq!(fs::read_to_string(root.join("new.md")).unwrap(), "x");
+    }
+
+    #[tokio::test]
+    async fn trash_path_command_validates_path_escape() {
+        // The OS trash service is unreliable in headless environments, so we
+        // exercise the `resolve_within_root` pre-flight guard that
+        // `trash_path` runs *before* calling `trash::delete`. The Ok(())
+        // mutation skips this guard entirely and would erroneously succeed.
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_file(&root.join("inside.md"), "x");
+
+        let escape = super::trash_path(
+            root.to_string_lossy().to_string(),
+            "../escape.md".to_string(),
+        )
+        .await;
+        assert!(
+            escape.is_err(),
+            "trash_path must reject path-escaping inputs; Ok(()) mutation would pass"
+        );
+    }
+
+    #[test]
+    fn find_in_files_skips_files_with_nul_byte_in_first_8k_probe() {
+        // Guard for `const FIND_IN_FILES_BINARY_PROBE: usize = 8 * 1024;`
+        // (line ~227). Mutating `*` to `+` flips the probe size from 8192
+        // to 1032. A NUL planted at offset 5000 is within 8 KiB but outside
+        // 1 KiB; the current code skips the file, the mutated code does
+        // not — and would surface the planted "needle" further down.
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let mut bytes = vec![b' '; 8000];
+        bytes[5000] = 0u8;
+        bytes[6000..6006].copy_from_slice(b"needle");
+        fs::write(root.join("planted.bin"), &bytes).unwrap();
+
+        let matches = find_in_files_impl(root, "needle", true, false).unwrap();
+        assert!(
+            matches.is_empty(),
+            "binary probe must catch NUL within first 8 KiB; \
+             mutation 8*1024 -> 8+1024 (=1032) would miss the NUL at offset 5000 and match the planted needle"
+        );
+    }
+
+    #[test]
+    fn find_in_files_processes_file_at_exact_size_limit() {
+        // Guard for `if metadata.len() > FIND_IN_FILES_FILE_SIZE_LIMIT`
+        // (line ~290). Mutating `>` to `>=` would skip files at *exactly*
+        // the limit; this fixture sits the file at the boundary so the
+        // mutation flips the visible result.
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let mut content = String::from("needle\n");
+        let pad = FIND_IN_FILES_FILE_SIZE_LIMIT as usize - content.len();
+        content.push_str(&"a".repeat(pad));
+        assert_eq!(
+            content.len() as u64,
+            FIND_IN_FILES_FILE_SIZE_LIMIT,
+            "fixture must sit exactly at the boundary"
+        );
+        write_file(&root.join("at-limit.md"), &content);
+
+        let matches = find_in_files_impl(root, "needle", true, false).unwrap();
+        assert_eq!(
+            matches.len(),
+            1,
+            "file at exactly FIND_IN_FILES_FILE_SIZE_LIMIT must be processed; \
+             mutation > -> >= would skip it"
+        );
+    }
 }

@@ -497,10 +497,11 @@ invariant "for each persistent tab, switching away then back yields
 the same content" would have caught this in the first 50 cases —
 the bug fires deterministically on `[Move(tab), Switch, SwitchBack]`.
 
-This is **deferred**, documented in the wiki log with a follow-up
-note. Adding it now without a current bug to surface would be
-busywork; adding it the next time we touch cross-pane state is
-mandatory.
+Tracked as **DJA-35** in the Linear project
+[AsciiMark — Technical debt & polish](https://linear.app/djalmajr/project/asciimark-technical-debt-and-polish-4009b2920302).
+Adding the suite now without a current bug to surface would be
+busywork; the issue captures the trigger ("the next time we touch
+cross-pane state").
 
 ### Lesson 4 — Property: snapshot/restore round-trip preservation
 

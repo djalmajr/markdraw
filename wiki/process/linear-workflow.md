@@ -110,7 +110,6 @@ Out of scope explícito quando há ambiguidade.
 - [ ] Critério mensurável 1
 - [ ] Critério mensurável 2
 - [ ] Sem regressão em <suite específica>
-- [ ] Code review + DoD validado por reviewer
 
 ## Notas técnicas
 Decisões já fechadas (linka ADRs).
@@ -140,29 +139,26 @@ suficiente para o tamanho atual. Não criar labels especulativas.
 | **Tipo** (Linear-native) | `Feature`, `Improvement`, `Bug` | Já existem |
 | **Scope** | `scope:desktop`, `scope:extension`, `scope:site` | Substitui sub-initiatives até justificar volume |
 | **Area** | `area:ai`, `area:ui`, `area:editor`, `area:preview`, `area:infra` | Filtro cross-project |
-| **Gate** | `needs-acceptance-review` | Bloqueia merge até reviewer validar checkboxes |
 | **External** | `blocked-external` | Dependência fora do time (provider, stakeholder) |
 
 Adicionar nova label só quando há um filtro real que ela viabiliza.
 Labels não usadas em ≥3 issues são candidatos a remoção.
 
-## Acceptance criteria (DoD)
+## Acceptance criteria
 
-Padrão **híbrido pragmático**:
+Toda story tem `## Acceptance criteria` com 3-7 checkboxes
+**mensuráveis** na descrição (testes passam, comportamento X ocorre,
+sem regressão em Y). Linear conta % concluído no peek/board.
 
-1. **Default — checklist inline.** Toda story tem `## Acceptance criteria`
-   com 3-7 checkboxes mensuráveis na descrição. Linear conta % concluído
-   automaticamente, fica visível no peek/board.
+Critérios em prosa longa (specs, business rules, runbooks) podem virar
+**Linear Document** anexado à issue — caso raro, story body fica
+enxuto e linka pro doc.
 
-2. **Linear Document anexado** (raro). Para critérios em prosa longa
-   (specs, business rules, runbooks). Story body fica enxuto e linka
-   para o doc. Persiste mesmo após epic fechar.
-
-3. **Label `needs-acceptance-review`** (gate). Removida pelo reviewer
-   quando confere checkboxes contra a entrega real. Gateia o merge.
-
-A label garante que "todos checkboxes marcados" não vire "marcou e
-mandou bala" sem revisão dupla.
+**Não há gate formal de revisor.** Nesse projeto solo, o fluxo é:
+implementação termina → relato no chat o que foi entregue → recebo
+ok/nok → fecho a issue (status → Done). Sem checkbox de "DoD
+validado por reviewer", sem label de gate. O ato é a confirmação
+direta.
 
 ## Fluxo end-to-end
 
@@ -173,7 +169,7 @@ mandou bala" sem revisão dupla.
 | Decisão arquitetural fechada (não-negociável) | Cria ADR em `wiki/decisions/NNN-titulo.md` + linka da issue. Issue NÃO duplica conteúdo da ADR |
 | Story entra no cycle | Issue ganha Cycle ativo + assignee, status → `In Progress` |
 | PR aberto | Linear detecta automaticamente quando o título da PR contém o identifier (ex: `DJA-12: ...`) |
-| Story fecha | Reviewer confere checkboxes, remove `needs-acceptance-review`, status → `Done` |
+| Story fecha | Implementação relatada no chat → owner dá ok/nok → status → `Done` |
 | Cycle fecha | Linear cycle review/retro acontecem nativamente |
 | Project fecha | Marca state `Completed`. ADRs persistem mesmo após — vivem em `wiki/decisions/` |
 

@@ -439,8 +439,9 @@ Key rules (full method in [`wiki/process/linear-workflow.md`](wiki/process/linea
 - **Issue body is self-contained.** Do not link to story.md files
   in the repo — there are none. Do link to ADRs in `wiki/decisions/`,
   architecture docs, and Figma frames.
-- **Acceptance criteria** = checklist in description + label
-  `needs-acceptance-review` to gate merge until reviewer validates.
+- **Acceptance criteria** = checklist in description (3-7 measurable
+  items). No formal reviewer gate; closing flow is "report what was
+  delivered → owner gives ok/nok → status → Done".
 - **Architecture decisions** that persist beyond an epic go in
   `wiki/decisions/NNN-titulo.md` (ADR format). Issues reference ADRs;
   ADRs are not duplicated in issues.
@@ -449,8 +450,7 @@ Key rules (full method in [`wiki/process/linear-workflow.md`](wiki/process/linea
 - **Labels** — use existing `Feature`/`Improvement`/`Bug` plus
   `scope:desktop`/`scope:extension`/`scope:site`,
   `area:ai`/`area:ui`/`area:editor`/`area:preview`/`area:infra`,
-  `needs-acceptance-review`, `blocked-external`. Don't invent
-  speculative labels.
+  `blocked-external`. Don't invent speculative labels.
 - **MCP** is available for Linear writes (`save_project`,
   `save_issue`, `save_milestone`, `save_document`,
   `create_issue_label`). Initiative writes via GraphQL when needed.
@@ -478,8 +478,6 @@ What's in. Out of scope when ambiguous.
 - [ ] Measurable criterion 1
 - [ ] Measurable criterion 2
 - [ ] No regression in <suite>
-- [ ] DoD validated by reviewer (removes `needs-acceptance-review`)
-
 ## Notas técnicas
 References to ADRs, patterns to follow.
 ```

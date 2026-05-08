@@ -14,9 +14,7 @@ status: stable
 
 # Testing — how to run everything
 
-Single page that lists every gate this repo ships with. Conceptual
-rationale lives in [strategies](strategies.md); this file is the
-operations reference.
+Single page that lists every gate this repo ships with. Conceptual rationale lives in [strategies](strategies.md); this file is the operations reference.
 
 > If a gate isn't listed here, it doesn't exist.
 > If a script isn't here, treat it as deprecated.
@@ -64,6 +62,26 @@ The `pre-commit` hook runs **all of the above in parallel** (~3s). See
 | `bun run fuzz:schemas` *(idem)* | 30s | idem |
 | `bun run fuzz:ci` *(idem)* | ~2min | All four sequential |
 | `bun run test:memlab` *(in `apps/desktop`)* | depends | memlab soak — needs `bun run dev:app` running on :2444 |
+
+### Mutation testing — when to run
+
+`cargo-mutants` is **manual / on-demand**, not a pre-push gate. Benchmark (2026-05-08) measured 4m 28s worst-case across 57 mutants, with 11 surviving. A blocking gate would force every dev to wait minutes per push *and* block any push touching the helper zone of `lib.rs` until those 11 are addressed (tracked separately).
+
+Run `bun run test:mutation:rust` when:
+
+- You modified logic in the helper zone of `apps/desktop/src-tauri/src/lib.rs` (lines 57-403 — `read_dir`, `read_file`, `find_in_files`, `write_file`, `rename_file`, `trash_path`, `read_dir_recursive`, etc.)
+- You added a new function inside the same zone and want to verify the tests cover it
+- You're prepping a release and want a clean coverage baseline
+
+The agents (Claude Code, Codex, OpenCode) ship a small **suggestion hook**
+in `.claude/hooks/`, `.codex/hooks/`, and `.opencode/plugins/` — when the
+agent is about to invoke `git push` and the diff `origin/main..HEAD`
+touches the helper zone, the hook prints a one-line reminder. The hook
+never blocks; the call is yours.
+
+References: Linear DJA-36 (decision rationale + benchmark) · Linear DJA-43
+(close the 11 surviving mutations as a pre-requisite for revisiting the
+gate).
 
 ## E2E
 

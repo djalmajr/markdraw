@@ -26,6 +26,10 @@ coverage
 **/reports/mutation
 packages/*/reports
 
+# cargo-mutants artifacts
+**/mutants.out
+**/mutants.out.old
+
 # fuzzing artifacts
 **/fuzz/findings
 **/fuzz/corpus
@@ -68,6 +72,14 @@ apps/desktop/src-tauri/llvm-cov-target
 
 .opencode/*
 !.opencode/commands/
+# Allow our project-owned mutation hook scripts (NOT the wiki-init managed
+# files in plugins/ and hooks/, which each dev regenerates locally).
+!.opencode/plugins/
+.opencode/plugins/*
+!.opencode/plugins/mutation-suggest.js
+!.opencode/hooks/
+.opencode/hooks/*
+!.opencode/hooks/suggest-mutation-test.sh
 
 # CLAUDE.md files (except root)
 **/CLAUDE.md
