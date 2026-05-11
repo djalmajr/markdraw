@@ -67,3 +67,26 @@ describe("TabBar — Move to Other Pane menu entry", () => {
     expect(screen.getByText("Move to Other Pane")).not.toBeNull();
   });
 });
+
+describe("TabBar — translated context menu (DJA-30)", () => {
+  it("renders the four close-action items by their resolved i18n labels", () => {
+    // Mutation captured: pointing any of the four ContextMenuItems at
+    // the wrong message key (e.g. m.tab_close in two slots) collapses
+    // the rendered set below 4 unique labels.
+    const pane = setupPaneWithTabs(["doc.md"]);
+    render(() => (
+      <TabBar
+        tabStore={pane.tabs}
+        onActivateTab={() => {}}
+        onCloseTab={() => {}}
+      />
+    ));
+    fireEvent.contextMenu(screen.getByText("doc.md"));
+    // EN is the base locale resolved by paraglide when no locale is set;
+    // these labels must come through the i18n catalog, not be hardcoded.
+    for (const label of ["Close", "Close Others", "Close to the Right", "Close All"]) {
+      expect(screen.getByText(label)).not.toBeNull();
+    }
+  });
+
+});
