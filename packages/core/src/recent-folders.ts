@@ -1,26 +1,19 @@
 import * as v from "valibot";
-import { RecentFolderSchema, type RecentFolder, tryParse } from "./schemas.ts";
+import { RecentFolderSchema, type RecentFolder, safeJsonParse, tryParse } from "./schemas.ts";
 
 const STORAGE_KEY = "asciimark-recent-folders-v1";
 const MAX_RECENT = 10;
 
 function readRecentFolders(): RecentFolder[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return [];
+  const list = safeJsonParse(localStorage.getItem(STORAGE_KEY), v.array(v.unknown()));
+  if (!list) return [];
 
-    const parsed = JSON.parse(stored);
-    if (!Array.isArray(parsed)) return [];
-
-    const folders: RecentFolder[] = [];
-    for (const item of parsed) {
-      const folder = tryParse(RecentFolderSchema, item);
-      if (folder) folders.push(folder);
-    }
-    return folders.slice(0, MAX_RECENT);
-  } catch {
-    return [];
+  const folders: RecentFolder[] = [];
+  for (const item of list) {
+    const folder = tryParse(RecentFolderSchema, item);
+    if (folder) folders.push(folder);
   }
+  return folders.slice(0, MAX_RECENT);
 }
 
 function getRecentFolders(): RecentFolder[] {

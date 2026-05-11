@@ -1,23 +1,17 @@
 import * as v from "valibot";
-import { FavoriteFileSchema, type FavoriteFile, tryParse } from "./schemas.ts";
+import { FavoriteFileSchema, type FavoriteFile, safeJsonParse, tryParse } from "./schemas.ts";
 
 const STORAGE_KEY = "asciimark-favorites";
 
 function readFavorites(): FavoriteFile[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return [];
-    const parsed = JSON.parse(stored);
-    if (!Array.isArray(parsed)) return [];
-    const out: FavoriteFile[] = [];
-    for (const item of parsed) {
-      const fav = tryParse(FavoriteFileSchema, item);
-      if (fav) out.push(fav);
-    }
-    return out;
-  } catch {
-    return [];
+  const list = safeJsonParse(localStorage.getItem(STORAGE_KEY), v.array(v.unknown()));
+  if (!list) return [];
+  const out: FavoriteFile[] = [];
+  for (const item of list) {
+    const fav = tryParse(FavoriteFileSchema, item);
+    if (fav) out.push(fav);
   }
+  return out;
 }
 
 function getFavorites(): FavoriteFile[] {

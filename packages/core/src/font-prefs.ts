@@ -1,9 +1,11 @@
+import { PartialFontPrefsSchema, safeJsonParse, type FontPrefs as PersistedFontPrefs } from "./schemas.ts";
+
 const STORAGE_KEY = "asciimark-font-prefs";
 
-interface FontPrefs {
-  fontFamily: string;
-  fontSize: number;
-}
+// Local alias — keeps the public type name (`FontPrefs`) stable for
+// downstream imports while the schema-inferred type lives in
+// schemas.ts so both stay in sync.
+interface FontPrefs extends PersistedFontPrefs {}
 
 const FontFamilies = [
   { id: "sans-serif", label: "Sans-serif" },
@@ -22,13 +24,14 @@ const FAMILY_MAP: Record<string, string> = {
 };
 
 function getStoredFontPrefs(): FontPrefs {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return DEFAULT_PREFS;
-    return { ...DEFAULT_PREFS, ...JSON.parse(stored) };
-  } catch {
-    return DEFAULT_PREFS;
-  }
+  // Storage boundary: validate the partial shape (older AsciiMark
+  // installs persisted only `fontSize` before `fontFamily` shipped,
+  // so a strict parse would reject those legacy entries). Validated
+  // fields are merged onto defaults; anything missing or invalid
+  // falls back to the canonical default for that field.
+  const parsed = safeJsonParse(localStorage.getItem(STORAGE_KEY), PartialFontPrefsSchema);
+  if (!parsed) return DEFAULT_PREFS;
+  return { ...DEFAULT_PREFS, ...parsed };
 }
 
 function setStoredFontPrefs(prefs: FontPrefs): void {

@@ -1,11 +1,22 @@
 import type { Frontmatter } from "./frontmatter.ts";
+import * as v from "valibot";
 import {
   PersistedTabSchema,
   PersistedTabSessionSchema,
   type PersistedTab,
   type PersistedTabSession,
+  safeJsonParse,
   tryParse,
 } from "./schemas.ts";
+
+// Schema for the raw wrapper read from localStorage. We don't validate
+// the `tabs` array deeply here — bad entries are filtered out below
+// rather than failing the whole session, mirroring the recent-files
+// pattern. activeTabId is allowed to be missing (null after parse).
+const TabSessionWrapperSchema = v.object({
+  tabs: v.array(v.unknown()),
+  activeTabId: v.optional(v.union([v.string(), v.null()])),
+});
 
 export type TabId = string;
 
@@ -48,29 +59,19 @@ export const LEGACY_STORAGE_KEY = "asciimark-tab-session";
 const DEFAULT_STORAGE_KEY = LEGACY_STORAGE_KEY;
 
 export function getTabSession(storageKey: string = DEFAULT_STORAGE_KEY): PersistedTabSession | null {
-  try {
-    const stored = localStorage.getItem(storageKey);
-    if (!stored) return null;
+  // Validate the wrapper at the storage boundary; broken individual
+  // tab entries are filtered out (not session-fatal). `safeJsonParse`
+  // swallows malformed JSON + shape mismatches.
+  const wrapper = safeJsonParse(localStorage.getItem(storageKey), TabSessionWrapperSchema);
+  if (!wrapper) return null;
 
-    // Validate the wrapper, but tolerate individual broken tabs by filtering
-    // them out instead of rejecting the entire session.
-    const raw = JSON.parse(stored);
-    if (typeof raw !== "object" || raw === null) return null;
+  const tabs = wrapper.tabs
+    .map((t) => tryParse(PersistedTabSchema, t))
+    .filter((t): t is PersistedTab => t !== null);
 
-    const tabs = Array.isArray((raw as { tabs?: unknown }).tabs)
-      ? ((raw as { tabs: unknown[] }).tabs
-          .map((t) => tryParse(PersistedTabSchema, t))
-          .filter((t): t is PersistedTab => t !== null))
-      : [];
-
-    if (tabs.length === 0) return null;
-    const activeTabId = typeof (raw as { activeTabId?: unknown }).activeTabId === "string"
-      ? (raw as { activeTabId: string }).activeTabId
-      : null;
-    return { tabs, activeTabId };
-  } catch {
-    return null;
-  }
+  if (tabs.length === 0) return null;
+  const activeTabId = typeof wrapper.activeTabId === "string" ? wrapper.activeTabId : null;
+  return { tabs, activeTabId };
 }
 
 export function setTabSession(

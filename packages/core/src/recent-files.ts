@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { RecentFileSchema, type RecentFile, tryParse } from "./schemas.ts";
+import { RecentFileSchema, type RecentFile, safeJsonParse, tryParse } from "./schemas.ts";
 
 const LEGACY_STORAGE_KEY = "asciimark-recent-files";
 const STORAGE_KEY = "asciimark-recent-files-v2";
@@ -10,22 +10,20 @@ const RecentFileListSchema = v.array(RecentFileSchema);
 function readRecentFiles(): RecentFile[] {
   localStorage.removeItem(LEGACY_STORAGE_KEY);
 
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return [];
+  // Validate the whole list shape at the storage boundary. The schema
+  // is permissive (`v.array(RecentFileSchema)`) so individual broken
+  // entries fail the parse — that's intentional: a list with one
+  // garbage entry should not nuke the rest. We fall back to
+  // per-element tryParse below to preserve the surviving entries.
+  const list = safeJsonParse(localStorage.getItem(STORAGE_KEY), v.array(v.unknown()));
+  if (!list) return [];
 
-    const parsed = JSON.parse(stored);
-    if (!Array.isArray(parsed)) return [];
-
-    const files: RecentFile[] = [];
-    for (const item of parsed) {
-      const file = tryParse(RecentFileSchema, item);
-      if (file) files.push(file);
-    }
-    return files.slice(0, MAX_RECENT);
-  } catch {
-    return [];
+  const files: RecentFile[] = [];
+  for (const item of list) {
+    const file = tryParse(RecentFileSchema, item);
+    if (file) files.push(file);
   }
+  return files.slice(0, MAX_RECENT);
 }
 
 function getRecentFiles(): RecentFile[] {

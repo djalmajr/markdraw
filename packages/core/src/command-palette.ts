@@ -6,6 +6,7 @@
  */
 
 import type { Platform } from "./keyboard-shortcuts.ts";
+import { RecentCommandIdsSchema, safeJsonParse } from "./schemas.ts";
 
 export type CommandGroup = "File" | "View" | "Theme" | "Workspace" | "Help" | "Language";
 
@@ -55,15 +56,13 @@ function defaultStorage(): RecentCommandsStorage | null {
 
 function readRecentIds(storage: RecentCommandsStorage | null): string[] {
   if (!storage) return [];
-  const raw = storage.getItem(RECENT_COMMANDS_STORAGE_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((v): v is string => typeof v === "string");
-  } catch {
-    return [];
-  }
+  // The schema is "array of strings" — a list with one non-string
+  // entry trips Valibot and we hand back []. Stricter than the old
+  // per-element filter, but matches the contract: stored ids that
+  // can't be redispatched should not survive a reload.
+  return (
+    safeJsonParse(storage.getItem(RECENT_COMMANDS_STORAGE_KEY), RecentCommandIdsSchema) ?? []
+  );
 }
 
 /** Returns the MRU command ids (most-recent first), capped at
