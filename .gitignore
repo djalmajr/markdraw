@@ -58,6 +58,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 apps/desktop/src-tauri/target
 apps/desktop/src-tauri/llvm-cov-target
 
+# Stand-alone Rust sub-crates under tools/ (loom-watcher-tests,
+# miri-helpers-tests). Each has its own target/ and Cargo.lock.
+tools/*/target
+tools/*/Cargo.lock
+
 # Finder (MacOS) folder config
 .DS_Store
 
