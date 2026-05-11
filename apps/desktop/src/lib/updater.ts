@@ -3,6 +3,13 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { message } from "@tauri-apps/plugin-dialog";
 import { createSignal } from "solid-js";
 import * as m from "@asciimark/i18n";
+import {
+  initialProgressState,
+  reduceDownloadEvent,
+  type DownloadProgress,
+} from "./updater-progress.ts";
+
+export type { DownloadProgress };
 
 /**
  * State surfaced to the host (`apps/desktop/src/app.tsx`) so it can
@@ -28,15 +35,28 @@ export interface PendingUpdate {
 }
 
 const [pendingUpdate, setPendingUpdate] = createSignal<PendingUpdate | null>(null);
+const [downloadProgress, setDownloadProgress] = createSignal<DownloadProgress | null>(null);
 
 export const useUpdate = pendingUpdate;
-export const dismissUpdate = () => setPendingUpdate(null);
+export const useDownloadProgress = downloadProgress;
+export const dismissUpdate = () => {
+  setPendingUpdate(null);
+  setDownloadProgress(null);
+};
+
 
 // Dev-only: lets the test harness simulate a pending update without
 // actually hitting the network or installing anything. Wired via the
 // `__DEV__` helper in `app.tsx` only when `import.meta.env.DEV`.
 export function _devSetPendingUpdate(value: PendingUpdate | null): void {
   setPendingUpdate(value);
+}
+
+// Dev-only: directly drives the download progress signal so the
+// progress UI can be exercised without hitting the network. Used by
+// the in-app Tauri MCP validation harness for DJA-34.
+export function _devSetDownloadProgress(value: DownloadProgress | null): void {
+  setDownloadProgress(value);
 }
 
 /**
@@ -73,7 +93,11 @@ export async function checkForAppUpdates(silent: boolean): Promise<void> {
         // actually close instead of hiding. Without this, relaunch
         // gets stuck because onCloseRequested prevents the exit.
         (window as unknown as { __asciimark_updating?: boolean }).__asciimark_updating = true;
-        await update.downloadAndInstall();
+        let state = initialProgressState();
+        await update.downloadAndInstall((event) => {
+          state = reduceDownloadEvent(state, event);
+          setDownloadProgress(state.progress);
+        });
         await relaunch();
       },
     });

@@ -32,7 +32,14 @@ import { confirm } from "@asciimark/ui/components/confirm-dialog.tsx";
 import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
 import { setupTray } from "./lib/tray.ts";
-import { _devSetPendingUpdate, checkForAppUpdates, dismissUpdate, useUpdate } from "./lib/updater.ts";
+import {
+  _devSetDownloadProgress,
+  _devSetPendingUpdate,
+  checkForAppUpdates,
+  dismissUpdate,
+  useDownloadProgress,
+  useUpdate,
+} from "./lib/updater.ts";
 import { fetchReleaseNotes, releaseHtmlUrl } from "./lib/release-notes.ts";
 import { UpdateAvailableDialog } from "@asciimark/ui/components/update-available-dialog.tsx";
 import { ReleaseNotesDialog } from "@asciimark/ui/components/release-notes-dialog.tsx";
@@ -166,6 +173,13 @@ export function App() {
           notes,
           install: async () => { console.log("[__DEV__] would install"); },
         }),
+      simulateDownloadProgress: (
+        phase: "downloading" | "installing",
+        downloaded: number,
+        total: number | null,
+        speed: number,
+      ) => _devSetDownloadProgress({ phase, downloaded, total, speed }),
+      clearDownloadProgress: () => _devSetDownloadProgress(null),
     };
   }
 
@@ -1325,6 +1339,7 @@ export function App() {
       version={useUpdate()?.version ?? ""}
       currentVersion={useUpdate()?.currentVersion ?? ""}
       notes={useUpdate()?.notes}
+      downloadProgress={useDownloadProgress()}
       onDismiss={dismissUpdate}
       onInstall={() => {
         const update = useUpdate();

@@ -2,6 +2,7 @@ import { Show, createMemo } from "solid-js";
 import MarkdownIt from "markdown-it";
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
+import { formatBytes } from "@asciimark/core/format-bytes.ts";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -9,6 +10,7 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog.tsx";
 import { Button } from "./ui/button.tsx";
+import { Progress } from "./ui/progress.tsx";
 
 // Minimal renderer for release-notes content. `html: false` disables
 // raw HTML embedded in the markdown (release notes come from GitHub
@@ -18,6 +20,14 @@ import { Button } from "./ui/button.tsx";
 // links in the embedded view, not the system browser, and the modal
 // is short-lived.
 const md = new MarkdownIt({ html: false, breaks: true, linkify: false });
+
+export interface DownloadProgressView {
+  phase: "downloading" | "installing";
+  downloaded: number;
+  total: number | null;
+  /** Bytes per second over the rolling sample window. */
+  speed: number;
+}
 
 export interface UpdateAvailableDialogProps {
   open: boolean;
@@ -29,6 +39,11 @@ export interface UpdateAvailableDialogProps {
    *  the GitHub release. Rendered as preformatted text (no parsing) so
    *  long changelogs don't introduce surprises. */
   notes?: string;
+  /** Active download progress. `null` until the user accepts; once
+   *  set, the footer swaps Install/Later for the progress bar + copy
+   *  and the dismissal paths are hidden so the user can't dismiss the
+   *  dialog mid-install. */
+  downloadProgress?: DownloadProgressView | null;
   /** Triggered when the user accepts the install. */
   onInstall: () => void;
   /** Triggered when the user defers (Esc, Later, click outside). */
@@ -55,7 +70,10 @@ export function UpdateAvailableDialog(props: UpdateAvailableDialogProps) {
     <AlertDialog
       open={props.open}
       onOpenChange={(open) => {
-        if (!open) props.onDismiss();
+        // Block dismissal once the download has started — the user
+        // can't cancel a native Tauri updater install, so hiding the
+        // dialog would leave a running install with no feedback.
+        if (!open && !props.downloadProgress) props.onDismiss();
       }}
     >
       <AlertDialogContent class="flex max-h-[80vh] w-full max-w-xl flex-col gap-0 overflow-hidden p-0">
@@ -93,14 +111,53 @@ export function UpdateAvailableDialog(props: UpdateAvailableDialogProps) {
           </Show>
         </div>
 
-        <footer class="flex justify-end gap-2 border-t border-border px-6 py-4">
-          <Button variant="outline" onClick={props.onDismiss}>
-            {(useLocale(), m.update_available_later())}
-          </Button>
-          <Button onClick={props.onInstall}>
-            {(useLocale(), m.update_available_install())}
-          </Button>
-        </footer>
+        <Show
+          when={props.downloadProgress}
+          fallback={
+            <footer class="flex justify-end gap-2 border-t border-border px-6 py-4">
+              <Button variant="outline" onClick={props.onDismiss}>
+                {(useLocale(), m.update_available_later())}
+              </Button>
+              <Button onClick={props.onInstall}>
+                {(useLocale(), m.update_available_install())}
+              </Button>
+            </footer>
+          }
+        >
+          {(progress) => (
+            <footer class="flex flex-col gap-2 border-t border-border px-6 py-4">
+              <p class="text-sm text-muted-foreground" data-testid="update-progress-copy">
+                <Show
+                  when={progress().phase === "downloading"}
+                  fallback={<>{(useLocale(), m.update_installing())}</>}
+                >
+                  <Show
+                    when={progress().total != null}
+                    fallback={(useLocale(),
+                      m.update_downloading_indeterminate({
+                        downloaded: formatBytes(progress().downloaded),
+                        speed: formatBytes(progress().speed),
+                      }))}
+                  >
+                    {(useLocale(),
+                      m.update_downloading_progress({
+                        downloaded: formatBytes(progress().downloaded),
+                        total: formatBytes(progress().total ?? 0),
+                        speed: formatBytes(progress().speed),
+                      }))}
+                  </Show>
+                </Show>
+              </p>
+              <Progress
+                value={progress().downloaded}
+                minValue={0}
+                maxValue={progress().total ?? undefined}
+                indeterminate={progress().total == null && progress().phase === "downloading"}
+                data-testid="update-progress-bar"
+              />
+            </footer>
+          )}
+        </Show>
       </AlertDialogContent>
     </AlertDialog>
   );
