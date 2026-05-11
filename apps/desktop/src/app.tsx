@@ -181,6 +181,27 @@ export function App() {
       ) => _devSetDownloadProgress({ phase, downloaded, total, speed }),
       clearDownloadProgress: () => _devSetDownloadProgress(null),
     };
+
+    // memlab soak hooks (DJA-38). The scenario dispatches synthetic
+    // events that drive the edit + fs-change path the way the user's
+    // keystrokes would, so memlab can compare baseline vs end-of-run
+    // heap and detect retention regressions. We register the
+    // listeners ONCE per process (no add/remove on each iteration —
+    // that would muddy the very leak signal we're trying to measure).
+    window.addEventListener("e2e:simulate-edit", (event) => {
+      const detail = (event as CustomEvent<{ iter: number; content: string }>).detail;
+      const pane = state.paneManager.activePane();
+      // Push content through the same code path the editor uses, so
+      // the convert pipeline runs, signal subscribers fire, and the
+      // fs-change watcher's listeners are exercised.
+      pane.setEditorContent(detail.content);
+      pane.tabs.updateActiveTabContent({ editorContent: detail.content });
+    });
+    window.addEventListener("e2e:reset", () => {
+      const pane = state.paneManager.activePane();
+      pane.setEditorContent("");
+      pane.tabs.updateActiveTabContent({ editorContent: "" });
+    });
   }
 
   // Toggle auto-refresh (only when roots are open)
