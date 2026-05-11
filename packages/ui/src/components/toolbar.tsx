@@ -64,6 +64,11 @@ interface ToolbarProps {
   tocVisible: boolean;
   onEditorModeChange: (mode: "edit" | "split" | "preview") => void;
   onCheckForUpdates?: () => void;
+  /** Open the read-only Release Notes dialog. Standalone from the
+   *  pending-update flow — lets the user reread the changelog of the
+   *  currently-installed version any time. When omitted (extension)
+   *  the menu item is hidden. */
+  onReleaseNotes?: () => void;
   /** Open the keyboard shortcuts help modal. Wired to a menu item; if
    *  omitted the item is hidden. */
   onShortcutsHelp?: () => void;
@@ -317,6 +322,7 @@ export function Toolbar(props: ToolbarProps) {
           (props.hasFile && props.onExportPdf)
           || props.onShortcutsHelp
           || props.onCheckForUpdates
+          || props.onReleaseNotes
           || props.onAbout
         }>
           <DropdownMenuSeparator />
@@ -338,6 +344,12 @@ export function Toolbar(props: ToolbarProps) {
           <DropdownMenuItem onSelect={props.onCheckForUpdates}>
             <IconDownload width={14} height={14} />
             {(useLocale(), m.menu_check_for_updates())}
+          </DropdownMenuItem>
+        </Show>
+        <Show when={props.onReleaseNotes}>
+          <DropdownMenuItem onSelect={props.onReleaseNotes}>
+            <IconFileText width={14} height={14} />
+            {(useLocale(), m.menu_release_notes())}
           </DropdownMenuItem>
         </Show>
         <Show when={props.onAbout}>

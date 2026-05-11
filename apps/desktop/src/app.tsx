@@ -33,7 +33,9 @@ import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
 import { setupTray } from "./lib/tray.ts";
 import { _devSetPendingUpdate, checkForAppUpdates, dismissUpdate, useUpdate } from "./lib/updater.ts";
+import { fetchReleaseNotes, releaseHtmlUrl } from "./lib/release-notes.ts";
 import { UpdateAvailableDialog } from "@asciimark/ui/components/update-available-dialog.tsx";
+import { ReleaseNotesDialog } from "@asciimark/ui/components/release-notes-dialog.tsx";
 import { findInFiles } from "./lib/fs.ts";
 import { WindowControls } from "./components/window-controls.tsx";
 import { FigmaCaptureButton } from "./components/figma-capture-button.tsx";
@@ -68,6 +70,17 @@ export function App() {
   const [shortcutsHelpVisible, setShortcutsHelpVisible] = createSignal(false);
   const [aboutOpen, setAboutOpen] = createSignal(false);
   const [appVersion, setAppVersion] = createSignal<string>("");
+  // Release notes dialog state — driven by the "Release notes" menu
+  // item / Command Palette command. `notes` is null while loading or
+  // on error; `error` flips to a localized message on failure.
+  const [releaseNotesState, setReleaseNotesState] = createSignal<{
+    open: boolean;
+    version: string;
+    notes: string | null;
+    loading: boolean;
+    error: string | null;
+    htmlUrl: string;
+  }>({ open: false, version: "", notes: null, loading: false, error: null, htmlUrl: "" });
   // Command palette (Cmd/Ctrl+Shift+P).
   const [commandPaletteVisible, setCommandPaletteVisible] = createSignal(false);
   // Symbol palette (Cmd/Ctrl+Shift+O).
@@ -316,6 +329,43 @@ export function App() {
   onMount(() => {
     void getVersion().then(setAppVersion).catch(() => {});
   });
+
+  // Opens the Release Notes dialog for the currently-installed version,
+  // fetching the body from GitHub the first time (cache hit afterwards).
+  // The error fallback inside the dialog surfaces the message and the
+  // "Open on GitHub" button remains available either way.
+  async function openReleaseNotes(): Promise<void> {
+    const version = appVersion() || (await getVersion().catch(() => ""));
+    if (!version) return;
+    setReleaseNotesState({
+      open: true,
+      version,
+      notes: null,
+      loading: true,
+      error: null,
+      htmlUrl: releaseHtmlUrl(version),
+    });
+    try {
+      const result = await fetchReleaseNotes(version);
+      setReleaseNotesState({
+        open: true,
+        version,
+        notes: result.body,
+        loading: false,
+        error: null,
+        htmlUrl: result.htmlUrl,
+      });
+    } catch (e) {
+      setReleaseNotesState({
+        open: true,
+        version,
+        notes: null,
+        loading: false,
+        error: (e as Error)?.message ?? String(e),
+        htmlUrl: releaseHtmlUrl(version),
+      });
+    }
+  }
 
   // In production, block the native WebView context menu (Reload / Inspect
   // Element). Kobalte's ContextMenu triggers call preventDefault() before this
@@ -844,6 +894,12 @@ export function App() {
         run: () => checkForAppUpdates(false),
       },
       {
+        id: "help.releaseNotes",
+        group: "Help",
+        title: m.command_release_notes(),
+        run: () => { void openReleaseNotes(); },
+      },
+      {
         id: "help.about",
         group: "Help",
         title: m.command_about(),
@@ -1196,6 +1252,7 @@ export function App() {
       onWindowDragStart={handleWindowDragStart}
       onWindowTitleDoubleClick={handleWindowTitleDoubleClick}
       onCheckForUpdates={() => checkForAppUpdates(false)}
+      onReleaseNotes={() => { void openReleaseNotes(); }}
       tabStore={tabStore()}
       onActivateTab={handleActivateTab}
       onCloseTab={handleCloseTab}
@@ -1273,6 +1330,18 @@ export function App() {
         const update = useUpdate();
         if (!update) return;
         void update.install();
+      }}
+    />
+    <ReleaseNotesDialog
+      open={releaseNotesState().open}
+      version={releaseNotesState().version}
+      loading={releaseNotesState().loading}
+      notes={releaseNotesState().notes}
+      error={releaseNotesState().error}
+      htmlUrl={releaseNotesState().htmlUrl}
+      onClose={() => setReleaseNotesState((s) => ({ ...s, open: false }))}
+      onOpenInBrowser={() => {
+        void openUrl(releaseNotesState().htmlUrl);
       }}
     />
     {import.meta.env.DEV && <FigmaCaptureButton />}

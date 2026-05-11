@@ -60,6 +60,11 @@ interface AppShellProps {
    * leave it undefined and the menu item is hidden.
    */
   onCheckForUpdates?: () => void;
+  /**
+   * Open the standalone Release Notes dialog. Only desktop wires this;
+   * extension leaves it undefined and the menu item is hidden.
+   */
+  onReleaseNotes?: () => void;
   onCloseRoot?: (rootId: string) => void;
   onGoBack: () => void;
   onGoForward: () => void;
@@ -461,6 +466,7 @@ export function AppShell(props: AppShellProps) {
             hasFile={s.hasFile()}
             hasRoot={props.hasRoot}
             onCheckForUpdates={props.onCheckForUpdates}
+            onReleaseNotes={props.onReleaseNotes}
             onShortcutsHelp={props.onShortcutsHelpOpen}
             onAbout={props.aboutVersion ? props.onAboutOpen : undefined}
             isSplit={visiblePanes().length > 1}

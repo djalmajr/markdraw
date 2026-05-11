@@ -118,3 +118,25 @@ describe("Toolbar — TOC toggle", () => {
     expect(btn.getAttribute("data-pressed")).toBe("");
   });
 });
+
+describe("Toolbar — Release Notes prop wiring (DJA-33)", () => {
+  // Kobalte's DropdownMenu lazy-mounts items only when the user opens
+  // the menu through real pointer/keyboard gestures — synthetic
+  // .click() events don't trigger the open state. We can still assert
+  // that the host's `onReleaseNotes` callback survives onto the
+  // Toolbar without exploding (prop wiring smoke), and the dialog
+  // render + behaviour mutation is fully covered in
+  // `release-notes-dialog.vtest.tsx`. The menu-entry render itself is
+  // protected by the in-app Tauri MCP screenshot capture during the
+  // DJA-33 visual validation pass.
+  it("accepts onReleaseNotes without throwing and continues rendering the toolbar", () => {
+    const onReleaseNotes = vi.fn();
+    const { baseElement } = render(() => (
+      <Toolbar {...BASE_PROPS} onReleaseNotes={onReleaseNotes} />
+    ));
+    // Toolbar still mounts and the menu trigger is intact (no
+    // accidental crash from the new prop pathway).
+    expect(baseElement.querySelector('[aria-label="Menu"]')).not.toBeNull();
+    expect(onReleaseNotes).not.toHaveBeenCalled();
+  });
+});
