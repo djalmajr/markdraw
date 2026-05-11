@@ -32,6 +32,16 @@ mock.module("./fs.ts", () => ({
     }),
   readFileByPath: async () => null,
   readFilesRelative: async () => new Map<string, string>(),
+  // Other exports listed because bun.module mocks the whole module —
+  // anything not listed becomes undefined for every suite that
+  // imports `./fs.ts` (mock survives the test process). These stubs
+  // are no-ops; the suites that actually exercise them ship their
+  // own controllable mocks above this one.
+  writeFile: async () => {},
+  renameFile: async () => {},
+  trashPath: async () => {},
+  readTree: async () => [],
+  openDirectory: async () => null,
 }));
 
 mock.module("@tauri-apps/api/event", () => ({
@@ -39,6 +49,12 @@ mock.module("@tauri-apps/api/event", () => ({
 }));
 mock.module("@tauri-apps/api/core", () => ({
   invoke: async () => undefined,
+  // Resource is a base class used by other Tauri plugins (notably
+  // plugin-updater's Update class). Other test suites in this folder
+  // import that plugin transitively; bun mocks are process-wide and
+  // first-to-load wins, so we have to ship Resource here for those
+  // tests to resolve cleanly when this suite runs first.
+  Resource: class {},
 }));
 mock.module("./chaos-invoke.ts", () => ({
   invoke: async () => undefined,

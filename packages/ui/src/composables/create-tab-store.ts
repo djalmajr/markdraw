@@ -364,6 +364,14 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     const tab = getTab(tabId);
     if (!tab) return;
     const newId = makeTabId(tab.rootId, newFilePath);
+    // No-op when the rewrite would collide with an EXISTING tab id
+    // (other than the one being renamed). Caught by the
+    // create-tab-store.stateful property test: rename-to-an-already-
+    // open-name used to drop two tabs into the same id, breaking the
+    // tabs-are-unique invariant and corrupting later operations
+    // keyed by id (close, activate). The FS layer rejects the rename
+    // for the same reason — staying consistent at the store level.
+    if (newId !== tabId && tabList().some((t) => t.id === newId)) return;
     setTabList((prev) =>
       prev.map((t) => {
         if (t.id !== tabId) return t;

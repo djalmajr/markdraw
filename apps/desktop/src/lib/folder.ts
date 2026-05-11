@@ -79,15 +79,21 @@ export function createFolder(deps: FolderDeps) {
   async function refreshRoot(rootId: string) {
     const rootPath = rootPaths().get(rootId);
     if (!rootPath) return;
+    // Pin the per-doc target BEFORE the await so the cleanup below
+    // writes to the same pane that observed the stale selectedFile.
+    // The AppState proxy resolves `paneManager.activePane()` on each
+    // call — if the user flips panes mid-read, naive `state.setHtml`
+    // would clear the wrong pane's preview. See wiki Round 4 Lesson 6.
+    const targetPane = state.paneManager.activePane();
     try {
       const entries = await readTree(rootPath, state.showHiddenEntries());
-      const currentPath = state.selectedFile()?.path;
+      const currentPath = targetPane.selectedFile()?.path;
       state.updateRootEntries(rootId, entries);
 
       // If selected file was in this root and was deleted, clear the selection
-      if (currentPath && state.selectedRootId() === rootId && !state.findEntryByPath(currentPath, rootId)) {
-        state.setSelectedFile(null);
-        state.setHtml("");
+      if (currentPath && targetPane.selectedRootId() === rootId && !state.findEntryByPath(currentPath, rootId)) {
+        targetPane.setSelectedFile(null);
+        targetPane.setHtml("");
       }
     } catch (e) {
       console.error("Failed to refresh root:", e);
@@ -96,17 +102,21 @@ export function createFolder(deps: FolderDeps) {
 
   async function refreshAllRoots(includeHiddenEntries: boolean) {
     const ids = Array.from(rootPaths().keys());
+    // Same race rule as refreshRoot: pin at call time so a pane flip
+    // during the parallel reads doesn't redirect the cleanup to the
+    // wrong pane.
+    const targetPane = state.paneManager.activePane();
     await Promise.allSettled(ids.map(async (rootId) => {
       const rootPath = rootPaths().get(rootId);
       if (!rootPath) return;
 
       const entries = await readTree(rootPath, includeHiddenEntries);
-      const currentPath = state.selectedFile()?.path;
+      const currentPath = targetPane.selectedFile()?.path;
       state.updateRootEntries(rootId, entries);
 
-      if (currentPath && state.selectedRootId() === rootId && !state.findEntryByPath(currentPath, rootId)) {
-        state.setSelectedFile(null);
-        state.setHtml("");
+      if (currentPath && targetPane.selectedRootId() === rootId && !state.findEntryByPath(currentPath, rootId)) {
+        targetPane.setSelectedFile(null);
+        targetPane.setHtml("");
       }
     }));
   }
@@ -129,16 +139,23 @@ export function createFolder(deps: FolderDeps) {
   }
 
   async function handleEditorSave() {
-    const entry = state.selectedFile();
-    const rootId = state.selectedRootId();
+    // Pin the pane that originated the save — autosave fires 1s after
+    // the last edit, and the user can flip panes during that window.
+    // Without pinning, `state.setSavedContent` would clear the dirty
+    // mark of whichever pane is active when the disk write returns,
+    // not the pane whose buffer we actually persisted. See Round 4
+    // Lesson 6 for the canonical write-up.
+    const targetPane = state.paneManager.activePane();
+    const entry = targetPane.selectedFile();
+    const rootId = targetPane.selectedRootId();
     const rootPath = rootId ? rootPaths().get(rootId) : null;
     if (!entry || !rootPath) return;
 
     try {
       const absolutePath = `${rootPath}/${entry.path}`;
-      const content = state.editorContent();
+      const content = targetPane.editorContent();
       await writeFile(absolutePath, content);
-      state.setSavedContent(content);
+      targetPane.setSavedContent(content);
     } catch (e) {
       console.error("Failed to save file:", e);
     }
@@ -169,16 +186,20 @@ export function createFolder(deps: FolderDeps) {
     const newRelative = parentRel + newName;
     if (newRelative === entry.path) return;
 
+    // Pin the per-doc target BEFORE the rename round-trip so a
+    // mid-await pane flip can't redirect the path rewrite to the
+    // wrong pane. See Round 4 Lesson 6.
+    const targetPane = state.paneManager.activePane();
     await renameFile(rootPath, entry.path, newRelative);
 
     // If the renamed entry is (or contains) the open file, rewrite its path
-    const sel = state.selectedFile();
-    if (sel && state.selectedRootId() === rootId) {
+    const sel = targetPane.selectedFile();
+    if (sel && targetPane.selectedRootId() === rootId) {
       if (sel.path === entry.path) {
-        state.setSelectedFile({ ...sel, path: newRelative, name: newName });
+        targetPane.setSelectedFile({ ...sel, path: newRelative, name: newName });
       } else if (sel.path.startsWith(entry.path + "/")) {
         const newSelPath = newRelative + sel.path.slice(entry.path.length);
-        state.setSelectedFile({ ...sel, path: newSelPath });
+        targetPane.setSelectedFile({ ...sel, path: newSelPath });
       }
     }
 
@@ -189,17 +210,21 @@ export function createFolder(deps: FolderDeps) {
     const rootPath = rootPaths().get(rootId);
     if (!rootPath) throw new Error("Root not found");
 
+    // Same rationale as handleRename / handleEditorSave — pin the
+    // pane whose preview we'll need to clear if the open file lived
+    // inside the deleted entry.
+    const targetPane = state.paneManager.activePane();
     await trashPath(rootPath, entry.path);
 
     // If the deleted entry is (or contains) the open file, clear selection
-    const sel = state.selectedFile();
-    if (sel && state.selectedRootId() === rootId) {
+    const sel = targetPane.selectedFile();
+    if (sel && targetPane.selectedRootId() === rootId) {
       if (sel.path === entry.path || sel.path.startsWith(entry.path + "/")) {
-        state.setSelectedFile(null);
-        state.setHtml("");
-        state.setFrontmatter(null);
-        state.setEditorContent("");
-        state.setSavedContent("");
+        targetPane.setSelectedFile(null);
+        targetPane.setHtml("");
+        targetPane.setFrontmatter(null);
+        targetPane.setEditorContent("");
+        targetPane.setSavedContent("");
       }
     }
 
