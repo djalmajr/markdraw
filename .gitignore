@@ -58,6 +58,12 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 apps/desktop/src-tauri/target
 apps/desktop/src-tauri/llvm-cov-target
 
+# Tauri-generated permission/ACL schemas. The `tauri-build` build
+# script regenerates these on every `cargo build` from the
+# currently-resolved plugin versions, so they drift the moment any
+# Tauri-side dep upgrades. Matches the Tauri 2 official template.
+apps/desktop/src-tauri/gen/schemas/
+
 # Stand-alone Rust sub-crates under tools/ (loom-watcher-tests,
 # miri-helpers-tests). Each has its own target/ and Cargo.lock.
 tools/*/target
