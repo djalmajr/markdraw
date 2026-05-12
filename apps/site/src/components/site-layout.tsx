@@ -84,16 +84,17 @@ function Flag(props: { locale: string; class?: string }) {
       </svg>
     );
   }
-  // en — Union Jack style for English (the language), not the US
-  // flag, since "en" here means the English language. Keep it
-  // visually distinct from the Brazilian green at small sizes.
+  // en — US flag (stripes + canton). At the picker size we don't
+  // try to render the 50 stars; the alternating red/white bands
+  // plus the blue canton are enough for instant recognition.
   return (
     <svg aria-hidden="true" class={cls} viewBox="0 0 20 14" xmlns="http://www.w3.org/2000/svg">
-      <rect width="20" height="14" fill="#012169" />
-      <path d="M0,0 L20,14 M20,0 L0,14" stroke="#ffffff" stroke-width="2.5" />
-      <path d="M0,0 L20,14 M20,0 L0,14" stroke="#c8102e" stroke-width="1.2" />
-      <path d="M10,0 V14 M0,7 H20" stroke="#ffffff" stroke-width="3.5" />
-      <path d="M10,0 V14 M0,7 H20" stroke="#c8102e" stroke-width="2" />
+      <rect width="20" height="14" fill="#ffffff" />
+      <rect width="20" height="2" y="0" fill="#b22234" />
+      <rect width="20" height="2" y="4" fill="#b22234" />
+      <rect width="20" height="2" y="8" fill="#b22234" />
+      <rect width="20" height="2" y="12" fill="#b22234" />
+      <rect width="8" height="7.5" fill="#3c3b6e" />
     </svg>
   );
 }
