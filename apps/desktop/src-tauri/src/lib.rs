@@ -759,6 +759,37 @@ pub fn run() {
     }
 
     builder
+        .setup(|app| {
+            // macOS-only: make the green traffic-light button do ZOOM
+            // (= classic "maximize") instead of entering native
+            // fullscreen. The default behaviour hides the entire
+            // title bar — including the close/min/max buttons — and
+            // since AsciiMark already has its own reader/zen mode
+            // (Cmd+. / F11), losing system fullscreen is a fair
+            // trade for keeping the traffic lights always visible
+            // after a maximize gesture.
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                use objc2::runtime::AnyObject;
+                if let Ok(handle) = window.ns_window() {
+                    let ns_window = handle as *mut AnyObject;
+                    // NSWindowCollectionBehaviorFullScreenNone =
+                    //   1 << 9. Bitwise-OR with the existing flags
+                    //   so other Tauri-managed collection behaviour
+                    //   (like ignoring exposé) survives the patch.
+                    const FULL_SCREEN_NONE: usize = 1 << 9;
+                    unsafe {
+                        let current: usize =
+                            objc2::msg_send![ns_window, collectionBehavior];
+                        let next = current | FULL_SCREEN_NONE;
+                        let _: () =
+                            objc2::msg_send![ns_window, setCollectionBehavior: next];
+                    }
+                }
+            }
+            let _ = app;
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
