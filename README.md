@@ -1,94 +1,98 @@
 # AsciiMark
 
-A viewer for AsciiDoc and Markdown files with diagrams, math, and more. Works as a Chrome extension that auto-renders `.adoc`/`.md` URLs, or as a standalone web app for browsing local directories. All processing happens locally in your browser.
+A local-first viewer and editor for AsciiDoc and Markdown — runs as
+a desktop app (Tauri) or a Chrome extension. Diagrams, math, split
+panes, workspace symbol search, backlinks, and a keyboard-first
+navigation layer; everything renders locally without telemetry.
 
-## Features
+## Install
 
-- **AsciiDoc & Markdown** - Full rendering with `@asciidoctor/core` and `markdown-it` (14 plugins)
-- **Syntax highlighting** - Code blocks highlighted with Prism (embedded, local)
-- **Mermaid diagrams** - Rendered inline in preview
-- **KaTeX math** - LaTeX expressions in Markdown
-- **Include resolution** - Recursive `include::` (AsciiDoc) and `<!-- include: path -->` (Markdown)
-- **File tree** - Browse local directories via File System Access API (with fallback)
-- **Table of Contents** - Auto-generated sidebar with scroll tracking
-- **Auto-refresh** - Polls for file changes (2s interval)
-- **Dark/light theme** - Toggle with system preference on first load
-- **PDF export** - Via browser print with optimized print styles
-- **Session restore** - Reopens last directory on reload (IndexedDB)
-- **SPA routing** - Hash-based navigation with browser back/forward support
-- **Chrome Extension** - Auto-detects `.adoc`/`.md` files opened in the browser
+* **Desktop** — pre-built signed installers for macOS (arm64 + x64),
+  Linux (AppImage + .deb), and Windows (MSI + EXE) at
+  [github.com/djalmajr/asciimark-releases](https://github.com/djalmajr/asciimark-releases/releases/latest).
+  Auto-update wired in via the Tauri updater.
+* **Chrome extension** —
+  [Chrome Web Store listing](https://chromewebstore.google.com/detail/asciimark/dmcihjkjbeckainfkaddpkeghlllmkbk).
+  Renders `.adoc` and `.md` URLs directly in the tab.
+* **Website** — [djalmajr.github.io/asciimark](https://djalmajr.github.io/asciimark/)
+  (downloads, guide, privacy).
 
-## Documentation
+## What's inside
 
-Full user guide and privacy policy available at [djalmajr.github.io/asciimark](https://djalmajr.github.io/asciimark/).
+* AsciiDoc (Asciidoctor) and Markdown (markdown-it, 14 plugins).
+* Mermaid + Kroki diagrams. KaTeX math.
+* `include::` resolution (recursive) and Markdown transclude.
+* Split panes (Cmd/Ctrl+\\) — independent tabs, editor mode, TOC
+  per pane.
+* VS Code–style preview tabs (italic until edited or pinned).
+* Quick Open (Cmd/Ctrl+P), Command Palette (⇧+P), Go to Heading
+  (⇧+O), Workspace Symbols (⌥+O), Find in Files (⇧+F),
+  Reader/Zen mode (.).
+* Backlinks panel + workspace-wide heading search across every doc.
+* Multi-root workspaces, recent files/folders, favorites.
+* Mac/Linux/Windows file-system watcher with debouncing.
+* Local-first: no analytics, no telemetry, no AsciiMark backend.
 
-## Monorepo Structure
+## Status
 
-```
-asciimark/
-├── packages/
-│   ├── core/          # Shared logic (AsciiDoc/Markdown conversion, utils)
-│   └── ui/            # Shared SolidJS components and styles
-├── apps/
-│   ├── extension/     # Chrome Extension
-│   └── desktop/       # Tauri Desktop App (planned)
-└── docs/              # GitHub Pages site
-```
-
-## Getting Started
-
-### Prerequisites
-
-- [Bun](https://bun.sh)
-
-### Install
-
-```sh
-bun install
-```
-
-### Development (Chrome Extension)
-
-```sh
-bun run dev:ext
-```
-
-Opens a local dev server with hot reload.
-
-### Build (Chrome Extension)
-
-```sh
-bun run build:ext
-```
-
-Outputs to `apps/extension/dist/`. Load this folder as an unpacked extension in Chrome:
-
-1. Go to `chrome://extensions`
-2. Enable **Developer mode**
-3. Click **Load unpacked** and select the `apps/extension/dist/` folder
-
-### Usage
-
-- **Open a folder** - Click "Open Folder" to browse local `.adoc` and `.md` files
-- **Extension mode** - Navigate to any `.adoc` or `.md` file URL and it renders automatically
-- **For `file://` URLs** - Enable "Allow access to file URLs" in the extension settings
-
-## Tech Stack
-
-- [SolidJS](https://solidjs.com) - UI framework
-- [Vite](https://vitejs.dev) - Build tool
-- [Tailwind CSS](https://tailwindcss.com) - Styling
-- [Kobalte](https://kobalte.dev) - Accessible UI primitives
-- [@asciidoctor/core](https://github.com/asciidoctor/asciidoctor.js) - AsciiDoc processor
-- [markdown-it](https://github.com/markdown-it/markdown-it) - Markdown processor
-- [Prism](https://prismjs.com) - Syntax highlighting
-- [Mermaid](https://mermaid.js.org) - Diagrams
-- [KaTeX](https://katex.org) - Math rendering (via markdown-it-katex)
+Active development. v0.10.0 shipped in May 2026; v0.11.0 in flight.
+Roadmap visible inside the wiki/private repo; public AI Assistant
+integration tracked openly.
 
 ## Privacy
 
-AsciiMark does not use analytics or telemetry. Most processing is local; Kroki diagram blocks use `https://kroki.io` for SVG rendering. See the [online privacy policy](https://djalmajr.github.io/asciimark/privacy.html).
+See [privacy policy](https://djalmajr.github.io/asciimark/privacy.html).
+TL;DR: no data leaves your machine except (1) the document URL you
+explicitly point the viewer at, (2) Kroki diagram blocks sent as
+plain text to `kroki.io` for SVG rendering, (3) the GitHub Releases
+poll done by the desktop auto-updater.
 
-## License
+## Tech stack
 
-MIT
+[Tauri 2](https://v2.tauri.app) (desktop runtime),
+[SolidJS](https://solidjs.com) (UI),
+[Vite](https://vitejs.dev),
+[Tailwind CSS](https://tailwindcss.com),
+[Kobalte](https://kobalte.dev) (UI primitives),
+[@asciidoctor/core](https://github.com/asciidoctor/asciidoctor.js),
+[markdown-it](https://github.com/markdown-it/markdown-it),
+[Prism](https://prismjs.com),
+[Mermaid](https://mermaid.js.org),
+[KaTeX](https://katex.org).
+
+## Repo layout
+
+```
+asciimark/
+├── apps/
+│   ├── desktop/       # Tauri desktop app (the primary target)
+│   ├── extension/     # Chrome extension
+│   └── site/          # djalmajr.github.io/asciimark (SolidJS)
+├── packages/
+│   ├── core/          # AsciiDoc/Markdown conversion + schemas
+│   ├── ui/            # Shared SolidJS components + styles
+│   └── i18n/          # paraglide-js catalog (en / pt-BR / es)
+├── tools/             # Stand-alone test crates (loom, miri)
+└── wiki/              # Architecture, decisions, processes
+```
+
+## Source-available, not open source
+
+The source is public so anyone can audit security or report bugs,
+but the code is **not licensed for reuse, redistribution, or
+competing products**. See [LICENSE](./LICENSE) and
+[LICENSING.md](./LICENSING.md) for the precise terms.
+
+To use AsciiMark: install one of the official binaries linked above.
+That's free, forever.
+
+For commercial licensing (embedding, redistribution, source under
+different terms), reach out: djalmajr@gmail.com.
+
+"AsciiMark" and the AsciiMark logo are trademarks of Djalma Júnior.
+
+## Contributing
+
+Issues and pull requests are welcome. By opening a PR you grant
+Djalma Júnior an irrevocable, perpetual, royalty-free license to
+incorporate the contribution under any terms (see `LICENSE`).

@@ -16,6 +16,7 @@ repo_markdown_allowlist:
   - CHANGELOG.md
   - SETUP.md
   - LICENSE.md
+  - LICENSING.md
   - BACKLOG.md
   - apps/*/README.md
   - apps/*/SETUP.md

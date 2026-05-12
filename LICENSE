@@ -1,0 +1,58 @@
+PROPRIETARY LICENSE — AsciiMark
+
+Copyright (c) 2026 Djalma Júnior. All rights reserved.
+
+This repository and all of its contents (the "Software") are made
+publicly viewable solely for transparency, security audit, and good-
+faith bug reporting. The publication of this source code does NOT
+grant any license, express or implied, to use, copy, modify, merge,
+publish, distribute, sublicense, sell, or create derivative works of
+the Software, in whole or in part, by any means, except as expressly
+permitted below.
+
+PERMITTED USES
+
+  1. Reading the source code for security review, bug reporting, or
+     personal study.
+  2. Running the unmodified binary distributions released through the
+     official channels:
+       * GitHub: https://github.com/djalmajr/asciimark-releases
+       * Chrome Web Store:
+         https://chromewebstore.google.com/detail/asciimark/
+         dmcihjkjbeckainfkaddpkeghlllmkbk
+  3. Submitting issues, discussions, and pull requests through this
+     repository. By submitting a contribution, the contributor grants
+     Djalma Júnior an irrevocable, perpetual, worldwide, royalty-free
+     license to use, modify, sublicense, and incorporate the
+     contribution into the Software under any terms, including
+     proprietary terms.
+
+PROHIBITED USES
+
+Without prior written permission from Djalma Júnior, you may NOT:
+
+  * Use the Software or any portion of it as the basis for another
+    product, service, fork, package, or distribution, whether
+    commercial or non-commercial.
+  * Copy, reproduce, or redistribute the source code, in whole or in
+    part, in any form.
+  * Modify the Software for distribution.
+  * Remove or alter any copyright, trademark, or attribution notices.
+  * Use the names "AsciiMark", "djalmajr/asciimark", or any
+    confusingly similar mark to identify a product or service that
+    is not produced by Djalma Júnior.
+
+TRADEMARKS
+
+"AsciiMark" and the AsciiMark logo are trademarks of Djalma Júnior.
+
+DISCLAIMER
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+OTHER LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For commercial-licensing inquiries, contact: djalmajr@gmail.com
