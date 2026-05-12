@@ -694,11 +694,14 @@ pub fn run() {
     let mut builder = tauri::Builder::default();
 
     // Dev-only: bind on 127.0.0.1 so the MCP bridge isn't exposed on the LAN.
+    // base_port 9233 keeps AsciiMark's bridge from colliding with sibling
+    // Tauri projects on the same machine that use the plugin's default 9223.
     #[cfg(debug_assertions)]
     {
         builder = builder.plugin(
             tauri_plugin_mcp_bridge::Builder::new()
                 .bind_address("127.0.0.1")
+                .base_port(9233)
                 .build(),
         );
     }

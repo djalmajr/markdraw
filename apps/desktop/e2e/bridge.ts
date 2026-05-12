@@ -1,6 +1,9 @@
 // Thin client for the tauri-plugin-mcp-bridge WebSocket protocol.
-// The plugin listens on 127.0.0.1:9223 by default. Each request is a JSON
-// object { id, command, args }; each response is { id, success, data | error }.
+// AsciiMark binds the bridge on 127.0.0.1:9233 (Rust side configured
+// via `.base_port(9233)` — see apps/desktop/src-tauri/src/lib.rs) so
+// it doesn't collide with sibling Tauri projects on the same host that
+// use the plugin's default 9223. Each request is a JSON object
+// { id, command, args }; each response is { id, success, data | error }.
 //
 // We need this client because the plugin only routes a fixed set of
 // `plugin:mcp-bridge|*` Tauri commands — it does NOT proxy arbitrary app
@@ -25,7 +28,7 @@ export interface Bridge {
 
 /**
  * Connect to the MCP bridge on a fixed port and resolve when a handshake
- * round-trip succeeds. Defaults to 127.0.0.1:9223 — overridable via env
+ * round-trip succeeds. Defaults to 127.0.0.1:9233 — overridable via env
  * vars TAURI_MCP_BRIDGE_HOST / TAURI_MCP_BRIDGE_PORT.
  *
  * Performs a `list_windows` round-trip during connect so we don't return a
@@ -38,7 +41,7 @@ export async function connectBridge(opts?: {
   handshakeTimeoutMs?: number;
 }): Promise<Bridge> {
   const host = opts?.host ?? process.env.TAURI_MCP_BRIDGE_HOST ?? "127.0.0.1";
-  const port = opts?.port ?? Number(process.env.TAURI_MCP_BRIDGE_PORT ?? 9223);
+  const port = opts?.port ?? Number(process.env.TAURI_MCP_BRIDGE_PORT ?? 9233);
   const handshakeTimeoutMs = opts?.handshakeTimeoutMs ?? 1500;
   return tryConnect(`ws://${host}:${port}`, handshakeTimeoutMs);
 }
