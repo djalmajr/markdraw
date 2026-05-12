@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@asciidoctor/core": "^3.0.4",
-    "@mdit/plugin-alert": "^0.22.4",
+    "@mdit/plugin-alert": "^0.23.2",
     "@traptitech/markdown-it-katex": "^3.6.0",
     "clsx": "^2.1.1",
     "fzf": "^0.5.2",
