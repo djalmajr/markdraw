@@ -117,7 +117,6 @@ a {
 }
 
 .site-header-button {
-  justify-self: end;
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
@@ -137,26 +136,37 @@ a {
   height: 0.95rem;
 }
 
-/* Locale picker — flag trigger + popover with the three locales. */
+/* Right-side actions cluster — keeps the locale picker and the
+ * GitHub button on the same row inside the third grid column. */
+.site-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  justify-self: end;
+}
+
+/* Locale picker — flag trigger styled as a ghost button to match
+ * the GitHub icon next to it. The popover lists the three locales
+ * with their flags and native names. */
 .site-locale-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.25rem;
-  height: 1.7rem;
+  width: 2rem;
+  height: 2rem;
   padding: 0;
-  border: 1px solid hsl(var(--border));
-  border-radius: 0.375rem;
-  background: hsl(var(--background));
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: background-color 120ms ease;
 }
 
 .site-locale-trigger:hover,
 .site-locale-trigger:focus-visible {
-  border-color: hsl(var(--primary));
+  background: hsl(var(--secondary));
   outline: none;
-  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.18);
 }
 
 .site-locale-flag {

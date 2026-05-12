@@ -120,50 +120,52 @@ export function SiteLayout() {
               )}
             </For>
           </nav>
-          <Popover>
-            <PopoverTrigger
-              class="site-locale-trigger"
-              aria-label={(useLocale(), m.site_locale_label())}
+          <div class="site-header-actions">
+            <Popover>
+              <PopoverTrigger
+                class="site-locale-trigger"
+                aria-label={(useLocale(), m.site_locale_label())}
+              >
+                {(useLocale(), <Flag locale={currentLocale()} />)}
+              </PopoverTrigger>
+              <PopoverContent class="site-locale-popover">
+                <ul class="site-locale-list" role="listbox">
+                  <For each={locales}>
+                    {(loc) => (
+                      <li>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={currentLocale() === loc}
+                          class="site-locale-option"
+                          classList={{
+                            "site-locale-option-active": currentLocale() === loc,
+                          }}
+                          onClick={() => {
+                            if (currentLocale() === loc) return;
+                            switchLocale(loc as (typeof locales)[number]);
+                          }}
+                        >
+                          <Flag locale={loc} />
+                          <span>{LOCALE_LABELS[loc] ?? loc}</span>
+                        </button>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </PopoverContent>
+            </Popover>
+            <Button
+              as="a"
+              class="site-header-button"
+              href="https://github.com/djalmajr/asciimark-releases/issues"
+              rel="noreferrer"
+              target="_blank"
+              variant="ghost"
             >
-              {(useLocale(), <Flag locale={currentLocale()} />)}
-            </PopoverTrigger>
-            <PopoverContent class="site-locale-popover">
-              <ul class="site-locale-list" role="listbox">
-                <For each={locales}>
-                  {(loc) => (
-                    <li>
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={currentLocale() === loc}
-                        class="site-locale-option"
-                        classList={{
-                          "site-locale-option-active": currentLocale() === loc,
-                        }}
-                        onClick={() => {
-                          if (currentLocale() === loc) return;
-                          switchLocale(loc as (typeof locales)[number]);
-                        }}
-                      >
-                        <Flag locale={loc} />
-                        <span>{LOCALE_LABELS[loc] ?? loc}</span>
-                      </button>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </PopoverContent>
-          </Popover>
-          <Button
-            as="a"
-            class="site-header-button"
-            href="https://github.com/djalmajr/asciimark-releases/issues"
-            rel="noreferrer"
-            target="_blank"
-            variant="ghost"
-          >
-            <GithubIcon />
-          </Button>
+              <GithubIcon />
+            </Button>
+          </div>
         </div>
       </header>
 
