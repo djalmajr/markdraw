@@ -578,17 +578,24 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   position: relative;
 }
 
-/* Editor/preview split — match the pane-splitter visual. The handle
-   keeps the same hit area (8px effective via negative margins) but
-   adds a static 1px line plus the same primary-coloured highlight
-   on hover and during the drag (parent `.content-panels.resizing`).
-   Scoped to `.content-panels > .resize-handle` so the sidebar
-   resize handle keeps its original transparent look — the sidebar
-   already shows a 1px border separator from the file tree. */
+/* Editor/preview split — mirrors the pane-splitter pattern exactly:
+   8px flex item that holds the col-resize cursor across the full
+   hit area, a centred 1px line for visual continuity, and a
+   primary-coloured highlight on hover plus during the drag (the
+   parent picks up `.resizing` from `onEditorResizeStart`). Scoped
+   to `.content-panels > .resize-handle` so the sidebar resize
+   handle keeps its original transparent look — the sidebar already
+   shows a 1px border separator from the file tree.
+
+   No negative margins: the original `margin-left: -3px` on the
+   base rule pushed half the hit area into the editor-panel, where
+   CodeMirror's own pointer surface absorbed the cursor and made
+   `col-resize` only show on the narrow center sliver. Letting the
+   handle take real flex space restores the full 8px column. */
 .content-panels > .resize-handle {
+  flex: 0 0 8px;
   width: 8px;
-  margin-left: -4px;
-  margin-right: -4px;
+  margin-left: 0;
   display: flex;
   align-items: stretch;
   justify-content: center;
@@ -1142,6 +1149,15 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .content-panels>.editor-panel:only-child {
+  border-right: none;
+}
+
+/* Split mode renders a resize-handle between editor and preview;
+   the handle owns the visual divider via its own ::before line, so
+   the editor-panel's static border-right would stack on top of it
+   and show as two parallel lines a few pixels apart. Drop the
+   border whenever a resize-handle sibling is present. */
+.editor-panel:has(+ .resize-handle) {
   border-right: none;
 }
 
