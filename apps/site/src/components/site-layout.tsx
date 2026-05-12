@@ -1,6 +1,11 @@
 import { For } from "solid-js";
 import { Link, Outlet } from "@tanstack/solid-router";
 import { Button } from "@asciimark/ui/components/ui/button.tsx";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@asciimark/ui/components/ui/popover.tsx";
 import * as m from "@asciimark/i18n";
 import { currentLocale, locales, switchLocale, useLocale } from "@asciimark/i18n/solid";
 
@@ -45,6 +50,54 @@ const LOCALE_LABELS: Record<string, string> = {
   es: "Español",
 };
 
+// Inline SVG flags so the picker stays self-contained (no external
+// font/emoji fallback variance across OSes and headless browsers).
+// Each flag is a simplified rectangular take on the national flag —
+// recognizable at the 20×14 size we ship in the header.
+function Flag(props: { locale: string; class?: string }) {
+  const cls = props.class ?? "site-locale-flag";
+  if (props.locale === "pt-BR") {
+    return (
+      <svg
+        aria-hidden="true"
+        class={cls}
+        viewBox="0 0 20 14"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <rect width="20" height="14" fill="#009b3a" />
+        <polygon points="10,2 18,7 10,12 2,7" fill="#ffdf00" />
+        <circle cx="10" cy="7" r="2.4" fill="#002776" />
+      </svg>
+    );
+  }
+  if (props.locale === "es") {
+    return (
+      <svg
+        aria-hidden="true"
+        class={cls}
+        viewBox="0 0 20 14"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <rect width="20" height="3.5" y="0" fill="#aa151b" />
+        <rect width="20" height="7" y="3.5" fill="#f1bf00" />
+        <rect width="20" height="3.5" y="10.5" fill="#aa151b" />
+      </svg>
+    );
+  }
+  // en — Union Jack style for English (the language), not the US
+  // flag, since "en" here means the English language. Keep it
+  // visually distinct from the Brazilian green at small sizes.
+  return (
+    <svg aria-hidden="true" class={cls} viewBox="0 0 20 14" xmlns="http://www.w3.org/2000/svg">
+      <rect width="20" height="14" fill="#012169" />
+      <path d="M0,0 L20,14 M20,0 L0,14" stroke="#ffffff" stroke-width="2.5" />
+      <path d="M0,0 L20,14 M20,0 L0,14" stroke="#c8102e" stroke-width="1.2" />
+      <path d="M10,0 V14 M0,7 H20" stroke="#ffffff" stroke-width="3.5" />
+      <path d="M10,0 V14 M0,7 H20" stroke="#c8102e" stroke-width="2" />
+    </svg>
+  );
+}
+
 export function SiteLayout() {
   return (
     <div class="site-shell">
@@ -67,25 +120,40 @@ export function SiteLayout() {
               )}
             </For>
           </nav>
-          <label class="site-locale-picker">
-            <span class="visually-hidden">
-              {(useLocale(), m.site_locale_label())}
-            </span>
-            <select
+          <Popover>
+            <PopoverTrigger
+              class="site-locale-trigger"
               aria-label={(useLocale(), m.site_locale_label())}
-              class="site-locale-select"
-              value={currentLocale()}
-              onChange={(event) => {
-                const next = event.currentTarget.value;
-                if (next === currentLocale()) return;
-                switchLocale(next as (typeof locales)[number]);
-              }}
             >
-              <For each={locales}>
-                {(loc) => <option value={loc}>{LOCALE_LABELS[loc] ?? loc}</option>}
-              </For>
-            </select>
-          </label>
+              {(useLocale(), <Flag locale={currentLocale()} />)}
+            </PopoverTrigger>
+            <PopoverContent class="site-locale-popover">
+              <ul class="site-locale-list" role="listbox">
+                <For each={locales}>
+                  {(loc) => (
+                    <li>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={currentLocale() === loc}
+                        class="site-locale-option"
+                        classList={{
+                          "site-locale-option-active": currentLocale() === loc,
+                        }}
+                        onClick={() => {
+                          if (currentLocale() === loc) return;
+                          switchLocale(loc as (typeof locales)[number]);
+                        }}
+                      >
+                        <Flag locale={loc} />
+                        <span>{LOCALE_LABELS[loc] ?? loc}</span>
+                      </button>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </PopoverContent>
+          </Popover>
           <Button
             as="a"
             class="site-header-button"

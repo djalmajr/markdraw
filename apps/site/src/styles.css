@@ -137,6 +137,83 @@ a {
   height: 0.95rem;
 }
 
+/* Locale picker — flag trigger + popover with the three locales. */
+.site-locale-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.375rem;
+  background: hsl(var(--background));
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.site-locale-trigger:hover,
+.site-locale-trigger:focus-visible {
+  border-color: hsl(var(--primary));
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.18);
+}
+
+.site-locale-flag {
+  width: 1.4rem;
+  height: 1rem;
+  border-radius: 2px;
+  object-fit: cover;
+  display: block;
+}
+
+.site-locale-popover {
+  width: auto !important;
+  min-width: 11rem;
+  padding: 0.4rem !important;
+}
+
+.site-locale-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.site-locale-option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.site-locale-option:hover,
+.site-locale-option:focus-visible {
+  background: hsl(var(--secondary));
+  outline: none;
+}
+
+.site-locale-option-active {
+  background: hsl(var(--primary) / 0.14);
+  color: hsl(var(--primary));
+}
+
+.site-locale-option-active:hover,
+.site-locale-option-active:focus-visible {
+  background: hsl(var(--primary) / 0.18);
+}
+
 .site-main {
   max-width: 1120px;
   width: 100%;
