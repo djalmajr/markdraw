@@ -115,7 +115,7 @@ export function AboutDialog(props: AboutDialogProps) {
           />
           <a
             class="text-primary underline-offset-2 hover:underline"
-            href="https://github.com/djalmajr/asciimark-releases/issues"
+            href="https://github.com/djalmajr/asciimark/issues"
             rel="noreferrer"
             target="_blank"
           >

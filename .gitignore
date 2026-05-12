@@ -86,3 +86,8 @@ tools/*/Cargo.lock
 # CLAUDE.md files (except root)
 **/CLAUDE.md
 !/CLAUDE.md
+
+# Wiki — internal architecture / process / decision logs.
+# Lives on disk so the local wiki-init / wiki-policy / wiki-query
+# hooks keep working, but is not published with the public repo.
+wiki/

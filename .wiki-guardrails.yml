@@ -1,3 +1,8 @@
+# The wiki directory is gitignored — see `wiki/` rule in .gitignore.
+# This guardrail file stays in the repo so local agent tooling
+# (wiki-init / wiki-policy / wiki-query) can still locate the wiki
+# on the developer's machine, but the wiki content itself is no
+# longer part of the public source.
 wiki_path: "./wiki"
 qmd_index: "asciimark"
 wiki_collection: "asciimark"

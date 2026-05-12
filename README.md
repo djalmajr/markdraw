@@ -72,8 +72,7 @@ asciimark/
 │   ├── core/          # AsciiDoc/Markdown conversion + schemas
 │   ├── ui/            # Shared SolidJS components + styles
 │   └── i18n/          # paraglide-js catalog (en / pt-BR / es)
-├── tools/             # Stand-alone test crates (loom, miri)
-└── wiki/              # Architecture, decisions, processes
+└── tools/             # Stand-alone test crates (loom, miri)
 ```
 
 ## Source-available, not open source

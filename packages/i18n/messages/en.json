@@ -248,7 +248,7 @@
   "privacy_section_changes": "Policy changes",
   "privacy_changes_p": "Any future updates to this policy are published on this page. The <strong>Last updated</strong> date at the top reflects the most recent change.",
   "privacy_section_contact": "Contact",
-  "privacy_contact_p": "For privacy questions, open an issue at <a href=\"https://github.com/djalmajr/asciimark-releases/issues\">github.com/djalmajr/asciimark-releases/issues</a>.",
+  "privacy_contact_p": "For privacy questions, open an issue at <a href=\"https://github.com/djalmajr/asciimark/issues\">github.com/djalmajr/asciimark/issues</a>.",
   "guide_sidebar_title": "Guide Sections",
   "guide_section_installation": "Installation",
   "guide_section_opening_files": "Opening Files",

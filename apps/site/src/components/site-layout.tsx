@@ -159,7 +159,7 @@ export function SiteLayout() {
             <Button
               as="a"
               class="site-header-button"
-              href="https://github.com/djalmajr/asciimark-releases/issues"
+              href="https://github.com/djalmajr/asciimark/issues"
               rel="noreferrer"
               target="_blank"
               variant="ghost"
