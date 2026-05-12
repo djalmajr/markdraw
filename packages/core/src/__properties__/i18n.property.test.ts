@@ -13,7 +13,11 @@ import { escapeHtml } from "../utils.ts";
 
 const noopRead = async () => null;
 
-const unicodeStringArb = fc.fullUnicodeString({ maxLength: 200 });
+// fast-check 4 removed `fullUnicodeString`; the equivalent is
+// `fc.string({ unit: "grapheme", ... })` which generates strings
+// over the full Unicode codepoint range including astral plane
+// characters (emoji, CJK extensions, etc.).
+const unicodeStringArb = fc.string({ unit: "grapheme", maxLength: 200 });
 
 describe("Unicode invariants", () => {
   it("extractFrontmatter handles arbitrary Unicode body without throwing", () => {
