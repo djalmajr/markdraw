@@ -334,11 +334,19 @@ export function Toolbar(props: ToolbarProps) {
           </DropdownMenuItem>
         </Show>
         <Show when={props.onShortcutsHelp}>
-          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={props.onShortcutsHelp}>
             <IconKeyboard width={14} height={14} />
             {(useLocale(), m.menu_keyboard_shortcuts())}
           </DropdownMenuItem>
+        </Show>
+        {/* Divider before the update/about cluster — Shortcuts is the
+            last item of the "things you do regularly" group; updates
+            and About read as a separate, lower-traffic block. */}
+        <Show when={
+          props.onShortcutsHelp
+          && (props.onCheckForUpdates || props.onReleaseNotes || props.onAbout)
+        }>
+          <DropdownMenuSeparator />
         </Show>
         <Show when={props.onCheckForUpdates}>
           <DropdownMenuItem onSelect={props.onCheckForUpdates}>
