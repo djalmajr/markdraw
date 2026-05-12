@@ -8,14 +8,12 @@
       "type": "http",
       "url": "https://mcp.linear.app/mcp",
       "headers": {
-        "Authorization": "Bearer ${LINEAR_API_KEY}"
+        "Authorization": "Bearer ${LINEAR_ZM_API_KEY}"
       }
     },
     "qmd": {
       "command": "/Users/djalmajr/.local/share/skills/qmd/wrappers/asciimark-qmd",
-      "args": [
-        "mcp"
-      ]
+      "args": ["mcp"]
     }
   }
 }

@@ -9,6 +9,4 @@ args = ["mcp"]
 
 [mcp_servers.linear]
 url = "https://mcp.linear.app/mcp"
-
-[mcp_servers.linear.headers]
-Authorization = "Bearer ${LINEAR_API_KEY}"
+bearer_token_env_var = "LINEAR_ZM_API_KEY"

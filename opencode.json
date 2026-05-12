@@ -13,7 +13,7 @@
       "type": "remote",
       "url": "https://mcp.linear.app/mcp",
       "headers": {
-        "Authorization": "Bearer ${LINEAR_API_KEY}"
+        "Authorization": "Bearer ${LINEAR_ZM_API_KEY}"
       },
       "enabled": true
     }
