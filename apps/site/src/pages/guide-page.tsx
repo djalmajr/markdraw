@@ -1,5 +1,7 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Button } from "@asciimark/ui/components/ui/button.tsx";
+import * as m from "@asciimark/i18n";
+import { useLocale } from "@asciimark/i18n/solid";
 
 interface GuideImage {
   alt: string;
@@ -7,111 +9,74 @@ interface GuideImage {
   src: string;
 }
 
-interface GuideSectionLink {
-  href: string;
-  label: string;
+// Inline-HTML wrappers — same pattern as the Privacy page: i18n
+// strings carry their own <code> / <strong> markup and we render
+// them via innerHTML. Source is fully controlled.
+function HtmlP(props: { html: string }) {
+  return <p innerHTML={props.html} />;
+}
+function HtmlLi(props: { html: string }) {
+  return <li innerHTML={props.html} />;
 }
 
-const sectionLinks: GuideSectionLink[] = [
-  { href: "#installation", label: "Installation" },
-  { href: "#opening-files", label: "Opening Files" },
-  { href: "#tabs", label: "Tabs" },
-  { href: "#navigation", label: "Navigation" },
-  { href: "#toc", label: "TOC and References" },
-  { href: "#workspace-symbols", label: "Workspace Symbols" },
-  { href: "#reader-mode", label: "Reader Mode" },
-  { href: "#search", label: "Search" },
-  { href: "#editor", label: "Editor" },
-  { href: "#appearance", label: "Appearance" },
-  { href: "#processing", label: "Document Processing" },
-  { href: "#diagrams", label: "Diagrams" },
-  { href: "#export", label: "Export" },
-  { href: "#shortcuts", label: "Keyboard Shortcuts" },
-  { href: "#screenshots", label: "Screenshots" },
-];
+const sectionIds = [
+  "installation",
+  "opening-files",
+  "tabs",
+  "navigation",
+  "toc",
+  "workspace-symbols",
+  "reader-mode",
+  "search",
+  "editor",
+  "appearance",
+  "processing",
+  "diagrams",
+  "export",
+  "shortcuts",
+  "screenshots",
+] as const;
+
+const sectionLabels: Record<(typeof sectionIds)[number], () => string> = {
+  installation: m.guide_section_installation,
+  "opening-files": m.guide_section_opening_files,
+  tabs: m.guide_section_tabs,
+  navigation: m.guide_section_navigation,
+  toc: m.guide_section_toc,
+  "workspace-symbols": m.guide_section_workspace_symbols,
+  "reader-mode": m.guide_section_reader_mode,
+  search: m.guide_section_search,
+  editor: m.guide_section_editor,
+  appearance: m.guide_section_appearance,
+  processing: m.guide_section_processing,
+  diagrams: m.guide_section_diagrams,
+  export: m.guide_section_export,
+  shortcuts: m.guide_section_shortcuts,
+  screenshots: m.guide_section_screenshots,
+};
 
 interface GuideScreenshot {
-  alt: string;
-  caption: string;
+  alt: () => string;
+  caption: () => string;
   src: string;
 }
 
 const guideScreenshots: GuideScreenshot[] = [
-  {
-    src: "/screenshots/desktop-welcome.png",
-    alt: "AsciiMark welcome screen with drop zone and keyboard shortcuts hint",
-    caption: "Welcome screen — drop a folder or click to open. The keyboard hint in the corner opens the shortcuts modal.",
-  },
-  {
-    src: "/screenshots/desktop-workspace-preview.png",
-    alt: "AsciiMark workspace with file tree, tabs, preview, and TOC",
-    caption: "A loaded workspace: sidebar tree, tab bar, live preview, and table of contents.",
-  },
-  {
-    src: "/screenshots/desktop-split-panes.png",
-    alt: "Two files open in split panes side by side",
-    caption: "Split panes (Cmd/Ctrl+\\) — read or compare two documents at the same time. Each pane has its own tab list and TOC.",
-  },
-  {
-    src: "/screenshots/desktop-preview-tabs.png",
-    alt: "Active workspace with one pinned tab and one preview tab in italic",
-    caption: "VSCode-style tabs — single-click opens the file in the preview slot (italic title); edit, double-click, or drag pins it.",
-  },
-  {
-    src: "/screenshots/desktop-toc-segmented.png",
-    alt: "Right gutter segmented into Summary and References tabs",
-    caption: "Right gutter is segmented into Summary (TOC) and References (workspace backlinks). Status bar shows live word count + reading time.",
-  },
-  {
-    src: "/screenshots/desktop-backlinks-panel.png",
-    alt: "References tab listing five workspace files that reference the active doc",
-    caption: "Backlinks — every workspace file that links to the active doc via Markdown link, AsciiDoc xref, or include::. Click a row to navigate.",
-  },
-  {
-    src: "/screenshots/desktop-workspace-symbols.png",
-    alt: "Workspace symbol palette listing headings across every doc",
-    caption: "Workspace Symbol Search (Cmd/Ctrl+Alt+O) — fuzzy-match headings across every doc in the workspace and jump in one click.",
-  },
-  {
-    src: "/screenshots/desktop-reader-mode.png",
-    alt: "Reader mode rendering only the centered preview without chrome",
-    caption: "Reader / Zen mode (Cmd/Ctrl+.) — chrome collapses, preview centers at a comfortable reading width.",
-  },
-  {
-    src: "/screenshots/desktop-edit-preview.png",
-    alt: "Editor and preview synced inside a single pane",
-    caption: "Edit + Preview mode — write Markdown/AsciiDoc on the left and see the rendering on the right.",
-  },
-  {
-    src: "/screenshots/desktop-quick-open.png",
-    alt: "Cmd/Ctrl+P fuzzy file picker showing matched files",
-    caption: "Quick Open (Cmd/Ctrl+P) — fuzzy-match files across all open workspaces.",
-  },
-  {
-    src: "/screenshots/desktop-command-palette.png",
-    alt: "Cmd/Ctrl+Shift+P command palette listing actions",
-    caption: "Command Palette (Cmd/Ctrl+Shift+P) — every action in one place, including theme and editor mode.",
-  },
-  {
-    src: "/screenshots/desktop-symbol-palette.png",
-    alt: "Cmd/Ctrl+Shift+O heading navigator showing the document outline",
-    caption: "Go to Heading (Cmd/Ctrl+Shift+O) — jump anywhere in the current document.",
-  },
-  {
-    src: "/screenshots/desktop-find-in-files.png",
-    alt: "Cmd/Ctrl+Shift+F search across the workspace with grouped results",
-    caption: "Find in Files (Cmd/Ctrl+Shift+F) — search across the workspace; jump to any match.",
-  },
-  {
-    src: "/screenshots/desktop-shortcuts-help.png",
-    alt: "Keyboard shortcuts modal listing every binding",
-    caption: "Shortcuts Help (Cmd/Ctrl+/) — discover bindings without leaving the app.",
-  },
-  {
-    src: "/screenshots/desktop-dark-theme.png",
-    alt: "AsciiMark in dark theme showing a rendered Markdown document",
-    caption: "Dark theme — switch via the menu or Command Palette.",
-  },
+  { src: "/screenshots/desktop-welcome.png", alt: m.guide_opening_folder_alt, caption: m.guide_opening_folder_caption },
+  { src: "/screenshots/desktop-workspace-preview.png", alt: m.guide_opening_folder_alt, caption: m.guide_opening_folder_caption },
+  { src: "/screenshots/desktop-split-panes.png", alt: m.guide_tabs_alt, caption: m.guide_tabs_caption },
+  { src: "/screenshots/desktop-preview-tabs.png", alt: m.guide_tabs_alt, caption: m.guide_tabs_caption },
+  { src: "/screenshots/desktop-toc-segmented.png", alt: m.guide_toc_h2, caption: m.guide_toc_summary_caption },
+  { src: "/screenshots/desktop-backlinks-panel.png", alt: m.guide_toc_h2, caption: m.guide_toc_references_caption },
+  { src: "/screenshots/desktop-workspace-symbols.png", alt: m.guide_symbols_h2, caption: m.guide_symbols_caption },
+  { src: "/screenshots/desktop-reader-mode.png", alt: m.guide_reader_h2, caption: m.guide_reader_caption },
+  { src: "/screenshots/desktop-edit-preview.png", alt: m.guide_editor_h2, caption: m.guide_editor_split_p },
+  { src: "/screenshots/desktop-quick-open.png", alt: m.guide_shortcut_quick_open, caption: m.guide_shortcut_quick_open },
+  { src: "/screenshots/desktop-command-palette.png", alt: m.guide_shortcut_command_palette, caption: m.guide_shortcut_command_palette },
+  { src: "/screenshots/desktop-symbol-palette.png", alt: m.guide_shortcut_go_heading, caption: m.guide_shortcut_go_heading },
+  { src: "/screenshots/desktop-find-in-files.png", alt: m.guide_shortcut_find_in_files, caption: m.guide_shortcut_find_in_files },
+  { src: "/screenshots/desktop-shortcuts-help.png", alt: m.guide_shortcut_modal, caption: m.guide_shortcut_modal },
+  { src: "/screenshots/desktop-dark-theme.png", alt: m.guide_appearance_caption, caption: m.guide_appearance_caption },
 ];
 
 export function GuidePage() {
@@ -127,19 +92,16 @@ export function GuidePage() {
   }
 
   onMount(() => {
-    const firstSectionId = sectionLinks[0].href.slice(1);
-    const lastSectionId = sectionLinks[sectionLinks.length - 1].href.slice(1);
+    const firstSectionId = sectionIds[0];
+    const lastSectionId = sectionIds[sectionIds.length - 1];
 
-    const sectionElements = sectionLinks
-      .map((item) => item.href.slice(1))
+    const sectionElements = sectionIds
       .map((id) => document.getElementById(id))
       .filter((element): element is HTMLElement => element !== null);
 
     function syncFromHash() {
       const hash = window.location.hash.replace("#", "");
-      if (hash) {
-        setActiveSection(hash);
-      }
+      if (hash) setActiveSection(hash);
     }
 
     function syncFromScrollExtremes() {
@@ -157,9 +119,7 @@ export function GuidePage() {
         !!lastSectionElement &&
         lastSectionElement.getBoundingClientRect().top <= window.innerHeight - 120;
 
-      if (nearBottom && reachedLastSection) {
-        setActiveSection(lastSectionId);
-      }
+      if (nearBottom && reachedLastSection) setActiveSection(lastSectionId);
     }
 
     syncFromHash();
@@ -167,19 +127,12 @@ export function GuidePage() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const visibleEntries = entries
-          .filter((entry) => entry.isIntersecting)
+        const visible = entries
+          .filter((e) => e.isIntersecting)
           .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top);
-
-        if (visibleEntries.length > 0) {
-          setActiveSection(visibleEntries[0].target.id);
-        }
+        if (visible.length > 0) setActiveSection(visible[0].target.id);
       },
-      {
-        root: null,
-        rootMargin: "-28% 0px -58% 0px",
-        threshold: [0, 0.25, 0.6, 1],
-      },
+      { root: null, rootMargin: "-28% 0px -58% 0px", threshold: [0, 0.25, 0.6, 1] },
     );
 
     sectionElements.forEach((element) => observer.observe(element));
@@ -193,22 +146,26 @@ export function GuidePage() {
     });
   });
 
+  function openImageWith(alt: () => string, caption: () => string, src: string) {
+    openImageModal({ alt: alt(), caption: caption(), src });
+  }
+
   return (
     <div class="guide-layout">
       <aside class="guide-sidebar-panel">
-        <p class="guide-sidebar-title">Guide Sections</p>
+        <p class="guide-sidebar-title">{(useLocale(), m.guide_sidebar_title())}</p>
         <nav aria-label="Guide sections" class="guide-sidebar-nav">
-          <For each={sectionLinks}>
-            {(item) => (
+          <For each={sectionIds}>
+            {(id) => (
               <a
                 class={
-                  item.href.slice(1) === activeSection()
+                  id === activeSection()
                     ? "guide-sidebar-link guide-sidebar-link-active"
                     : "guide-sidebar-link"
                 }
-                href={item.href}
+                href={`#${id}`}
               >
-                {item.label}
+                {(useLocale(), sectionLabels[id]())}
               </a>
             )}
           </For>
@@ -217,433 +174,274 @@ export function GuidePage() {
 
       <div class="guide-content-stack">
         <section class="content-panel" id="top">
-          <h1 class="content-title">User Guide</h1>
-          <p>
-            Everything you need to install, configure, and use AsciiMark across desktop and
-            extension workflows.
-          </p>
+          <h1 class="content-title">{(useLocale(), m.guide_title())}</h1>
+          <p>{(useLocale(), m.guide_intro_p())}</p>
         </section>
 
         <section class="content-panel" id="installation">
-          <h2>Installation</h2>
-          <h3>Chrome Extension</h3>
-          <p>
-            The Chrome Extension is currently under review in the Chrome Web Store. Once approved,
-            you will be able to install it and render <code>.adoc</code> and <code>.md</code> files
-            in-browser with formatted preview.
-          </p>
-          <h3>Desktop App</h3>
-          <p>Download the installer for your platform from the Home page downloads section.</p>
-          <h3>macOS: first launch</h3>
-          <p>Since the app is not notarized, macOS may block first launch. Run once:</p>
-          <p>
-            <code>xattr -cr /Applications/AsciiMark.app</code>
-          </p>
-          <h3>Windows: SmartScreen</h3>
-          <p>
-            If SmartScreen appears, click <strong>More info</strong> and then
-            <strong> Run anyway</strong>.
-          </p>
-          <h3>Linux: AppImage</h3>
-          <p>Make the downloaded AppImage executable before running:</p>
-          <p>
-            <code>chmod +x AsciiMark_*.AppImage</code>
-          </p>
-          <p>
-            The <code>.deb</code> package can be installed with your distro package manager.
-          </p>
+          <h2>{(useLocale(), m.guide_installation_h2())}</h2>
+          <h3>{(useLocale(), m.guide_installation_chrome_h3())}</h3>
+          <HtmlP html={(useLocale(), m.guide_installation_chrome_p())} />
+          <h3>{(useLocale(), m.guide_installation_desktop_h3())}</h3>
+          <p>{(useLocale(), m.guide_installation_desktop_p())}</p>
+          <h3>{(useLocale(), m.guide_installation_macos_h3())}</h3>
+          <p>{(useLocale(), m.guide_installation_macos_p())}</p>
+          <p><code>xattr -cr /Applications/AsciiMark.app</code></p>
+          <h3>{(useLocale(), m.guide_installation_windows_h3())}</h3>
+          <HtmlP html={(useLocale(), m.guide_installation_windows_p())} />
+          <h3>{(useLocale(), m.guide_installation_linux_h3())}</h3>
+          <p>{(useLocale(), m.guide_installation_linux_p())}</p>
+          <p><code>chmod +x AsciiMark_*.AppImage</code></p>
+          <HtmlP html={(useLocale(), m.guide_installation_linux_deb())} />
         </section>
 
         <section class="content-panel" id="opening-files">
-          <h2>Opening Files</h2>
-          <h3>Open Folder</h3>
-          <p>Select a local directory to browse all supported files in a tree sidebar.</p>
+          <h2>{(useLocale(), m.guide_opening_h2())}</h2>
+          <h3>{(useLocale(), m.guide_opening_folder_h3())}</h3>
+          <p>{(useLocale(), m.guide_opening_folder_p())}</p>
           <figure class="guide-media">
             <button
               class="guide-media-button"
               onClick={() =>
-                openImageModal({
-                  alt: "Sidebar file tree after loading a folder",
-                  caption: "Loaded folder tree in the left sidebar.",
-                  src: "/screenshots/desktop-workspace-preview.png",
-                })
+                openImageWith(m.guide_opening_folder_alt, m.guide_opening_folder_caption, "/screenshots/desktop-workspace-preview.png")
               }
               type="button"
             >
-              <img alt="Sidebar file tree after loading a folder" src="/screenshots/desktop-workspace-preview.png" />
+              <img alt={(useLocale(), m.guide_opening_folder_alt())} src="/screenshots/desktop-workspace-preview.png" />
             </button>
-            <figcaption>Loaded folder tree in the left sidebar.</figcaption>
+            <figcaption>{(useLocale(), m.guide_opening_folder_caption())}</figcaption>
           </figure>
-          <h3>Drag and Drop</h3>
-          <p>Drop a folder to populate the tree, or drop a file to open it directly.</p>
-          <h3>URL Mode</h3>
-          <p>
-            URLs ending with <code>.adoc</code> and <code>.md</code> can be rendered directly.
-          </p>
-          <h3>File URL Access (Extension)</h3>
+          <h3>{(useLocale(), m.guide_opening_dnd_h3())}</h3>
+          <p>{(useLocale(), m.guide_opening_dnd_p())}</p>
+          <h3>{(useLocale(), m.guide_opening_url_h3())}</h3>
+          <HtmlP html={(useLocale(), m.guide_opening_url_p())} />
+          <h3>{(useLocale(), m.guide_opening_file_url_h3())}</h3>
           <ul>
-            <li>
-              Open <code>chrome://extensions</code>
-            </li>
-            <li>Find AsciiMark and open Details</li>
-            <li>Enable Allow access to file URLs</li>
+            <HtmlLi html={(useLocale(), m.guide_opening_file_url_item1())} />
+            <HtmlLi html={(useLocale(), m.guide_opening_file_url_item2())} />
+            <HtmlLi html={(useLocale(), m.guide_opening_file_url_item3())} />
           </ul>
         </section>
 
         <section class="content-panel" id="tabs">
-          <h2>Tabs — preview vs pinned</h2>
-          <p>
-            Single-click in the file tree opens the file in the <strong>preview slot</strong> — the
-            tab title shows in italic. Click another file and the preview is replaced. Double-click,
-            drag, or just start editing to <strong>pin</strong> the tab; pinned tabs stay until you
-            close them.
-          </p>
-          <p>
-            The invariant: at most one preview tab per pane. Middle-click and "Open in New Tab"
-            always create a pinned tab.
-          </p>
+          <h2>{(useLocale(), m.guide_tabs_h2())}</h2>
+          <HtmlP html={(useLocale(), m.guide_tabs_p1())} />
+          <HtmlP html={(useLocale(), m.guide_tabs_p2())} />
           <figure class="guide-media">
             <button
               class="guide-media-button"
-              onClick={() =>
-                openImageModal({
-                  alt: "Active workspace with one pinned tab and one preview tab in italic",
-                  caption: "VSCode-style tabs — pinned title is upright, preview is italic.",
-                  src: "/screenshots/desktop-preview-tabs.png",
-                })
-              }
+              onClick={() => openImageWith(m.guide_tabs_alt, m.guide_tabs_caption, "/screenshots/desktop-preview-tabs.png")}
               type="button"
             >
-              <img alt="Active workspace with one pinned tab and one preview tab in italic" src="/screenshots/desktop-preview-tabs.png" />
+              <img alt={(useLocale(), m.guide_tabs_alt())} src="/screenshots/desktop-preview-tabs.png" />
             </button>
-            <figcaption>VSCode-style tabs — pinned upright, preview italic.</figcaption>
+            <figcaption>{(useLocale(), m.guide_tabs_caption())}</figcaption>
           </figure>
         </section>
 
         <section class="content-panel" id="navigation">
-          <h2>Navigation</h2>
+          <h2>{(useLocale(), m.guide_navigation_h2())}</h2>
           <ul>
-            <li>Use the file tree to jump between documents.</li>
-            <li>Follow AsciiDoc xref links in rendered preview.</li>
-            <li>Use browser/app back and forward history.</li>
-            <li>Use breadcrumbs to understand current file location.</li>
+            <li>{(useLocale(), m.guide_navigation_item1())}</li>
+            <li>{(useLocale(), m.guide_navigation_item2())}</li>
+            <li>{(useLocale(), m.guide_navigation_item3())}</li>
+            <li>{(useLocale(), m.guide_navigation_item4())}</li>
           </ul>
           <figure class="guide-media">
             <button
               class="guide-media-button"
-              onClick={() =>
-                openImageModal({
-                  alt: "Markdown file opened from sidebar tree",
-                  caption: "Example of opening a file directly from the tree.",
-                  src: "/screenshots/desktop-workspace-preview.png",
-                })
-              }
+              onClick={() => openImageWith(m.guide_navigation_alt, m.guide_navigation_caption, "/screenshots/desktop-workspace-preview.png")}
               type="button"
             >
-              <img alt="Markdown file opened from sidebar tree" src="/screenshots/desktop-workspace-preview.png" />
+              <img alt={(useLocale(), m.guide_navigation_alt())} src="/screenshots/desktop-workspace-preview.png" />
             </button>
-            <figcaption>Example of opening a file directly from the tree.</figcaption>
+            <figcaption>{(useLocale(), m.guide_navigation_caption())}</figcaption>
           </figure>
         </section>
 
         <section class="content-panel" id="toc">
-          <h2>TOC and References</h2>
-          <p>
-            The right gutter is segmented into two tabs:
-          </p>
+          <h2>{(useLocale(), m.guide_toc_h2())}</h2>
+          <p>{(useLocale(), m.guide_toc_intro())}</p>
           <ul>
-            <li><strong>Summary</strong> — the rendered document's table of contents. Scroll position drives the active heading highlight.</li>
-            <li><strong>References</strong> — every other workspace doc that links to the current file via Markdown link, AsciiDoc xref, or include. The count badge tells you upfront whether the active doc is referenced.</li>
+            <HtmlLi html={(useLocale(), m.guide_toc_item_summary())} />
+            <HtmlLi html={(useLocale(), m.guide_toc_item_references())} />
           </ul>
-          <p>
-            Both tabs stay mounted regardless of which is visible — switching is instant.
-          </p>
+          <p>{(useLocale(), m.guide_toc_outro())}</p>
           <figure class="guide-media guide-media-compact">
             <button
               class="guide-media-button"
-              onClick={() =>
-                openImageModal({
-                  alt: "Right gutter segmented into Summary and References tabs",
-                  caption: "Summary tab shows the document TOC; the count on References indicates inbound links.",
-                  src: "/screenshots/desktop-toc-segmented.png",
-                })
-              }
+              onClick={() => openImageWith(m.guide_toc_h2, m.guide_toc_summary_caption, "/screenshots/desktop-toc-segmented.png")}
               type="button"
             >
-              <img alt="Right gutter segmented into Summary and References tabs" src="/screenshots/desktop-toc-segmented.png" />
+              <img alt={(useLocale(), m.guide_toc_h2())} src="/screenshots/desktop-toc-segmented.png" />
             </button>
-            <figcaption>Summary tab shows the document TOC; the count on References indicates inbound links.</figcaption>
+            <figcaption>{(useLocale(), m.guide_toc_summary_caption())}</figcaption>
           </figure>
           <figure class="guide-media guide-media-compact">
             <button
               class="guide-media-button"
-              onClick={() =>
-                openImageModal({
-                  alt: "References tab listing five workspace files that reference the active doc",
-                  caption: "References — workspace backlinks for the active file.",
-                  src: "/screenshots/desktop-backlinks-panel.png",
-                })
-              }
+              onClick={() => openImageWith(m.guide_toc_h2, m.guide_toc_references_caption, "/screenshots/desktop-backlinks-panel.png")}
               type="button"
             >
-              <img alt="References tab listing five workspace files that reference the active doc" src="/screenshots/desktop-backlinks-panel.png" />
+              <img alt={(useLocale(), m.guide_toc_h2())} src="/screenshots/desktop-backlinks-panel.png" />
             </button>
-            <figcaption>References — workspace backlinks for the active file.</figcaption>
+            <figcaption>{(useLocale(), m.guide_toc_references_caption())}</figcaption>
           </figure>
         </section>
 
         <section class="content-panel" id="workspace-symbols">
-          <h2>Workspace Symbol Search</h2>
-          <p>
-            <code>Cmd/Ctrl+Alt+O</code> opens a fuzzy-match palette over every heading in every doc
-            of the workspace — not just the active file. Type the heading text or the file path to
-            scope; pick a row and the file opens, scrolled to the right line, with the TOC active
-            highlight already on the matching item.
-          </p>
+          <h2>{(useLocale(), m.guide_symbols_h2())}</h2>
+          <HtmlP html={(useLocale(), m.guide_symbols_p())} />
           <figure class="guide-media guide-media-compact">
             <button
               class="guide-media-button"
-              onClick={() =>
-                openImageModal({
-                  alt: "Workspace symbol palette listing headings across every doc",
-                  caption: "Cmd/Ctrl+Alt+O — workspace-wide heading search.",
-                  src: "/screenshots/desktop-workspace-symbols.png",
-                })
-              }
+              onClick={() => openImageWith(m.guide_symbols_h2, m.guide_symbols_caption, "/screenshots/desktop-workspace-symbols.png")}
               type="button"
             >
-              <img alt="Workspace symbol palette listing headings across every doc" src="/screenshots/desktop-workspace-symbols.png" />
+              <img alt={(useLocale(), m.guide_symbols_h2())} src="/screenshots/desktop-workspace-symbols.png" />
             </button>
-            <figcaption>Cmd/Ctrl+Alt+O — workspace-wide heading search.</figcaption>
+            <figcaption>{(useLocale(), m.guide_symbols_caption())}</figcaption>
           </figure>
         </section>
 
         <section class="content-panel" id="reader-mode">
-          <h2>Reader / Zen mode</h2>
-          <p>
-            <code>Cmd/Ctrl+.</code> (or <em>View → Toggle Reader Mode</em> in the Command Palette)
-            collapses the toolbar, sidebar, TOC, and status bar — leaving only the rendered preview
-            centered at a comfortable reading width. Press the same shortcut to come back.
-          </p>
-          <p>
-            <code>F11</code> is accepted as a fallback on platforms where it isn't already taken by
-            the OS. macOS Mission Control swallows <code>F11</code> by default — use the period
-            chord there.
-          </p>
+          <h2>{(useLocale(), m.guide_reader_h2())}</h2>
+          <HtmlP html={(useLocale(), m.guide_reader_p1())} />
+          <HtmlP html={(useLocale(), m.guide_reader_p2())} />
           <figure class="guide-media">
             <button
               class="guide-media-button"
-              onClick={() =>
-                openImageModal({
-                  alt: "Reader mode rendering only the centered preview without chrome",
-                  caption: "Reader / Zen mode — focused preview without distractions.",
-                  src: "/screenshots/desktop-reader-mode.png",
-                })
-              }
+              onClick={() => openImageWith(m.guide_reader_h2, m.guide_reader_caption, "/screenshots/desktop-reader-mode.png")}
               type="button"
             >
-              <img alt="Reader mode rendering only the centered preview without chrome" src="/screenshots/desktop-reader-mode.png" />
+              <img alt={(useLocale(), m.guide_reader_h2())} src="/screenshots/desktop-reader-mode.png" />
             </button>
-            <figcaption>Reader / Zen mode — focused preview without distractions.</figcaption>
+            <figcaption>{(useLocale(), m.guide_reader_caption())}</figcaption>
           </figure>
         </section>
 
         <section class="content-panel" id="search">
-          <h2>Search</h2>
-          <h3>Search in file tree</h3>
-          <p>Filter files by name as you type.</p>
-          <h3>Search in preview</h3>
-          <p>
-            Press <code>Ctrl+F</code> to open in-document search and navigate highlighted results.
-          </p>
+          <h2>{(useLocale(), m.guide_search_h2())}</h2>
+          <h3>{(useLocale(), m.guide_search_tree_h3())}</h3>
+          <p>{(useLocale(), m.guide_search_tree_p())}</p>
+          <h3>{(useLocale(), m.guide_search_preview_h3())}</h3>
+          <HtmlP html={(useLocale(), m.guide_search_preview_p())} />
         </section>
 
         <section class="content-panel" id="editor">
-          <h2>Editor</h2>
-          <h3>Split mode</h3>
-          <p>Edit source and preview output side by side.</p>
-          <h3>Save</h3>
+          <h2>{(useLocale(), m.guide_editor_h2())}</h2>
+          <h3>{(useLocale(), m.guide_editor_split_h3())}</h3>
+          <p>{(useLocale(), m.guide_editor_split_p())}</p>
+          <h3>{(useLocale(), m.guide_editor_save_h3())}</h3>
           <ul>
-            <li>
-              Save with <code>Ctrl+S</code> (or <code>Cmd+S</code> on macOS).
-            </li>
-            <li>Changes are written back to local files when permissions are granted.</li>
+            <HtmlLi html={(useLocale(), m.guide_editor_save_item1())} />
+            <li>{(useLocale(), m.guide_editor_save_item2())}</li>
           </ul>
         </section>
 
         <section class="content-panel" id="appearance">
-          <h2>Appearance</h2>
+          <h2>{(useLocale(), m.guide_appearance_h2())}</h2>
           <ul>
-            <li>Theme: Light, Dark, or System.</li>
-            <li>Consistent code block styling.</li>
-            <li>Font size and family customization.</li>
+            <li>{(useLocale(), m.guide_appearance_item1())}</li>
+            <li>{(useLocale(), m.guide_appearance_item2())}</li>
+            <li>{(useLocale(), m.guide_appearance_item3())}</li>
           </ul>
           <figure class="guide-media guide-media-compact">
             <button
               class="guide-media-button"
-              onClick={() =>
-                openImageModal({
-                  alt: "Settings menu options",
-                  caption: "Appearance and export controls in the settings menu.",
-                  src: "/screenshots/desktop-dark-theme.png",
-                })
-              }
+              onClick={() => openImageWith(m.guide_appearance_caption, m.guide_appearance_caption, "/screenshots/desktop-dark-theme.png")}
               type="button"
             >
-              <img alt="Settings menu options" src="/screenshots/desktop-dark-theme.png" />
+              <img alt={(useLocale(), m.guide_appearance_caption())} src="/screenshots/desktop-dark-theme.png" />
             </button>
-            <figcaption>Appearance and export controls in the settings menu.</figcaption>
+            <figcaption>{(useLocale(), m.guide_appearance_caption())}</figcaption>
           </figure>
         </section>
 
         <section class="content-panel" id="processing">
-          <h2>Document Processing</h2>
-          <h3>AsciiDoc</h3>
-          <p>
-            Uses Asciidoctor with support for admonitions, tables, source blocks, xrefs, and
-            recursive includes.
-          </p>
-          <h3>Markdown</h3>
-          <p>
-            Uses markdown-it with plugins for task lists, footnotes, definition lists, emoji,
-            alerts, advanced tables, and more.
-          </p>
+          <h2>{(useLocale(), m.guide_processing_h2())}</h2>
+          <h3>{(useLocale(), m.guide_processing_asciidoc_h3())}</h3>
+          <p>{(useLocale(), m.guide_processing_asciidoc_p())}</p>
+          <h3>{(useLocale(), m.guide_processing_md_h3())}</h3>
+          <p>{(useLocale(), m.guide_processing_md_p())}</p>
           <figure class="guide-media">
             <button
               class="guide-media-button"
-              onClick={() =>
-                openImageModal({
-                  alt: "Rendered markdown preview with sections",
-                  caption: "Rendered output with markdown features.",
-                  src: "/screenshots/desktop-workspace-preview.png",
-                })
-              }
+              onClick={() => openImageWith(m.guide_processing_caption, m.guide_processing_caption, "/screenshots/desktop-workspace-preview.png")}
               type="button"
             >
-              <img alt="Rendered markdown preview with sections" src="/screenshots/desktop-workspace-preview.png" />
+              <img alt={(useLocale(), m.guide_processing_caption())} src="/screenshots/desktop-workspace-preview.png" />
             </button>
-            <figcaption>Rendered output with markdown features.</figcaption>
+            <figcaption>{(useLocale(), m.guide_processing_caption())}</figcaption>
           </figure>
         </section>
 
         <section class="content-panel" id="diagrams">
-          <h2>Diagrams</h2>
+          <h2>{(useLocale(), m.guide_diagrams_h2())}</h2>
           <ul>
-            <li>Mermaid diagrams render directly in preview.</li>
-            <li>Kroki is used for PlantUML, Ditaa, Graphviz and related formats.</li>
+            <li>{(useLocale(), m.guide_diagrams_item1())}</li>
+            <li>{(useLocale(), m.guide_diagrams_item2())}</li>
           </ul>
         </section>
 
         <section class="content-panel" id="export">
-          <h2>Export</h2>
+          <h2>{(useLocale(), m.guide_export_h2())}</h2>
           <ul>
-            <li>
-              Print to PDF with <code>Ctrl+P</code>.
-            </li>
-            <li>Direct PDF generation is available in supported modes.</li>
+            <HtmlLi html={(useLocale(), m.guide_export_item1())} />
+            <li>{(useLocale(), m.guide_export_item2())}</li>
           </ul>
         </section>
 
         <section class="content-panel" id="shortcuts">
-          <h2>Keyboard Shortcuts</h2>
-          <p>
-            On macOS use <code>Cmd</code>; on Linux and Windows use <code>Ctrl</code>. Press
-            {" "}
-            <code>Cmd/Ctrl+/</code>
-            {" "}
-            anywhere in the app to open the live shortcuts reference.
-          </p>
+          <h2>{(useLocale(), m.guide_shortcuts_h2())}</h2>
+          <HtmlP html={(useLocale(), m.guide_shortcuts_intro())} />
           <table class="guide-table">
             <thead>
               <tr>
-                <th>Shortcut</th>
-                <th>Action</th>
+                <th>{(useLocale(), m.guide_shortcuts_col_shortcut())}</th>
+                <th>{(useLocale(), m.guide_shortcuts_col_action())}</th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td><code>Cmd/Ctrl+P</code></td>
-                <td>Quick Open — fuzzy-find a file across all open workspaces</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+Shift+P</code></td>
-                <td>Command Palette — every action in one place</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+Shift+O</code></td>
-                <td>Go to Heading — jump anywhere in the current document</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+Alt+O</code></td>
-                <td>Go to Symbol in Workspace — fuzzy-match headings across every doc</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+Shift+F</code></td>
-                <td>Find in Files — search across the workspace</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+.</code></td>
-                <td>Toggle Reader / Zen mode (chrome-less, centered preview)</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+/</code></td>
-                <td>Open the keyboard-shortcuts modal</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+\</code></td>
-                <td>Toggle the second pane (split / collapse)</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+1</code> / <code>Cmd/Ctrl+2</code></td>
-                <td>Focus the first / second pane</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+T</code></td>
-                <td>New tab in the active pane</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+W</code></td>
-                <td>Close the active tab</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+Shift+T</code></td>
-                <td>Reopen the last closed tab</td>
-              </tr>
-              <tr>
-                <td><code>Ctrl+Tab</code> / <code>Ctrl+Shift+Tab</code></td>
-                <td>Cycle tabs forward / backward</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+S</code></td>
-                <td>Save the active document (when permissions allow)</td>
-              </tr>
-              <tr>
-                <td><code>Cmd/Ctrl+F</code></td>
-                <td>Find inside the current preview / editor</td>
-              </tr>
+              <tr><td><code>Cmd/Ctrl+P</code></td><td>{(useLocale(), m.guide_shortcut_quick_open())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+Shift+P</code></td><td>{(useLocale(), m.guide_shortcut_command_palette())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+Shift+O</code></td><td>{(useLocale(), m.guide_shortcut_go_heading())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+Alt+O</code></td><td>{(useLocale(), m.guide_shortcut_workspace_symbols())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+Shift+F</code></td><td>{(useLocale(), m.guide_shortcut_find_in_files())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+.</code></td><td>{(useLocale(), m.guide_shortcut_reader_mode())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+/</code></td><td>{(useLocale(), m.guide_shortcut_modal())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+\</code></td><td>{(useLocale(), m.guide_shortcut_split_pane())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+1</code> / <code>Cmd/Ctrl+2</code></td><td>{(useLocale(), m.guide_shortcut_focus_pane())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+T</code></td><td>{(useLocale(), m.guide_shortcut_new_tab())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+W</code></td><td>{(useLocale(), m.guide_shortcut_close_tab())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+Shift+T</code></td><td>{(useLocale(), m.guide_shortcut_reopen_tab())}</td></tr>
+              <tr><td><code>Ctrl+Tab</code> / <code>Ctrl+Shift+Tab</code></td><td>{(useLocale(), m.guide_shortcut_cycle_tab())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+S</code></td><td>{(useLocale(), m.guide_shortcut_save())}</td></tr>
+              <tr><td><code>Cmd/Ctrl+F</code></td><td>{(useLocale(), m.guide_shortcut_find())}</td></tr>
             </tbody>
           </table>
         </section>
 
         <section class="content-panel" id="screenshots">
-          <h2>Screenshots</h2>
-          <p>
-            Captured from the desktop app. The Chrome extension shares the same UI in a smaller window.
-          </p>
+          <h2>{(useLocale(), m.guide_screenshots_h2())}</h2>
+          <p>{(useLocale(), m.guide_screenshots_intro())}</p>
           <div class="screenshot-grid">
             <For each={guideScreenshots}>
               {(item) => (
                 <figure class="screenshot-card">
                   <button
                     class="screenshot-button"
-                    onClick={() =>
-                      openImageModal({ alt: item.alt, caption: item.caption, src: item.src })
-                    }
+                    onClick={() => openImageWith(item.alt, item.caption, item.src)}
                     type="button"
                   >
-                    <img alt={item.alt} class="screenshot-image" loading="lazy" src={item.src} />
+                    <img
+                      alt={(useLocale(), item.alt())}
+                      class="screenshot-image"
+                      loading="lazy"
+                      src={item.src}
+                    />
                   </button>
-                  <figcaption>{item.caption}</figcaption>
+                  <figcaption>{(useLocale(), item.caption())}</figcaption>
                 </figure>
               )}
             </For>
@@ -658,11 +456,13 @@ export function GuidePage() {
                 onClick={(event) => event.stopPropagation()}
                 role="dialog"
                 aria-modal="true"
-                aria-label="Guide image preview"
+                aria-label={(useLocale(), m.guide_modal_label())}
               >
                 <div class="screenshot-modal-header">
                   <p>{image().caption}</p>
-                  <Button onClick={closeImageModal} size="sm" type="button" variant="outline">Close</Button>
+                  <Button onClick={closeImageModal} size="sm" type="button" variant="outline">
+                    {(useLocale(), m.guide_modal_close())}
+                  </Button>
                 </div>
                 <div class="screenshot-modal-image-wrap">
                   <img alt={image().alt} class="screenshot-modal-image" src={image().src} />
