@@ -1,13 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { ReleaseNotesDialog } from "./release-notes-dialog.tsx";
+import { ReleaseNotesDialog, type ReleaseNotesEntry } from "./release-notes-dialog.tsx";
 
 afterEach(cleanup);
 
+function entry(overrides: Partial<ReleaseNotesEntry> = {}): ReleaseNotesEntry {
+  return {
+    name: "AsciiMark v0.10.0",
+    version: "0.10.0",
+    body: "## Features\n\n- thing",
+    htmlUrl: "https://example.test/v0.10.0",
+    publishedAt: "2026-05-06T23:46:24Z",
+    ...overrides,
+  };
+}
+
 const baseProps = {
   open: true,
-  version: "0.10.0",
-  htmlUrl: "https://example.test/v0.10.0",
+  currentVersion: "0.10.0",
 };
 
 describe("ReleaseNotesDialog", () => {
@@ -17,7 +27,7 @@ describe("ReleaseNotesDialog", () => {
         {...baseProps}
         open={false}
         loading={false}
-        notes=""
+        entries={[]}
         error={null}
         onClose={() => {}}
         onOpenInBrowser={() => {}}
@@ -26,33 +36,29 @@ describe("ReleaseNotesDialog", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
-  it("renders the loading copy when loading=true and skips the body", () => {
-    // Mutation captured: short-circuiting the loading branch (rendering
-    // the empty body fallback instead) would surface the "No release
-    // notes" copy here, failing this assertion.
+  it("renders the loading copy when loading=true and skips the entry list", () => {
+    // Mutation captured: short-circuiting the loading branch would
+    // surface the "No release notes" copy here.
     render(() => (
       <ReleaseNotesDialog
         {...baseProps}
         loading
-        notes={null}
+        entries={null}
         error={null}
         onClose={() => {}}
         onOpenInBrowser={() => {}}
       />
     ));
     expect(screen.getByText(/Fetching release notes/i)).not.toBeNull();
-    expect(screen.queryByText(/No release notes were published/i)).toBeNull();
+    expect(screen.queryAllByTestId("release-notes-entry")).toHaveLength(0);
   });
 
   it("renders the error message and keeps the Open on GitHub button visible", () => {
-    // Mutation captured: dropping `props.error` from the visible
-    // branch would leave the user staring at a blank body while
-    // believing the request actually returned.
     render(() => (
       <ReleaseNotesDialog
         {...baseProps}
         loading={false}
-        notes={null}
+        entries={null}
         error="boom"
         onClose={() => {}}
         onOpenInBrowser={() => {}}
@@ -62,12 +68,12 @@ describe("ReleaseNotesDialog", () => {
     expect(screen.getByRole("button", { name: /Open on GitHub/i })).not.toBeNull();
   });
 
-  it("renders the no-notes fallback when notes resolve to an empty string", () => {
+  it("renders the no-notes fallback when the entries array is empty", () => {
     render(() => (
       <ReleaseNotesDialog
         {...baseProps}
         loading={false}
-        notes=""
+        entries={[]}
         error={null}
         onClose={() => {}}
         onOpenInBrowser={() => {}}
@@ -76,34 +82,75 @@ describe("ReleaseNotesDialog", () => {
     expect(screen.getByText(/No release notes were published/i)).not.toBeNull();
   });
 
-  it("renders the markdown body when notes are non-empty", () => {
-    // Mutation captured: changing `(props.notes?.trim()?.length ?? 0) > 0`
-    // to `< 0` would render the empty-fallback instead of the parsed
-    // markdown — and this assertion looks for the actual heading text.
+  it("renders one card per entry with name + date + markdown body", () => {
+    // Mutation captured: dropping the For loop or hard-coding to the
+    // first entry would shrink the rendered list and fail the count.
     render(() => (
       <ReleaseNotesDialog
         {...baseProps}
         loading={false}
-        notes="## What's new\n\n- entry one"
+        entries={[
+          entry({ name: "AsciiMark v0.10.0", version: "0.10.0", body: "## Features\n\n- alpha" }),
+          entry({ name: "AsciiMark v0.9.1", version: "0.9.1", body: "## Fixes\n\n- beta" }),
+        ]}
         error={null}
         onClose={() => {}}
         onOpenInBrowser={() => {}}
       />
     ));
-    expect(screen.getByText(/What's new/i)).not.toBeNull();
-    expect(screen.getByText(/entry one/i)).not.toBeNull();
+    const cards = screen.getAllByTestId("release-notes-entry");
+    expect(cards).toHaveLength(2);
+    expect(screen.getByText("AsciiMark v0.10.0")).not.toBeNull();
+    expect(screen.getByText("AsciiMark v0.9.1")).not.toBeNull();
+    expect(screen.getByText(/alpha/)).not.toBeNull();
+    expect(screen.getByText(/beta/)).not.toBeNull();
+  });
+
+  it("marks the entry that matches currentVersion as current", () => {
+    // Mutation captured: dropping the `version === currentVersion`
+    // check would leave every row unmarked and the locator would
+    // come up empty.
+    render(() => (
+      <ReleaseNotesDialog
+        {...baseProps}
+        currentVersion="0.10.0"
+        loading={false}
+        entries={[
+          entry({ name: "v0.10.0", version: "0.10.0", body: "x" }),
+          entry({ name: "v0.9.1", version: "0.9.1", body: "y" }),
+        ]}
+        error={null}
+        onClose={() => {}}
+        onOpenInBrowser={() => {}}
+      />
+    ));
+    const cards = screen.getAllByTestId("release-notes-entry");
+    expect(cards[0]?.className).toContain("release-notes-entry-current");
+    expect(cards[1]?.className).not.toContain("release-notes-entry-current");
+  });
+
+  it("falls back to the italic 'no notes' copy for an entry with empty body", () => {
+    render(() => (
+      <ReleaseNotesDialog
+        {...baseProps}
+        loading={false}
+        entries={[entry({ body: "" })]}
+        error={null}
+        onClose={() => {}}
+        onOpenInBrowser={() => {}}
+      />
+    ));
+    expect(screen.getByText(/No release notes were published/i)).not.toBeNull();
   });
 
   it("Close button calls onClose without invoking onOpenInBrowser", () => {
-    // Mutation captured: swapping the two footer buttons would fail
-    // here because the Close handler would never get called.
     const onClose = vi.fn();
     const onOpenInBrowser = vi.fn();
     render(() => (
       <ReleaseNotesDialog
         {...baseProps}
         loading={false}
-        notes="ok"
+        entries={[entry()]}
         error={null}
         onClose={onClose}
         onOpenInBrowser={onOpenInBrowser}
@@ -121,7 +168,7 @@ describe("ReleaseNotesDialog", () => {
       <ReleaseNotesDialog
         {...baseProps}
         loading={false}
-        notes="ok"
+        entries={[entry()]}
         error={null}
         onClose={onClose}
         onOpenInBrowser={onOpenInBrowser}

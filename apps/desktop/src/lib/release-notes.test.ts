@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import {
   _clearReleaseNotesCache,
+  fetchReleaseHistory,
   fetchReleaseNotes,
   releaseHtmlUrl,
 } from "./release-notes.ts";
@@ -99,6 +100,84 @@ describe("fetchReleaseNotes", () => {
     ).rejects.toThrow();
     const ok = await fetchReleaseNotes("0.10.0", fetcher as unknown as typeof fetch);
     expect(ok.body).toBe("recovered");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("fetchReleaseHistory", () => {
+  it("normalizes the GitHub list payload into ReleaseHistoryEntry[]", async () => {
+    // Mutation captured: dropping the `v` strip from `tag_name` would
+    // surface "v0.10.0" inside `version` and break the version-equality
+    // check the dialog uses to mark the "current" entry.
+    const fetcher = mock(async () =>
+      jsonResponse([
+        {
+          tag_name: "v0.10.0",
+          name: "AsciiMark v0.10.0",
+          body: "## Features\n\n- thing",
+          html_url: "https://github.com/djalmajr/asciimark-releases/releases/tag/v0.10.0",
+          published_at: "2026-05-06T23:46:24Z",
+        },
+        {
+          tag_name: "v0.9.1",
+          name: "AsciiMark v0.9.1",
+          body: "## Fixes\n\n- crash",
+          html_url: "https://github.com/djalmajr/asciimark-releases/releases/tag/v0.9.1",
+          published_at: "2026-05-06T01:36:30Z",
+        },
+      ]),
+    );
+    const list = await fetchReleaseHistory(10, fetcher as unknown as typeof fetch);
+    expect(list).toHaveLength(2);
+    expect(list[0]).toMatchObject({
+      tagName: "v0.10.0",
+      version: "0.10.0",
+      name: "AsciiMark v0.10.0",
+      body: "## Features\n\n- thing",
+      publishedAt: "2026-05-06T23:46:24Z",
+    });
+    expect(list[1]?.version).toBe("0.9.1");
+  });
+
+  it("skips drafts and tolerates missing fields", async () => {
+    // Mutation captured: removing the draft filter would surface
+    // unpublished work-in-progress entries to every user.
+    const fetcher = mock(async () =>
+      jsonResponse([
+        { tag_name: "v0.11.0", draft: true, body: "WIP" },
+        { tag_name: "v0.10.0", name: "AsciiMark v0.10.0" },
+        // missing tag_name → discarded (no way to render it)
+        { name: "broken", body: "x" },
+      ]),
+    );
+    const list = await fetchReleaseHistory(10, fetcher as unknown as typeof fetch);
+    expect(list.map((e) => e.tagName)).toEqual(["v0.10.0"]);
+    expect(list[0]?.body).toBe(""); // missing body → empty string, not undefined
+    expect(list[0]?.htmlUrl).toContain("v0.10.0"); // fallback when html_url missing
+  });
+
+  it("caches the result — second call skips the network", async () => {
+    // Mutation captured: removing the `historyCache` short-circuit
+    // would refetch on every dialog open.
+    const fetcher = mock(async () => jsonResponse([{ tag_name: "v0.10.0", body: "x" }]));
+    await fetchReleaseHistory(10, fetcher as unknown as typeof fetch);
+    await fetchReleaseHistory(10, fetcher as unknown as typeof fetch);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not cache failed responses", async () => {
+    // Domain rule: a network blip on the first open should not leave
+    // the dialog stuck in an error state forever — the next open
+    // must be allowed to refetch.
+    let calls = 0;
+    const fetcher = mock(async () => {
+      calls += 1;
+      if (calls === 1) return new Response("", { status: 503, statusText: "Down" });
+      return jsonResponse([{ tag_name: "v0.10.0", body: "ok" }]);
+    });
+    await expect(fetchReleaseHistory(10, fetcher as unknown as typeof fetch)).rejects.toThrow();
+    const list = await fetchReleaseHistory(10, fetcher as unknown as typeof fetch);
+    expect(list).toHaveLength(1);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

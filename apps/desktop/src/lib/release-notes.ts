@@ -14,7 +14,13 @@
 
 const RELEASES_REPO = "djalmajr/asciimark-releases";
 
+/** Default number of historical releases the dialog asks for. The
+ *  GitHub API caps `per_page` at 100; 10 is enough to cover the
+ *  visible scroll length of the dialog and keeps the payload small. */
+const DEFAULT_HISTORY_LIMIT = 10;
+
 const cache = new Map<string, string>();
+let historyCache: ReleaseHistoryEntry[] | null = null;
 
 export interface ReleaseNotes {
   /** Markdown body. Empty string when the release has no notes. */
@@ -22,6 +28,26 @@ export interface ReleaseNotes {
   /** Public URL of the release page (always returned so the UI can
    *  link out even when the request succeeded). */
   htmlUrl: string;
+}
+
+/** One entry in the release-history listing rendered by the dialog. */
+export interface ReleaseHistoryEntry {
+  /** Tag name as published on GitHub (`v0.10.0`). */
+  tagName: string;
+  /** Version stripped of the leading `v` (`0.10.0`). The dialog uses
+   *  this for the header label and for matching against the locally
+   *  installed version. */
+  version: string;
+  /** Display name (`AsciiMark v0.10.0` etc.). Falls back to tagName
+   *  when the release has no `name`. */
+  name: string;
+  /** Release body (markdown). Empty string when the release shipped
+   *  without notes. */
+  body: string;
+  /** Public URL of the release page. */
+  htmlUrl: string;
+  /** ISO timestamp from GitHub. May be empty for drafts. */
+  publishedAt: string;
 }
 
 /** URL of the release page for the given version. Used by the dialog
@@ -53,7 +79,59 @@ export async function fetchReleaseNotes(
   return { body, htmlUrl: releaseHtmlUrl(version) };
 }
 
-/** Test hook — clears the in-memory cache so test isolation is honoured. */
+/**
+ * Fetches the N most recent releases from the public release repo,
+ * caching the resulting list in memory so reopening the dialog skips
+ * the network. Drafts are filtered out by the API for unauthenticated
+ * calls; we additionally normalize the shape to `ReleaseHistoryEntry`
+ * (tagName / version / name / body / htmlUrl / publishedAt).
+ *
+ * A failure throws — the dialog renders the error message and the
+ * "Open on GitHub" button remains available either way. Failures are
+ * NOT cached, so a transient network blip on first open can recover
+ * on the next try.
+ */
+export async function fetchReleaseHistory(
+  limit: number = DEFAULT_HISTORY_LIMIT,
+  fetcher: typeof fetch = fetch,
+): Promise<ReleaseHistoryEntry[]> {
+  if (historyCache !== null) return historyCache;
+  const url = `https://api.github.com/repos/${RELEASES_REPO}/releases?per_page=${limit}`;
+  const res = await fetcher(url, {
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  if (!res.ok) {
+    throw new Error(`GitHub responded with ${res.status} ${res.statusText}`);
+  }
+  const raw = (await res.json()) as Array<{
+    tag_name?: string;
+    name?: string;
+    body?: string;
+    html_url?: string;
+    published_at?: string;
+    draft?: boolean;
+    prerelease?: boolean;
+  }>;
+  const entries: ReleaseHistoryEntry[] = raw
+    .filter((entry) => entry.draft !== true && typeof entry.tag_name === "string")
+    .map((entry) => {
+      const tagName = entry.tag_name!;
+      const version = tagName.startsWith("v") ? tagName.slice(1) : tagName;
+      return {
+        tagName,
+        version,
+        name: entry.name?.trim() || tagName,
+        body: (entry.body ?? "").trim(),
+        htmlUrl: entry.html_url ?? releaseHtmlUrl(version),
+        publishedAt: entry.published_at ?? "",
+      };
+    });
+  historyCache = entries;
+  return entries;
+}
+
+/** Test hook — clears the in-memory caches so test isolation is honoured. */
 export function _clearReleaseNotesCache(): void {
   cache.clear();
+  historyCache = null;
 }

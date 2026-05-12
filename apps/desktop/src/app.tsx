@@ -40,7 +40,10 @@ import {
   useDownloadProgress,
   useUpdate,
 } from "./lib/updater.ts";
-import { fetchReleaseNotes, releaseHtmlUrl } from "./lib/release-notes.ts";
+import { fetchReleaseHistory, type ReleaseHistoryEntry } from "./lib/release-notes.ts";
+
+const RELEASES_INDEX_URL =
+  "https://github.com/djalmajr/asciimark-releases/releases";
 import { UpdateAvailableDialog } from "@asciimark/ui/components/update-available-dialog.tsx";
 import { ReleaseNotesDialog } from "@asciimark/ui/components/release-notes-dialog.tsx";
 import { findInFiles } from "./lib/fs.ts";
@@ -78,16 +81,17 @@ export function App() {
   const [aboutOpen, setAboutOpen] = createSignal(false);
   const [appVersion, setAppVersion] = createSignal<string>("");
   // Release notes dialog state — driven by the "Release notes" menu
-  // item / Command Palette command. `notes` is null while loading or
-  // on error; `error` flips to a localized message on failure.
+  // item / Command Palette command. `entries` is null while loading
+  // or on error; `error` flips to a localized message on failure.
+  // `currentVersion` is the locally installed app version so the
+  // dialog can mark the matching row.
   const [releaseNotesState, setReleaseNotesState] = createSignal<{
     open: boolean;
-    version: string;
-    notes: string | null;
+    currentVersion: string;
+    entries: ReleaseHistoryEntry[] | null;
     loading: boolean;
     error: string | null;
-    htmlUrl: string;
-  }>({ open: false, version: "", notes: null, loading: false, error: null, htmlUrl: "" });
+  }>({ open: false, currentVersion: "", entries: null, loading: false, error: null });
   // Command palette (Cmd/Ctrl+Shift+P).
   const [commandPaletteVisible, setCommandPaletteVisible] = createSignal(false);
   // Symbol palette (Cmd/Ctrl+Shift+O).
@@ -365,39 +369,35 @@ export function App() {
     void getVersion().then(setAppVersion).catch(() => {});
   });
 
-  // Opens the Release Notes dialog for the currently-installed version,
-  // fetching the body from GitHub the first time (cache hit afterwards).
+  // Opens the Release Notes dialog with the recent release history,
+  // fetching the list from GitHub the first time (cache hit afterwards).
   // The error fallback inside the dialog surfaces the message and the
   // "Open on GitHub" button remains available either way.
   async function openReleaseNotes(): Promise<void> {
-    const version = appVersion() || (await getVersion().catch(() => ""));
-    if (!version) return;
+    const currentVersion = appVersion() || (await getVersion().catch(() => ""));
     setReleaseNotesState({
       open: true,
-      version,
-      notes: null,
+      currentVersion,
+      entries: null,
       loading: true,
       error: null,
-      htmlUrl: releaseHtmlUrl(version),
     });
     try {
-      const result = await fetchReleaseNotes(version);
+      const entries = await fetchReleaseHistory();
       setReleaseNotesState({
         open: true,
-        version,
-        notes: result.body,
+        currentVersion,
+        entries,
         loading: false,
         error: null,
-        htmlUrl: result.htmlUrl,
       });
     } catch (e) {
       setReleaseNotesState({
         open: true,
-        version,
-        notes: null,
+        currentVersion,
+        entries: null,
         loading: false,
         error: (e as Error)?.message ?? String(e),
-        htmlUrl: releaseHtmlUrl(version),
       });
     }
   }
@@ -1370,14 +1370,15 @@ export function App() {
     />
     <ReleaseNotesDialog
       open={releaseNotesState().open}
-      version={releaseNotesState().version}
+      currentVersion={releaseNotesState().currentVersion}
       loading={releaseNotesState().loading}
-      notes={releaseNotesState().notes}
+      entries={releaseNotesState().entries}
       error={releaseNotesState().error}
-      htmlUrl={releaseNotesState().htmlUrl}
       onClose={() => setReleaseNotesState((s) => ({ ...s, open: false }))}
       onOpenInBrowser={() => {
-        void openUrl(releaseNotesState().htmlUrl);
+        // Always link to the public releases index — the dialog now
+        // surfaces history, not a single version.
+        void openUrl(RELEASES_INDEX_URL);
       }}
     />
     {import.meta.env.DEV && <FigmaCaptureButton />}

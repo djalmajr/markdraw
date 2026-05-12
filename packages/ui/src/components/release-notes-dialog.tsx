@@ -1,4 +1,4 @@
-import { Show, createMemo } from "solid-js";
+import { For, Show } from "solid-js";
 import MarkdownIt from "markdown-it";
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
@@ -15,41 +15,63 @@ import { Button } from "./ui/button.tsx";
 // rendering correctly when read from the "Release notes" menu entry.
 const md = new MarkdownIt({ html: false, breaks: true, linkify: false });
 
+/** One row in the release-history list rendered by the dialog. */
+export interface ReleaseNotesEntry {
+  /** Display name (e.g. "AsciiMark v0.10.0"). */
+  name: string;
+  /** Bare version (e.g. "0.10.0") — compared against the installed
+   *  version to mark the current row. */
+  version: string;
+  /** Markdown body of the release. Empty string for releases that
+   *  shipped without notes. */
+  body: string;
+  /** Public URL of the release page on GitHub. */
+  htmlUrl: string;
+  /** ISO timestamp from GitHub. Empty string if unknown. */
+  publishedAt: string;
+}
+
 export interface ReleaseNotesDialogProps {
   open: boolean;
-  /** Version whose notes are being viewed (e.g. "0.10.0"). */
-  version: string;
-  /** Loading state from the caller's fetch — when true, the body
-   *  renders the localized spinner copy. */
+  /** Currently installed version — used to mark the matching entry
+   *  as "current" so users can tell at a glance which row matches
+   *  their build. */
+  currentVersion: string;
+  /** Loading state — when true, the body renders the localized
+   *  spinner copy. */
   loading: boolean;
-  /** Raw markdown body. `null` while the caller hasn't loaded it yet
-   *  (loading=true) or hit an error (error≠null). */
-  notes: string | null;
-  /** Localized error message. Renders the "Open on GitHub" CTA when
-   *  set. */
+  /** Full history fetched from GitHub. `null` while still loading
+   *  or on an error. The dialog renders each entry as a header
+   *  (version + date) followed by the markdown body. */
+  entries: ReleaseNotesEntry[] | null;
+  /** Localized error message. Renders alongside the "Open on
+   *  GitHub" CTA when set. */
   error: string | null;
-  /** Public URL of the release page (always provided so the user can
-   *  fall back to the browser, even on success). */
-  htmlUrl: string;
   onClose: () => void;
-  /** Opens the release page in the system browser. Implementation is
-   *  host-specific (Tauri opener / window.open). */
+  /** Opens the public release index in the system browser. */
   onOpenInBrowser: () => void;
 }
 
+function formatDate(iso: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 /**
- * Standalone read-only dialog that shows release notes for any
- * version — used by the "Release notes" menu entry and Command
- * Palette command. The shape mirrors UpdateAvailableDialog
- * (scrollable body + sticky footer) so users see a consistent layout
- * across the two flows.
+ * Standalone read-only dialog that shows the recent release history
+ * for AsciiMark — used by the "Release notes" menu entry and Command
+ * Palette command. Pulls the last ~10 entries from
+ * djalmajr/asciimark-releases and lays them out as a scrollable
+ * stack; the entry that matches the currently-installed version is
+ * highlighted so users can locate "what's mine".
  */
 export function ReleaseNotesDialog(props: ReleaseNotesDialogProps) {
-  const renderedNotes = createMemo(() => {
-    const body = props.notes?.trim();
-    return body ? md.render(body) : "";
-  });
-
   return (
     <AlertDialog
       open={props.open}
@@ -63,7 +85,7 @@ export function ReleaseNotesDialog(props: ReleaseNotesDialogProps) {
             {(useLocale(), m.release_notes_title())}
           </AlertDialogTitle>
           <AlertDialogDescription class="text-sm text-muted-foreground">
-            {(useLocale(), m.release_notes_subtitle({ version: props.version }))}
+            {(useLocale(), m.release_notes_subtitle({ version: props.currentVersion }))}
           </AlertDialogDescription>
         </header>
 
@@ -79,18 +101,49 @@ export function ReleaseNotesDialog(props: ReleaseNotesDialogProps) {
             </p>
           </Show>
           <Show
-            when={!props.loading && !props.error && (props.notes?.trim()?.length ?? 0) === 0}
+            when={
+              !props.loading
+              && !props.error
+              && (props.entries?.length ?? 0) === 0
+            }
           >
             <p class="text-sm text-muted-foreground">
               {(useLocale(), m.release_notes_no_notes())}
             </p>
           </Show>
-          <Show when={!props.loading && !props.error && (props.notes?.trim()?.length ?? 0) > 0}>
-            {/* Safe: md.render runs with `html: false`. */}
-            <div
-              class="release-notes-body text-sm leading-relaxed text-foreground"
-              innerHTML={renderedNotes()}
-            />
+          <Show when={!props.loading && !props.error && (props.entries?.length ?? 0) > 0}>
+            <div class="release-notes-history flex flex-col gap-5">
+              <For each={props.entries ?? []}>
+                {(entry) => (
+                  <article
+                    class="release-notes-entry rounded-md border border-border px-4 py-3"
+                    classList={{ "release-notes-entry-current": entry.version === props.currentVersion }}
+                    data-testid="release-notes-entry"
+                  >
+                    <header class="flex items-baseline justify-between gap-2 mb-2">
+                      <h3 class="text-sm font-semibold">{entry.name}</h3>
+                      <span class="text-xs text-muted-foreground" data-testid="release-notes-date">
+                        {formatDate(entry.publishedAt)}
+                      </span>
+                    </header>
+                    <Show
+                      when={entry.body.length > 0}
+                      fallback={
+                        <p class="text-xs text-muted-foreground italic">
+                          {(useLocale(), m.release_notes_no_notes())}
+                        </p>
+                      }
+                    >
+                      {/* Safe: md.render runs with `html: false`. */}
+                      <div
+                        class="release-notes-body text-sm leading-relaxed text-foreground"
+                        innerHTML={md.render(entry.body)}
+                      />
+                    </Show>
+                  </article>
+                )}
+              </For>
+            </div>
           </Show>
         </div>
 
