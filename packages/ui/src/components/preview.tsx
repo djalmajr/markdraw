@@ -982,12 +982,22 @@ export function Preview(props: PreviewProps) {
       // focus flip can re-attach the freshly rendered toc — without
       // this, a re-render that happens while inactive would leave the
       // pane stuck on the previous render's stale toc.
+      //
+      // When this pane is inactive (`tocContainer` is undefined), the
+      // toc node still has to leave the article body — otherwise the
+      // asciidoctor / markdown-toc-rendered list shows up inline above
+      // the actual content and the user sees a duplicated table of
+      // contents the moment focus leaves this pane. Detaching keeps
+      // `tocNode` valid as a cache so the next focus flip can move
+      // the same node into the now-bound shared container.
       const tocContainer = props.tocContainer;
       const toc = container.querySelector<HTMLElement>("#toc");
       tocNode = toc ?? undefined;
       if (tocContainer) {
         tocContainer.textContent = "";
         if (toc) tocContainer.appendChild(toc);
+      } else if (toc) {
+        toc.remove();
       }
 
       props.onTocChange(!!toc);

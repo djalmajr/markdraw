@@ -258,6 +258,73 @@ describe("Preview", () => {
     document.body.removeChild(sharedToc);
   });
 
+  /**
+   * Inactive pane (or initial mount with no shared TOC container)
+   * must NOT leave the rendered `#toc` element inside the article.
+   * Asciidoctor's default `:toc:` directive (and markdown-it's TOC
+   * plugin) emit the table as a `<div id="toc">` sibling above the
+   * first heading; without explicit removal the user sees a
+   * duplicated TOC inline in the preview whenever focus is on the
+   * other pane — the bug a user reported in 2026-05-12.
+   */
+  it("detaches the inline #toc element when no shared container is bound", async () => {
+    // Mutation captured: dropping the `else if (toc) { toc.remove(); }`
+    // branch in `afterSwap` (preview.tsx around line 992) keeps the
+    // rendered `#toc` inside the article, which is exactly what
+    // shows up as the inline duplicate in the screenshot.
+    const { container } = render(() => (
+      <Preview {...withDefaults({
+        html: TOC_HTML_A,
+        tocVisible: true,
+        // tocContainer intentionally left undefined — this models an
+        // inactive pane (or single-pane mount without a shared TOC
+        // panel ref) where the active sibling owns the sidebar.
+        tocContainer: undefined,
+      })} />
+    ));
+    await new Promise((r) => setTimeout(r, 50));
+    const article = container.querySelector<HTMLElement>(".preview-article, article");
+    expect(article).not.toBeNull();
+    // The article must not still carry the toc widget inline. The
+    // header below the (would-be) toc is still rendered — only the
+    // toc node itself is detached.
+    expect(article!.querySelector("#toc")).toBeNull();
+    expect(article!.textContent).toContain("A section");
+  });
+
+  /**
+   * Companion to the inactive-mount detach test: once the pane
+   * becomes active the cached node must move into the shared
+   * container, so the user doesn't lose the TOC entirely on the
+   * focus flip after they were previously inactive.
+   */
+  it("re-attaches the cached toc to the shared container on focus flip after an inactive mount", async () => {
+    const sharedToc = document.createElement("div");
+    document.body.appendChild(sharedToc);
+
+    const [tocContainer, setTocContainer] = createSignal<HTMLElement | undefined>(undefined);
+    const { container } = render(() => (
+      <Preview {...withDefaults({
+        html: TOC_HTML_A,
+        tocVisible: true,
+        get tocContainer() { return tocContainer(); },
+      })} />
+    ));
+    await new Promise((r) => setTimeout(r, 50));
+    const article = container.querySelector<HTMLElement>(".preview-article, article");
+    expect(article!.querySelector("#toc")).toBeNull();
+
+    // Becoming active — the cached tocNode (detached but alive) must
+    // land in the shared container. Without the cache, this flip
+    // would leave the sidebar empty because the article has no
+    // `#toc` to query at this point.
+    setTocContainer(sharedToc);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(sharedToc.querySelector("a[href='#a-section']")).not.toBeNull();
+
+    document.body.removeChild(sharedToc);
+  });
+
   it("clears the toc cache when html becomes empty (file unload)", async () => {
     const sharedToc = document.createElement("div");
     document.body.appendChild(sharedToc);
