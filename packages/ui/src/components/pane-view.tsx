@@ -114,6 +114,13 @@ export function PaneView(props: PaneViewProps) {
 
   let editorPanelRef: HTMLDivElement | undefined;
   let previewPanelRef: HTMLDivElement | undefined;
+  // The container that holds both the editor panel and the preview
+  // panel side by side. The editor/preview resize handler needs to
+  // query for `.editor-panel` and `.content` (inside `.preview-panel`)
+  // to compute the new split percentage — passing `editorPanelRef`
+  // as the search root would never find either sibling, which is the
+  // bug that made the drag-handle silently do nothing.
+  let contentPanelsRef: HTMLDivElement | undefined;
 
   // Pane-level droppable so a tab dragged from the OTHER pane can land
   // here even when this pane has zero tabs (the empty splitter case).
@@ -231,7 +238,7 @@ export function PaneView(props: PaneViewProps) {
           moveToOtherPaneLabel={props.moveTabLabel}
         />
       </Show>
-      <div class="content-panels">
+      <div class="content-panels" ref={contentPanelsRef}>
         <Show when={pane().editorMode() !== "preview" && pane().selectedFile()}>
           <div
             class="editor-panel"
@@ -314,7 +321,7 @@ export function PaneView(props: PaneViewProps) {
           <div
             class="resize-handle"
             onDblClick={s.onEditorResizeReset}
-            onMouseDown={(e) => s.onEditorResizeStart(e, editorPanelRef, editorPanelRef)}
+            onMouseDown={(e) => s.onEditorResizeStart(e, contentPanelsRef, contentPanelsRef)}
           />
         </Show>
         <Show when={pane().editorMode() !== "edit"}>
