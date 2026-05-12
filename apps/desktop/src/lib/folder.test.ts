@@ -63,6 +63,10 @@ mock.module("@tauri-apps/plugin-clipboard-manager", () => ({
 mock.module("@tauri-apps/api/core", () => ({
   invoke: async () => undefined,
   Resource: class {},
+  // Channel — see updater-drain.test.ts: plugin-updater statically
+  // imports it from this module and the mock must expose it for
+  // cross-suite ordering to stay deterministic.
+  Channel: class {},
 }));
 mock.module("@tauri-apps/api/event", () => ({
   listen: async () => () => {},

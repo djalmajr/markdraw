@@ -1,6 +1,7 @@
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { message } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
 import * as m from "@asciimark/i18n";
 import {
@@ -8,6 +9,29 @@ import {
   reduceDownloadEvent,
   type DownloadProgress,
 } from "./updater-progress.ts";
+
+// Best-effort handle drain before relaunch. The Rust side has two
+// file watchers (`WatcherHolder`, `DirWatcherHolder`) plus the
+// tauri_plugin_single_instance lock. If the OS hasn't released
+// those by the time `relaunch()` spawns the new binary, the new
+// process sees the old as still alive and the single-instance
+// plugin silently exits — the user observes "freeze on relaunch"
+// and has to force-quit before reopening. Stopping watchers + a
+// short settling delay reliably avoids the race on macOS.
+//
+// Exported so the test suite can verify both invoke targets are
+// called; the 250ms settling window is intentionally not asserted
+// (timing-dependent) — it's documented here and verified by hand
+// against a v0.10.0 → newer auto-update on a real macOS bundle.
+export async function drainBeforeRelaunch(): Promise<void> {
+  try {
+    await Promise.allSettled([invoke("stop_watching"), invoke("stop_watching_dirs")]);
+  } catch {
+    // Best effort — if either command isn't available or errors,
+    // we still want the relaunch to proceed.
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, 250));
+}
 
 export type { DownloadProgress };
 
@@ -98,6 +122,7 @@ export async function checkForAppUpdates(silent: boolean): Promise<void> {
           state = reduceDownloadEvent(state, event);
           setDownloadProgress(state.progress);
         });
+        await drainBeforeRelaunch();
         await relaunch();
       },
     });

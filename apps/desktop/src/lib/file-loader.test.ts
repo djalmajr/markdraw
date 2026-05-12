@@ -55,6 +55,11 @@ mock.module("@tauri-apps/api/core", () => ({
   // first-to-load wins, so we have to ship Resource here for those
   // tests to resolve cleanly when this suite runs first.
   Resource: class {},
+  // Channel ditto — plugin-updater does a static
+  // `import { Channel } from "@tauri-apps/api/core"` and explodes
+  // with "Export named 'Channel' not found" when this mock wins
+  // first-to-load and another suite then imports plugin-updater.
+  Channel: class {},
 }));
 mock.module("./chaos-invoke.ts", () => ({
   invoke: async () => undefined,
