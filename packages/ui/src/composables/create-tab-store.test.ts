@@ -348,4 +348,68 @@ describe("createTabStore", () => {
       expect(store.tabs()).toHaveLength(2);
     });
   });
+
+  it("loadInActiveTab replaces the active empty (\"+\") tab regardless of its pin state", () => {
+    // Mutation captured: removing the empty-tab branch makes the file
+    // land in a new preview alongside, orphaning the "+" tab.
+    withStore((store) => {
+      const emptyEntry: FSEntry = { name: "New Tab", path: "", kind: "file" };
+      store.openTab(emptyEntry, "r"); // pinned by default, like handleNewTab
+      const emptyId = store.activeTabId()!;
+      expect(store.getTab(emptyId)?.isPinned).toBe(true);
+
+      store.loadInActiveTab(entry("a.md"), "r");
+
+      expect(store.tabs()).toHaveLength(1);
+      expect(store.activeTabId()).not.toBe(emptyId);
+      expect(store.getTab(store.activeTabId()!)?.filePath).toBe("a.md");
+      expect(store.getTab(emptyId)).toBeUndefined();
+    });
+  });
+
+  it("loadInActiveTab drops the active empty tab when the file is already open elsewhere", () => {
+    // Reproduces the screenshot bug: guide.adoc was the preview, user
+    // clicked "+", then single-clicked guide.adoc in the tree. The
+    // existing tab was activated but the empty placeholder lingered.
+    // Mutation captured: skipping the placeholder-drop here brings the
+    // orphaned "New Tab" back next to the activated existing file.
+    withStore((store) => {
+      store.loadInActiveTab(entry("guide.adoc"), "r"); // preview guide.adoc
+      const guideId = store.activeTabId()!;
+      const emptyEntry: FSEntry = { name: "New Tab", path: "", kind: "file" };
+      store.openTab(emptyEntry, "r"); // pinned empty tab, now active
+      const emptyId = store.activeTabId()!;
+      expect(store.tabs()).toHaveLength(2);
+
+      // User single-clicks guide.adoc in the file tree.
+      store.loadInActiveTab(entry("guide.adoc"), "r");
+
+      // Existing guide.adoc tab is reactivated, empty placeholder is gone.
+      expect(store.activeTabId()).toBe(guideId);
+      expect(store.getTab(emptyId)).toBeUndefined();
+      expect(store.tabs()).toHaveLength(1);
+    });
+  });
+
+  it("loadInActiveTab prefers the active empty tab over a dormant preview slot", () => {
+    // Mutation captured: putting the empty-tab branch *after* the
+    // preview-recycle branch would route the file into the dormant
+    // preview and leave the active "+" tab orphaned.
+    withStore((store) => {
+      store.loadInActiveTab(entry("a.md"), "r"); // preview A
+      const aId = store.activeTabId()!;
+      const emptyEntry: FSEntry = { name: "New Tab", path: "", kind: "file" };
+      store.openTab(emptyEntry, "r"); // pinned empty tab, now active
+      const emptyId = store.activeTabId()!;
+
+      store.loadInActiveTab(entry("b.md"), "r");
+
+      // The empty slot got recycled, not the dormant preview A.
+      expect(store.getTab(emptyId)).toBeUndefined();
+      expect(store.getTab(aId)?.filePath).toBe("a.md");
+      expect(store.getTab(aId)?.isPinned).toBe(false);
+      expect(store.getTab(store.activeTabId()!)?.filePath).toBe("b.md");
+      expect(store.tabs()).toHaveLength(2);
+    });
+  });
 });

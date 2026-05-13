@@ -154,10 +154,33 @@ export function createTabStore(config: TabStoreConfig): TabStore {
   function loadInActiveTab(entry: FSEntry, rootId: string): TabId {
     const tabId = makeTabId(rootId, entry.path);
 
-    // If this file is already open in a tab, just activate it
+    // Empty/scratch ("+") tab acts as a passthrough: opening a file
+    // while it's active never leaves it behind, whether the target is
+    // brand-new (we recycle the slot below) or already open elsewhere
+    // (we drop the placeholder when activating the existing tab).
+    const active = tabList().find((t) => t.id === activeId());
+    const emptyActive = active && active.filePath === "" ? active : null;
+
+    // If this file is already open in a tab, just activate it.
     const existing = getTab(tabId);
     if (existing) {
+      if (emptyActive && emptyActive.id !== existing.id) {
+        // Drop the empty placeholder silently — skip closedTabsStack,
+        // there's nothing meaningful to reopen via Cmd+Shift+T.
+        setTabList((prev) => prev.filter((t) => t.id !== emptyActive.id));
+      }
       activateTab(tabId);
+      return tabId;
+    }
+
+    // Empty tab takes priority over the preview slot — recycle it in
+    // place so the file lands where the user expected.
+    if (emptyActive) {
+      snapshotActiveTab();
+      const newTab = createTabState(entry, rootId);
+      setTabList((prev) => prev.map((t) => (t.id === emptyActive.id ? newTab : t)));
+      setActiveId(tabId);
+      persistSession();
       return tabId;
     }
 
