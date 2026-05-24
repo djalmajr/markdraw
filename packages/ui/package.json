@@ -26,6 +26,7 @@
     "@mdit/plugin-alert": "^0.23.2",
     "class-variance-authority": "^0.7.1",
     "katex": "^0.16.22",
+    "tw-animate-css": "^1.0.1",
     "markdown-it": "^14.1.1",
     "mermaid": "^11.14.0",
     "pdfjs-dist": "^5.7.284",

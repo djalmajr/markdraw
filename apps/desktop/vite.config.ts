@@ -1,6 +1,7 @@
 import path from "path";
 import { defineConfig } from "vite";
 import solidPlugin from "vite-plugin-solid";
+import tailwindcss from "@tailwindcss/vite";
 import Icons from "unplugin-icons/vite";
 
 const host = process.env.TAURI_DEV_HOST;
@@ -8,6 +9,7 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [
     solidPlugin(),
+    tailwindcss(),
     Icons({
       compiler: "solid",
       autoInstall: false,

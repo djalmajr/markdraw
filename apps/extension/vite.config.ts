@@ -1,6 +1,7 @@
 import path from "path";
 import { defineConfig } from "vite";
 import solidPlugin from "vite-plugin-solid";
+import tailwindcss from "@tailwindcss/vite";
 import Icons from "unplugin-icons/vite";
 
 // Asciidoctor.js (compiled from Opal) emits HTML that loads CDN-hosted JS
@@ -121,6 +122,7 @@ function stripAsciidoctorHighlightJsCdn() {
 export default defineConfig({
   plugins: [
     solidPlugin(),
+    tailwindcss(),
     stripAsciidoctorHighlightJsCdn(),
     Icons({
       compiler: "solid",
