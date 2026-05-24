@@ -20,9 +20,15 @@ import {
 // short settling delay reliably avoids the race on macOS.
 //
 // Exported so the test suite can verify both invoke targets are
-// called; the 250ms settling window is intentionally not asserted
-// (timing-dependent) — it's documented here and verified by hand
-// against a v0.10.0 → newer auto-update on a real macOS bundle.
+// called; the settling window is intentionally not asserted
+// (timing-dependent) — it's documented here.
+//
+// Window: 250ms was enough on a real macOS bundle, but Windows users
+// reported "freeze on relaunch, must reopen" — the single-instance
+// lock + the NSIS installer's own restart take longer to release
+// there, so the freshly relaunched process loses the single-instance
+// race and exits. Bumped to 600ms for more headroom on Windows; the
+// exact value is being validated against a real Windows auto-update.
 export async function drainBeforeRelaunch(): Promise<void> {
   try {
     await Promise.allSettled([invoke("stop_watching"), invoke("stop_watching_dirs")]);
@@ -30,7 +36,7 @@ export async function drainBeforeRelaunch(): Promise<void> {
     // Best effort — if either command isn't available or errors,
     // we still want the relaunch to proceed.
   }
-  await new Promise<void>((resolve) => setTimeout(resolve, 250));
+  await new Promise<void>((resolve) => setTimeout(resolve, 600));
 }
 
 export type { DownloadProgress };
@@ -106,6 +112,27 @@ export async function checkForAppUpdates(silent: boolean): Promise<void> {
         });
       }
       return;
+    }
+
+    // Make sure the window is visible and focused before surfacing the
+    // dialog. On Windows, users reported the modal's buttons not
+    // responding to clicks (only Tab+Enter worked) — a classic symptom
+    // of WebView2 swallowing pointer input on an unfocused/background
+    // window (the startup check fires 3s after boot, and the window may
+    // be in the tray or behind another app). Show + focus first so the
+    // first click lands on the button instead of just activating the
+    // window.
+    try {
+      // Dynamic import so test files that load updater.ts (drain /
+      // progress) don't drag the window module — and its core
+      // `SERIALIZE_TO_IPC_FN` import — into their mocked graph.
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      await win.show();
+      await win.unminimize();
+      await win.setFocus();
+    } catch {
+      // Best effort — never block the update prompt on a focus hiccup.
     }
 
     setPendingUpdate({
