@@ -133,4 +133,46 @@ describe("reduceDownloadEvent", () => {
     s = reduceDownloadEvent(s, { event: "Progress", data: { chunkLength: -50 } } as DownloadEvent, 100);
     expect(s.progress?.downloaded).toBe(0);
   });
+
+  it("a second Started mid-download does NOT reset downloaded (Windows redirect / 3G retry)", () => {
+    // Regression: on a slow Windows/3G download the progress bar went
+    // "back and forth" because every `Started` zeroed `downloaded`. The
+    // Tauri updater can emit a second Started (the GitHub→CDN redirect hop
+    // and the real download each fire one; flaky links also retry). The
+    // extra Started must be a CONTINUATION, not a reset.
+    // Mutation captured: reverting the Started case to always
+    // `downloaded: 0` flips the post-redirect assertion from 40 to 0.
+    let s = reduceDownloadEvent(initialProgressState(), { event: "Started", data: { contentLength: 100 } }, 0);
+    s = reduceDownloadEvent(s, { event: "Progress", data: { chunkLength: 40 } }, 100);
+    expect(s.progress?.downloaded).toBe(40);
+    // Second Started arrives mid-stream.
+    s = reduceDownloadEvent(s, { event: "Started", data: { contentLength: 100 } }, 150);
+    expect(s.progress?.downloaded).toBe(40); // continuation, not reset
+    expect(s.progress?.total).toBe(100);
+    s = reduceDownloadEvent(s, { event: "Progress", data: { chunkLength: 30 } }, 250);
+    expect(s.progress?.downloaded).toBe(70); // keeps climbing monotonically
+  });
+
+  it("a second Started adopts a total the first (redirect hop) lacked", () => {
+    // Common Windows shape: the redirect hop's Started has no
+    // content-length; the real download's Started carries it. We must
+    // fill the total without disturbing the byte count.
+    let s = reduceDownloadEvent(initialProgressState(), { event: "Started", data: {} }, 0);
+    expect(s.progress?.total).toBeNull();
+    s = reduceDownloadEvent(s, { event: "Progress", data: { chunkLength: 10 } }, 50);
+    s = reduceDownloadEvent(s, { event: "Started", data: { contentLength: 5_000 } }, 100);
+    expect(s.progress?.downloaded).toBe(10);
+    expect(s.progress?.total).toBe(5_000);
+  });
+
+  it("a fresh Started AFTER a finished download still resets (genuinely new run)", () => {
+    // Guard the other side: once we've flipped to installing, a new
+    // Started is a real new download and SHOULD reset to 0.
+    let s = reduceDownloadEvent(initialProgressState(), { event: "Started", data: { contentLength: 100 } }, 0);
+    s = reduceDownloadEvent(s, { event: "Progress", data: { chunkLength: 100 } }, 100);
+    s = reduceDownloadEvent(s, { event: "Finished" }, 200);
+    s = reduceDownloadEvent(s, { event: "Started", data: { contentLength: 200 } }, 300);
+    expect(s.progress?.downloaded).toBe(0);
+    expect(s.progress?.total).toBe(200);
+  });
 });

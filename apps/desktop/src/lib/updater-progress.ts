@@ -42,6 +42,21 @@ export function reduceDownloadEvent(
         typeof event.data.contentLength === "number" && event.data.contentLength > 0
           ? event.data.contentLength
           : null;
+      const prev = state.progress;
+      // A download already in flight that emits a SECOND `Started` must
+      // not reset `downloaded` to 0 — that makes the bar jump backward
+      // ("indo e voltando"). This happens on Windows (the updater follows
+      // the GitHub asset → CDN redirect with a fresh request, so the redirect
+      // hop and the real download each emit a `Started`) and on flaky 3G
+      // links that retry. Treat the extra `Started` as a continuation: keep
+      // the bytes already counted and only fill a `total` we didn't have yet
+      // (the redirect hop often carries no content-length; the real one does).
+      if (prev && prev.phase === "downloading") {
+        return {
+          ...state,
+          progress: { ...prev, total: prev.total ?? total },
+        };
+      }
       return {
         progress: { phase: "downloading", downloaded: 0, total, speed: 0 },
         lastTickMs: nowMs,
