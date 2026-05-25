@@ -336,13 +336,16 @@ export function FileTree(props: FileTreeProps) {
                 onClick={(e: MouseEvent) => e.stopPropagation()}
               />
             </Show>
-            <span
-              class="workspace-root-chevron"
-              classList={{ "workspace-root-chevron-open": !propsRoot.root().collapsed }}
-            >
-              <IconChevronRight width={14} height={14} />
+            <span class="tree-icon">
+              <IconChevronRight
+                width={14}
+                height={14}
+                class={!propsRoot.root().collapsed ? "chevron-expanded" : "chevron-collapsed"}
+              />
             </span>
-            <IconFolderOpen width={14} height={14} class="workspace-root-icon" />
+            <span class="tree-icon workspace-root-icon">
+              <IconFolderOpen width={14} height={14} />
+            </span>
             <span class="workspace-root-name">{propsRoot.root().name}</span>
           </div>
           <div class="workspace-root-actions">

@@ -866,17 +866,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   color: hsl(var(--foreground));
 }
 
-.workspace-root-chevron {
-  display: flex;
-  transition: transform 0.15s;
-}
-
-.workspace-root-chevron-open {
-  transform: rotate(90deg);
-}
-
 .workspace-root-icon {
-  flex-shrink: 0;
   opacity: 0.7;
 }
 

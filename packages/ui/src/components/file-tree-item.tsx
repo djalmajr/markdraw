@@ -32,8 +32,13 @@ import {
 } from "./ui/dropdown-menu.tsx";
 import { useApp } from "../context/app-context.tsx";
 
+// Children render as `.tree-item` (margin-left: 4px) while the root renders
+// as `.workspace-root-header` (no margin, padding-left: 8px). BASE_PADDING=4
+// makes a child's leading edge land at 4 (margin) + 4 = 8 — the same x as the
+// root header's content — so a child's chevron aligns with the parent folder
+// icon at every depth, including the root.
 const INDENT_PER_DEPTH = 20;
-const BASE_PADDING = 8;
+const BASE_PADDING = 4;
 
 const IS_MAC = typeof navigator !== "undefined"
   && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
