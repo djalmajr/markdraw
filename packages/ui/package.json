@@ -43,7 +43,7 @@
     "happy-dom": "^20.8.9",
     "typescript": "^5.9.3",
     "unplugin-icons": "^23.0.1",
-    "vite": "^8.0.10",
+    "vite": "^8.0.14",
     "vite-plugin-solid": "^2.11.10",
     "vitest": "^4.1.6"
   }
