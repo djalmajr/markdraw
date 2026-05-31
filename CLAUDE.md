@@ -340,21 +340,23 @@ component, app shell, etc.) is too large to mount in a vtest, that's a
 **signal to refactor, not a license to skip the test**. Extract a child
 component with a small prop surface, move the rules into it, and cover
 those props with vtest cases that name the mutation each one kills. See
-`wiki/testing/strategies.md` (Round 6) and
-`wiki/testing/conventions.md` for the canonical pattern.
+the ai-memory pages `testing/strategies.md` (Round 6) and
+`testing/conventions.md` for the canonical pattern.
 
-### Document New Strategies in the Wiki
+### Document New Strategies in ai-memory
 When you discover a new testing technique, anti-pattern, or
-incident-driven lesson:
-1. Append a new "Round N" section to `wiki/testing/strategies.md`
+incident-driven lesson, persist it via `memory_write_page` (workspace
+`djalmajr`, project `asciimark`):
+1. Append a new "Round N" section to the `testing/strategies.md` page
    describing what the bug taught you (incident → lesson → pattern →
    anti-pattern).
-2. If the lesson translates into a *rule*, add it to
-   `wiki/testing/conventions.md` so future PRs check against it.
-3. Update `wiki/log.md` with a one-line entry pointing at both.
+2. If the lesson translates into a *rule*, add it to the
+   `testing/conventions.md` page so future PRs check against it.
+3. Link related pages with `[[testing/strategies.md]]` /
+   `[[testing/conventions.md]]`.
 
 The bar is "would a future engineer be able to apply this lesson without
-talking to me?" — if no, the wiki entry isn't done.
+talking to me?" — if no, the ai-memory page isn't done.
 
 ### Keyboard shortcuts — three-source rule
 Every keybinding MUST land in three parallel surfaces in the same
@@ -370,8 +372,8 @@ change:
 
 A binding present in only one or two surfaces is a regression trap —
 power users discover features by name, not by changelog. See
-`wiki/architecture/keyboard-shortcuts.md` for the full rule, the
-OS-reserved-keys table, and the checklist.
+the ai-memory page `architecture/keyboard-shortcuts.md` for the full
+rule, the OS-reserved-keys table, and the checklist.
 
 ### Preview pipeline — mermaid/kroki need attached DOM + paint frame
 For changes that touch the AsciiDoc/Markdown preview rendering path
@@ -392,8 +394,8 @@ For changes that touch the AsciiDoc/Markdown preview rendering path
   `h1-h6` by text and scrolls. The scroll then drives
   `setupTocScrollTracking` automatically.
 
-See `wiki/architecture/preview-pipeline.md` for the full pipeline
-diagram, the abandoned approaches, and the retry strategy.
+See the ai-memory page `architecture/preview-pipeline.md` for the full
+pipeline diagram, the abandoned approaches, and the retry strategy.
 
 ---
 
@@ -420,7 +422,8 @@ Registry index: https://github.com/stefan-karger/solid-ui/tree/main/apps/docs/pu
 ### Linear workflow (source of truth for plans)
 
 **Linear is the source of truth for epics, stories, milestones, and
-cycles.** The repo holds only code + the living wiki — no `planning/`
+cycles.** The repo holds only code; durable project knowledge lives in
+ai-memory (workspace `djalmajr`, project `asciimark`) — no `planning/`
 folder, no markdown shadow of issue bodies.
 
 Hierarchy:
@@ -432,21 +435,21 @@ Initiative: AsciiMark — Local-first technical writing
                           warrants own status/assignee)
 ```
 
-Key rules (full method in [`wiki/process/linear-workflow.md`](wiki/process/linear-workflow.md)):
+Key rules (full method in the ai-memory page `process/linear-workflow.md`):
 
 - **1 issue = 1 story.** Tasks are checkboxes inside the issue body,
   not sub-issues, unless the task earns own status/assignee.
 - **Issue body is self-contained.** Do not link to story.md files
-  in the repo — there are none. Do link to ADRs in `wiki/decisions/`,
-  architecture docs, and Figma frames.
+  in the repo — there are none. Do link to ADRs (ai-memory
+  `decisions/` pages), architecture pages, and Figma frames.
 - **Acceptance criteria** = checklist in description (3-7 measurable
   items). No formal reviewer gate; closing flow is "report what was
   delivered → owner gives ok/nok → status → Done".
 - **Architecture decisions** that persist beyond an epic go in
-  `wiki/decisions/NNN-titulo.md` (ADR format). Issues reference ADRs;
-  ADRs are not duplicated in issues.
-- **Roadmap-level prose** stays in `wiki/roadmap/*.md`. Story-level
-  plans live only in Linear.
+  ai-memory `decisions/NNN-titulo.md` pages (ADR format). Issues
+  reference ADRs; ADRs are not duplicated in issues.
+- **Roadmap-level prose** stays in ai-memory `roadmap/*.md` pages.
+  Story-level plans live only in Linear.
 - **Labels** — use existing `Feature`/`Improvement`/`Bug` plus
   `scope:desktop`/`scope:extension`/`scope:site`,
   `area:ai`/`area:ui`/`area:editor`/`area:preview`/`area:infra`,
@@ -465,7 +468,7 @@ Key rules (full method in [`wiki/process/linear-workflow.md`](wiki/process/linea
 Issue body template:
 
 ```
-> Source: wiki/<doc>.md § <section>
+> Source: ai-memory <doc>.md § <section>
 > Figma: <node-id>
 
 ## Contexto
@@ -669,19 +672,21 @@ is still wired.
 `fileURLToPath`** — under Bun 1.3.x, vite-plugin-solid's injected HMR
 runtime breaks. Fixed by `solid({ hot: false })` in `packages/ui/vitest.config.ts`.
 
-<!-- wiki-init:start -->
-## LLM Wiki
+<!-- ai-memory:start -->
+## LLM Memory (ai-memory)
 
-Before answering or acting on durable project knowledge, consult the wiki at `./wiki`.
-
-Order:
+Before answering or acting on durable project knowledge, recall from the ai-memory MCP
+(server `memory-personal`, workspace `djalmajr`, project `asciimark`).
 
 1. Read the project's agent rules.
-2. Query QMD index `asciimark` when available.
-3. Read wiki markdown directly when the target page is known.
-4. If a task discovers a canonical rule, gotcha, schema/contract, operational constraint, or product decision, update the wiki and log the change.
+2. `memory_query` (semantic recall) via the ai-memory MCP, for the relevant workspace/project.
+3. Read the page markdown directly (or `/api/v1`) when the target path is known.
+4. If a task discovers a canonical rule, gotcha, schema/contract, operational constraint, or
+   product decision, persist it via `memory_write_page` and link related pages with `[[path.md]]`
+   (page paths carry the `.md` suffix; links resolve by exact path).
 
-Hooks in this repo are guardrails, not a guarantee. They catch path-visible drift; semantic decisions from conversation and debugging still belong to the agent.
-<!-- wiki-init:end -->
+Semantic decisions from conversation and debugging belong to the agent — recall before acting,
+write back when you learn something canonical.
+<!-- ai-memory:end -->
 
 

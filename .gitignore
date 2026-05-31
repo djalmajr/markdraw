@@ -72,28 +72,21 @@ tools/*/Cargo.lock
 # Finder (MacOS) folder config
 .DS_Store
 
-# Agents
-.claude/*
-.claude/hooks/**/.bypass
-.claude/hooks/**/store.db
-!.claude/commands/
-!.claude/hooks/
-!.claude/rules/
-!.claude/settings.json
+# Agents — operator-local routing (MCP endpoints + agent config).
+# Kept on disk but not published: versioning these leaks the personal
+# MCP endpoint and forces collaborators onto a specific instance.
+# The ai-memory MCP is registered globally per-operator, so the repo
+# needs no per-repo MCP config.
+.claude/
+.codex/
+opencode.json
 
 .opencode/*
 !.opencode/commands/
-# Track project-owned plugins and hooks (wiki-init managed files included —
-# every dev should pull a working setup from git instead of having to
-# re-run wiki-init locally).
+# Track project-owned plugins and hooks (mutation-suggest guardrail).
 !.opencode/plugins/
 !.opencode/hooks/
 
 # CLAUDE.md files (except root)
 **/CLAUDE.md
 !/CLAUDE.md
-
-# Wiki — internal architecture / process / decision logs.
-# Lives on disk so the local wiki-init / wiki-policy / wiki-query
-# hooks keep working, but is not published with the public repo.
-wiki/
