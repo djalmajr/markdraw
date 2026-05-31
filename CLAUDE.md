@@ -283,6 +283,14 @@ breaking it into smaller focused files. Keep the project navigable.
 
 ## 10. Test Quality
 
+The **stack-agnostic testing gates** (observable-behavior-only, forbidden
+shapes, name-the-mutation, mutation-survival bar, extract-for-testability)
+are canonical in the ai-memory **`default` workspace, `development`
+project**: `rules/testing.md` (gates), `testing/techniques.md` (technique
+catalog), `testing/by-project-type.md` (which lenses fit which archetype).
+The subsections below are AsciiMark's restatement plus its project-specific
+instances. When in doubt, the `development` pages are the source.
+
 ### Observable Behavior Only
 A test is only accepted if it verifies observable behavior. Tests that
 exercise internals without proving a user-facing or contract-level outcome
@@ -343,20 +351,28 @@ those props with vtest cases that name the mutation each one kills. See
 the ai-memory pages `testing/strategies.md` (Round 6) and
 `testing/conventions.md` for the canonical pattern.
 
-### Document New Strategies in ai-memory
+### Document New Strategies — the split (project vs global)
 When you discover a new testing technique, anti-pattern, or
-incident-driven lesson, persist it via `memory_write_page` (workspace
-`djalmajr`, project `asciimark`):
-1. Append a new "Round N" section to the `testing/strategies.md` page
-   describing what the bug taught you (incident → lesson → pattern →
-   anti-pattern).
-2. If the lesson translates into a *rule*, add it to the
-   `testing/conventions.md` page so future PRs check against it.
-3. Link related pages with `[[testing/strategies.md]]` /
-   `[[testing/conventions.md]]`.
+incident-driven lesson, route it by **portability**:
 
-The bar is "would a future engineer be able to apply this lesson without
-talking to me?" — if no, the ai-memory page isn't done.
+**Project-specific → AsciiMark** (`memory_write_page`, workspace
+`djalmajr`, project `asciimark`). The incident as evidence — stack,
+file paths, commands, perf numbers, the actual bug:
+1. Append a new "Round N" section to the `testing/strategies.md` page
+   (incident → lesson → pattern → anti-pattern).
+2. If it's a project-level *convention*, add it to `testing/conventions.md`.
+3. Link with `[[testing/strategies.md]]` / `[[testing/conventions.md]]`.
+
+**Portable lesson → global** (`memory_write_page`, workspace `default`,
+project `development`). The distilled, stack-agnostic rule:
+- A new *gate/bar* → `rules/testing.md`.
+- A new *technique* (bug class + when-it-fits) → `testing/techniques.md`.
+- A new *archetype recommendation* → `testing/by-project-type.md`.
+
+Keep the incident in AsciiMark as evidence and promote only the rule —
+don't copy stack-specific detail into `development`. The bar is "would a
+future engineer on a *different* project be able to apply this without
+talking to me?" — if yes, it belongs in `development`.
 
 ### Keyboard shortcuts — three-source rule
 Every keybinding MUST land in three parallel surfaces in the same
