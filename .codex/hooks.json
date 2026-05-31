@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "shell|local_shell|exec_command|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/suggest-mutation-test.sh\"",
+            "timeout": 3,
+            "statusMessage": "Mutation-test relevance check"
+          }
+        ]
+      }
+    ]
+  }
+}

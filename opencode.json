@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "linear": {
+      "type": "remote",
+      "url": "https://mcp.linear.app/mcp",
+      "headers": {
+        "Authorization": "Bearer ${LINEAR_API_KEY}"
+      },
+      "enabled": true
+    }
+  },
+  "permission": {
+    "skill": {
+      "aim-*": "allow"
+    }
+  }
+}
