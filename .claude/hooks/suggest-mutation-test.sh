@@ -60,17 +60,28 @@ git diff --quiet "$RANGE" -- apps/desktop/src-tauri/src/lib.rs && exit 0
 
 # Did it touch the hot zone? Parse hunk headers from the unified diff.
 DIFF=$(git diff "$RANGE" -- apps/desktop/src-tauri/src/lib.rs 2>/dev/null) || exit 0
-TOUCHES_HOT=$(printf '%s\n' "$DIFF" | awk -v s="$HOT_START" -v e="$HOT_END" '
-  /^@@ / {
-    # @@ -<old>,<oldcount> +<new>,<newcount> @@
-    if (match($0, /\+([0-9]+)(,([0-9]+))?/, a)) {
-      start = a[1] + 0
-      count = (a[3] == "") ? 1 : a[3] + 0
-      end = start + count - 1
-      if (end >= s && start <= e) { print "yes"; exit }
-    }
-  }
-')
+# Parse hunk headers in python3 (already required above for JSON). The awk
+# 3-arg match($0, re, arr) is a GNU-awk extension and errors on BSD awk
+# (macOS default), which would silently disable the hook on the maintainer's
+# machine — so we avoid it.
+TOUCHES_HOT=$(printf '%s\n' "$DIFF" | HOT_START="$HOT_START" HOT_END="$HOT_END" python3 -c '
+import os, re, sys
+s = int(os.environ["HOT_START"]); e = int(os.environ["HOT_END"])
+out = ""
+for line in sys.stdin:
+    if not line.startswith("@@ "):
+        continue
+    m = re.search(r"\+([0-9]+)(?:,([0-9]+))?", line)
+    if not m:
+        continue
+    start = int(m.group(1))
+    count = int(m.group(2)) if m.group(2) else 1
+    end = start + count - 1
+    if end >= s and start <= e:
+        out = "yes"
+        break
+print(out)
+' 2>/dev/null)
 
 [ "$TOUCHES_HOT" = "yes" ] || exit 0
 
