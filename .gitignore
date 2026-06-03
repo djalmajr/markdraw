@@ -72,10 +72,19 @@ tools/*/Cargo.lock
 # Finder (MacOS) folder config
 .DS_Store
 
+# Operator-local ai-memory routing (never commit — would leak in the public repo):
+# the workspace/project marker, and the Claude project-scope MCP config.
+.ai-memory.toml
+.mcp.json
+
+# Local tooling caches / scratch (browser-MCP output, MCP tool-schema cache).
+.playwright-mcp/
+mcps/
+
 # Agents — track project-owned config + guardrails (the mutation-suggest
 # hook lives here, no secrets). The personal MCP endpoint is registered
-# globally per-operator and the only purely-operator-local routing file
-# (.mcp.json) is git-ignored separately; everything below is shareable.
+# globally per-operator; the operator-local routing files above are git-ignored,
+# everything below is shareable.
 .claude/*
 .claude/hooks/**/.bypass
 .claude/hooks/**/store.db

@@ -20,6 +20,7 @@ import { FileWatcher } from "./lib/watcher.ts";
 import { createFileLoader } from "./lib/file-loader.ts";
 import { createNavigation } from "./lib/navigation.ts";
 import { createFolder } from "./lib/folder.ts";
+import { ExcalidrawFrame } from "./components/excalidraw-frame.tsx";
 import { isSupportedFile } from "@asciimark/core/utils.ts";
 import { buildBacklinkIndex } from "@asciimark/core/backlinks.ts";
 import { flattenWorkspace } from "@asciimark/core/file-index.ts";
@@ -1397,6 +1398,10 @@ export function App() {
       }}
       resolveImageSrc={resolveImageSrc}
       resolveFileSrc={resolveFileSrc}
+      renderExcalidraw={(file, rootId) => {
+        const root = rootPaths().get(rootId);
+        return root ? <ExcalidrawFrame filePath={`${root}/${file.path}`} /> : null;
+      }}
       onToggleShowHiddenEntries={() => folder.refreshAllRoots()}
       onToggleRespectGitignore={() => folder.refreshAllRoots()}
       onReorderRoots={(newOrder) => state.reorderRoots(newOrder)}

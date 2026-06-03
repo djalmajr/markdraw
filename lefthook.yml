@@ -23,6 +23,10 @@ pre-commit:
     test-rust:
       glob: "apps/desktop/src-tauri/**/*.rs"
       root: "apps/desktop/src-tauri"
+      # Windows: embed the ComCtl32 v6 manifest into the test binary so it can
+      # load (see src-tauri/build.rs); no-op on other platforms.
+      env:
+        ASCIIMARK_EMBED_TEST_MANIFEST: "1"
       run: cargo test --lib
     clippy:
       glob: "apps/desktop/src-tauri/**/*.rs"
@@ -48,6 +52,10 @@ pre-push:
       run: bun test
     test-rust:
       root: "apps/desktop/src-tauri"
+      # Windows: embed the ComCtl32 v6 manifest into the test binary so it can
+      # load (see src-tauri/build.rs); no-op on other platforms.
+      env:
+        ASCIIMARK_EMBED_TEST_MANIFEST: "1"
       run: cargo test --lib
     test-ui:
       root: "packages/ui"

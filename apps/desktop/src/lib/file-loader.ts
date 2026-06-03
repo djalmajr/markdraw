@@ -62,7 +62,11 @@ export function createFileLoader(deps: FileLoaderDeps) {
     // watcher left running on the previous file, and let PaneView swap
     // to the viewer based on viewerKind().
     const kind = fileKind(entry.path);
-    if (kind === "image" || kind === "pdf") {
+    // Image/PDF use the builtin media viewer; `.excalidraw` uses the embedded
+    // Excalidraw editor (the host's `renderExcalidraw` capability reads/writes
+    // the file itself). Either way there's no text pipeline — clear the
+    // text-centric signals and let PaneView swap to the right view by kind.
+    if (kind === "image" || kind === "pdf" || kind === "excalidraw") {
       targetPane.setHtml("");
       targetPane.setFrontmatter(null);
       targetPane.setEditorContent("");

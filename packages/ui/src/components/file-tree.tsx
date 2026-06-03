@@ -16,7 +16,7 @@ import ExpandIcon from "~icons/fluent/arrow-between-down-20-filled";
 import IconSlidersHorizontal from "~icons/lucide/sliders-horizontal";
 import IconX from "~icons/lucide/x";
 import IconFolderOpen from "~icons/lucide/folder-open";
-import { isSupportedFile } from "@asciimark/core/utils.ts";
+import { fileKind, isSupportedFile } from "@asciimark/core/utils.ts";
 import type { FSEntry, WorkspaceRoot } from "@asciimark/core/types.ts";
 
 export interface ExpandAction {
@@ -92,7 +92,8 @@ function computeVisiblePaths(
           anyVisible = true;
         }
       } else {
-        const typeAllowed = showAllFiles || isSupportedFile(entry.name);
+        const typeAllowed =
+          showAllFiles || isSupportedFile(entry.name) || fileKind(entry.name) === "excalidraw";
         const matchesSearch = !lowerSearch || entry.name.toLowerCase().includes(lowerSearch);
         if (typeAllowed && matchesSearch) {
           result.add(entry.path);

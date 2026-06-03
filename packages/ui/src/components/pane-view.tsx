@@ -65,6 +65,9 @@ export interface PaneViewProps {
    *  can load (desktop via `convertFileSrc`). Used by the media viewer to
    *  display images/PDFs. Returns null when the host can't resolve it. */
   resolveFileSrc?: (rootId: string, relativePath: string) => string | null;
+  /** Desktop-only: render the embedded Excalidraw editor for a `.excalidraw`
+   *  file. The extension leaves this undefined, so it never shows the editor. */
+  renderExcalidraw?: (file: FSEntry, rootId: string) => JSX.Element;
   onLoadFile?: (entry: FSEntry, rootId: string) => void;
   onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;
   onActivateTab?: (tabId: string) => void;
@@ -122,6 +125,14 @@ export function PaneView(props: PaneViewProps) {
     const rootId = pane().selectedRootId();
     if (!f || !rootId || !props.resolveFileSrc) return null;
     return props.resolveFileSrc(rootId, f.path);
+  };
+
+  // A `.excalidraw` file opens in the embedded Excalidraw editor instead of the
+  // editor/preview pipeline. Desktop-only: the host must provide
+  // `renderExcalidraw` (the extension doesn't, so it never enters this branch).
+  const isExcalidraw = () => {
+    const f = pane().selectedFile();
+    return !!f && !!props.renderExcalidraw && fileKind(f.name) === "excalidraw";
   };
 
   // The file-loader writes UNSUPPORTED_CONTENT into html when the file can
@@ -272,6 +283,11 @@ export function PaneView(props: PaneViewProps) {
         />
       </Show>
       <div class="content-panels" ref={contentPanelsRef}>
+        <Show when={isExcalidraw()}>
+          <div class="preview-panel">
+            {props.renderExcalidraw?.(pane().selectedFile()!, pane().selectedRootId()!)}
+          </div>
+        </Show>
         <Show when={isMedia()}>
           <div class="preview-panel">
             <MediaViewer
@@ -290,7 +306,7 @@ export function PaneView(props: PaneViewProps) {
             </div>
           </div>
         </Show>
-        <Show when={!isMedia() && !isUnsupported() && pane().editorMode() !== "preview" && pane().selectedFile()}>
+        <Show when={!isMedia() && !isExcalidraw() && !isUnsupported() && pane().editorMode() !== "preview" && pane().selectedFile()}>
           <div
             class="editor-panel"
             ref={editorPanelRef}
@@ -368,14 +384,14 @@ export function PaneView(props: PaneViewProps) {
             />
           </div>
         </Show>
-        <Show when={!isMedia() && !isUnsupported() && pane().editorMode() === "split" && pane().selectedFile()}>
+        <Show when={!isMedia() && !isExcalidraw() && !isUnsupported() && pane().editorMode() === "split" && pane().selectedFile()}>
           <div
             class="resize-handle"
             onDblClick={s.onEditorResizeReset}
             onMouseDown={(e) => s.onEditorResizeStart(e, contentPanelsRef, contentPanelsRef)}
           />
         </Show>
-        <Show when={!isMedia() && !isUnsupported() && pane().editorMode() !== "edit"}>
+        <Show when={!isMedia() && !isExcalidraw() && !isUnsupported() && pane().editorMode() !== "edit"}>
           <div
             class="preview-panel"
             ref={previewPanelRef}

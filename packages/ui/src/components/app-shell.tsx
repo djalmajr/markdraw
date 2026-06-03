@@ -106,6 +106,9 @@ interface AppShellProps {
    *  builtin image/PDF viewer. Desktop maps it through Tauri's asset
    *  protocol. */
   resolveFileSrc?: (rootId: string, relativePath: string) => string | null;
+  /** Desktop-only: render the embedded Excalidraw editor for a `.excalidraw`
+   *  file. Passed straight through to each PaneView. */
+  renderExcalidraw?: (file: FSEntry, rootId: string) => JSX.Element;
   onToggleShowHiddenEntries?: (enabled: boolean) => void | Promise<void>;
   /** Desktop-only: paired with the new file-tree dropdown toggle that
    *  filters entries through `.gitignore`. The shell flips
@@ -624,6 +627,7 @@ export function AppShell(props: AppShellProps) {
                         contentWrapper={props.contentWrapper}
                         resolveImageSrc={props.resolveImageSrc}
                         resolveFileSrc={props.resolveFileSrc}
+                        renderExcalidraw={props.renderExcalidraw}
                         onLoadFile={props.onLoadFile}
                         onOpenInNewTab={props.onOpenInNewTab}
                         onActivateTab={props.onActivateTab}
