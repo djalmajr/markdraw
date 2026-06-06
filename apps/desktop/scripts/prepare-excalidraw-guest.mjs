@@ -66,8 +66,16 @@ run("bun", ["install"], cacheRoot);
 // Build only the two packages the guest actually needs. The repo-wide build
 // also compiles frame-solid/-vue/-angular, whose unrelated d.ts emit can fail
 // and would needlessly break us.
-log("building frame packages (@zomme/frame, @zomme/frame-react)…");
-run("bun", ["run", "--filter", "@zomme/frame", "--filter", "@zomme/frame-react", "build"], cacheRoot);
+//
+// Build them SEQUENTIALLY, frame first: frame-react's `tsc --emitDeclarationOnly`
+// resolves `@zomme/frame/*` against frame's emitted .d.ts, which only exist once
+// frame's own build finishes. A single multi-filter run builds them in parallel
+// and races — it passed locally but failed in CI with TS7016 ("Could not find a
+// declaration file for module '@zomme/frame/sdk'").
+log("building @zomme/frame…");
+run("bun", ["run", "--filter", "@zomme/frame", "build"], cacheRoot);
+log("building @zomme/frame-react…");
+run("bun", ["run", "--filter", "@zomme/frame-react", "build"], cacheRoot);
 
 log("building guest (vite build --base=./)…");
 run("bunx", ["vite", "build", "--base=./"], guestDir);
