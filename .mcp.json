@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tauri": {
+      "command": "npx",
+      "args": ["-y", "@hypothesi/tauri-mcp-server"],
+      "env": {
+        "MCP_BRIDGE_HOST": "127.0.0.1",
+        "MCP_BRIDGE_PORT": "9223"
+      }
+    }
+  }
+}

@@ -3,10 +3,14 @@ import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
 import { FileTreeItem } from "./file-tree-item.tsx";
+import { type ItemDndData, isItemDndId, setSiblingDropParent, siblingDropParent } from "./tree-dnd.ts";
+import { CreateRow } from "./create-row.tsx";
+import { useApp } from "../context/app-context.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu.tsx";
 import { Switch, SwitchControl, SwitchThumb } from "./ui/switch.tsx";
@@ -16,6 +20,14 @@ import ExpandIcon from "~icons/fluent/arrow-between-down-20-filled";
 import IconSlidersHorizontal from "~icons/lucide/sliders-horizontal";
 import IconX from "~icons/lucide/x";
 import IconFolderOpen from "~icons/lucide/folder-open";
+import IconFolder from "~icons/lucide/folder";
+import IconFile from "~icons/lucide/file";
+import IconEllipsisVertical from "~icons/lucide/ellipsis-vertical";
+import IconFilePlus from "~icons/lucide/file-plus";
+import IconFolderPlus from "~icons/lucide/folder-plus";
+import IconClipboard from "~icons/lucide/clipboard-copy";
+import IconClipboardPaste from "~icons/lucide/clipboard-paste";
+import IconTrash from "~icons/lucide/trash-2";
 import { fileKind, isSupportedFile } from "@asciimark/core/utils.ts";
 import type { FSEntry, WorkspaceRoot } from "@asciimark/core/types.ts";
 
@@ -40,6 +52,15 @@ interface FileTreeProps {
   onCopyPath?: (entry: FSEntry, rootId: string) => void | Promise<void>;
   onRevealInFileManager?: (entry: FSEntry, rootId: string) => void | Promise<void>;
   onRename?: (entry: FSEntry, rootId: string, newName: string) => Promise<void>;
+  /** Desktop-only: commit an inline-created file/folder under `parentPath`
+   *  ("" = workspace root). When omitted, New File/Folder entries are hidden. */
+  onCreate?: (parentPath: string, name: string, kind: "file" | "folder", rootId: string) => void;
+  /** Desktop-only: move an entry into a directory ("" = workspace root).
+   *  Powers tree drag & drop and the Cut/Paste menu entries. */
+  onMove?: (entry: FSEntry, targetDirRel: string, rootId: string, targetRootId?: string) => void | Promise<void>;
+  /** Desktop-only: copy an entry into a directory ("" = workspace root),
+   *  auto-numbering on collision. Powers Copy/Paste + ⌘C/⌘V. */
+  onCopy?: (entry: FSEntry, targetDirRel: string, rootId: string, targetRootId?: string) => void | Promise<void>;
   onDelete?: (entry: FSEntry, rootId: string) => Promise<void>;
   onReorderRoots?: (newOrder: string[]) => void;
   onSelect: (entry: FSEntry, rootId: string) => void;
@@ -120,9 +141,20 @@ function fromRootDndId(dndId: unknown): string | null {
   return dndId.slice(ROOT_DND_PREFIX.length);
 }
 
+
 export function FileTree(props: FileTreeProps) {
+  const app = useApp();
   const [filterText, setFilterText] = createSignal("");
+  // The single "active" tree node — a file OR a folder. Drives the `.selected`
+  // highlight and keyboard target alike, so a folder selects exactly like a
+  // file (and can be selected with no file open). Synced from the open file
+  // and updated on click / keyboard navigation.
   const [focusedPath, setFocusedPath] = createSignal<string | null>(null);
+  const [activeRootId, setActiveRootId] = createSignal<string | null>(null);
+  const selectNode = (path: string | null, rootId: string | null) => {
+    setFocusedPath(path);
+    setActiveRootId(rootId);
+  };
   const [expandActions, setExpandActions] = createSignal<Record<string, ExpandAction>>({});
   const [activeDragRootId, setActiveDragRootId] = createSignal<string | null>(null);
   // Expanded state lives outside FileTreeItem so it survives entry reconciliation.
@@ -210,7 +242,78 @@ export function FileTree(props: FileTreeProps) {
     setActiveDragRootId(sourceRootId);
   }
 
+  // While dragging an entry, mark the *parent folder* of a hovered sibling file
+  // as the drop zone (dashed) — not the sibling row itself. Dropping straight
+  // onto a folder leaves siblingDropParent null (that folder shows its own
+  // solid highlight instead).
+  function handleProviderDragOver(event: any) {
+    if (!isItemDndId(event?.operation?.source?.id)) {
+      setSiblingDropParent(null);
+      return;
+    }
+    const tgtId = event?.operation?.target?.id;
+    // Resolve the *destination folder* — a folder hovered directly, the parent
+    // of a hovered sibling file, or a workspace root's top level. Highlighting
+    // that single folder (not the hovered row) keeps the indicator stable: a
+    // folder and the files inside it all map to the same destination, so there
+    // is no flicker as the pointer moves between them.
+    if (isItemDndId(tgtId)) {
+      const tgt = event?.operation?.target?.data as ItemDndData | undefined;
+      if (tgt) {
+        const dir = tgt.kind === "directory"
+          ? tgt.path
+          : (tgt.path.includes("/") ? tgt.path.slice(0, tgt.path.lastIndexOf("/")) : "");
+        setSiblingDropParent({ path: dir, rootId: tgt.rootId });
+        return;
+      }
+    }
+    const rootId = fromRootDndId(tgtId);
+    if (rootId) {
+      setSiblingDropParent({ path: "", rootId });
+      return;
+    }
+    setSiblingDropParent(null);
+  }
+
   function handleProviderDragEnd(event: any) {
+    setSiblingDropParent(null);
+    // Entry move (drag a file/folder onto a folder, a sibling file, or a
+    // workspace root). Distinct from root reordering by the source id
+    // namespace. Resolves the destination dir + root, then forwards to
+    // handleMove (which guards no-ops, folder-into-itself, and overwrites,
+    // and handles cross-workspace moves).
+    if (isItemDndId(event?.operation?.source?.id)) {
+      const src = event?.operation?.source?.data as ItemDndData | undefined;
+      const targetId = event?.operation?.target?.id;
+      if (!event?.canceled && src && props.onMove && targetId) {
+        let targetRootId: string | null = null;
+        let targetDir: string | null = null;
+        if (isItemDndId(targetId)) {
+          const tgt = event?.operation?.target?.data as ItemDndData | undefined;
+          if (tgt) {
+            targetRootId = tgt.rootId;
+            // Onto a folder → inside it; onto a file → its parent dir.
+            targetDir = tgt.kind === "directory"
+              ? tgt.path
+              : (tgt.path.includes("/") ? tgt.path.slice(0, tgt.path.lastIndexOf("/")) : "");
+          }
+        } else {
+          // Dropped on a workspace-root header → that root's top level.
+          const rootId = fromRootDndId(targetId);
+          if (rootId) {
+            targetRootId = rootId;
+            targetDir = "";
+          }
+        }
+        if (targetRootId !== null && targetDir !== null) {
+          void Promise.resolve(
+            props.onMove({ name: src.name, path: src.path, kind: src.kind }, targetDir, src.rootId, targetRootId),
+          ).catch(() => {});
+        }
+      }
+      return;
+    }
+
     const sourceRootId =
       fromRootDndId(event?.operation?.source?.id) ??
       activeDragRootId();
@@ -262,15 +365,22 @@ export function FileTree(props: FileTreeProps) {
         return !canReorderRoots();
       },
     });
+    // Droppable for BOTH root reordering and as a destination for entries
+    // dragged onto the workspace header (move to that root's top level).
     const droppable = useDroppable({
       id: dndId,
       get disabled() {
-        return !canReorderRoots();
+        return !canReorderRoots() && !props.onMove;
       },
     });
 
-    const isDropTarget = () =>
-      droppable.isDropTarget() && activeDragRootId() !== rootId;
+    const isDropTarget = () => {
+      // Root reorder hover, OR a sibling drop whose parent is this root's top
+      // level (path "") — same dashed affordance as a folder sibling drop.
+      if (droppable.isDropTarget() && activeDragRootId() !== rootId) return true;
+      const s = siblingDropParent();
+      return !!s && s.path === "" && s.rootId === rootId;
+    };
     const isRootCollapsed = () => propsRoot.root().collapsed;
     const currentExpandAction = () => expandActions()[rootId] ?? null;
 
@@ -300,6 +410,16 @@ export function FileTree(props: FileTreeProps) {
       });
     }
 
+    function toggleRoot() {
+      setExpandActions((prev) => {
+        if (!(rootId in prev)) return prev;
+        const next = { ...prev };
+        delete next[rootId];
+        return next;
+      });
+      props.onToggleRootCollapsed?.(rootId);
+    }
+
     return (
       <div
         class="workspace-root-block"
@@ -307,25 +427,25 @@ export function FileTree(props: FileTreeProps) {
           "drag-over": isDropTarget(),
           "dragging": draggable.isDragging(),
         }}
-        ref={droppable.ref}
       >
         <div
           class="workspace-root-header"
           classList={{
-            "workspace-root-active": props.selectedRootId === rootId,
+            "workspace-root-active": activeRootId() === rootId && focusedPath() === "",
             "draggable-root": canReorderRoots(),
           }}
-          ref={draggable.ref}
+          ref={(el: HTMLDivElement) => {
+            draggable.ref(el);
+            droppable.ref(el);
+          }}
           onClick={() => {
             if (Date.now() < suppressRootClickUntil) return;
-            setExpandActions((prev) => {
-              if (!(rootId in prev)) return prev;
-              const next = { ...prev };
-              delete next[rootId];
-              return next;
-            });
-            props.onToggleRootCollapsed?.(rootId);
+            // Match child folders: a row click selects the root (so ⌘V targets
+            // its top level); expand/collapse is the chevron's (or dbl-click's)
+            // job.
+            selectNode("", rootId);
           }}
+          onDblClick={() => toggleRoot()}
         >
           <div class="workspace-root-main">
             <Show when={canReorderRoots()}>
@@ -337,7 +457,13 @@ export function FileTree(props: FileTreeProps) {
                 onClick={(e: MouseEvent) => e.stopPropagation()}
               />
             </Show>
-            <span class="tree-icon">
+            <span
+              class="tree-icon tree-chevron"
+              onClick={(e: MouseEvent) => {
+                e.stopPropagation();
+                toggleRoot();
+              }}
+            >
               <IconChevronRight
                 width={14}
                 height={14}
@@ -350,45 +476,125 @@ export function FileTree(props: FileTreeProps) {
             <span class="workspace-root-name">{propsRoot.root().name}</span>
           </div>
           <div class="workspace-root-actions">
-            <button
-              class="workspace-root-btn"
-              aria-label={nextRootBulkAction() === "expand" ? "Expand all" : "Collapse all"}
-              title={nextRootBulkAction() === "expand" ? "Expand all" : "Collapse all"}
-              onClick={(e: MouseEvent) => {
-                e.stopPropagation();
-                const action = nextRootBulkAction();
-
-                if (action === "expand" && isRootCollapsed()) {
-                  props.onToggleRootCollapsed?.(rootId);
-                }
-
-                if (action === "expand") {
-                  triggerRootExpandAll();
-                } else {
-                  triggerRootCollapseAll();
-                }
-              }}
-            >
-              <Show when={nextRootBulkAction() === "expand"} fallback={<CollapseIcon width={14} height={14} />}>
-                <ExpandIcon width={14} height={14} />
-              </Show>
-            </button>
-            <Show when={props.onCloseRoot}>
-              <button
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                as="button"
                 class="workspace-root-btn"
-                aria-label="Close"
-                title="Close"
-                onClick={(e: MouseEvent) => {
-                  e.stopPropagation();
-                  props.onCloseRoot!(rootId);
-                }}
+                aria-label={m.tree_workspace_actions()}
+                title={m.tree_workspace_actions()}
+                onClick={(e: MouseEvent) => e.stopPropagation()}
               >
-                <IconX width={14} height={14} />
-              </button>
-            </Show>
+                <IconEllipsisVertical width={14} height={14} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent class="min-w-48">
+                <Show when={props.onCreate}>
+                  <DropdownMenuItem
+                    class="gap-2"
+                    onSelect={() => {
+                      if (propsRoot.root().collapsed) props.onToggleRootCollapsed?.(rootId);
+                      app.setCreatingAt({ parentPath: "", rootId, kind: "file" });
+                    }}
+                  >
+                    <span class="flex items-center gap-2"><IconFilePlus width={14} height={14} /> {m.tree_new_file()}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    class="gap-2"
+                    onSelect={() => {
+                      if (propsRoot.root().collapsed) props.onToggleRootCollapsed?.(rootId);
+                      app.setCreatingAt({ parentPath: "", rootId, kind: "folder" });
+                    }}
+                  >
+                    <span class="flex items-center gap-2"><IconFolderPlus width={14} height={14} /> {m.tree_new_folder()}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </Show>
+                <Show when={(() => {
+                  const c = app.moveClipboard();
+                  if (!c) return false;
+                  if (c.mode === "copy") return !!props.onCopy;
+                  // Cut to this root's top makes sense unless it is already a
+                  // top-level entry of THIS same root (a no-op).
+                  return props.onMove && (c.rootId !== rootId || c.entry.path.includes("/"));
+                })()}>
+                  <DropdownMenuItem
+                    class="gap-2"
+                    onSelect={() => {
+                      const c = app.moveClipboard();
+                      if (!c) return;
+                      app.setMoveClipboard(null);
+                      const handler = c.mode === "cut" ? props.onMove : props.onCopy;
+                      void Promise.resolve(handler?.(c.entry, "", c.rootId, rootId)).catch(() => {});
+                    }}
+                  >
+                    <span class="flex items-center gap-2"><IconClipboardPaste width={14} height={14} /> {m.tree_paste()}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </Show>
+                <DropdownMenuItem
+                  class="gap-2"
+                  onSelect={() => {
+                    if (nextRootBulkAction() === "expand") {
+                      if (isRootCollapsed()) props.onToggleRootCollapsed?.(rootId);
+                      triggerRootExpandAll();
+                    } else {
+                      triggerRootCollapseAll();
+                    }
+                  }}
+                >
+                  <span class="flex items-center gap-2">
+                    <Show when={nextRootBulkAction() === "expand"} fallback={<CollapseIcon width={14} height={14} />}>
+                      <ExpandIcon width={14} height={14} />
+                    </Show>
+                    {nextRootBulkAction() === "expand" ? m.tree_expand_all() : m.tree_collapse_all()}
+                  </span>
+                </DropdownMenuItem>
+                <Show when={props.onRevealInFileManager}>
+                  <DropdownMenuItem
+                    class="gap-2"
+                    onSelect={() => props.onRevealInFileManager!({ name: propsRoot.root().name, kind: "directory", path: "" }, rootId)}
+                  >
+                    <span class="flex items-center gap-2"><IconFolderOpen width={14} height={14} /> {m.tree_reveal_file_manager()}</span>
+                  </DropdownMenuItem>
+                </Show>
+                <Show when={props.onCopyPath}>
+                  <DropdownMenuItem
+                    class="gap-2"
+                    onSelect={() => props.onCopyPath!({ name: propsRoot.root().name, kind: "directory", path: "" }, rootId)}
+                  >
+                    <span class="flex items-center gap-2"><IconClipboard width={14} height={14} /> {m.tree_copy_path()}</span>
+                  </DropdownMenuItem>
+                </Show>
+                <Show when={props.onCloseRoot}>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    class="gap-2"
+                    onSelect={() => props.onCloseRoot!(rootId)}
+                  >
+                    <span class="flex items-center gap-2"><IconTrash width={14} height={14} /> {m.tree_remove_from_workspace()}</span>
+                  </DropdownMenuItem>
+                </Show>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
         <Show when={!propsRoot.root().collapsed}>
+          <Show when={app.creatingAt()?.parentPath === "" && app.creatingAt()?.rootId === rootId}>
+            <CreateRow
+              kind={app.creatingAt()!.kind}
+              indent={24}
+              icon={
+                app.creatingAt()!.kind === "folder"
+                  ? <IconFolder width={14} height={14} />
+                  : <IconFile width={14} height={14} />
+              }
+              onCommit={(name) => {
+                const c = app.creatingAt()!;
+                app.setCreatingAt(null);
+                props.onCreate?.(c.parentPath, name, c.kind, rootId);
+              }}
+              onCancel={() => app.setCreatingAt(null)}
+            />
+          </Show>
           <For each={propsRoot.root().entries}>
             {(entry) => (
               <FileTreeItem
@@ -406,9 +612,13 @@ export function FileTree(props: FileTreeProps) {
                 onRevealInFileManager={props.onRevealInFileManager}
                 onRename={props.onRename}
                 onDelete={props.onDelete}
-                onSelect={(e) => props.onSelect(e, rootId)}
+                onSelect={(e) => { selectNode(e.path, rootId); props.onSelect(e, rootId); }}
+                onFocusEntry={(e) => selectNode(e.path, rootId)}
                 onOpenInNewTab={props.onOpenInNewTab ? (e) => props.onOpenInNewTab!(e, rootId) : undefined}
                 onDoubleClickFile={props.onDoubleClickFile ? (e) => props.onDoubleClickFile!(e, rootId) : undefined}
+                onCreate={props.onCreate}
+                onMove={props.onMove}
+                onCopy={props.onCopy}
                 showItemMenu={props.showItemMenu}
               />
             )}
@@ -420,10 +630,11 @@ export function FileTree(props: FileTreeProps) {
 
   // ── Focus / keyboard ───────────────────────────────────────────────────
 
-  // Sync focused path when selection changes (e.g. via click)
+  // Sync the active node when the open file changes (e.g. opened elsewhere).
   createEffect(() => {
     const sel = props.selectedPath;
-    if (sel) setFocusedPath(sel);
+    const root = props.selectedRootId;
+    if (sel) selectNode(sel, root ?? activeRootId());
   });
 
   const rootIds = createMemo(() => props.roots.map((r) => r.id));
@@ -454,18 +665,29 @@ export function FileTree(props: FileTreeProps) {
   function findFocusedIndex(items: HTMLElement[]): number {
     const fp = focusedPath();
     if (!fp) return -1;
-    return items.findIndex((el) => el.dataset.path === fp);
+    const root = activeRootId();
+    return items.findIndex(
+      (el) => el.dataset.path === fp && (!root || el.dataset.rootId === root),
+    );
   }
 
   function moveFocus(items: HTMLElement[], index: number) {
     const el = items[index];
     if (el?.dataset.path) {
-      setFocusedPath(el.dataset.path);
+      selectNode(el.dataset.path, el.dataset.rootId ?? null);
       el.scrollIntoView({ block: "nearest" });
     }
   }
 
   function handleKeyDown(e: KeyboardEvent) {
+    // Escape clears a pending Cut (move clipboard) — mirrors the file
+    // manager convention where Esc abandons a queued cut/copy.
+    if (e.key === "Escape" && app.moveClipboard()) {
+      e.preventDefault();
+      app.setMoveClipboard(null);
+      return;
+    }
+
     const items = getVisibleItems();
     if (items.length === 0) return;
 
@@ -536,17 +758,62 @@ export function FileTree(props: FileTreeProps) {
       }
       case "c":
       case "C": {
-        // Copy focused item's absolute path. Shortcut: ⇧⌘C on macOS,
-        // Alt+Shift+C on Windows/Linux. Dispatched as an event so the item
-        // can call its platform-provided `onCopyPath` (which knows the
-        // workspace root and can build the absolute path).
-        if (!e.shiftKey) return;
         const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+        // ⌘C / Ctrl+C → copy the focused entry onto the tree clipboard.
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
+          if (idx < 0) return;
+          e.preventDefault();
+          items[idx].dispatchEvent(new Event("tree-copy"));
+          break;
+        }
+        // ⇧⌘C / Alt+Shift+C → copy the focused item's absolute path.
+        if (!e.shiftKey) return;
         const modifierOk = isMac ? e.metaKey : e.altKey;
         if (!modifierOk) return;
         if (idx < 0) return;
         e.preventDefault();
         items[idx].dispatchEvent(new Event("tree-copy-path"));
+        break;
+      }
+      case "x":
+      case "X": {
+        // ⌘X / Ctrl+X → cut (move clipboard).
+        if (!(e.metaKey || e.ctrlKey) || e.shiftKey) return;
+        if (idx < 0) return;
+        e.preventDefault();
+        items[idx].dispatchEvent(new Event("tree-cut"));
+        break;
+      }
+      case "v":
+      case "V": {
+        // ⌘V / Ctrl+V → paste the clipboard into the focused dir (or the
+        // focused file's parent), or — when a workspace root is selected
+        // (focusedPath === "", so no tree-item is focused) — into that root's
+        // top level, since the root header isn't a `.tree-item`.
+        if (!(e.metaKey || e.ctrlKey) || e.shiftKey) return;
+        if (idx >= 0) {
+          e.preventDefault();
+          items[idx].dispatchEvent(new Event("tree-paste"));
+          break;
+        }
+        const root = activeRootId();
+        const clip = app.moveClipboard();
+        if (focusedPath() === "" && root && clip) {
+          e.preventDefault();
+          app.setMoveClipboard(null);
+          const handler = clip.mode === "cut" ? props.onMove : props.onCopy;
+          void Promise.resolve(handler?.(clip.entry, "", clip.rootId, root)).catch(() => {});
+        }
+        break;
+      }
+      case "Backspace":
+      case "Delete": {
+        // ⌘⌫ (macOS) / Ctrl+Del → move the focused entry to Trash (the host
+        // still confirms before deleting).
+        if (!(e.metaKey || e.ctrlKey)) return;
+        if (idx < 0) return;
+        e.preventDefault();
+        items[idx].dispatchEvent(new Event("tree-trash"));
         break;
       }
       case "Home": {
@@ -623,8 +890,8 @@ export function FileTree(props: FileTreeProps) {
                 >
                   <span class="flex-1">{(useLocale(), m.file_tree_respect_gitignore())}</span>
                   <Switch checked={props.respectGitignore ?? false} class="file-tree-switch">
-                    <SwitchControl class="file-tree-switch-control">
-                      <SwitchThumb class="file-tree-switch-thumb" />
+                    <SwitchControl class="h-4 w-7">
+                      <SwitchThumb class="size-3 data-[checked]:translate-x-3" />
                     </SwitchControl>
                   </Switch>
                 </DropdownMenuItem>
@@ -636,8 +903,8 @@ export function FileTree(props: FileTreeProps) {
                 >
                   <span class="flex-1">Show Hidden</span>
                   <Switch checked={props.showHiddenEntries ?? false} class="file-tree-switch">
-                    <SwitchControl class="file-tree-switch-control">
-                      <SwitchThumb class="file-tree-switch-thumb" />
+                    <SwitchControl class="h-4 w-7">
+                      <SwitchThumb class="size-3 data-[checked]:translate-x-3" />
                     </SwitchControl>
                   </Switch>
                 </DropdownMenuItem>
@@ -649,8 +916,8 @@ export function FileTree(props: FileTreeProps) {
                 >
                   <span class="flex-1">Show All Folders</span>
                   <Switch checked={props.showAllDirs ?? false} class="file-tree-switch">
-                    <SwitchControl class="file-tree-switch-control">
-                      <SwitchThumb class="file-tree-switch-thumb" />
+                    <SwitchControl class="h-4 w-7">
+                      <SwitchThumb class="size-3 data-[checked]:translate-x-3" />
                     </SwitchControl>
                   </Switch>
                 </DropdownMenuItem>
@@ -662,8 +929,8 @@ export function FileTree(props: FileTreeProps) {
                 >
                   <span class="flex-1">Show All Files</span>
                   <Switch checked={props.showAllFiles ?? false} class="file-tree-switch">
-                    <SwitchControl class="file-tree-switch-control">
-                      <SwitchThumb class="file-tree-switch-thumb" />
+                    <SwitchControl class="h-4 w-7">
+                      <SwitchThumb class="size-3 data-[checked]:translate-x-3" />
                     </SwitchControl>
                   </Switch>
                 </DropdownMenuItem>
@@ -676,6 +943,7 @@ export function FileTree(props: FileTreeProps) {
         <Show when={hasAnyEntries()} fallback={<div class="file-tree-empty">{(useLocale(), m.tree_no_files_found())}</div>}>
           <DragDropProvider
             onDragStart={handleProviderDragStart}
+            onDragOver={handleProviderDragOver}
             onDragEnd={handleProviderDragEnd}
           >
             <For each={rootIds()}>
@@ -691,8 +959,8 @@ export function FileTree(props: FileTreeProps) {
                     filterText(),
                   );
                 });
-                const isActiveRoot = () => props.selectedRootId === rootId;
-                const rootSelectedPath = () => isActiveRoot() ? props.selectedPath : null;
+                const isActiveRoot = () => activeRootId() === rootId;
+                const rootSelectedPath = () => isActiveRoot() ? focusedPath() : null;
                 const rootFocusedPath = () => isActiveRoot() ? focusedPath() : null;
 
                 return (
@@ -708,9 +976,13 @@ export function FileTree(props: FileTreeProps) {
                 );
               }}
             </For>
-            <DragOverlay>
+            <DragOverlay dropAnimation={null}>
               {(source: any) => (
-                <div class="workspace-root-overlay">{getRootNameByDndId(source?.id)}</div>
+                <div class="workspace-root-overlay">
+                  {isItemDndId(source?.id)
+                    ? (source?.data?.name ?? "")
+                    : getRootNameByDndId(source?.id)}
+                </div>
               )}
             </DragOverlay>
           </DragDropProvider>

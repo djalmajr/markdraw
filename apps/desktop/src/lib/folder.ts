@@ -3,7 +3,8 @@ import { writeText as clipboardWriteText } from "@tauri-apps/plugin-clipboard-ma
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { FSEntry } from "@asciimark/core/types.ts";
 import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
-import { openDirectory, readTree, renameFile, trashPath, writeFile } from "./fs.ts";
+import { copyPath, createDir, createFile, movePath, openDirectory, readTree, renameFile, trashPath, writeFile } from "./fs.ts";
+import { joinRelative, nextAvailableName, withDefaultExtension } from "./fs-paths.ts";
 import type { FileWatcher } from "./watcher.ts";
 
 interface FolderDeps {
@@ -265,8 +266,125 @@ export function createFolder(deps: FolderDeps) {
     await refreshRoot(rootId);
   }
 
+  /** Create an empty file under `parentRel` (default `.md` extension;
+   *  `sub/dir/name` creates the intermediate folders) and return its new
+   *  workspace-relative path so the caller can open it. */
+  async function handleCreateFile(
+    parentRel: string,
+    name: string,
+    rootId: string,
+  ): Promise<string> {
+    const rootPath = rootPaths().get(rootId);
+    if (!rootPath) throw new Error("Root not found");
+    const relative = joinRelative(parentRel, withDefaultExtension(name));
+    await createFile(rootPath, relative);
+    await refreshRoot(rootId);
+    return relative;
+  }
+
+  /** Create a directory under `parentRel` and return its new path. */
+  async function handleCreateFolder(
+    parentRel: string,
+    name: string,
+    rootId: string,
+  ): Promise<string> {
+    const rootPath = rootPaths().get(rootId);
+    if (!rootPath) throw new Error("Root not found");
+    const relative = joinRelative(parentRel, name);
+    await createDir(rootPath, relative);
+    await refreshRoot(rootId);
+    return relative;
+  }
+
+  /** Move `entry` into the directory at `targetDirRel` ("" = workspace root)
+   *  of `targetRootId` (defaults to `rootId` for within-root moves). Within a
+   *  root it reuses `rename_file`; across roots it uses `move_path`. Refuses
+   *  to drop a folder into itself and rewrites the open file's path. */
+  async function handleMove(
+    entry: FSEntry,
+    targetDirRel: string,
+    rootId: string,
+    targetRootId: string = rootId,
+  ): Promise<void> {
+    const rootPath = rootPaths().get(rootId);
+    const targetRootPath = rootPaths().get(targetRootId);
+    if (!rootPath || !targetRootPath) throw new Error("Root not found");
+    const newRelative = joinRelative(targetDirRel, entry.name);
+    const sameRoot = targetRootId === rootId;
+    if (sameRoot && newRelative === entry.path) return;
+    if (
+      entry.kind === "directory"
+      && sameRoot
+      && (targetDirRel === entry.path || targetDirRel.startsWith(entry.path + "/"))
+    ) {
+      throw new Error("Cannot move a folder into itself");
+    }
+
+    const targetPane = state.paneManager.activePane();
+    if (sameRoot) {
+      await renameFile(rootPath, entry.path, newRelative);
+    } else {
+      await movePath(rootPath, entry.path, targetRootPath, newRelative);
+    }
+
+    // Keep the open file pointing at its new location (path, and root when it
+    // crossed workspaces).
+    const sel = targetPane.selectedFile();
+    if (sel && targetPane.selectedRootId() === rootId) {
+      const rewrite = (path: string) => {
+        if (!sameRoot) targetPane.setSelectedRootId(targetRootId);
+        targetPane.setSelectedFile({ ...sel, path });
+      };
+      if (sel.path === entry.path) {
+        rewrite(newRelative);
+      } else if (sel.path.startsWith(entry.path + "/")) {
+        rewrite(newRelative + sel.path.slice(entry.path.length));
+      }
+    }
+
+    await refreshRoot(rootId);
+    if (!sameRoot) await refreshRoot(targetRootId);
+  }
+
+  /** Copy `entry` into the directory at `targetDirRel` ("" = workspace root) of
+   *  `targetRootId` (defaults to `rootId`; differs for cross-workspace copies).
+   *  On a name collision (notably copying into the entry's own parent) the copy
+   *  is suffixed ` (1)`, ` (2)`, … before the extension. Returns the new copy's
+   *  workspace-relative path. */
+  async function handleCopy(
+    entry: FSEntry,
+    targetDirRel: string,
+    rootId: string,
+    targetRootId: string = rootId,
+  ): Promise<string> {
+    const rootPath = rootPaths().get(rootId);
+    const targetRootPath = rootPaths().get(targetRootId);
+    if (!rootPath || !targetRootPath) throw new Error("Root not found");
+    const sameRoot = targetRootId === rootId;
+    if (
+      entry.kind === "directory"
+      && sameRoot
+      && (targetDirRel === entry.path || targetDirRel.startsWith(entry.path + "/"))
+    ) {
+      throw new Error("Cannot copy a folder into itself");
+    }
+
+    const taken = (candidate: string) =>
+      state.findEntryByPath(joinRelative(targetDirRel, candidate), targetRootId) != null;
+    const name = nextAvailableName(entry.name, taken, entry.kind === "directory");
+    const newRelative = joinRelative(targetDirRel, name);
+    await copyPath(rootPath, entry.path, targetRootPath, newRelative);
+    await refreshRoot(targetRootId);
+    if (!sameRoot) await refreshRoot(rootId);
+    return newRelative;
+  }
+
   return {
     getPathName,
+    handleCreateFile,
+    handleCreateFolder,
+    handleMove,
+    handleCopy,
     handleCloseRoot,
     handleCopyPath,
     handleRevealInFileManager,

@@ -74,6 +74,38 @@ export async function trashPath(
   await invoke("trash_path", { root: rootPath, relative });
 }
 
+export async function createFile(
+  rootPath: string,
+  relative: string,
+): Promise<void> {
+  await invoke("create_file", { root: rootPath, relative });
+}
+
+export async function createDir(
+  rootPath: string,
+  relative: string,
+): Promise<void> {
+  await invoke("create_dir", { root: rootPath, relative });
+}
+
+export async function copyPath(
+  srcRoot: string,
+  fromRelative: string,
+  dstRoot: string,
+  toRelative: string,
+): Promise<void> {
+  await invoke("copy_path", { srcRoot, fromRelative, dstRoot, toRelative });
+}
+
+export async function movePath(
+  srcRoot: string,
+  srcRelative: string,
+  dstRoot: string,
+  dstRelative: string,
+): Promise<void> {
+  await invoke("move_path", { srcRoot, srcRelative, dstRoot, dstRelative });
+}
+
 export interface FileMatch {
   /** Workspace-relative, forward-slash path. */
   path: string;

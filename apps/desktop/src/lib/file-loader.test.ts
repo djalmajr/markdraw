@@ -44,6 +44,10 @@ mock.module("./fs.ts", () => ({
   trashPath: async () => {},
   readTree: async () => [],
   openDirectory: async () => null,
+  createFile: async () => {},
+  createDir: async () => {},
+  copyPath: async () => {},
+  movePath: async () => {},
 }));
 
 mock.module("@tauri-apps/api/event", () => ({

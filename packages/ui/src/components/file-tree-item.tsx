@@ -1,4 +1,4 @@
-import { createSignal, createEffect, createMemo, Show, For, onMount, onCleanup, type JSX } from "solid-js";
+import { createEffect, createMemo, Show, For, onMount, onCleanup, type JSX } from "solid-js";
 import type { FSEntry } from "@asciimark/core/types.ts";
 import { fileKind, fileManagerKind } from "@asciimark/core/utils.ts";
 import * as m from "@asciimark/i18n";
@@ -11,10 +11,18 @@ import IconFileImage from "~icons/lucide/file-image";
 import IconFilePlain from "~icons/lucide/file";
 import IconEllipsisVertical from "~icons/lucide/ellipsis-vertical";
 import IconClipboard from "~icons/lucide/clipboard-copy";
+import IconClipboardPaste from "~icons/lucide/clipboard-paste";
+import IconCopy from "~icons/lucide/copy";
+import IconScissors from "~icons/lucide/scissors";
 import IconPencil from "~icons/lucide/pencil";
 import IconTrash from "~icons/lucide/trash-2";
 import IconFolderOpen from "~icons/lucide/folder-open";
 import IconExternalLink from "~icons/lucide/external-link";
+import IconFilePlus from "~icons/lucide/file-plus";
+import IconFolderPlus from "~icons/lucide/folder-plus";
+import { useDraggable, useDroppable } from "@dnd-kit/solid";
+import { CreateRow } from "./create-row.tsx";
+import { type ItemDndData, siblingDropParent, toItemDndId } from "./tree-dnd.ts";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -43,10 +51,28 @@ const BASE_PADDING = 4;
 const IS_MAC = typeof navigator !== "undefined"
   && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 
+/** Whether `src` can be moved into the directory `dstDir` (workspace-
+ *  relative, "" = root): not a no-op (already its parent), not onto
+ *  itself, and not a folder into its own subtree. */
+function canMoveInto(src: FSEntry, dstDir: string): boolean {
+  if (src.path === dstDir) return false;
+  const srcParent = src.path.includes("/") ? src.path.slice(0, src.path.lastIndexOf("/")) : "";
+  if (srcParent === dstDir) return false;
+  if (src.kind === "directory" && (dstDir === src.path || dstDir.startsWith(src.path + "/"))) return false;
+  return true;
+}
+
 /** Platform-conventional rename shortcut, formatted for display in menus. */
 const RENAME_SHORTCUT_LABEL = IS_MAC ? "⌘↵" : "F2";
 /** Copy-path shortcut: ⇧⌘C on macOS, Alt+Shift+C elsewhere. */
 const COPY_SHORTCUT_LABEL = IS_MAC ? "⇧⌘C" : "Alt+Shift+C";
+/** Cut / Copy / Paste (move clipboard) and create / trash shortcut labels. */
+const CUT_SHORTCUT_LABEL = IS_MAC ? "⌘X" : "Ctrl+X";
+const COPY_ENTRY_SHORTCUT_LABEL = IS_MAC ? "⌘C" : "Ctrl+C";
+const PASTE_SHORTCUT_LABEL = IS_MAC ? "⌘V" : "Ctrl+V";
+const NEW_FILE_SHORTCUT_LABEL = IS_MAC ? "⌘N" : "Ctrl+N";
+const NEW_FOLDER_SHORTCUT_LABEL = IS_MAC ? "⇧⌘N" : "Ctrl+Shift+N";
+const TRASH_SHORTCUT_LABEL = IS_MAC ? "⌘⌫" : "Del";
 
 /** Middle-click affordance glyph shown next to "Open in New Tab". */
 function MiddleClickGlyph() {
@@ -103,10 +129,24 @@ interface FileTreeItemProps {
   onRename?: (entry: FSEntry, rootId: string, newName: string) => Promise<void>;
   onDelete?: (entry: FSEntry, rootId: string) => Promise<void>;
   onSelect: (entry: FSEntry) => void;
+  /** Focus/select a folder row (without expanding it) so keyboard actions
+   *  like ⌘V have a target. Files focus implicitly via `onSelect`. */
+  onFocusEntry?: (entry: FSEntry) => void;
   /** Open file in a new pinned tab (right-click / middle-click). */
   onOpenInNewTab?: (entry: FSEntry) => void;
   /** Double-click on file — pin the tab. */
   onDoubleClickFile?: (entry: FSEntry) => void;
+  /** Desktop-only: commit a new file/folder created inline under
+   *  `parentPath` (workspace-relative, "" = root). When omitted (web/
+   *  extension), the New File / New Folder entries are hidden. */
+  onCreate?: (parentPath: string, name: string, kind: "file" | "folder", rootId: string) => void;
+  /** Desktop-only: move `entry` into `targetDirRel` ("" = workspace root).
+   *  Powers drag & drop and the Cut/Paste menu entries. When omitted
+   *  (web/extension), dragging and Cut/Paste are disabled. */
+  onMove?: (entry: FSEntry, targetDirRel: string, rootId: string, targetRootId?: string) => void | Promise<void>;
+  /** Desktop-only: copy `entry` into `targetDirRel` ("" = workspace root),
+   *  auto-numbering on collision. Powers the Copy/Paste menu + ⌘C/⌘V. */
+  onCopy?: (entry: FSEntry, targetDirRel: string, rootId: string, targetRootId?: string) => void | Promise<void>;
   /**
    * Render the per-item context menu and the three-dot dropdown
    * (Copy path / Rename / Delete / Open in New Tab). When false, the
@@ -173,21 +213,77 @@ export function FileTreeItem(props: FileTreeItemProps) {
       if (props.onRename) startRename();
     };
     const onCopyEvt = () => copyPath();
+    const onCutEvt = () => {
+      if (props.onMove) app.setMoveClipboard({ entry: props.entry, rootId: props.rootId, mode: "cut" });
+    };
+    const onCopyEntryEvt = () => {
+      if (props.onCopy) app.setMoveClipboard({ entry: props.entry, rootId: props.rootId, mode: "copy" });
+    };
+    const onPasteEvt = () => doPaste();
+    const onTrashEvt = () => props.onDelete?.(props.entry, props.rootId);
     itemRef.addEventListener("tree-expand", onExpand);
     itemRef.addEventListener("tree-collapse", onCollapse);
     itemRef.addEventListener("tree-rename", onRenameEvt);
     itemRef.addEventListener("tree-copy-path", onCopyEvt);
+    itemRef.addEventListener("tree-cut", onCutEvt);
+    itemRef.addEventListener("tree-copy", onCopyEntryEvt);
+    itemRef.addEventListener("tree-paste", onPasteEvt);
+    itemRef.addEventListener("tree-trash", onTrashEvt);
     onCleanup(() => {
       itemRef!.removeEventListener("tree-expand", onExpand);
       itemRef!.removeEventListener("tree-collapse", onCollapse);
       itemRef!.removeEventListener("tree-rename", onRenameEvt);
       itemRef!.removeEventListener("tree-copy-path", onCopyEvt);
+      itemRef!.removeEventListener("tree-cut", onCutEvt);
+      itemRef!.removeEventListener("tree-copy", onCopyEntryEvt);
+      itemRef!.removeEventListener("tree-paste", onPasteEvt);
+      itemRef!.removeEventListener("tree-trash", onTrashEvt);
     });
   });
 
   const isFocused = () => props.focusedPath === props.entry.path;
   const isSelected = () => props.selectedPath === props.entry.path;
   const isDirectory = () => props.entry.kind === "directory";
+  /** This entry is on the clipboard. Cut → italic/dimmed (it will move away);
+   *  Copy → a subtle marked outline (the original stays put). */
+  const onClipboard = (mode: "cut" | "copy") => {
+    const c = app.moveClipboard();
+    return !!c && c.mode === mode && c.rootId === props.rootId && c.entry.path === props.entry.path;
+  };
+  const isCut = () => onClipboard("cut");
+  const isCopy = () => onClipboard("copy");
+
+  /** Directory a paste lands in: this dir if it is one, else its parent. */
+  function pasteTargetDir(): string {
+    if (isDirectory()) return props.entry.path;
+    return props.entry.path.includes("/")
+      ? props.entry.path.slice(0, props.entry.path.lastIndexOf("/"))
+      : "";
+  }
+
+  /** Whether the current clipboard can paste into `dir` of this row's root. */
+  function pasteAllowed(clip: NonNullable<ReturnType<typeof app.moveClipboard>>, dir: string): boolean {
+    // Cross-workspace paste is always allowed — the backend (handleMove /
+    // handleCopy) is the source of truth and guards within-root edge cases.
+    if (clip.rootId !== props.rootId) return true;
+    if (clip.mode === "cut") return canMoveInto(clip.entry, dir);
+    // Copy auto-numbers on collision, so same-parent is fine; only block
+    // copying a folder into its own subtree (would recurse).
+    return !(clip.entry.kind === "directory" && (dir === clip.entry.path || dir.startsWith(clip.entry.path + "/")));
+  }
+
+  /** Execute the pending Cut (move) or Copy into `pasteTargetDir()` — into
+   *  this row's root, which may differ from the clipboard's (cross-workspace). */
+  function doPaste() {
+    const clip = app.moveClipboard();
+    if (!clip) return;
+    const dir = pasteTargetDir();
+    if (!pasteAllowed(clip, dir)) return;
+    app.setMoveClipboard(null);
+    if (isDirectory()) setExpanded(true);
+    const handler = clip.mode === "cut" ? props.onMove : props.onCopy;
+    void Promise.resolve(handler?.(clip.entry, dir, clip.rootId, props.rootId)).catch(() => {});
+  }
   const isEditing = () => app.editingPath() === props.entry.path;
   const indent = () => props.depth * INDENT_PER_DEPTH + BASE_PADDING;
 
@@ -222,17 +318,41 @@ export function FileTreeItem(props: FileTreeItemProps) {
     }
   });
 
+  // Auto-expand a directory when an inline create targets it, so the CreateRow
+  // placeholder is visible even if the folder was collapsed.
+  createEffect(() => {
+    const c = app.creatingAt();
+    if (c && c.parentPath === props.entry.path && c.rootId === props.rootId && isDirectory() && !expanded()) {
+      setExpanded(true);
+    }
+  });
+
   function handleClick() {
     if (isEditing()) return;
     if (isDirectory()) {
-      setExpanded(!expanded());
+      // A folder row click selects/focuses the folder (so keyboard actions
+      // like ⌘V target it) — it does NOT expand. Expansion is the chevron's
+      // job (or a double-click), keeping select and expand separate. Focus the
+      // nav so its keydown handler (⌘V/⌘X/…) receives keys.
+      props.onFocusEntry?.(props.entry);
+      focusNav();
     } else {
       props.onSelect(props.entry);
     }
   }
 
+  function handleChevronClick(e: MouseEvent) {
+    e.stopPropagation();
+    if (isEditing()) return;
+    setExpanded(!expanded());
+  }
+
   function handleDoubleClick() {
-    if (isEditing() || isDirectory()) return;
+    if (isEditing()) return;
+    if (isDirectory()) {
+      setExpanded(!expanded());
+      return;
+    }
     props.onDoubleClickFile?.(props.entry);
   }
 
@@ -242,6 +362,54 @@ export function FileTreeItem(props: FileTreeItemProps) {
       props.onOpenInNewTab?.(props.entry);
     }
   }
+
+  // ── Drag & drop (move) ────────────────────────────────────────────
+  // Reuse the same @dnd-kit provider that powers workspace-root reordering —
+  // native HTML5 drag never initiates reliably for these rows under WKWebView
+  // (the Kobalte trigger swallows the gesture). Every row is draggable; only
+  // folders are drop targets. The actual move is dispatched from FileTree's
+  // onDragEnd, which carries the source/target `data` we set here.
+  const dndId = toItemDndId(props.rootId, props.entry.path);
+  const dndData = (): ItemDndData => ({
+    rootId: props.rootId,
+    path: props.entry.path,
+    name: props.entry.name,
+    kind: props.entry.kind,
+  });
+  const draggable = useDraggable({
+    id: dndId,
+    get data() {
+      return dndData();
+    },
+    get disabled() {
+      return !props.onMove || isEditing();
+    },
+  });
+  // Both folders and files are drop targets: dropping onto a folder moves the
+  // entry inside it; dropping onto a file moves it next to that file (into the
+  // file's parent). FileTree.onDragEnd resolves the destination directory.
+  const droppable = useDroppable({
+    id: dndId,
+    get data() {
+      return dndData();
+    },
+    get disabled() {
+      return !props.onMove;
+    },
+  });
+  // This folder is the resolved drop destination (hovered directly, or the
+  // parent of a hovered sibling). The dashed affordance goes on the whole
+  // subtree (the wrapper), matching the workspace-root drop zone.
+  const isDropFolder = () => {
+    if (!isDirectory()) return false;
+    const s = siblingDropParent();
+    return !!s && s.path === props.entry.path && s.rootId === props.rootId;
+  };
+  const setItemRef = (el: HTMLDivElement) => {
+    itemRef = el;
+    draggable.ref(el);
+    droppable.ref(el);
+  };
 
   function copyPath() {
     if (props.onCopyPath) {
@@ -285,6 +453,35 @@ export function FileTreeItem(props: FileTreeItemProps) {
   // the entries (icon / label / action / shortcut / order) live here once.
   const menuEntries = (): TreeMenuEntry[] => {
     const list: TreeMenuEntry[] = [];
+    if (props.onCreate) {
+      const dir = isDirectory()
+        ? props.entry.path
+        : props.entry.path.includes("/")
+          ? props.entry.path.slice(0, props.entry.path.lastIndexOf("/"))
+          : "";
+      const startCreate = (kind: "file" | "folder") => {
+        if (isDirectory()) setExpanded(true);
+        app.setCreatingAt({ parentPath: dir, rootId: props.rootId, kind });
+      };
+      list.push(
+        {
+          id: "new-file",
+          icon: <IconFilePlus width={14} height={14} />,
+          label: m.tree_new_file,
+          onSelect: () => startCreate("file"),
+          shortcut: NEW_FILE_SHORTCUT_LABEL,
+          itemClass: "justify-between gap-3",
+        },
+        {
+          id: "new-folder",
+          icon: <IconFolderPlus width={14} height={14} />,
+          label: m.tree_new_folder,
+          onSelect: () => startCreate("folder"),
+          shortcut: NEW_FOLDER_SHORTCUT_LABEL,
+          itemClass: "justify-between gap-3",
+        },
+      );
+    }
     if (!isDirectory() && props.onOpenInNewTab) {
       list.push({
         id: "open-in-new-tab",
@@ -322,14 +519,50 @@ export function FileTreeItem(props: FileTreeItemProps) {
         itemClass: "gap-2",
       });
     }
+    if (props.onMove) {
+      list.push({
+        id: "cut",
+        icon: <IconScissors width={14} height={14} />,
+        label: m.tree_cut,
+        onSelect: () => app.setMoveClipboard({ entry: props.entry, rootId: props.rootId, mode: "cut" }),
+        shortcut: CUT_SHORTCUT_LABEL,
+        separatorBefore: true,
+        itemClass: "justify-between gap-3",
+      });
+    }
+    if (props.onCopy) {
+      list.push({
+        id: "copy",
+        icon: <IconCopy width={14} height={14} />,
+        label: m.tree_copy,
+        onSelect: () => app.setMoveClipboard({ entry: props.entry, rootId: props.rootId, mode: "copy" }),
+        shortcut: COPY_ENTRY_SHORTCUT_LABEL,
+        separatorBefore: !props.onMove,
+        itemClass: "justify-between gap-3",
+      });
+    }
+    if (props.onMove || props.onCopy) {
+      const clip = app.moveClipboard();
+      if (isDirectory() && clip && pasteAllowed(clip, props.entry.path)) {
+        list.push({
+          id: "paste",
+          icon: <IconClipboardPaste width={14} height={14} />,
+          label: m.tree_paste,
+          onSelect: doPaste,
+          shortcut: PASTE_SHORTCUT_LABEL,
+          itemClass: "justify-between gap-3",
+        });
+      }
+    }
     if (props.onDelete) {
       list.push({
         id: "trash",
         icon: <IconTrash width={14} height={14} />,
         label: m.tree_move_to_trash,
         onSelect: () => props.onDelete?.(props.entry, props.rootId),
+        shortcut: TRASH_SHORTCUT_LABEL,
         separatorBefore: true,
-        itemClass: "gap-2",
+        itemClass: "justify-between gap-3",
       });
     }
     return list;
@@ -410,22 +643,30 @@ export function FileTreeItem(props: FileTreeItemProps) {
   const menuEnabled = () => props.showItemMenu !== false;
 
   return (
-    <div class="tree-item-wrapper" style={isVisible() ? undefined : { display: "none" }}>
+    <div
+      class="tree-item-wrapper"
+      classList={{ "drop-into": isDropFolder() }}
+      style={isVisible() ? undefined : { display: "none" }}
+    >
       <ContextMenu>
         <ContextMenuTrigger
           as="div"
-          class={`tree-item ${isSelected() ? "selected" : ""} ${isDirectory() ? "directory" : "file"} ${isFocused() ? "focused" : ""}`}
+          class={`tree-item ${isSelected() ? "selected" : ""} ${isDirectory() ? "directory" : "file"} ${isFocused() ? "focused" : ""} ${isCut() ? "cut-pending" : ""} ${isCopy() ? "copy-pending" : ""}`}
           data-expanded={isDirectory() ? String(expanded()) : undefined}
           data-kind={props.entry.kind}
           data-path={props.entry.path}
-          ref={itemRef}
+          data-root-id={props.rootId}
+          ref={setItemRef}
           style={{ "padding-left": `${indent()}px` }}
           title={props.entry.path}
           onClick={handleClick}
           onDblClick={handleDoubleClick}
           onMouseDown={handleMouseDown}
         >
-          <span class="tree-icon">
+          <span
+            class={`tree-icon ${isDirectory() ? "tree-chevron" : ""}`}
+            onClick={isDirectory() ? handleChevronClick : undefined}
+          >
             <Show when={isDirectory()}>
               <IconChevronRight
                 width={14}
@@ -522,8 +763,25 @@ export function FileTreeItem(props: FileTreeItemProps) {
           </ContextMenuContent>
         </Show>
       </ContextMenu>
-      <Show when={isDirectory() && (expanded() || props.forceExpand) && props.entry.children}>
-        <For each={props.entry.children}>
+      <Show when={isDirectory() && (expanded() || props.forceExpand)}>
+        <Show when={app.creatingAt()?.parentPath === props.entry.path && app.creatingAt()?.rootId === props.rootId}>
+          <CreateRow
+            kind={app.creatingAt()!.kind}
+            indent={(props.depth + 1) * INDENT_PER_DEPTH + BASE_PADDING}
+            icon={
+              app.creatingAt()!.kind === "folder"
+                ? <IconFolder width={14} height={14} />
+                : <IconFilePlain width={14} height={14} />
+            }
+            onCommit={(name) => {
+              const c = app.creatingAt()!;
+              app.setCreatingAt(null);
+              props.onCreate?.(c.parentPath, name, c.kind, props.rootId);
+            }}
+            onCancel={() => app.setCreatingAt(null)}
+          />
+        </Show>
+        <For each={props.entry.children ?? []}>
           {(child) => (
             <FileTreeItem
               depth={props.depth + 1}
@@ -541,8 +799,12 @@ export function FileTreeItem(props: FileTreeItemProps) {
               onRename={props.onRename}
               onDelete={props.onDelete}
               onSelect={props.onSelect}
+              onFocusEntry={props.onFocusEntry}
               onOpenInNewTab={props.onOpenInNewTab}
               onDoubleClickFile={props.onDoubleClickFile}
+              onCreate={props.onCreate}
+              onMove={props.onMove}
+              onCopy={props.onCopy}
               showItemMenu={props.showItemMenu}
             />
           )}

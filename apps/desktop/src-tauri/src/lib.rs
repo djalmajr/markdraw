@@ -239,6 +239,46 @@ async fn trash_path(root: String, relative: String) -> Result<(), String> {
     trash::delete(&target_canon).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn create_file(root: String, relative: String) -> Result<(), String> {
+    create_file_impl(&PathBuf::from(&root), &relative)
+}
+
+#[tauri::command]
+async fn create_dir(root: String, relative: String) -> Result<(), String> {
+    create_dir_impl(&PathBuf::from(&root), &relative)
+}
+
+#[tauri::command]
+async fn copy_path(
+    src_root: String,
+    from_relative: String,
+    dst_root: String,
+    to_relative: String,
+) -> Result<(), String> {
+    copy_path_impl(
+        &PathBuf::from(&src_root),
+        &from_relative,
+        &PathBuf::from(&dst_root),
+        &to_relative,
+    )
+}
+
+#[tauri::command]
+async fn move_path(
+    src_root: String,
+    src_relative: String,
+    dst_root: String,
+    dst_relative: String,
+) -> Result<(), String> {
+    move_path_impl(
+        &PathBuf::from(&src_root),
+        &src_relative,
+        &PathBuf::from(&dst_root),
+        &dst_relative,
+    )
+}
+
 /// Read a file by joining `relative` to `root`. Public for testing.
 pub fn read_file_relative_impl(root: &Path, relative: &str) -> Result<String, String> {
     let full = root.join(relative);
@@ -433,6 +473,166 @@ pub fn rename_file_impl(
     }
 
     std::fs::rename(&from, &to).map_err(|e| e.to_string())
+}
+
+/// Reject traversal/absolute paths, create the parent directory chain, and
+/// return the canonicalized parent — guaranteed to live inside `root`.
+pub fn ensure_parent_within_root(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let rel = Path::new(relative);
+    if rel.file_name().is_none()
+        || rel.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err("invalid path".into());
+    }
+    let root_canon = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let target = root_canon.join(rel);
+    let parent = target.parent().ok_or_else(|| "invalid destination".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let parent_canon = std::fs::canonicalize(parent).map_err(|e| e.to_string())?;
+    if !parent_canon.starts_with(&root_canon) {
+        return Err("destination escapes workspace root".into());
+    }
+    Ok(parent_canon)
+}
+
+/// Create an empty file at `relative` inside `root`, creating parent dirs as
+/// needed. Validates traversal and refuses to overwrite an existing file.
+pub fn create_file_impl(root: &Path, relative: &str) -> Result<(), String> {
+    let parent_canon = ensure_parent_within_root(root, relative)?;
+    let name = Path::new(relative)
+        .file_name()
+        .ok_or_else(|| "invalid file name".to_string())?;
+    let target = parent_canon.join(name);
+    if target.exists() {
+        return Err("file already exists".into());
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Create a directory at `relative` inside `root`, creating parent dirs as
+/// needed. Validates traversal and refuses to overwrite an existing entry.
+pub fn create_dir_impl(root: &Path, relative: &str) -> Result<(), String> {
+    let parent_canon = ensure_parent_within_root(root, relative)?;
+    let name = Path::new(relative)
+        .file_name()
+        .ok_or_else(|| "invalid directory name".to_string())?;
+    let target = parent_canon.join(name);
+    if target.exists() {
+        return Err("directory already exists".into());
+    }
+    std::fs::create_dir(&target).map_err(|e| e.to_string())
+}
+
+/// Copy the file or directory at `from_rel` (inside `src_root`) to `to_rel`
+/// (inside `dst_root`). Works within a single root and across two different
+/// workspace roots. Directories are copied recursively. Validates both
+/// endpoints and refuses to overwrite an existing destination (the caller
+/// chooses a free `to_rel`, e.g. `name (1).md`).
+pub fn copy_path_impl(
+    src_root: &Path,
+    from_rel: &str,
+    dst_root: &Path,
+    to_rel: &str,
+) -> Result<(), String> {
+    let from = src_root.join(from_rel);
+    let src_root_canon = std::fs::canonicalize(src_root).map_err(|e| e.to_string())?;
+    let from_canon = std::fs::canonicalize(&from).map_err(|e| e.to_string())?;
+    if !from_canon.starts_with(&src_root_canon) {
+        return Err("copy source escapes workspace root".into());
+    }
+
+    let parent_canon = ensure_parent_within_root(dst_root, to_rel)?;
+    let name = Path::new(to_rel)
+        .file_name()
+        .ok_or_else(|| "invalid destination name".to_string())?;
+    let to = parent_canon.join(name);
+    if to.exists() {
+        return Err("destination already exists".into());
+    }
+
+    // Refuse to copy a directory into its own subtree (would recurse forever).
+    if from_canon.is_dir() && to.starts_with(&from_canon) {
+        return Err("cannot copy a folder into itself".into());
+    }
+
+    if from_canon.is_dir() {
+        copy_dir_recursive(&from_canon, &to)
+    } else {
+        std::fs::copy(&from_canon, &to).map(|_| ()).map_err(|e| e.to_string())
+    }
+}
+
+/// Move the file or directory at `src_rel` (inside `src_root`) to `dst_rel`
+/// (inside `dst_root`). Works within a single root and across two different
+/// workspace roots. Validates both endpoints, refuses to overwrite, and falls
+/// back to copy+remove when a plain rename fails (e.g. cross-filesystem).
+pub fn move_path_impl(
+    src_root: &Path,
+    src_rel: &str,
+    dst_root: &Path,
+    dst_rel: &str,
+) -> Result<(), String> {
+    let from = src_root.join(src_rel);
+    let src_root_canon = std::fs::canonicalize(src_root).map_err(|e| e.to_string())?;
+    let from_canon = std::fs::canonicalize(&from).map_err(|e| e.to_string())?;
+    if !from_canon.starts_with(&src_root_canon) {
+        return Err("move source escapes workspace root".into());
+    }
+
+    let parent_canon = ensure_parent_within_root(dst_root, dst_rel)?;
+    let name = Path::new(dst_rel)
+        .file_name()
+        .ok_or_else(|| "invalid destination name".to_string())?;
+    let to = parent_canon.join(name);
+    if to.exists() {
+        return Err("destination already exists".into());
+    }
+
+    // Refuse to move a directory into its own subtree.
+    if from_canon.is_dir() && to.starts_with(&from_canon) {
+        return Err("cannot move a folder into itself".into());
+    }
+
+    // Fast path: a plain rename. Falls back to copy+remove across filesystems.
+    if std::fs::rename(&from_canon, &to).is_ok() {
+        return Ok(());
+    }
+    if from_canon.is_dir() {
+        copy_dir_recursive(&from_canon, &to)?;
+        std::fs::remove_dir_all(&from_canon).map_err(|e| e.to_string())
+    } else {
+        std::fs::copy(&from_canon, &to).map_err(|e| e.to_string())?;
+        std::fs::remove_file(&from_canon).map_err(|e| e.to_string())
+    }
+}
+
+/// Recursively copy `from` (a directory) to `to`, creating `to` and mirroring
+/// the subtree. Assumes `to` does not yet exist.
+fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(from).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        let dest = to.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(entry.path(), &dest).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 struct WatcherHolder(
@@ -825,6 +1025,10 @@ pub fn run() {
             write_file,
             rename_file,
             trash_path,
+            create_file,
+            create_dir,
+            copy_path,
+            move_path,
             watch_paths,
             stop_watching,
             watch_dirs,
@@ -864,6 +1068,167 @@ mod tests {
 
     fn names(entries: &[DirEntry]) -> Vec<&str> {
         entries.iter().map(|e| e.name.as_str()).collect()
+    }
+
+    #[test]
+    fn create_file_makes_an_empty_file() {
+        let dir = tempdir().unwrap();
+        create_file_impl(dir.path(), "notes.md").unwrap();
+        let p = dir.path().join("notes.md");
+        assert!(p.exists());
+        assert_eq!(fs::read_to_string(&p).unwrap(), "");
+    }
+
+    #[test]
+    fn create_file_makes_parent_dirs() {
+        let dir = tempdir().unwrap();
+        create_file_impl(dir.path(), "a/b/c.md").unwrap();
+        assert!(dir.path().join("a/b/c.md").exists());
+    }
+
+    #[test]
+    fn create_file_refuses_to_overwrite() {
+        let dir = tempdir().unwrap();
+        touch(&dir.path().join("x.md"));
+        fs::write(dir.path().join("x.md"), b"keep").unwrap();
+        let err = create_file_impl(dir.path(), "x.md").unwrap_err();
+        assert!(err.contains("already exists"), "got: {err}");
+        assert_eq!(fs::read_to_string(dir.path().join("x.md")).unwrap(), "keep");
+    }
+
+    #[test]
+    fn create_file_rejects_parent_traversal() {
+        let dir = tempdir().unwrap();
+        let err = create_file_impl(dir.path(), "../escape.md").unwrap_err();
+        assert_eq!(err, "invalid path");
+        assert!(!dir.path().parent().unwrap().join("escape.md").exists());
+    }
+
+    #[test]
+    fn create_file_rejects_absolute_path() {
+        let dir = tempdir().unwrap();
+        let err = create_file_impl(dir.path(), "/tmp/escape.md").unwrap_err();
+        assert_eq!(err, "invalid path");
+    }
+
+    #[test]
+    fn create_dir_makes_nested_dirs() {
+        let dir = tempdir().unwrap();
+        create_dir_impl(dir.path(), "a/b/c").unwrap();
+        assert!(dir.path().join("a/b/c").is_dir());
+    }
+
+    #[test]
+    fn create_dir_refuses_to_overwrite() {
+        let dir = tempdir().unwrap();
+        fs::create_dir(dir.path().join("d")).unwrap();
+        let err = create_dir_impl(dir.path(), "d").unwrap_err();
+        assert!(err.contains("already exists"), "got: {err}");
+    }
+
+    #[test]
+    fn create_dir_rejects_traversal() {
+        let dir = tempdir().unwrap();
+        let err = create_dir_impl(dir.path(), "../evil").unwrap_err();
+        assert_eq!(err, "invalid path");
+    }
+
+    #[test]
+    fn copy_file_duplicates_content() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.md"), b"hello").unwrap();
+        copy_path_impl(dir.path(), "a.md", dir.path(), "a (1).md").unwrap();
+        assert_eq!(fs::read(dir.path().join("a (1).md")).unwrap(), b"hello");
+        // original is untouched.
+        assert_eq!(fs::read(dir.path().join("a.md")).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn copy_file_into_subdir_creates_parents() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.md"), b"x").unwrap();
+        copy_path_impl(dir.path(), "a.md", dir.path(), "sub/deep/a.md").unwrap();
+        assert!(dir.path().join("sub/deep/a.md").exists());
+    }
+
+    #[test]
+    fn copy_dir_recursively_mirrors_subtree() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src/inner")).unwrap();
+        fs::write(dir.path().join("src/top.md"), b"1").unwrap();
+        fs::write(dir.path().join("src/inner/leaf.md"), b"2").unwrap();
+        copy_path_impl(dir.path(), "src", dir.path(), "src-copy").unwrap();
+        assert_eq!(fs::read(dir.path().join("src-copy/top.md")).unwrap(), b"1");
+        assert_eq!(fs::read(dir.path().join("src-copy/inner/leaf.md")).unwrap(), b"2");
+    }
+
+    #[test]
+    fn copy_refuses_to_overwrite_existing_destination() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.md"), b"x").unwrap();
+        fs::write(dir.path().join("b.md"), b"y").unwrap();
+        let err = copy_path_impl(dir.path(), "a.md", dir.path(), "b.md").unwrap_err();
+        assert_eq!(err, "destination already exists");
+    }
+
+    #[test]
+    fn copy_refuses_directory_into_itself() {
+        let dir = tempdir().unwrap();
+        fs::create_dir(dir.path().join("docs")).unwrap();
+        let err = copy_path_impl(dir.path(), "docs", dir.path(), "docs/copy").unwrap_err();
+        assert_eq!(err, "cannot copy a folder into itself");
+    }
+
+    #[test]
+    fn copy_across_roots_duplicates_into_other_workspace() {
+        let a = tempdir().unwrap();
+        let b = tempdir().unwrap();
+        fs::write(a.path().join("note.md"), b"hi").unwrap();
+        copy_path_impl(a.path(), "note.md", b.path(), "note.md").unwrap();
+        // original stays in A, copy lands in B.
+        assert_eq!(fs::read(a.path().join("note.md")).unwrap(), b"hi");
+        assert_eq!(fs::read(b.path().join("note.md")).unwrap(), b"hi");
+    }
+
+    #[test]
+    fn move_within_root_relocates_file() {
+        let dir = tempdir().unwrap();
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        fs::write(dir.path().join("a.md"), b"x").unwrap();
+        move_path_impl(dir.path(), "a.md", dir.path(), "sub/a.md").unwrap();
+        assert!(!dir.path().join("a.md").exists());
+        assert_eq!(fs::read(dir.path().join("sub/a.md")).unwrap(), b"x");
+    }
+
+    #[test]
+    fn move_across_roots_relocates_and_removes_source() {
+        let a = tempdir().unwrap();
+        let b = tempdir().unwrap();
+        fs::write(a.path().join("note.md"), b"hi").unwrap();
+        move_path_impl(a.path(), "note.md", b.path(), "note.md").unwrap();
+        assert!(!a.path().join("note.md").exists());
+        assert_eq!(fs::read(b.path().join("note.md")).unwrap(), b"hi");
+    }
+
+    #[test]
+    fn move_across_roots_relocates_a_directory_tree() {
+        let a = tempdir().unwrap();
+        let b = tempdir().unwrap();
+        fs::create_dir_all(a.path().join("docs/inner")).unwrap();
+        fs::write(a.path().join("docs/inner/leaf.md"), b"1").unwrap();
+        move_path_impl(a.path(), "docs", b.path(), "docs").unwrap();
+        assert!(!a.path().join("docs").exists());
+        assert_eq!(fs::read(b.path().join("docs/inner/leaf.md")).unwrap(), b"1");
+    }
+
+    #[test]
+    fn move_refuses_to_overwrite_existing_destination() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.md"), b"x").unwrap();
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        fs::write(dir.path().join("sub/a.md"), b"y").unwrap();
+        let err = move_path_impl(dir.path(), "a.md", dir.path(), "sub/a.md").unwrap_err();
+        assert_eq!(err, "destination already exists");
     }
 
     #[test]

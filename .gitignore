@@ -73,9 +73,12 @@ tools/*/Cargo.lock
 .DS_Store
 
 # Operator-local ai-memory routing (never commit — would leak in the public repo):
-# the workspace/project marker, and the Claude project-scope MCP config.
+# the workspace/project marker.
 .ai-memory.toml
-.mcp.json
+
+# .mcp.json IS versioned, but ONLY with non-private servers (the tauri dev
+# bridge). NEVER add private endpoints here (ai-memory, tokens) — register those
+# per-operator in ~/.claude.json, which is never committed.
 
 # Local tooling caches / scratch (browser-MCP output, MCP tool-schema cache).
 .playwright-mcp/

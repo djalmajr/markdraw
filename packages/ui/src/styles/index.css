@@ -768,18 +768,17 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   pointer-events: none;
 }
 
-.file-tree-switch-control {
-  width: 28px !important;
-  height: 16px !important;
-}
-
-.file-tree-switch-thumb {
-  width: 12px !important;
-  height: 12px !important;
-}
-
-.file-tree-switch-control[data-checked] .file-tree-switch-thumb {
-  transform: translateX(12px) !important;
+.create-row .tree-create-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid hsl(var(--ring));
+  border-radius: 4px;
+  padding: 0 4px;
+  font: inherit;
+  line-height: inherit;
+  color: inherit;
+  outline: none;
 }
 
 .file-tree-list {
@@ -810,7 +809,9 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: hsl(var(--muted-foreground));
+  /* Same text colour as the regular folder/file rows (.tree-item) — the root
+     is no longer dimmed relative to its children. */
+  color: hsl(var(--foreground));
   cursor: pointer;
   user-select: none;
 }
@@ -862,8 +863,17 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   background: hsl(var(--bg-hover));
 }
 
-.workspace-root-active {
-  color: hsl(var(--foreground));
+/* Selected workspace root — same active treatment as a selected folder/file
+   row (.tree-item.selected): background highlight + primary text. The
+   `.workspace-root-header` qualifier matches the `:hover` rule's specificity
+   so the active state persists on hover instead of being overridden by it. */
+.workspace-root-header.workspace-root-active {
+  background: hsl(var(--bg-selected));
+  color: hsl(var(--primary));
+  border-radius: 4px;
+  /* Same focus ring a selected tree row gets (.tree-item.focused). */
+  outline: 1px solid hsl(var(--ring) / 0.55);
+  outline-offset: -2px;
 }
 
 .workspace-root-icon {
@@ -985,6 +995,41 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 .tree-item.directory {
   font-weight: 500;
+}
+
+/* The chevron is its own click target (toggles expand/collapse); the rest of
+   the folder row selects/focuses without toggling. */
+.tree-chevron {
+  cursor: pointer;
+}
+
+/* Drop zone for moving an entry into a folder: the dashed outline spans the
+   folder's whole subtree (its wrapper contains the header row + every visible
+   descendant), mirroring the workspace-root drop affordance. Whether you hover
+   the folder itself or a file inside it, the same destination folder lights up
+   — so there is no flicker as the pointer moves within it. `outline` keeps the
+   rows from shifting. */
+.tree-item-wrapper.drop-into {
+  outline: 1px dashed hsl(var(--primary));
+  outline-offset: -2px;
+  border-radius: 6px;
+  background: hsl(var(--primary) / 0.06);
+}
+
+/* An entry placed on the move clipboard via Cut — dimmed + italic until it
+   is pasted (or the clipboard is cleared). */
+/* On the clipboard (Cut or Copy) — both get the dashed outline. Cut additionally
+   dims + italicises the name (the entry will move away); Copy leaves it intact. */
+.tree-item.cut-pending,
+.tree-item.copy-pending {
+  outline: 1px dashed hsl(var(--primary) / 0.6);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.tree-item.cut-pending .tree-name {
+  font-style: italic;
+  opacity: 0.55;
 }
 
 .tree-icon {

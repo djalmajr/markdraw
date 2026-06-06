@@ -157,6 +157,8 @@ export function App() {
   if (import.meta.env.DEV) {
     (window as unknown as { __DEV__?: Record<string, unknown> }).__DEV__ = {
       openFolder: folder.openFolderPath,
+      startCreate: (parentPath: string, rootId: string, kind: "file" | "folder") =>
+        state.setCreatingAt({ parentPath, rootId, kind }),
       toggleShowAllFiles: () => state.setShowAllFiles((v) => !v),
       toggleShowAllDirs: () => state.setShowAllDirs((v) => !v),
       toggleShowHidden: () => {
@@ -672,6 +674,47 @@ export function App() {
     });
   }
 
+  /** Inline create commit from the file tree. Creates the file/folder on disk
+   *  (the folder handlers refresh the root), then opens a freshly created file. */
+  async function handleCreate(
+    parentRel: string,
+    name: string,
+    kind: "file" | "folder",
+    rootId: string,
+  ) {
+    try {
+      if (kind === "file") {
+        const relative = await folder.handleCreateFile(parentRel, name, rootId);
+        const entry = state.findEntryByPath(relative, rootId);
+        if (entry && entry.kind === "file") {
+          await handleLoadFileWithTab(entry, rootId);
+        }
+      } else {
+        await folder.handleCreateFolder(parentRel, name, rootId);
+      }
+    } catch (e) {
+      console.error("Create failed:", e);
+    }
+  }
+
+  /** Start an inline create: resolve the target dir from the current
+   *  selection (folder → inside it; file → its sibling dir; nothing → the
+   *  active root) and open the inline input via `creatingAt`. */
+  function startInlineCreate(kind: "file" | "folder") {
+    const rootId = state.selectedRootId();
+    if (!rootId) return;
+    const sel = state.selectedFile();
+    let parentPath = "";
+    if (sel) {
+      parentPath = sel.kind === "directory"
+        ? sel.path
+        : sel.path.includes("/")
+          ? sel.path.slice(0, sel.path.lastIndexOf("/"))
+          : "";
+    }
+    state.setCreatingAt({ parentPath, rootId, kind });
+  }
+
   /** Open in New Tab / middle-click / file-tree double-click. The
    *  resulting tab is **pinned** — these are the explicit "I want
    *  this around" gestures. If the file is already open in this
@@ -819,6 +862,22 @@ export function App() {
         title: m.command_open_folder(),
         shortcut: { mac: ["⌘", "O"], other: ["Ctrl", "O"] },
         run: () => folder.handleOpenFolder(),
+      },
+      {
+        id: "file.newFile",
+        group: "File",
+        title: m.command_new_file(),
+        shortcut: { mac: ["⌘", "N"], other: ["Ctrl", "N"] },
+        when: () => hasRoot,
+        run: () => startInlineCreate("file"),
+      },
+      {
+        id: "file.newFolder",
+        group: "File",
+        title: m.command_new_folder(),
+        shortcut: { mac: ["⌘", "⇧", "N"], other: ["Ctrl", "Shift", "N"] },
+        when: () => hasRoot,
+        run: () => startInlineCreate("folder"),
       },
       {
         id: "file.exportPdf",
@@ -1170,6 +1229,13 @@ export function App() {
         handleNewTab();
       }
 
+      // Cmd/Ctrl+N: new file; Cmd/Ctrl+Shift+N: new folder (inline in the tree)
+      if (mod && (e.key === "n" || e.key === "N")) {
+        e.preventDefault();
+        if (rootPaths().size === 0) return;
+        startInlineCreate(e.shiftKey ? "folder" : "file");
+      }
+
       // Open exactly one overlay at a time. Each shortcut closes the
       // siblings before toggling its own — without this, hitting
       // Cmd+Shift+P while Cmd+Shift+O is up stacks two palettes on
@@ -1375,6 +1441,11 @@ export function App() {
       onOpenRecentFile={handleOpenRecentFile}
       onOpenRecentFolder={handleOpenRecentFolder}
       onRename={folder.handleRename}
+      onCreate={handleCreate}
+      onMove={(entry, targetDirRel, rootId, targetRootId) => folder.handleMove(entry, targetDirRel, rootId, targetRootId)}
+      onCopy={(entry, targetDirRel, rootId, targetRootId) => {
+        void folder.handleCopy(entry, targetDirRel, rootId, targetRootId);
+      }}
       onDelete={async (entry, rootId) => {
         const label = entry.kind === "directory" ? "folder" : "file";
         const confirmed = await confirm({

@@ -26,6 +26,8 @@ let resolveReadTree: ((entries: unknown[]) => void) | undefined;
 let writeFileCalls: Array<{ path: string; content: string }> = [];
 let renameFileCalls: Array<{ root: string; from: string; to: string }> = [];
 let trashCalls: Array<{ root: string; rel: string }> = [];
+let copyCalls: Array<{ srcRoot: string; from: string; dstRoot: string; to: string }> = [];
+let moveAcrossCalls: Array<{ srcRoot: string; srcRel: string; dstRoot: string; dstRel: string }> = [];
 
 mock.module("./fs.ts", () => ({
   writeFile: (path: string, content: string) => {
@@ -51,6 +53,14 @@ mock.module("./fs.ts", () => ({
       resolveReadTree = (entries) => resolve(entries);
     }),
   openDirectory: async () => null,
+  createFile: async () => {},
+  createDir: async () => {},
+  copyPath: async (srcRoot: string, from: string, dstRoot: string, to: string) => {
+    copyCalls.push({ srcRoot, from, dstRoot, to });
+  },
+  movePath: async (srcRoot: string, srcRel: string, dstRoot: string, dstRel: string) => {
+    moveAcrossCalls.push({ srcRoot, srcRel, dstRoot, dstRel });
+  },
 }));
 
 mock.module("@tauri-apps/plugin-clipboard-manager", () => ({
@@ -141,6 +151,8 @@ beforeEach(() => {
   writeFileCalls = [];
   renameFileCalls = [];
   trashCalls = [];
+  copyCalls = [];
+  moveAcrossCalls = [];
   localStorage.clear();
 });
 
@@ -233,6 +245,179 @@ describe("createFolder.refreshRoot — pin per-doc target before await (DJA-41)"
 
     expect(pane0.selectedFile()).toBeNull(); // gone — cleared on origin pane
     expect(pane1.selectedFile()?.path).toBe("kept.md"); // intact
+  });
+});
+
+describe("createFolder.handleMove", () => {
+  it("moves an entry by renaming it into the target directory, then refreshes", async () => {
+    const paneManager = createPaneManager();
+    const state = makeState(paneManager);
+    const folder = createFolder({
+      rootPaths: () => new Map([["root1", "/work/root1"]]),
+      setRootPaths: () => {},
+      state,
+      watcher,
+    });
+
+    const movePromise = folder.handleMove(
+      { name: "a.md", path: "a.md", kind: "file" },
+      "sub",
+      "root1",
+    );
+    resolveRename!();
+    await Promise.resolve();
+    resolveReadTree!([]);
+    await movePromise;
+
+    expect(renameFileCalls).toEqual([{ root: "/work/root1", from: "a.md", to: "sub/a.md" }]);
+  });
+
+  it("rewrites the open file's path when the moved file is the selection", async () => {
+    const paneManager = createPaneManager();
+    const pane = paneManager.activePane();
+    pane.setSelectedRootId("root1");
+    pane.setSelectedFile({ name: "a.md", path: "a.md", kind: "file" });
+    const state = makeState(paneManager);
+    // After the move, refreshRoot looks the open file up by its NEW path;
+    // make it resolve so the selection isn't cleared as a vanished entry.
+    (state as unknown as { findEntryByPath: (p: string) => unknown }).findEntryByPath = (path: string) =>
+      path === "sub/a.md" ? { name: "a.md", path: "sub/a.md", kind: "file" } : null;
+    const folder = createFolder({
+      rootPaths: () => new Map([["root1", "/work/root1"]]),
+      setRootPaths: () => {},
+      state,
+      watcher,
+    });
+
+    const movePromise = folder.handleMove(
+      { name: "a.md", path: "a.md", kind: "file" },
+      "sub",
+      "root1",
+    );
+    resolveRename!();
+    await Promise.resolve();
+    resolveReadTree!([]);
+    await movePromise;
+
+    expect(pane.selectedFile()?.path).toBe("sub/a.md");
+  });
+
+  it("is a no-op when the target dir already holds the entry (no rename)", async () => {
+    const paneManager = createPaneManager();
+    const state = makeState(paneManager);
+    const folder = createFolder({
+      rootPaths: () => new Map([["root1", "/work/root1"]]),
+      setRootPaths: () => {},
+      state,
+      watcher,
+    });
+
+    // a.md already lives at root → moving into "" yields the same path.
+    await folder.handleMove({ name: "a.md", path: "a.md", kind: "file" }, "", "root1");
+    expect(renameFileCalls).toEqual([]);
+  });
+
+  it("uses move_path (not rename) when moving across workspace roots", async () => {
+    const paneManager = createPaneManager();
+    const state = makeState(paneManager);
+    const folder = createFolder({
+      rootPaths: () => new Map([["root1", "/work/root1"], ["root2", "/work/root2"]]),
+      setRootPaths: () => {},
+      state,
+      watcher,
+    });
+
+    const flush = async () => {
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    };
+    const p = folder.handleMove({ name: "a.md", path: "a.md", kind: "file" }, "sub", "root1", "root2");
+    await flush();
+    resolveReadTree?.([]); // refreshRoot(root1)
+    await flush();
+    resolveReadTree?.([]); // refreshRoot(root2)
+    await p;
+
+    expect(moveAcrossCalls).toEqual([
+      { srcRoot: "/work/root1", srcRel: "a.md", dstRoot: "/work/root2", dstRel: "sub/a.md" },
+    ]);
+    expect(renameFileCalls).toEqual([]); // not a within-root rename
+  });
+
+  it("refuses to move a folder into its own subtree", async () => {
+    const paneManager = createPaneManager();
+    const state = makeState(paneManager);
+    const folder = createFolder({
+      rootPaths: () => new Map([["root1", "/work/root1"]]),
+      setRootPaths: () => {},
+      state,
+      watcher,
+    });
+
+    await expect(
+      folder.handleMove({ name: "docs", path: "docs", kind: "directory" }, "docs/inner", "root1"),
+    ).rejects.toThrow(/into itself/);
+    expect(renameFileCalls).toEqual([]);
+  });
+});
+
+describe("createFolder.handleCopy", () => {
+  it("copies an entry into the target dir, keeping its name when free", async () => {
+    const paneManager = createPaneManager();
+    const state = makeState(paneManager); // findEntryByPath → null (no collisions)
+    const folder = createFolder({
+      rootPaths: () => new Map([["root1", "/work/root1"]]),
+      setRootPaths: () => {},
+      state,
+      watcher,
+    });
+
+    const p = folder.handleCopy({ name: "a.md", path: "a.md", kind: "file" }, "sub", "root1");
+    await Promise.resolve();
+    await Promise.resolve();
+    resolveReadTree!([]);
+    const rel = await p;
+
+    expect(copyCalls).toEqual([{ srcRoot: "/work/root1", from: "a.md", dstRoot: "/work/root1", to: "sub/a.md" }]);
+    expect(rel).toBe("sub/a.md");
+  });
+
+  it("auto-numbers ' (1)' when copying into the entry's own parent (collision)", async () => {
+    const paneManager = createPaneManager();
+    const state = makeState(paneManager);
+    // a.md already exists at the root; the bare name collides, "a (1).md" is free.
+    (state as unknown as { findEntryByPath: (p: string) => unknown }).findEntryByPath = (path: string) =>
+      path === "a.md" ? { name: "a.md", path: "a.md", kind: "file" } : null;
+    const folder = createFolder({
+      rootPaths: () => new Map([["root1", "/work/root1"]]),
+      setRootPaths: () => {},
+      state,
+      watcher,
+    });
+
+    const p = folder.handleCopy({ name: "a.md", path: "a.md", kind: "file" }, "", "root1");
+    await Promise.resolve();
+    await Promise.resolve();
+    resolveReadTree!([]);
+    const rel = await p;
+
+    expect(copyCalls).toEqual([{ srcRoot: "/work/root1", from: "a.md", dstRoot: "/work/root1", to: "a (1).md" }]);
+    expect(rel).toBe("a (1).md");
+  });
+
+  it("refuses to copy a folder into its own subtree", async () => {
+    const paneManager = createPaneManager();
+    const state = makeState(paneManager);
+    const folder = createFolder({
+      rootPaths: () => new Map([["root1", "/work/root1"]]),
+      setRootPaths: () => {},
+      state,
+      watcher,
+    });
+
+    await expect(
+      folder.handleCopy({ name: "docs", path: "docs", kind: "directory" }, "docs/inner", "root1"),
+    ).rejects.toThrow(/into itself/);
+    expect(copyCalls).toEqual([]);
   });
 });
 

@@ -9,10 +9,16 @@ import { FileTree } from "./file-tree.tsx";
 // Minimal AppState stub — only the fields FileTreeItem actually reads.
 function makeAppStub(): AppState {
   const [editingPath, setEditingPath] = createSignal<string | null>(null);
+  const [creatingAt, setCreatingAt] = createSignal<null>(null);
+  const [moveClipboard, setMoveClipboard] = createSignal<null>(null);
   const [selectedFile, setSelectedFile] = createSignal<FSEntry | null>(null);
   return {
     editingPath,
     setEditingPath,
+    creatingAt,
+    setCreatingAt,
+    moveClipboard,
+    setMoveClipboard,
     selectedFile,
     setSelectedFile,
     isDirty: () => false,
@@ -129,6 +135,22 @@ describe("FileTree", () => {
     expect(container.querySelector(".file-tree")).not.toBeNull();
   });
 
+  it("folder row click does not expand; only the chevron toggles", () => {
+    const { container } = render(() => (
+      <AppProvider state={makeAppStub()}>
+        <FileTree roots={SINGLE_ROOT} selectedPath={null} selectedRootId={null} onSelect={() => {}} />
+      </AppProvider>
+    ));
+    const item = container.querySelector<HTMLElement>('.tree-item.directory[data-path="notes"]')!;
+    expect(item.dataset.expanded).toBe("false");
+    // Clicking the row must NOT expand (it selects/focuses the folder).
+    fireEvent.click(item);
+    expect(item.dataset.expanded).toBe("false");
+    // Clicking the chevron expands.
+    fireEvent.click(item.querySelector<HTMLElement>(".tree-chevron")!);
+    expect(item.dataset.expanded).toBe("true");
+  });
+
   describe("showItemMenu prop", () => {
     // The bug this guards against: `FileTreeItem` renders its children
     // recursively through itself, and the prop list passed to that inner
@@ -151,7 +173,11 @@ describe("FileTree", () => {
       ).find((el) => el.querySelector(".tree-name")?.textContent?.trim() === name);
       const item = wrapper?.querySelector<HTMLElement>(".tree-item.directory");
       if (!item) throw new Error(`directory '${name}' not found`);
-      fireEvent.click(item);
+      // The folder row no longer toggles on click — expansion is the chevron's
+      // job, so click the chevron to expand.
+      const chevron = item.querySelector<HTMLElement>(".tree-chevron");
+      if (!chevron) throw new Error(`chevron for '${name}' not found`);
+      fireEvent.click(chevron);
     }
 
     it("renders the three-dot trigger on every row by default", () => {
@@ -218,6 +244,89 @@ describe("FileTree", () => {
         .map((el) => el.querySelector(".tree-name")?.textContent?.trim());
       expect(visibleNames).toContain("a.md");
       expect(visibleNames).toContain("b.md");
+    });
+  });
+
+  it("marks the cut entry with .cut-pending when it is on the move clipboard", () => {
+    const [editingPath] = createSignal<string | null>(null);
+    const [creatingAt] = createSignal<null>(null);
+    const [selectedFile] = createSignal<FSEntry | null>(null);
+    const [moveClipboard] = createSignal({ entry: file("README.md"), rootId: "r1", mode: "cut" as const });
+    const stub = {
+      editingPath,
+      setEditingPath: () => {},
+      creatingAt,
+      setCreatingAt: () => {},
+      moveClipboard,
+      setMoveClipboard: () => {},
+      selectedFile,
+      setSelectedFile: () => {},
+      isDirty: () => false,
+    } as unknown as AppState;
+    const { container } = render(() => (
+      <AppProvider state={stub}>
+        <FileTree roots={SINGLE_ROOT} selectedPath={null} selectedRootId={null} onSelect={() => {}} onMove={() => {}} />
+      </AppProvider>
+    ));
+    const cut = container.querySelector<HTMLElement>('.tree-item[data-path="README.md"]');
+    expect(cut?.classList.contains("cut-pending")).toBe(true);
+    // a sibling that is NOT on the clipboard must not be marked.
+    const other = container.querySelector<HTMLElement>('.tree-item[data-path="notes"]');
+    expect(other?.classList.contains("cut-pending")).toBe(false);
+  });
+
+  it("Escape clears a pending Cut (move clipboard)", () => {
+    const [editingPath] = createSignal<string | null>(null);
+    const [creatingAt] = createSignal<null>(null);
+    const [selectedFile] = createSignal<FSEntry | null>(null);
+    const [moveClipboard, setMoveClipboard] = createSignal<
+      { entry: FSEntry; rootId: string; mode: "cut" | "copy" } | null
+    >({
+      entry: file("README.md"),
+      rootId: "r1",
+      mode: "cut",
+    });
+    const stub = {
+      editingPath,
+      setEditingPath: () => {},
+      creatingAt,
+      setCreatingAt: () => {},
+      moveClipboard,
+      setMoveClipboard,
+      selectedFile,
+      setSelectedFile: () => {},
+      isDirty: () => false,
+    } as unknown as AppState;
+    const { container } = render(() => (
+      <AppProvider state={stub}>
+        <FileTree roots={SINGLE_ROOT} selectedPath={null} selectedRootId={null} onSelect={() => {}} onMove={() => {}} />
+      </AppProvider>
+    ));
+    expect(moveClipboard()).not.toBeNull();
+    const nav = container.querySelector(".file-tree") as HTMLElement;
+    fireEvent.keyDown(nav, { key: "Escape" });
+    expect(moveClipboard()).toBeNull();
+  });
+
+  describe("move (onMove) — drag affordance", () => {
+    // Drag & drop is powered by @dnd-kit (same provider as workspace-root
+    // reordering); the move dispatch + numbering live in folder.handleMove /
+    // handleCopy, covered by the desktop bun suite. Here we only smoke-test
+    // that the tree still renders with onMove wired (the dnd hooks mount).
+    it("renders with onMove wired without crashing", () => {
+      const { getByText } = render(() => (
+        <AppProvider state={makeAppStub()}>
+          <FileTree
+            roots={SINGLE_ROOT}
+            selectedPath={null}
+            selectedRootId={null}
+            onSelect={() => {}}
+            onMove={() => {}}
+            onCopy={() => {}}
+          />
+        </AppProvider>
+      ));
+      expect(getByText("README.md")).not.toBeNull();
     });
   });
 

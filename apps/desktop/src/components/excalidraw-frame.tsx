@@ -1,8 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-// Vendored @zomme/frame core (registers the <z-frame> custom element). Bundled
-// from the sibling `frame` repo until it is published / linked properly.
-import "../vendor/zomme-frame.js";
+// Registers the <z-frame> custom element (from the published @zomme/frame core).
+import "@zomme/frame";
 
 interface Scene {
   appState?: Record<string, unknown>;
@@ -39,9 +38,11 @@ function Frame(props: Record<string, unknown> & { name: string; src: string }): 
     else el.setAttribute(name, String(value));
   };
 
+  // Set `sandbox` BEFORE `src`: the z-frame builds the iframe when `src` lands,
+  // so setting sandbox afterwards forces a wasteful iframe recreation on mount.
   createEffect(() => setAttr("name", props.name));
-  createEffect(() => setAttr("src", props.src));
   createEffect(() => setAttr("sandbox", (props.sandbox as string) ?? "allow-scripts allow-same-origin"));
+  createEffect(() => setAttr("src", props.src));
   createEffect(() => setAttr("style", props.style));
 
   onMount(() => {
@@ -141,8 +142,11 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
     <Frame
       name="excalidraw"
       // TODO(prod): serve the guest as a bundled static asset instead of the
-      // app-excalidraw vite dev server.
-      src="http://localhost:4204/"
+      // app-excalidraw vite dev server. Match the host's hostname (127.0.0.1
+      // vs localhost are different origins): the z-frame needs same-origin
+      // with the guest, so deriving it from window.location avoids the
+      // "Blocked a frame ... Protocols, domains, and ports must match" error.
+      src={`http://${typeof window !== "undefined" ? window.location.hostname : "localhost"}:4204/`}
       style="width:100%;height:100%;border:0;display:block"
       drawingData={scene()}
       save={save}
