@@ -13,7 +13,7 @@ const FontFamilies = [
   { id: "monospace", label: "Monospace" },
 ] as const;
 
-const FontSizes = [13, 14, 15, 16, 18, 20] as const;
+const FontSizes = [13, 14, 15, 16, 18, 20, 24, 28, 32, 40, 48] as const;
 
 const DEFAULT_PREFS: FontPrefs = { fontSize: 15, fontFamily: "sans-serif" };
 

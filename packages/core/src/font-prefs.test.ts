@@ -56,6 +56,6 @@ describe("font preferences", () => {
 
   it("exposes a stable list of supported families and sizes for the UI", () => {
     expect(FontFamilies.map((f) => f.id)).toEqual(["sans-serif", "serif", "monospace"]);
-    expect([...FontSizes]).toEqual([13, 14, 15, 16, 18, 20]);
+    expect([...FontSizes]).toEqual([13, 14, 15, 16, 18, 20, 24, 28, 32, 40, 48]);
   });
 });
