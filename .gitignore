@@ -51,6 +51,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 *.tsbuildinfo
 
+# Excalidraw guest bundle — generated from djalmajr/frame by
+# apps/desktop/scripts/prepare-excalidraw-guest.mjs (never committed)
+apps/desktop/public/excalidraw/
+
 # IntelliJ based IDEs
 .idea
 

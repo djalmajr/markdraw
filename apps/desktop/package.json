@@ -5,9 +5,10 @@
   "private": true,
   "scripts": {
     "dev": "tauri dev",
-    "dev:frontend": "vite",
+    "dev:frontend": "bun run prepare:excalidraw && vite",
     "build": "tauri build",
-    "build:frontend": "vite build",
+    "build:frontend": "bun run prepare:excalidraw && vite build",
+    "prepare:excalidraw": "node scripts/prepare-excalidraw-guest.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bun test e2e/specs",
     "test:e2e": "bun test e2e/specs",

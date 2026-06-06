@@ -38,10 +38,12 @@ function Frame(props: Record<string, unknown> & { name: string; src: string }): 
     else el.setAttribute(name, String(value));
   };
 
-  // Set `sandbox` BEFORE `src`: the z-frame builds the iframe when `src` lands,
-  // so setting sandbox afterwards forces a wasteful iframe recreation on mount.
+  // Set `sandbox`/`pathname` BEFORE `src`: the z-frame builds the iframe when
+  // `src` lands (reading `pathname` to form the final URL), so setting them
+  // afterwards forces a wasteful iframe recreation on mount.
   createEffect(() => setAttr("name", props.name));
   createEffect(() => setAttr("sandbox", (props.sandbox as string) ?? "allow-scripts allow-same-origin"));
+  createEffect(() => setAttr("pathname", props.pathname));
   createEffect(() => setAttr("src", props.src));
   createEffect(() => setAttr("style", props.style));
 
@@ -138,15 +140,25 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
     return { ok: true };
   };
 
+  // The guest ships as a static asset under the app's own origin (see
+  // scripts/prepare-excalidraw-guest.mjs, which copies its build into
+  // public/excalidraw/). Loading it from the app's own origin makes it
+  // same-origin with the host in BOTH dev (vite :2444) and prod (Tauri app
+  // protocol) — no standalone server, and no cross-origin frame block.
+  //
+  // The z-frame forms the iframe URL as `src` (an origin/base) + `pathname`
+  // (the route, default "/"). We must land on the EXACT file `/excalidraw/
+  // index.html`: vite's dev server SPA-falls-back to the host's own index.html
+  // for any directory/non-file path (so `/excalidraw/` would recursively load
+  // AsciiMark itself). So pass the origin as `src` and the full file path as
+  // `pathname`. `src` is also absolute, as the z-frame does `new URL(this.src)`.
+  const guestOrigin = window.location.origin;
+
   return (
     <Frame
       name="excalidraw"
-      // TODO(prod): serve the guest as a bundled static asset instead of the
-      // app-excalidraw vite dev server. Match the host's hostname (127.0.0.1
-      // vs localhost are different origins): the z-frame needs same-origin
-      // with the guest, so deriving it from window.location avoids the
-      // "Blocked a frame ... Protocols, domains, and ports must match" error.
-      src={`http://${typeof window !== "undefined" ? window.location.hostname : "localhost"}:4204/`}
+      src={guestOrigin}
+      pathname="/excalidraw/index.html"
       style="width:100%;height:100%;border:0;display:block"
       drawingData={scene()}
       save={save}
