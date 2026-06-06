@@ -20,12 +20,19 @@ let bridge: Awaited<ReturnType<typeof connectBridge>> | null = null;
 try {
   bridge = await connectBridge({ handshakeTimeoutMs: 5000 });
   while (Date.now() - start < TIMEOUT_MS) {
-    const t = await bridge.evalJs("typeof window.__DEV__");
-    if (t === "object") {
-      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-      console.log(`▶ Frontend ready after ${elapsed}s`);
-      bridge.close();
-      process.exit(0);
+    // The bridge's TCP socket binds before the webview window registers, so
+    // an early evalJs can throw "Window 'main' not found". That's transient —
+    // swallow it and keep polling until the window exists and __DEV__ mounts.
+    try {
+      const t = await bridge.evalJs("typeof window.__DEV__");
+      if (t === "object") {
+        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+        console.log(`▶ Frontend ready after ${elapsed}s`);
+        bridge.close();
+        process.exit(0);
+      }
+    } catch {
+      // window/webview not ready yet — retry below
     }
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }

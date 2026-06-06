@@ -12,6 +12,11 @@ cd "$(dirname "$0")/.."
 # either piece via TAURI_MCP_BRIDGE_HOST / TAURI_MCP_BRIDGE_PORT.
 BRIDGE_HOST="${TAURI_MCP_BRIDGE_HOST:-127.0.0.1}"
 BRIDGE_PORT="${TAURI_MCP_BRIDGE_PORT:-9223}"
+# Export so the probe, wait-app-ready.ts, and the specs all resolve the SAME
+# host/port (they read these env vars via e2e/bridge.ts) — otherwise a child
+# falls back to bridge.ts's default and can target a port nothing is bound to.
+export TAURI_MCP_BRIDGE_HOST="$BRIDGE_HOST"
+export TAURI_MCP_BRIDGE_PORT="$BRIDGE_PORT"
 LOG_DIR="$(mktemp -d -t asciimark-e2e-XXXXXX)"
 DEV_LOG="$LOG_DIR/dev.log"
 DEV_PID=""

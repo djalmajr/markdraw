@@ -633,9 +633,13 @@ describe("file-tree reveal-in-file-manager", () => {
     await expectEventually(async () =>
       (await bridge!.evalJs(`!!document.querySelector('.tree-item[data-path="partials"]')`)) === true,
     );
+    // Expand via the chevron, not the row: since the unified-selection change
+    // a row click only SELECTS the folder — only `.tree-chevron` (or a
+    // double-click) toggles expansion.
     await bridge.evalJs(
-      `(() => { const d = document.querySelector('.tree-item[data-path="partials"]');
-        for (const t of ["mousedown","mouseup","click"]) d?.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,button:0}));
+      `(() => { const row = document.querySelector('.tree-item[data-path="partials"]');
+        const chev = row?.querySelector('.tree-chevron') ?? row;
+        for (const t of ["mousedown","mouseup","click"]) chev?.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,button:0}));
       })()`,
     );
     await expectEventually(async () =>

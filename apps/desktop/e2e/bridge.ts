@@ -1,8 +1,10 @@
 // Thin client for the tauri-plugin-mcp-bridge WebSocket protocol.
-// AsciiMark binds the bridge on 127.0.0.1:9233 (Rust side configured
-// via `.base_port(9233)` — see apps/desktop/src-tauri/src/lib.rs) so
-// it doesn't collide with sibling Tauri projects on the same host that
-// use the plugin's default 9223. Each request is a JSON object
+// The app actually binds the bridge on 127.0.0.1:9223 (lib.rs `.base_port(9223)`,
+// the plugin default). This client deliberately DEFAULTS to 9233 — a port the
+// app never binds — so that a bare `bun test` (no orchestration) can't reach a
+// bridge and the integration specs skip themselves. The real runs go through
+// `scripts/run-e2e.sh`, which spawns the app and exports TAURI_MCP_BRIDGE_PORT=9223
+// so this client connects to it. Each request is a JSON object
 // { id, command, args }; each response is { id, success, data | error }.
 //
 // We need this client because the plugin only routes a fixed set of
@@ -28,7 +30,8 @@ export interface Bridge {
 
 /**
  * Connect to the MCP bridge on a fixed port and resolve when a handshake
- * round-trip succeeds. Defaults to 127.0.0.1:9233 — overridable via env
+ * round-trip succeeds. Defaults to 127.0.0.1:9233 (an unbound port, so bare
+ * test runs skip) — run-e2e.sh overrides it to 9223 via env
  * vars TAURI_MCP_BRIDGE_HOST / TAURI_MCP_BRIDGE_PORT.
  *
  * Performs a `list_windows` round-trip during connect so we don't return a
