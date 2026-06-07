@@ -62,7 +62,14 @@ export interface AITool {
   execute: (args: unknown, opts?: ToolExecuteOptions) => Promise<unknown>;
   /** Origin label for the UI (the MCP server id, or `"app"` for in-process). */
   source?: string;
+  /** Human-in-the-loop gating. `"auto"` runs without asking; `"prompt"` asks
+   *  the user to Accept/Reject before executing. When omitted, the host derives
+   *  a default via {@link resolveApprovalTier} (MCP/unknown tools prompt). */
+  approval?: ApprovalTier;
 }
+
+/** Approval tier for a tool call. */
+export type ApprovalTier = "auto" | "prompt";
 
 /** Options the engine passes to {@link AITool.execute}. */
 export interface ToolExecuteOptions {

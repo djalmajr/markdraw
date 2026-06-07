@@ -208,6 +208,7 @@
   "ai_action_summarize": "Summarize",
   "ai_inline_accept": "Accept",
   "ai_inline_reject": "Reject",
+  "ai_tool_approval_title": "Allow this tool to run?",
   "ai_diagram_placeholder": "Describe the diagram…",
   "ai_diagram_generate": "Generate",
   "ai_diagram_insert": "Insert into block",

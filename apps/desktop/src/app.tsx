@@ -14,6 +14,7 @@ import { createAppState } from "@asciimark/ui/composables/create-app-state.ts";
 import { createMockProvider } from "@asciimark/ai/mock-provider.ts";
 import type { AIConfig, MCPServerConfig } from "@asciimark/ai/config-schema.ts";
 import type { AIProvider, AITool } from "@asciimark/ai/types.ts";
+import { withApproval, type ApprovalRequest } from "@asciimark/ai/approval-policy.ts";
 import { resolveModel } from "@asciimark/ai/resolve-model.ts";
 import { resolveCredential } from "@asciimark/ai/resolve-credential.ts";
 import { createProvider as createAiProvider } from "@asciimark/ai/adapter.ts";
@@ -105,6 +106,16 @@ export function App() {
     replace: string;
     apply: () => void;
     reject: () => void;
+  } | null>(null);
+
+  // A prompt-tier tool call (MCP / unknown) awaiting Accept/Reject before it
+  // runs. Human-in-the-loop gating on top of the current non-streaming loop.
+  const [pendingApproval, setPendingApproval] = createSignal<{
+    toolName: string;
+    source?: string;
+    argsPreview: string;
+    approve: () => void;
+    deny: () => void;
   } | null>(null);
 
   // Build the active provider from ai-prefs + config + keychain. Falls back to
@@ -234,7 +245,35 @@ export function App() {
     } catch {
       mcp = [];
     }
-    return [...inProcess, ...mcp];
+    // Gate prompt-tier tools (MCP/unknown) behind an Accept/Reject; in-process
+    // app tools auto-run (reads; the edit tool runs its own approval).
+    return [...inProcess, ...mcp].map((t) => withApproval(t, requestToolApproval));
+  }
+
+  /** Ask the user to Accept/Reject a prompt-tier tool call before it runs.
+   *  Resolves true to execute, false to skip (the model gets a rejection). */
+  function requestToolApproval(req: ApprovalRequest): Promise<boolean> {
+    let argsPreview: string;
+    try {
+      argsPreview = JSON.stringify(req.args, null, 2);
+    } catch {
+      argsPreview = String(req.args);
+    }
+    return new Promise<boolean>((resolve) => {
+      setPendingApproval({
+        toolName: req.toolName,
+        source: req.source,
+        argsPreview,
+        approve: () => {
+          setPendingApproval(null);
+          resolve(true);
+        },
+        deny: () => {
+          setPendingApproval(null);
+          resolve(false);
+        },
+      });
+    });
   }
 
   /** Stage an AI-proposed find→replace edit for the user to Accept/Reject.
@@ -1926,6 +1965,74 @@ export function App() {
               type="button"
               class="inline-flex items-center justify-center rounded-md h-8 px-3 text-sm bg-primary text-primary-foreground hover:opacity-90"
               onClick={() => edit().apply()}
+            >
+              {m.ai_inline_accept()}
+            </button>
+          </div>
+        </div>
+      )}
+    </Show>
+
+    {/* Prompt-tier tool approval (MCP / unknown tools): the model never runs an
+        arbitrary server tool without an explicit Accept here. */}
+    <Show when={pendingApproval()}>
+      {(req) => (
+        <div
+          role="dialog"
+          aria-label={m.ai_tool_approval_title()}
+          style={{
+            position: "fixed",
+            bottom: "16px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            "z-index": "60",
+            "max-width": "min(640px, 92vw)",
+            display: "flex",
+            "flex-direction": "column",
+            gap: "10px",
+            padding: "12px 14px",
+            "border-radius": "10px",
+            border: "1px solid hsl(var(--border))",
+            background: "hsl(var(--popover))",
+            color: "hsl(var(--popover-foreground))",
+            "box-shadow": "0 10px 30px rgba(0, 0, 0, 0.25)",
+          }}
+        >
+          <div style={{ "font-size": "13px", "font-weight": "600" }}>
+            {m.ai_tool_approval_title()}
+          </div>
+          <div style={{ "font-size": "12px", opacity: "0.85" }}>
+            <span style={{ "font-family": "var(--font-mono, monospace)" }}>{req().toolName}</span>
+            <Show when={req().source}>
+              {(src) => <span style={{ opacity: "0.6" }}>{`  ·  ${src()}`}</span>}
+            </Show>
+          </div>
+          <pre
+            style={{
+              "font-size": "11px",
+              "line-height": "1.4",
+              margin: "0",
+              "white-space": "pre-wrap",
+              "word-break": "break-word",
+              "max-height": "30vh",
+              "overflow-y": "auto",
+              opacity: "0.8",
+            }}
+          >
+            {req().argsPreview}
+          </pre>
+          <div style={{ display: "flex", "justify-content": "flex-end", gap: "8px" }}>
+            <button
+              type="button"
+              class="inline-flex items-center justify-center rounded-md h-8 px-3 text-sm hover:bg-accent hover:text-accent-foreground border border-input"
+              onClick={() => req().deny()}
+            >
+              {m.ai_inline_reject()}
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center justify-center rounded-md h-8 px-3 text-sm bg-primary text-primary-foreground hover:opacity-90"
+              onClick={() => req().approve()}
             >
               {m.ai_inline_accept()}
             </button>

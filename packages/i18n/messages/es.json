@@ -208,6 +208,7 @@
   "ai_action_summarize": "Resumir",
   "ai_inline_accept": "Aceptar",
   "ai_inline_reject": "Rechazar",
+  "ai_tool_approval_title": "¿Permitir que esta herramienta se ejecute?",
   "ai_diagram_placeholder": "Describe el diagrama…",
   "ai_diagram_generate": "Generar",
   "ai_diagram_insert": "Insertar en el bloque",
