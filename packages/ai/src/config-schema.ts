@@ -65,8 +65,11 @@ const MCPTransportSchema = v.picklist(["stdio", "http"] as const);
 /** One MCP (Model Context Protocol) server the assistant may use as a tool
  *  source. The Rust manager (ai_mcp.rs) owns the connection for both
  *  transports; this is just the persisted definition. Secret tokens in
- *  `headers`/`env` should use `{env:VAR}`/`{file:path}` references (resolved at
- *  connect time, like provider keys), not raw plaintext. */
+ *  `headers`/`env` should use `{env:VAR}` / `{file:path}` / `{keychain:id}`
+ *  references — resolved in memory at connect time (desktop: ai-mcp.ts via
+ *  resolve-credential `expandRecord`), so plaintext secrets never touch
+ *  `ai.json`. Embedded refs like `Bearer {env:TOKEN}` are supported; a key
+ *  whose ref can't be resolved is dropped rather than sent literally. */
 const MCPServerConfigSchema = v.object({
   /** Stable id — also namespaces the server's tools as `<id>__<tool>`. */
   id: v.string(),

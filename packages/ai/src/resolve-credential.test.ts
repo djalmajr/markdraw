@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ProviderConfig } from "./config-schema.ts";
-import { resolveCredential } from "./resolve-credential.ts";
+import { expandRecord, expandRefs, resolveCredential } from "./resolve-credential.ts";
 
 const anthropic: ProviderConfig = {
   kind: "anthropic",
@@ -78,5 +78,60 @@ describe("resolveCredential substitution", () => {
       keychain: (id) => (id === "ollama" ? "ollama-key" : undefined),
     });
     expect(key).toBe("ollama-key");
+  });
+});
+
+describe("expandRefs (MCP headers/env)", () => {
+  const resolvers = {
+    env: (n: string) => (n === "TOKEN" ? "t0k3n" : undefined),
+    file: (p: string) => (p === "/k" ? "  filekey\n" : undefined),
+    keychain: (id: string) => (id === "mcp-linear" ? "kc-secret" : undefined),
+  };
+
+  it("returns a literal unchanged when there are no refs", async () => {
+    expect(await expandRefs("application/json", resolvers)).toBe("application/json");
+  });
+
+  it("expands an embedded {env:} ref (Bearer token)", async () => {
+    expect(await expandRefs("Bearer {env:TOKEN}", resolvers)).toBe("Bearer t0k3n");
+  });
+
+  it("expands {file:} (trimmed) and {keychain:}", async () => {
+    expect(await expandRefs("{file:/k}", resolvers)).toBe("filekey");
+    expect(await expandRefs("{keychain:mcp-linear}", resolvers)).toBe("kc-secret");
+  });
+
+  it("expands multiple refs in one value", async () => {
+    expect(await expandRefs("{env:TOKEN}:{keychain:mcp-linear}", resolvers)).toBe("t0k3n:kc-secret");
+  });
+
+  it("returns undefined when any ref is unresolvable", async () => {
+    expect(await expandRefs("Bearer {env:MISSING}", resolvers)).toBeUndefined();
+    expect(await expandRefs("{keychain:nope}", resolvers)).toBeUndefined();
+  });
+});
+
+describe("expandRecord (MCP headers/env)", () => {
+  const resolvers = {
+    env: (n: string) => (n === "TOKEN" ? "t0k3n" : undefined),
+  };
+
+  it("expands resolvable values and drops keys with unresolvable refs", async () => {
+    const out = await expandRecord(
+      {
+        Authorization: "Bearer {env:TOKEN}",
+        "Content-Type": "application/json",
+        "X-Missing": "{env:NOPE}",
+      },
+      resolvers,
+    );
+    expect(out).toEqual({
+      Authorization: "Bearer t0k3n",
+      "Content-Type": "application/json",
+    });
+  });
+
+  it("returns an empty record for an empty input", async () => {
+    expect(await expandRecord({}, resolvers)).toEqual({});
   });
 });

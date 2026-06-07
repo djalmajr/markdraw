@@ -227,6 +227,16 @@ async fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// Read one environment variable from the host process, for `{env:VAR}`
+/// references in AI / MCP config (resolved at connect time, never persisted).
+/// Returns `None` when unset. Note: a macOS app launched from Finder inherits a
+/// limited environment, so `{env:}` is mainly a dev convenience — prefer
+/// `{keychain:id}` for real secrets.
+#[tauri::command]
+fn ai_read_env(name: String) -> Option<String> {
+    std::env::var(name).ok()
+}
+
 #[tauri::command]
 async fn read_file_relative(root: String, relative_path: String) -> Result<String, String> {
     read_file_relative_impl(&PathBuf::from(&root), &relative_path)
@@ -1056,6 +1066,7 @@ pub fn run() {
             ai_set_api_key,
             ai_get_api_key,
             ai_delete_api_key,
+            ai_read_env,
             ai_read_config,
             ai_write_config,
             ai_mcp_connect,
