@@ -119,6 +119,8 @@ interface AppShellProps {
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
   indexingTier?: IndexingTier;
   onIndexingTierChange?: (tier: IndexingTier) => void;
+  aiStreaming?: boolean;
+  onAiStreamingChange?: (enabled: boolean) => void;
   onListModels?: (providerId: string, apiKey: string) => Promise<string[]>;
   onSaveAiProvider?: (opts: {
     providerId: string;
@@ -473,6 +475,8 @@ export function AppShell(props: AppShellProps) {
           onSaveMcpServer={(s) => props.onSaveMcpServer?.(s)}
           onRemoveMcpServer={(id) => props.onRemoveMcpServer?.(id)}
           onToggleMcpServer={(id, enabled) => props.onToggleMcpServer?.(id, enabled)}
+          aiStreaming={props.aiStreaming ?? false}
+          onAiStreamingChange={(v) => props.onAiStreamingChange?.(v)}
           appVersion={props.aboutVersion}
         />
       </Show>

@@ -121,6 +121,9 @@ export interface SettingsDialogProps {
   onRemoveMcpServer?: (id: string) => void | Promise<void>;
   /** Enable/disable an MCP server. */
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
+  /** Streaming-responses beta toggle (real incremental deltas). */
+  aiStreaming?: boolean;
+  onAiStreamingChange?: (enabled: boolean) => void;
 }
 
 const NAV: ReadonlyArray<{ id: SettingsSection; key: string; icon: () => JSX.Element }> = [
@@ -326,6 +329,26 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
         <Button size="sm" onClick={() => void save()} disabled={!providerId() || !modelId()}>
           {(useLocale(), label("settings_ai_save"))}
         </Button>
+      </div>
+
+      <div class="settings-row" style={{ "align-items": "center", gap: "10px", "margin-top": "12px" }}>
+        <ToggleSwitch
+          checked={props.aiStreaming ?? false}
+          onChange={(checked) => props.onAiStreamingChange?.(checked)}
+          aria-label={(useLocale(), label("settings_ai_streaming_label"))}
+        >
+          <SwitchControl>
+            <SwitchThumb />
+          </SwitchControl>
+        </ToggleSwitch>
+        <div>
+          <label class="settings-label" style={{ margin: "0" }}>
+            {(useLocale(), label("settings_ai_streaming_label"))}
+          </label>
+          <p class="settings-prose" style={{ margin: "2px 0 0" }}>
+            {(useLocale(), label("settings_ai_streaming_desc"))}
+          </p>
+        </div>
       </div>
     </div>
   );

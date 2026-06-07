@@ -229,6 +229,8 @@
   "settings_ai_save": "Guardar",
   "settings_ai_saved": "Guardado",
   "settings_ai_no_models": "Sin modelos — carga o elige un proveedor",
+  "settings_ai_streaming_label": "Respuestas en streaming (beta)",
+  "settings_ai_streaming_desc": "Muestra la respuesta token a token a medida que llega. Si se cuelga, desactívalo.",
   "settings_indexing_title": "Indexación del workspace",
   "settings_indexing_off_title": "Desactivado",
   "settings_indexing_off_desc": "Sin indexación en segundo plano. La IA usa solo el documento activo. Las acciones en línea siguen funcionando.",

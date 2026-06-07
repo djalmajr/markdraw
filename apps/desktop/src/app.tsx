@@ -24,6 +24,7 @@ import {
   getStoredAiModel,
   setStoredAiModel,
   getStoredAiStreaming,
+  setStoredAiStreaming,
   getStoredIndexingTier,
   setStoredIndexingTier,
   type IndexingTier,
@@ -187,6 +188,9 @@ export function App() {
   const [indexingTier, setIndexingTier] = createSignal<IndexingTier>(
     getStoredIndexingTier(),
   );
+  // Streaming-responses beta toggle. Read fresh by buildAIProvider each turn, so
+  // flipping it takes effect on the next message (no provider rebuild needed).
+  const [aiStreaming, setAiStreaming] = createSignal(getStoredAiStreaming());
 
   const aiProviders = createMemo(() =>
     Object.entries(aiConfig().provider).map(([id, p]) => ({
@@ -1789,6 +1793,11 @@ export function App() {
       onIndexingTierChange={(t) => {
         setIndexingTier(t);
         setStoredIndexingTier(t);
+      }}
+      aiStreaming={aiStreaming()}
+      onAiStreamingChange={(v) => {
+        setAiStreaming(v);
+        setStoredAiStreaming(v);
       }}
       onListModels={listAiModels}
       onSaveAiProvider={saveAiProvider}
