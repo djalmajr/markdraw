@@ -222,6 +222,8 @@ export function createAppState(config: AppStateConfig) {
     (paneManager.activePane().setSelectedFile as (v: unknown) => unknown)(value)) as Setter<FSEntry | null>;
   const DEFAULT_SIDEBAR_WIDTH = 280;
   const [sidebarWidth, setSidebarWidth] = createSignal(DEFAULT_SIDEBAR_WIDTH);
+  const DEFAULT_TOC_WIDTH = 260;
+  const [tocWidth, setTocWidth] = createSignal(DEFAULT_TOC_WIDTH);
   const [sidebarVisible, setSidebarVisible] = createSignal(true);
   const [showAllDirs, setShowAllDirs] = createSignal(false);
   const [showAllFiles, setShowAllFiles] = createSignal(false);
@@ -747,6 +749,46 @@ export function createAppState(config: AppStateConfig) {
     window.addEventListener("mouseup", onUp);
   }
 
+  // ── Right (TOC / AI) panel resize ──────────────────────────────────────
+  // The panel sits on the RIGHT, so width grows as the cursor moves LEFT:
+  // width = viewport width − cursor X.
+
+  let tocResizing = false;
+  let tocRafId = 0;
+
+  function onTocResizeReset() {
+    setTocWidth(DEFAULT_TOC_WIDTH);
+  }
+
+  function onTocResizeStart(e: MouseEvent, appRef?: HTMLElement) {
+    e.preventDefault();
+    tocResizing = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    appRef?.classList.add("resizing");
+
+    const onMove = (ev: MouseEvent) => {
+      if (!tocResizing) return;
+      cancelAnimationFrame(tocRafId);
+      tocRafId = requestAnimationFrame(() => {
+        setTocWidth(Math.max(200, Math.min(700, window.innerWidth - ev.clientX)));
+      });
+    };
+
+    const onUp = () => {
+      tocResizing = false;
+      cancelAnimationFrame(tocRafId);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      appRef?.classList.remove("resizing");
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   // ── Editor panel resize ────────────────────────────────────────────────
 
   const DEFAULT_EDITOR_WIDTH = 50;
@@ -921,6 +963,7 @@ export function createAppState(config: AppStateConfig) {
     sidebarWidth,
     themeMode,
     tocVisible,
+    tocWidth,
     tocLevels,
     tree,
     wrapText,
@@ -1015,6 +1058,8 @@ export function createAppState(config: AppStateConfig) {
     onEditorResizeStart,
     onResizeReset,
     onResizeStart,
+    onTocResizeReset,
+    onTocResizeStart,
     pushNavHistory,
     pushRecentFile,
     pushRecentFolder,

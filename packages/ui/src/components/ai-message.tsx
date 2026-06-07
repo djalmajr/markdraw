@@ -2,6 +2,7 @@ import { For, Show, type JSX } from "solid-js";
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
 import type { ToolActivity } from "../composables/create-ai-chat-store.ts";
+import { renderChatMarkdown } from "../lib/chat-markdown.ts";
 
 export interface AiMessageProps {
   role: "user" | "assistant";
@@ -68,7 +69,11 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
         <AiToolChips tools={props.tools!} />
       </Show>
       <div class="ai-message-text">
-        {props.content}
+        <Show when={props.role === "assistant"} fallback={props.content}>
+          {/* `html: false` in renderChatMarkdown escapes raw HTML, so this
+              innerHTML never injects model/tool markup. */}
+          <div class="ai-markdown" innerHTML={renderChatMarkdown(props.content)} />
+        </Show>
         <Show when={props.streaming}>
           <span class="ai-message-cursor" aria-hidden="true" />
         </Show>

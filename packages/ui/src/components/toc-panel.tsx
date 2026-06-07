@@ -56,6 +56,8 @@ export interface TocPanelProps {
    *  Falls back to internal state when omitted. */
   activeTab?: TocPanelTab;
   onActiveTabChange?: (tab: TocPanelTab) => void;
+  /** Panel width in px (user-resizable). Falls back to the CSS default. */
+  width?: number;
 }
 
 /**
@@ -87,6 +89,7 @@ export function TocPanel(props: TocPanelProps) {
         "toc-empty": !props.hasToc,
       }}
       data-toc-levels={props.tocLevels}
+      style={props.width != null ? { "--toc-width": `${props.width}px` } : undefined}
       ref={(el) => props.panelRef?.(el)}
     >
       <div class="toc-panel-tabs">

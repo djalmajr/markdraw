@@ -753,9 +753,17 @@ export function AppShell(props: AppShellProps) {
               </DragOverlay>
             </DragDropProvider>
           </div>
+          <Show when={s.tocVisible() && !!props.hasRoot}>
+            <div
+              class="resize-handle resize-handle-toc"
+              onDblClick={s.onTocResizeReset}
+              onMouseDown={(e) => s.onTocResizeStart(e, appRef)}
+            />
+          </Show>
           <TocPanel
             tocVisible={s.tocVisible()}
             hasRoot={!!props.hasRoot}
+            width={s.tocWidth()}
             hasToc={s.hasToc()}
             tocLevels={s.tocLevels()}
             setTocLevels={s.setTocLevels}

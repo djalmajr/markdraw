@@ -1401,7 +1401,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 /* === TOC Panel (flex sibling of .content) === */
 .toc-panel {
-  width: 260px;
+  width: var(--toc-width, 260px);
   flex-shrink: 0;
   /* See `.main` above — without `min-height: 0`, a TOC tree taller
      than the viewport leaks the gutter past `.app`'s 100vh and
@@ -1625,6 +1625,78 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .ai-message-assistant .ai-message-text {
   background: hsl(var(--secondary));
   color: hsl(var(--foreground));
+}
+
+/* Rendered assistant markdown — reset the plain-text `pre-wrap` and give the
+   blocks compact, theme-aware prose styling. */
+.ai-markdown {
+  white-space: normal;
+}
+.ai-markdown > :first-child {
+  margin-top: 0;
+}
+.ai-markdown > :last-child {
+  margin-bottom: 0;
+}
+.ai-markdown p,
+.ai-markdown ul,
+.ai-markdown ol,
+.ai-markdown blockquote,
+.ai-markdown pre,
+.ai-markdown table {
+  margin: 0 0 8px;
+}
+.ai-markdown h1,
+.ai-markdown h2,
+.ai-markdown h3,
+.ai-markdown h4 {
+  margin: 12px 0 6px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ai-markdown h1 { font-size: 1.3em; }
+.ai-markdown h2 { font-size: 1.18em; }
+.ai-markdown h3 { font-size: 1.06em; }
+.ai-markdown ul,
+.ai-markdown ol {
+  padding-left: 1.4em;
+}
+.ai-markdown li {
+  margin: 2px 0;
+}
+.ai-markdown a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}
+.ai-markdown code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  background: hsl(var(--muted));
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+}
+.ai-markdown pre {
+  background: hsl(var(--muted));
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.ai-markdown pre code {
+  background: none;
+  padding: 0;
+}
+.ai-markdown blockquote {
+  border-left: 3px solid hsl(var(--border));
+  padding-left: 10px;
+  color: hsl(var(--muted-foreground));
+}
+.ai-markdown table {
+  border-collapse: collapse;
+}
+.ai-markdown th,
+.ai-markdown td {
+  border: 1px solid hsl(var(--border));
+  padding: 3px 8px;
 }
 
 .ai-message-cursor {
