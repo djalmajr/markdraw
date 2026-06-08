@@ -1984,11 +1984,17 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
+  outline: none;
   transition: background 0.1s;
 }
 .ai-mp-trigger:hover,
 .ai-mp-trigger[data-expanded] {
   background: hsl(var(--bg-hover));
+}
+/* No ring on mouse click (it reads as noise inside the composer); only a thin
+   teal ring on keyboard focus. */
+.ai-mp-trigger:focus-visible {
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.4);
 }
 .ai-mp-trigger-label {
   overflow: hidden;
