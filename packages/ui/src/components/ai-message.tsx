@@ -13,6 +13,13 @@ export interface AiMessageProps {
   streaming?: boolean;
 }
 
+/** Drop the `<source>__` namespace prefix so a chip reads "read_active_doc"
+ *  rather than the raw "app__read_active_doc". */
+function toolDisplayName(name: string): string {
+  const idx = name.indexOf("__");
+  return idx >= 0 ? name.slice(idx + 2) : name;
+}
+
 /** Compact chips summarizing tool calls made during a turn. Shared by completed
  *  assistant messages and the in-flight streaming reply. */
 export function AiToolChips(props: { tools: ToolActivity[] }): JSX.Element {
@@ -38,8 +45,10 @@ export function AiToolChips(props: { tools: ToolActivity[] }): JSX.Element {
             <span class="ai-tool-chip-icon" aria-hidden="true">
               ⚙
             </span>
-            <span class="ai-tool-chip-name">{tool.toolName}</span>
-            <Show when={tool.source}>
+            <span class="ai-tool-chip-name">{toolDisplayName(tool.toolName)}</span>
+            {/* Source is only informative for MCP servers — in-process "app"
+                tools already read clearly from the (de-namespaced) name. */}
+            <Show when={tool.source && tool.source !== "app"}>
               <span class="ai-tool-chip-source">· {tool.source}</span>
             </Show>
           </span>

@@ -163,4 +163,19 @@ describe("AiPanel", () => {
     expect(chip?.textContent).toContain("memory");
     expect(baseElement.querySelector(".ai-tool-chip-done")).not.toBeNull();
   });
+
+  it("de-namespaces the tool name and hides the redundant 'app' source", () => {
+    const { baseElement } = render(() => (
+      <AiMessage
+        role="assistant"
+        content="done"
+        tools={[{ toolCallId: "t1", toolName: "app__read_active_doc", source: "app", status: "done" }]}
+      />
+    ));
+    const chip = baseElement.querySelector(".ai-tool-chip")!;
+    expect(chip.querySelector(".ai-tool-chip-name")?.textContent).toBe("read_active_doc");
+    expect(chip.textContent).not.toContain("app__");
+    // The "· app" source chip is hidden for in-process app tools.
+    expect(chip.querySelector(".ai-tool-chip-source")).toBeNull();
+  });
 });
