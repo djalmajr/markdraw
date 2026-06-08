@@ -1,19 +1,15 @@
 import { Show, createSignal, type JSX } from "solid-js";
-import IconCheck from "~icons/lucide/check";
-import IconSlidersHorizontal from "~icons/lucide/sliders-horizontal";
-import IconSparkles from "~icons/lucide/sparkles";
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu.tsx";
-import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.tsx";
+  RightPanelTabs,
+  type RightPanelOverflowItem,
+  type RightPanelTab,
+} from "./right-panel-tabs.tsx";
 
-export type TocPanelTab = "toc" | "backlinks" | "ai";
+/** Encoded right-panel tab: the pinned TOC tab, the References (backlinks)
+ *  view fronted from the overflow menu, or a specific chat session. */
+export type TocPanelTab = "toc" | "backlinks" | `chat:${string}`;
 
 export interface TocPanelProps {
   /** Toolbar toggle. Drives panel visibility — only `false` should
@@ -24,61 +20,98 @@ export interface TocPanelProps {
    *  too because the dropzone fills the canvas and there's nothing on
    *  the right to anchor a gutter against. */
   hasRoot: boolean;
-  /** True when the active pane's preview produced a `#toc` block.
-   *  When false the placeholder takes over so the gutter doesn't
-   *  flicker between docs that do/don't render headings. */
+  /** True when the active pane's preview produced a `#toc` block. */
   hasToc: boolean;
-  /** Visible heading depth (1-4). Bound to a CSS attribute selector
-   *  that hides deeper levels — see `[data-toc-levels]` in
-   *  `index.css`. */
+  /** Visible heading depth (1-4). Bound to a CSS attribute selector. */
   tocLevels: number;
   setTocLevels: (n: number) => void;
   /** Bulk expand/collapse for nested toc-collapsible items. */
   setTocExpanded: (expanded: boolean) => void;
-  /** Where Preview moves the `#toc` node. AppShell forwards a single
-   *  shared ref bound to whichever pane is active. */
+  /** Where Preview moves the `#toc` node. MUST stay mounted across tab
+   *  switches (the TOC pane is hidden, never unmounted). */
   contentRef: (el: HTMLDivElement) => void;
-  /** Optional ref to the panel root for callers that need to scope
-   *  queries (e.g. setTocExpanded operating on toggles). */
+  /** Optional ref to the panel root for query scoping. */
   panelRef?: (el: HTMLElement) => void;
-  /** Number of inbound references for the active doc — drives the
-   *  count badge on the Backlinks tab. */
+  /** Inbound reference count for the active doc — badges the References
+   *  entry in the "…" overflow menu. */
   backlinksCount?: number;
-  /** Backlinks list rendered when the Backlinks segment is active.
-   *  Always mounted (just visually hidden when on the TOC tab) so
-   *  the empty-state stays stable across switches. */
+  /** Backlinks list, rendered in the (always-mounted) References pane. */
   backlinksSlot?: JSX.Element;
-  /** AI panel content rendered in the third segment (DJA-12). When omitted the
-   *  AI segment is not shown — keeps the panel two-up for hosts without AI. */
+  /** Controlled active tab (encoded string). Falls back to internal state. */
+  activeTab?: string;
+  onActiveTabChange?: (tab: string) => void;
+  /** Open chat sessions for the strip (host builds from the session manager). */
+  chatSessions?: Array<{ id: string; title: string; streaming?: boolean }>;
+  /** AiPanel bound to the active chat — rendered only when a chat tab is active. */
   aiSlot?: JSX.Element;
-  /** Controlled active tab. When provided (with `onActiveTabChange`) the host
-   *  owns which segment is fronted — needed so ⌘L can front the AI segment.
-   *  Falls back to internal state when omitted. */
-  activeTab?: TocPanelTab;
-  onActiveTabChange?: (tab: TocPanelTab) => void;
+  onNewChat?: () => void;
+  onCloseChat?: (id: string) => void;
+  /** ChatHistoryMenu element, rendered in the strip's actions cluster. */
+  historySlot?: JSX.Element;
+  /** Localized fallback title for untitled chats. */
+  defaultChatTitle?: string;
   /** Panel width in px (user-resizable). Falls back to the CSS default. */
   width?: number;
 }
 
 /**
- * Sticky right gutter with two segments at the top — Summary
- * (TOC) and References (Backlinks). Each pane keeps its own
- * SECTION header below the segment row (uppercase title + the
- * pane-specific action), matching the layout pattern of the main
- * editor-mode segmented control in the toolbar.
- *
- * Both subtrees stay mounted regardless of which tab is visible —
- * Preview moves the `#toc` node into the toc tree via `contentRef`
- * and a re-mount would lose that wiring.
+ * The right gutter. A single unified tab strip (pinned TOC + N chat tabs, plus
+ * `+`/history/overflow/collapse controls) sits above three content panes. The
+ * TOC and References panes stay MOUNTED at all times (hidden via attribute) —
+ * Preview moves the `#toc` node into the TOC tree imperatively and a re-mount
+ * would lose that wiring; References must keep its empty-state stable. Only the
+ * active chat pane mounts/unmounts (chat content has no imperative DOM
+ * contract). References is reachable from the "…" overflow, not a strip tab.
  */
 export function TocPanel(props: TocPanelProps) {
-  // Controlled-with-fallback: the host may drive the active tab (so ⌘L can
-  // front the AI segment); otherwise the panel keeps its own state.
-  const [localTab, setLocalTab] = createSignal<TocPanelTab>("toc");
-  const activeTab = (): TocPanelTab => props.activeTab ?? localTab();
-  const changeTab = (tab: TocPanelTab): void => {
+  // Controlled-with-fallback so the host can drive the active tab (⌘L fronts a
+  // chat); otherwise the panel keeps its own state for standalone rendering.
+  const [localTab, setLocalTab] = createSignal<string>("toc");
+  const activeTab = (): string => props.activeTab ?? localTab();
+  const changeTab = (tab: string): void => {
     setLocalTab(tab);
     props.onActiveTabChange?.(tab);
+  };
+  const isChatActive = (): boolean => activeTab().startsWith("chat:");
+
+  const tabs = (): RightPanelTab[] => [
+    { id: "toc", kind: "toc", title: (useLocale(), m.toc_tab_outline()) },
+    ...(props.chatSessions ?? []).map((s) => ({
+      id: s.id,
+      kind: "chat" as const,
+      title: s.title || props.defaultChatTitle || (useLocale(), m.ai_chat_default_title()),
+      streaming: s.streaming,
+    })),
+  ];
+
+  const overflowItems = (): RightPanelOverflowItem[] => {
+    useLocale();
+    const items: RightPanelOverflowItem[] = [
+      {
+        id: "references",
+        label: m.toc_tab_references(),
+        count: props.backlinksCount,
+        onSelect: () => changeTab("backlinks"),
+      },
+    ];
+    // The TOC depth/expand controls live in the overflow only while the TOC tab
+    // is active (they don't apply to chats or references).
+    if (activeTab() === "toc") {
+      items.push(
+        { id: "expand", label: m.toc_expand_all(), separatorBefore: true, onSelect: () => props.setTocExpanded(true) },
+        { id: "collapse", label: m.toc_collapse_all(), onSelect: () => props.setTocExpanded(false) },
+      );
+      for (const lvl of [1, 2, 3, 4] as const) {
+        items.push({
+          id: `lvl${lvl}`,
+          label: m.toc_show_levels({ n: String(lvl) }),
+          separatorBefore: lvl === 1,
+          checked: props.tocLevels === lvl,
+          onSelect: () => props.setTocLevels(lvl),
+        });
+      }
+    }
+    return items;
   };
 
   return (
@@ -92,125 +125,43 @@ export function TocPanel(props: TocPanelProps) {
       style={props.width != null ? { "--toc-width": `${props.width}px` } : undefined}
       ref={(el) => props.panelRef?.(el)}
     >
-      <div class="toc-panel-tabs">
-        <Tabs
-          value={activeTab()}
-          onChange={(v) => changeTab(v as TocPanelTab)}
-        >
-          <TabsList>
-            <TabsTrigger value="toc">
-              {(useLocale(), m.toc_tab_summary())}
-            </TabsTrigger>
-            <TabsTrigger value="backlinks">
-              <span>{(useLocale(), m.toc_tab_references())}</span>
-              <Show when={(props.backlinksCount ?? 0) > 0}>
-                <span class="toc-panel-tab-count">{props.backlinksCount}</span>
-              </Show>
-            </TabsTrigger>
-            <Show when={props.aiSlot}>
-              <TabsTrigger value="ai">
-                <IconSparkles width={12} height={12} class="toc-panel-tab-icon" />
-                <span>{(useLocale(), m.toc_tab_ai())}</span>
-              </TabsTrigger>
-            </Show>
-          </TabsList>
-        </Tabs>
-      </div>
+      <RightPanelTabs
+        tabs={tabs()}
+        activeId={activeTab()}
+        onSelect={changeTab}
+        onCloseChat={(id) => props.onCloseChat?.(id)}
+        onNewChat={props.onNewChat}
+        overflowItems={overflowItems()}
+        historySlot={props.historySlot}
+      />
+
       <div class="toc-panel-panes" data-active-tab={activeTab()}>
-        {/* Each pane is its own flex column so the section header
-            stays put while only the inner `.toc-panel-scroll` scrolls.
-            Sticky-positioning the header inside a single shared scroll
-            container kept the TOC tree leaking under a translucent
-            edge — restructuring per-pane scroll fixed it. */}
-        <div
-          class="toc-panel-pane"
-          data-pane="toc"
-          role="tabpanel"
-          hidden={activeTab() !== "toc"}
-        >
-          <div class="toc-panel-section-header">
-            <span class="toc-panel-section-title">
-              {(useLocale(), m.toc_title())}
-            </span>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                as="button"
-                class="toc-panel-options"
-                aria-label="TOC options"
-                title="TOC options"
-              >
-                <IconSlidersHorizontal width={14} height={14} />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem onSelect={() => props.setTocExpanded(true)}>
-                  {(useLocale(), m.toc_expand_all())}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => props.setTocExpanded(false)}>
-                  {(useLocale(), m.toc_collapse_all())}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => props.setTocLevels(1)}>
-                  <span class="flex-1">{(useLocale(), m.toc_show_levels({ n: "1" }))}</span>
-                  <Show when={props.tocLevels === 1}>
-                    <IconCheck width={14} height={14} />
-                  </Show>
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => props.setTocLevels(2)}>
-                  <span class="flex-1">{(useLocale(), m.toc_show_levels({ n: "2" }))}</span>
-                  <Show when={props.tocLevels === 2}>
-                    <IconCheck width={14} height={14} />
-                  </Show>
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => props.setTocLevels(3)}>
-                  <span class="flex-1">{(useLocale(), m.toc_show_levels({ n: "3" }))}</span>
-                  <Show when={props.tocLevels === 3}>
-                    <IconCheck width={14} height={14} />
-                  </Show>
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => props.setTocLevels(4)}>
-                  <span class="flex-1">{(useLocale(), m.toc_show_levels({ n: "4" }))}</span>
-                  <Show when={props.tocLevels === 4}>
-                    <IconCheck width={14} height={14} />
-                  </Show>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+        {/* TOC pane — ALWAYS mounted; hidden via attribute. Preview moves the
+            `#toc` node into `.toc-panel-tree`, so it must never unmount. */}
+        <div class="toc-panel-pane" data-pane="toc" role="tabpanel" hidden={activeTab() !== "toc"}>
           <div class="toc-panel-scroll">
-            {/* Placeholder must NOT live inside `.toc-panel-tree`:
-                Preview wipes that node with `textContent = ""` whenever
-                a pane re-binds the active TOC, which would also remove
-                this fallback. Sibling placement keeps the reactive
-                `<Show>` independent of the move. */}
+            {/* Placeholder must NOT live inside `.toc-panel-tree`: Preview wipes
+                that node's textContent on re-bind, which would remove a child
+                fallback. Sibling placement keeps the `<Show>` independent. */}
             <Show when={!props.hasToc}>
               <p class="toc-panel-empty">{(useLocale(), m.toc_no_headings())}</p>
             </Show>
             <div class="toc-panel-tree" ref={(el) => props.contentRef(el)} />
           </div>
         </div>
-        <div
-          class="toc-panel-pane"
-          data-pane="backlinks"
-          role="tabpanel"
-          hidden={activeTab() !== "backlinks"}
-        >
+
+        {/* References pane — ALWAYS mounted; fronted from the "…" overflow. */}
+        <div class="toc-panel-pane" data-pane="backlinks" role="tabpanel" hidden={activeTab() !== "backlinks"}>
           <div class="toc-panel-section-header">
-            <span class="toc-panel-section-title">
-              {(useLocale(), m.backlinks_title())}
-            </span>
+            <span class="toc-panel-section-title">{(useLocale(), m.backlinks_title())}</span>
           </div>
           <div class="toc-panel-scroll">{props.backlinksSlot}</div>
         </div>
-        {/* AI pane is self-contained: AiPanel owns its header + scroll +
-            composer layout, so it fills the pane directly (no shared
-            section-header / single-scroll wrapper). */}
-        <Show when={props.aiSlot}>
-          <div
-            class="toc-panel-pane toc-panel-pane-ai"
-            data-pane="ai"
-            role="tabpanel"
-            hidden={activeTab() !== "ai"}
-          >
+
+        {/* Chat pane — only the ACTIVE chat session mounts. AiPanel owns its own
+            header + scroll + composer, so it fills the pane directly. */}
+        <Show when={isChatActive()}>
+          <div class="toc-panel-pane toc-panel-pane-ai" data-pane="ai" role="tabpanel">
             {props.aiSlot}
           </div>
         </Show>

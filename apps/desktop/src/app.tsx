@@ -200,6 +200,39 @@ export function App() {
     })),
   );
 
+  // Model picker shown in the chat composer footer. Reads `aiConfig()` so it
+  // re-derives when the selection changes (selectAiModel bumps the config).
+  const aiCurrentModel = createMemo<string>(() => {
+    aiConfig();
+    return getStoredAiModel() ?? "";
+  });
+  const aiModelOptions = createMemo<{ value: string; label: string }[]>(() => {
+    const ref = aiCurrentModel();
+    if (!ref || !ref.includes("/")) return [];
+    const providerId = ref.slice(0, ref.indexOf("/"));
+    const provider = aiConfig().provider[providerId];
+    if (!provider) return [];
+    return Object.keys(provider.models).map((mid) => ({
+      value: `${providerId}/${mid}`,
+      label: provider.models[mid]?.name ?? mid,
+    }));
+  });
+  /** Context window (tokens) of the active model — drives the composer's
+   *  context-usage ring. Undefined when the model config has no `limit`. */
+  const aiContextLimit = createMemo<number | undefined>(() => {
+    const ref = aiCurrentModel();
+    if (!ref.includes("/")) return undefined;
+    const providerId = ref.slice(0, ref.indexOf("/"));
+    const modelId = ref.slice(ref.indexOf("/") + 1);
+    return aiConfig().provider[providerId]?.models[modelId]?.limit?.context;
+  });
+  /** Quick model switch from the composer footer (same provider). Persists the
+   *  selection and bumps the config so the picker/label refresh. */
+  function selectAiModel(modelRef: string): void {
+    setStoredAiModel(modelRef);
+    setAiConfig((c) => ({ ...c }));
+  }
+
   async function listAiModels(providerId: string, apiKey: string): Promise<string[]> {
     const provider = aiConfig().provider[providerId];
     const baseURL = provider?.options?.baseURL;
@@ -1092,6 +1125,51 @@ export function App() {
     });
   }
 
+  /** Attach a file to the AI chat as context (file-tree "Add to chat"). Reads
+   *  the file text and fronts the chat so the new context chip is visible. */
+  async function addFileToChat(entry: import("@asciimark/core/types.ts").FSEntry, rootId: string) {
+    const rootPath = rootPaths().get(rootId);
+    if (!rootPath) return;
+    try {
+      const content = await readFileContent(`${rootPath}/${entry.path}`);
+      state.addAiContext({
+        id: `file:${rootId}:${entry.path}`,
+        kind: "file",
+        label: entry.name,
+        path: entry.path,
+        rootId,
+        content,
+      });
+      state.focusAiComposer();
+    } catch {
+      // Unreadable (binary / deleted) — silently skip.
+    }
+  }
+
+  /** Attach the current editor selection to the chat as a context chip. Returns
+   *  true when a non-empty selection was added (so ⌘L / the selection popover
+   *  can decide whether to also front the chat). */
+  function addSelectionToChat(): boolean {
+    const pane = state.paneManager.activePane() as { editorApi?: EditorApi };
+    const api = pane.editorApi;
+    if (!api) return false;
+    const sel = api.getSelection();
+    if (!sel || !sel.text.trim()) return false;
+    const file = state.selectedFile();
+    const fileName = file?.name ?? "selection";
+    const content = state.editorContent();
+    const lineOf = (off: number) => content.slice(0, Math.max(0, off)).split("\n").length;
+    const label = `${fileName}:${lineOf(sel.from)}-${lineOf(sel.to)}`;
+    state.addAiContext({
+      id: `selection:${file?.path ?? ""}:${sel.from}-${sel.to}`,
+      kind: "selection",
+      label,
+      ...(file ? { path: file.path } : {}),
+      content: sel.text,
+    });
+    return true;
+  }
+
   // Quick Open (Cmd/Ctrl+P) — recents set keyed by `${rootId}::${path}` so
   // the fuzzy ranker can boost recently-opened files. In desktop the rootId
   // equals the absolute root path (set by `folder.openFolderPath`), so the
@@ -1718,9 +1796,12 @@ export function App() {
         state.setReaderMode((v) => !v);
       }
 
-      // ⌘L / Ctrl+L: open & focus the AI chat in the sidebar (DJA-12)
+      // ⌘L / Ctrl+L: add the current selection to the chat as context (visible
+      // chip, Cursor-style), then open & focus the AI chat. With no selection
+      // it just fronts the chat.
       if (mod && !e.shiftKey && (e.key === "l" || e.key === "L")) {
         e.preventDefault();
+        addSelectionToChat();
         state.focusAiComposer();
       }
 
@@ -1786,6 +1867,10 @@ export function App() {
       state={state}
       hasRoot={rootPaths().size > 0}
       aiProviderLabel={aiProviderLabel()}
+      aiModels={aiModelOptions()}
+      aiCurrentModel={aiCurrentModel()}
+      aiContextLimit={aiContextLimit()}
+      onSelectAiModel={selectAiModel}
       onOpenSettings={() => setSettingsOpen(true)}
       settingsOpen={settingsOpen()}
       onSettingsClose={() => setSettingsOpen(false)}
@@ -1857,6 +1942,7 @@ export function App() {
       onGoForward={navigation.handleGoForward}
       onLoadFile={handleLoadFileWithTab}
       onOpenInNewTab={handleOpenInNewTab}
+      onAddToChat={(entry, rootId) => void addFileToChat(entry, rootId)}
       onDoubleClickFile={handleOpenInNewTab}
       onNavigate={navigation.handleNavigate}
       onOpenExternal={(url) => openUrl(url)}

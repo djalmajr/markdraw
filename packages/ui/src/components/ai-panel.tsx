@@ -1,45 +1,71 @@
-import {
-  For,
-  Show,
-  createEffect,
-  createSignal,
-  type JSX,
-} from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
 import IconSparkles from "~icons/lucide/sparkles";
+import IconArrowUp from "~icons/lucide/arrow-up";
+import IconSquare from "~icons/lucide/square";
+import IconCheck from "~icons/lucide/check";
+import IconChevronDown from "~icons/lucide/chevron-down";
+import IconX from "~icons/lucide/x";
+import IconFileText from "~icons/lucide/file-text";
+import IconTextSelect from "~icons/lucide/text-select";
 import type { AiChatStore } from "../composables/create-ai-chat-store.ts";
+import type { AiContextItem } from "../composables/ai-context.ts";
 import { Button } from "./ui/button.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu.tsx";
 import { AiMessage } from "./ai-message.tsx";
 
 export interface AiPanelProps {
   store: AiChatStore;
   /** Increment to focus the composer (driven by ⌘L via the host). */
   focusTrigger?: number;
-  /** Display label for the active provider, or null when none is configured. */
+  /** Display label for the active provider/model, or null when none is set.
+   *  Used as the footer fallback when no `models` are provided. */
   providerLabel?: string | null;
-  /** Opens Settings → AI (empty-state CTA). Optional until DJA-15 wires it. */
+  /** Model options for the active provider (a `providerId/modelId` value +
+   *  label). When provided the footer shows a model picker instead of the
+   *  static "connected" chip. */
+  models?: Array<{ value: string; label: string }>;
+  /** Currently selected model ref (`providerId/modelId`). */
+  currentModel?: string;
+  /** Context window (tokens) of the active model — drives the usage ring. */
+  contextLimit?: number;
+  /** Persist a model selection. */
+  onSelectModel?: (modelRef: string) => void;
+  /** Explicit context items (attached files / selections) shown as chips. */
+  contextItems?: AiContextItem[];
+  /** The active-document chip (read via tool, shown for awareness), or null. */
+  activeFileContext?: { label: string } | null;
+  onRemoveContext?: (id: string) => void;
+  onDismissActiveFile?: () => void;
+  /** Handle a file dropped onto the composer (host reads it + adds context). */
+  onContextDrop?: (e: DragEvent) => void;
+  /** Opens Settings → AI (empty-state CTA). */
   onOpenSettings?: () => void;
 }
 
 /**
- * The AI sidebar chat shell (DJA-12). Self-contained flex column — header +
- * scrollable messages + composer — so it fills the TocPanel's AI pane directly.
- * Reads everything from `props.store` (the shared chat store); knows nothing
- * about providers or IPC. Runs against the MockProvider in M1.
+ * The AI sidebar chat. Header-less (the tab already says it's the assistant):
+ * a scrollable message list over a composer "box" — the textarea with the
+ * provider/model chip and an embedded send arrow in its footer (modern-editor
+ * style). Reads everything from `props.store` (the active chat session's store).
  */
 export function AiPanel(props: AiPanelProps): JSX.Element {
   const [input, setInput] = createSignal("");
   let textarea: HTMLTextAreaElement | undefined;
   let scroller: HTMLDivElement | undefined;
 
-  // Focus the composer when the host pulses focusTrigger (⌘L).
   createEffect(() => {
     props.focusTrigger;
     textarea?.focus();
   });
 
-  // Keep the latest message in view as content streams in.
   createEffect(() => {
     props.store.messages();
     props.store.streamingText();
@@ -64,28 +90,25 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     }
   }
 
+  const [dragOver, setDragOver] = createSignal(false);
+
   const hasConversation = (): boolean =>
     props.store.messages().length > 0 || props.store.streaming();
 
+  const hasContext = (): boolean =>
+    !!props.activeFileContext || (props.contextItems?.length ?? 0) > 0;
+
+  const currentModelLabel = (): string => {
+    const cur = props.models?.find((mdl) => mdl.value === props.currentModel);
+    return cur?.label ?? props.providerLabel ?? (useLocale(), m.ai_provider_none());
+  };
+
   return (
     <div class="ai-panel">
-      <div class="ai-panel-header">
-        <span class="ai-panel-title">{(useLocale(), m.ai_panel_title())}</span>
-        <span
-          class="ai-provider-chip"
-          classList={{ "ai-provider-chip-active": !!props.providerLabel }}
-        >
-          <span class="ai-provider-dot" aria-hidden="true" />
-          {props.providerLabel ?? (useLocale(), m.ai_provider_none())}
-        </span>
-      </div>
-
       <div class="ai-messages" ref={(el) => (scroller = el)}>
         <Show when={hasConversation()} fallback={<AiEmptyState {...props} />}>
           <For each={props.store.messages()}>
-            {(msg) => (
-              <AiMessage role={msg.role} content={msg.content} tools={msg.tools} />
-            )}
+            {(msg) => <AiMessage role={msg.role} content={msg.content} tools={msg.tools} />}
           </For>
           <Show when={props.store.streaming()}>
             <AiMessage
@@ -105,7 +128,58 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
         </Show>
       </div>
 
-      <div class="ai-composer">
+      <div
+        class="ai-composer"
+        classList={{ "ai-composer-dragover": dragOver() }}
+        onDragOver={(e) => {
+          if (!props.onContextDrop) return;
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          setDragOver(false);
+          props.onContextDrop?.(e);
+        }}
+      >
+        <Show when={hasContext()}>
+          <div class="ai-context-bar">
+            <Show when={props.activeFileContext}>
+              {(ctx) => (
+                <span class="ai-context-chip ai-context-chip-active" title={ctx().label}>
+                  <IconFileText width={12} height={12} />
+                  <span class="ai-context-chip-label">{ctx().label}</span>
+                  <button
+                    type="button"
+                    class="ai-context-chip-x"
+                    aria-label={(useLocale(), m.ai_context_remove())}
+                    onClick={() => props.onDismissActiveFile?.()}
+                  >
+                    <IconX width={11} height={11} />
+                  </button>
+                </span>
+              )}
+            </Show>
+            <For each={props.contextItems}>
+              {(item) => (
+                <span class="ai-context-chip" title={item.label}>
+                  <Show when={item.kind === "selection"} fallback={<IconFileText width={12} height={12} />}>
+                    <IconTextSelect width={12} height={12} />
+                  </Show>
+                  <span class="ai-context-chip-label">{item.label}</span>
+                  <button
+                    type="button"
+                    class="ai-context-chip-x"
+                    aria-label={(useLocale(), m.ai_context_remove())}
+                    onClick={() => props.onRemoveContext?.(item.id)}
+                  >
+                    <IconX width={11} height={11} />
+                  </button>
+                </span>
+              )}
+            </For>
+          </div>
+        </Show>
         <textarea
           ref={(el) => (textarea = el)}
           class="ai-composer-input"
@@ -115,31 +189,185 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           onInput={(e) => setInput(e.currentTarget.value)}
           onKeyDown={onKeyDown}
         />
-        <div class="ai-composer-actions">
+        <div class="ai-composer-footer">
           <Show
-            when={props.store.streaming()}
+            when={props.models && props.models.length > 0}
             fallback={
-              <Button
-                size="sm"
-                onClick={submit}
-                disabled={!input().trim()}
-                aria-label={(useLocale(), m.ai_composer_send())}
+              <span
+                class="ai-provider-chip"
+                classList={{ "ai-provider-chip-active": !!props.providerLabel }}
               >
-                {(useLocale(), m.ai_composer_send())}
-              </Button>
+                <span class="ai-provider-dot" aria-hidden="true" />
+                {props.providerLabel ?? (useLocale(), m.ai_provider_none())}
+              </span>
             }
           >
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => props.store.cancel()}
-            >
-              {(useLocale(), m.ai_composer_stop())}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger as="button" class="ai-model-select" title={currentModelLabel()}>
+                <span class="ai-provider-dot ai-provider-dot-active" aria-hidden="true" />
+                <span class="ai-model-label">{currentModelLabel()}</span>
+                <IconChevronDown width={13} height={13} class="ai-model-chevron" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent class="ai-model-menu">
+                <For each={props.models}>
+                  {(mdl) => (
+                    <DropdownMenuItem onSelect={() => props.onSelectModel?.(mdl.value)}>
+                      <span class="flex-1">{mdl.label}</span>
+                      <Show when={mdl.value === props.currentModel}>
+                        <IconCheck width={14} height={14} />
+                      </Show>
+                    </DropdownMenuItem>
+                  )}
+                </For>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </Show>
+          <div class="ai-composer-tools">
+            <ContextUsage store={props.store} contextLimit={props.contextLimit} />
+            <Show
+              when={props.store.streaming()}
+              fallback={
+                <button
+                  type="button"
+                  class="ai-send-btn"
+                  onClick={submit}
+                  disabled={!input().trim()}
+                  aria-label={(useLocale(), m.ai_composer_send())}
+                  title={(useLocale(), m.ai_composer_send())}
+                >
+                  <IconArrowUp width={16} height={16} />
+                </button>
+              }
+            >
+              <button
+                type="button"
+                class="ai-send-btn ai-stop-btn"
+                onClick={() => props.store.cancel()}
+                aria-label={(useLocale(), m.ai_composer_stop())}
+                title={(useLocale(), m.ai_composer_stop())}
+              >
+                <IconSquare width={12} height={12} />
+              </button>
+            </Show>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Context usage (estimated) ─────────────────────────────────────────────
+/** Length of a JSON-serializable value's serialization, robust to cycles/BigInt. */
+function safeLen(value: unknown): number {
+  if (value == null) return 0;
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
+const estTokens = (chars: number): number => Math.ceil(chars / 4);
+/** Fallback context window when the model config declares no `limit`. */
+const DEFAULT_CONTEXT_WINDOW = 128_000;
+
+/** A small circular progress ring — the context-usage indicator (fills as the
+ *  conversation approaches the model's context window). */
+function ProgressRing(props: { pct: number; size?: number }): JSX.Element {
+  const size = props.size ?? 16;
+  const sw = 2.5;
+  const r = (size - sw) / 2;
+  const circ = 2 * Math.PI * r;
+  const center = String(size / 2);
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} class="ai-ctx-ring" aria-hidden="true">
+      <circle class="ai-ctx-ring-track" cx={center} cy={center} r={String(r)} fill="none" stroke-width={String(sw)} />
+      <circle
+        class="ai-ctx-ring-fill"
+        cx={center}
+        cy={center}
+        r={String(r)}
+        fill="none"
+        stroke-width={String(sw)}
+        stroke-linecap="round"
+        stroke-dasharray={String(circ)}
+        stroke-dashoffset={String(circ * (1 - Math.max(0, Math.min(1, props.pct))))}
+        transform={`rotate(-90 ${center} ${center})`}
+      />
+    </svg>
+  );
+}
+
+function ContextUsage(props: { store: AiChatStore; contextLimit?: number }): JSX.Element {
+  // System prompt + tool definitions are loaded async (and refreshed when the
+  // popover opens, since MCP servers can connect mid-session); the conversation
+  // estimate is reactive so the ring fills live as messages stream in.
+  const [base, setBase] = createSignal({ system: 0, tools: 0, toolCount: 0 });
+
+  async function loadBase(): Promise<void> {
+    const sys = props.store.systemPrompt() ?? "";
+    const tools = await props.store.listTools();
+    setBase({
+      system: estTokens(sys.length),
+      tools: estTokens(tools.reduce((n, t) => n + safeLen(t), 0)),
+      toolCount: tools.length,
+    });
+  }
+  onMount(() => void loadBase());
+
+  const conversation = createMemo(() => {
+    const chars = props.store.messages().reduce((n, msg) => {
+      const toolBytes = msg.tools?.reduce((x, t) => x + safeLen(t.args) + safeLen(t.result), 0) ?? 0;
+      return n + msg.content.length + toolBytes;
+    }, 0);
+    return estTokens(chars + props.store.streamingText().length);
+  });
+
+  const total = (): number => base().system + base().tools + conversation();
+  const windowSize = (): number =>
+    props.contextLimit && props.contextLimit > 0 ? props.contextLimit : DEFAULT_CONTEXT_WINDOW;
+  const pct = (): number => Math.max(0, Math.min(1, total() / windowSize()));
+  const pctLabel = (): string => `${Math.round(pct() * 100)}%`;
+
+  return (
+    <Popover
+      placement="top-end"
+      onOpenChange={(open) => {
+        if (open) void loadBase();
+      }}
+    >
+      <PopoverTrigger
+        as="button"
+        class="ai-send-btn ai-context-btn"
+        title={(useLocale(), m.ai_context_usage())}
+        aria-label={(useLocale(), m.ai_context_usage())}
+      >
+        <ProgressRing pct={pct()} />
+      </PopoverTrigger>
+      <PopoverContent class="ai-context-pop">
+        <div class="ai-context-title">{(useLocale(), m.ai_context_usage())}</div>
+        <div class="ai-context-row">
+          <span>{(useLocale(), m.ai_context_system())}</span>
+          <b>{base().system}</b>
+        </div>
+        <div class="ai-context-row">
+          <span>
+            {(useLocale(), m.ai_context_tools())} ({base().toolCount})
+          </span>
+          <b>{base().tools}</b>
+        </div>
+        <div class="ai-context-row">
+          <span>{(useLocale(), m.ai_context_conversation())}</span>
+          <b>{conversation()}</b>
+        </div>
+        <div class="ai-context-row ai-context-total">
+          <span>{(useLocale(), m.ai_context_total())}</span>
+          <b>
+            {total()} · {pctLabel()}
+          </b>
+        </div>
+        <div class="ai-context-note">{(useLocale(), m.ai_context_note())}</div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -151,12 +379,8 @@ function AiEmptyState(props: AiPanelProps): JSX.Element {
         when={props.store.providerReady()}
         fallback={
           <>
-            <p class="ai-empty-title">
-              {(useLocale(), m.ai_empty_no_provider_title())}
-            </p>
-            <p class="ai-empty-body">
-              {(useLocale(), m.ai_empty_no_provider_body())}
-            </p>
+            <p class="ai-empty-title">{(useLocale(), m.ai_empty_no_provider_title())}</p>
+            <p class="ai-empty-body">{(useLocale(), m.ai_empty_no_provider_body())}</p>
             <Show when={props.onOpenSettings}>
               <Button size="sm" variant="outline" onClick={() => props.onOpenSettings?.()}>
                 {(useLocale(), m.ai_empty_no_provider_cta())}

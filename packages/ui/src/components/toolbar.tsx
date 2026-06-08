@@ -12,10 +12,10 @@ import IconFolder from "~icons/lucide/folder-open";
 import IconInfo from "~icons/lucide/info";
 import IconKeyboard from "~icons/lucide/keyboard";
 import IconLink from "~icons/lucide/link-2";
-import IconListTree from "~icons/lucide/list-tree";
 import IconMonitor from "~icons/lucide/monitor";
 import IconMoon from "~icons/lucide/moon";
 import IconPanelLeft from "~icons/lucide/panel-left";
+import IconPanelRight from "~icons/lucide/panel-right";
 import IconColumns from "~icons/lucide/columns-2";
 import IconMenu from "~icons/lucide/menu";
 import IconAppWindow from "~icons/lucide/app-window";
@@ -160,7 +160,7 @@ export function Toolbar(props: ToolbarProps) {
         onChange={props.onToggleToc}
         aria-label={(useLocale(), m.toolbar_toggle_toc())}
       >
-        <IconListTree width={16} height={16} />
+        <IconPanelRight width={16} height={16} />
       </TooltipTrigger>
       <TooltipContent>{(useLocale(), m.toolbar_toggle_toc())}</TooltipContent>
     </Tooltip>

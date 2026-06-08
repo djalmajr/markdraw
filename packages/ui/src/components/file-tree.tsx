@@ -65,6 +65,8 @@ interface FileTreeProps {
   onReorderRoots?: (newOrder: string[]) => void;
   onSelect: (entry: FSEntry, rootId: string) => void;
   onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;
+  /** Attach a file to the AI chat as context (desktop-only). */
+  onAddToChat?: (entry: FSEntry, rootId: string) => void;
   onDoubleClickFile?: (entry: FSEntry, rootId: string) => void;
   onToggleRootCollapsed?: (rootId: string) => void;
   onToggleShowHiddenEntries?: () => void;
@@ -615,6 +617,7 @@ export function FileTree(props: FileTreeProps) {
                 onSelect={(e) => { selectNode(e.path, rootId); props.onSelect(e, rootId); }}
                 onFocusEntry={(e) => selectNode(e.path, rootId)}
                 onOpenInNewTab={props.onOpenInNewTab ? (e) => props.onOpenInNewTab!(e, rootId) : undefined}
+                onAddToChat={props.onAddToChat ? (e) => props.onAddToChat!(e, rootId) : undefined}
                 onDoubleClickFile={props.onDoubleClickFile ? (e) => props.onDoubleClickFile!(e, rootId) : undefined}
                 onCreate={props.onCreate}
                 onMove={props.onMove}

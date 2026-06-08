@@ -18,6 +18,7 @@ import IconPencil from "~icons/lucide/pencil";
 import IconTrash from "~icons/lucide/trash-2";
 import IconFolderOpen from "~icons/lucide/folder-open";
 import IconExternalLink from "~icons/lucide/external-link";
+import IconSparkles from "~icons/lucide/sparkles";
 import IconFilePlus from "~icons/lucide/file-plus";
 import IconFolderPlus from "~icons/lucide/folder-plus";
 import { useDraggable, useDroppable } from "@dnd-kit/solid";
@@ -134,6 +135,9 @@ interface FileTreeItemProps {
   onFocusEntry?: (entry: FSEntry) => void;
   /** Open file in a new pinned tab (right-click / middle-click). */
   onOpenInNewTab?: (entry: FSEntry) => void;
+  /** Attach this file to the AI chat as context (desktop-only). rootId is
+   *  injected by the parent, matching the onOpenInNewTab pattern. */
+  onAddToChat?: (entry: FSEntry) => void;
   /** Double-click on file — pin the tab. */
   onDoubleClickFile?: (entry: FSEntry) => void;
   /** Desktop-only: commit a new file/folder created inline under
@@ -490,6 +494,15 @@ export function FileTreeItem(props: FileTreeItemProps) {
         onSelect: () => props.onOpenInNewTab?.(props.entry),
         shortcut: <MiddleClickGlyph />,
         itemClass: "justify-between gap-3",
+      });
+    }
+    if (!isDirectory() && props.onAddToChat) {
+      list.push({
+        id: "add-to-chat",
+        icon: <IconSparkles width={14} height={14} />,
+        label: m.ai_add_to_chat,
+        onSelect: () => props.onAddToChat?.(props.entry),
+        itemClass: "gap-2",
       });
     }
     list.push({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AIProvider, AIStreamPart } from "@asciimark/ai/types.ts";
+import type { AIMessage, AIProvider, AIStreamPart } from "@asciimark/ai/types.ts";
 import { createAiChatStore } from "./create-ai-chat-store.ts";
 
 /** A controllable provider that replays a fixed list of stream parts. */
@@ -166,6 +166,28 @@ describe("createAiChatStore", () => {
     });
     await store.sendMessage("hi");
     expect(store.messages().at(-1)!.tools?.[0]?.status).toBe("error");
+  });
+
+  it("injects getContext into the SENT message but keeps the displayed turn clean", async () => {
+    let received: AIMessage[] | undefined;
+    const provider: AIProvider = {
+      async *chat(messages) {
+        received = messages as AIMessage[];
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const store = createAiChatStore({ getProvider: () => provider, getContext: () => "CTX-BLOCK" });
+    await store.sendMessage("hi");
+    // The model receives the context prepended to the last user message…
+    expect(received?.at(-1)?.content).toBe("CTX-BLOCK\n\nhi");
+    // …but the stored/displayed turn stays clean (no raw context dump).
+    expect(store.messages()[0]).toEqual({ role: "user", content: "hi" });
   });
 
   it("resolves and forwards tools to the provider chat opts", async () => {

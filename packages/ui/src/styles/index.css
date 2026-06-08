@@ -232,6 +232,19 @@
   will-change: width;
 }
 
+/* During a drag-resize, neutralize pointer events on the preview surface so an
+   embedded <z-frame>/<iframe> guest (the Excalidraw editor) can't swallow the
+   window's mousemove/mouseup. Without this the drag never ends while an
+   Excalidraw file is open — the iframe captures the events, so the resize
+   "sticks" until you switch back to a Markdown file (where there is no iframe
+   and the window receives mouseup normally). `pointer-events: none` inherits
+   into the z-frame's shadow tree, covering the inner iframe too. Kept separate
+   from the block above so it carries no `contain: strict` size containment that
+   could collapse the 100%-height guest mid-drag. */
+.app.resizing .preview-panel {
+  pointer-events: none;
+}
+
 .main {
   display: flex;
   flex: 1;
@@ -1410,7 +1423,9 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   overflow: hidden;
   background: hsl(var(--secondary));
   border-left: 1px solid hsl(var(--border));
-  padding: 12px 12px 0;
+  /* No padding here: the tab strip sits flush to the top + side edges
+     (Cursor-style). The content panes carry their own inset below. */
+  padding: 0;
   font-size: 13px;
   display: flex;
   flex-direction: column;
@@ -1449,13 +1464,276 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   line-height: 1.4;
 }
 
-/* Segmented control wrapper — uses the shared solid-ui `Tabs`
-   primitive. Centers the segment in the gutter so it visually
-   aligns with the editor-mode segment in the toolbar above. */
-.toc-panel-tabs {
+/* ── Right-panel unified tab strip (Cursor-style) ─────────────────────────
+   Pinned TOC tab + N chat tabs, with +/history/…/collapse on the right.
+   Mirrors the document `.tab-bar` (overflow scroll, active underline, close
+   button). All colors are theme-aware tokens, so dark mode needs no override. */
+.rp-strip {
   display: flex;
+  align-items: stretch;
+  height: 36px;
+  flex-shrink: 0;
+  background: hsl(var(--secondary));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.rp-strip-tabs {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.rp-strip-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.rp-strip-scroll {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  margin-bottom: 12px;
+  width: 22px;
+  flex-shrink: 0;
+  border: none;
+  background: hsl(var(--secondary));
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+.rp-strip-scroll:hover {
+  color: hsl(var(--foreground));
+}
+.rp-strip-scroll-disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.rp-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 36px;
+  padding: 0 6px 0 10px;
+  max-width: 160px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+  flex-shrink: 0;
+  position: relative;
+  cursor: pointer;
+  border: none;
+  background: none;
+  transition:
+    color 0.1s,
+    background 0.1s;
+}
+.rp-tab:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--bg-hover));
+}
+.rp-tab-active {
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+}
+.rp-tab-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: hsl(var(--primary));
+}
+.rp-tab-pinned {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.rp-tab-icon {
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+.rp-tab-active .rp-tab-icon {
+  color: hsl(var(--primary));
+}
+.rp-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.rp-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
+  flex-shrink: 0;
+  animation: ai-blink 1.2s steps(2, start) infinite;
+}
+.rp-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.1s,
+    color 0.1s,
+    background 0.1s;
+}
+.rp-tab:hover .rp-tab-close,
+.rp-tab-active .rp-tab-close {
+  opacity: 0.6;
+}
+.rp-tab-close:hover {
+  opacity: 1;
+  color: hsl(var(--foreground));
+  background: hsl(var(--bg-hover));
+}
+
+.rp-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 4px;
+  flex-shrink: 0;
+  border-left: 1px solid hsl(var(--border));
+}
+.rp-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: none;
+  border-radius: 5px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition:
+    color 0.1s,
+    background 0.1s;
+}
+.rp-icon-btn:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--bg-hover));
+}
+.rp-icon-btn[data-expanded] {
+  color: hsl(var(--foreground));
+  background: hsl(var(--bg-selected));
+}
+
+.rp-overflow-menu {
+  min-width: 11rem;
+}
+.rp-overflow-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: hsl(var(--secondary));
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Chat history popover ──────────────────────────────────────────────── */
+.rp-history {
+  width: 280px;
+  padding: 0;
+  overflow: hidden;
+}
+.rp-history-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+.rp-history-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+}
+.rp-history-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.rp-history-group-label {
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+.rp-history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+}
+.rp-history-row:hover {
+  background: hsl(var(--bg-hover));
+}
+.rp-history-row-active {
+  background: hsl(var(--bg-selected));
+}
+.rp-history-row-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rp-history-row-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  opacity: 0;
+}
+.rp-history-row:hover .rp-history-row-menu {
+  opacity: 0.7;
+}
+.rp-history-row-menu:hover {
+  opacity: 1;
+  color: hsl(var(--foreground));
+  background: hsl(var(--bg-hover));
+}
+.rp-history-delete {
+  color: hsl(var(--destructive));
+}
+.rp-history-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
 /* Per-pane section header — sits BELOW the segment row, mirrors the
@@ -1511,6 +1789,14 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* Side inset for the content (the strip above spans full width). p-3. */
+  padding: 12px 12px 0;
+}
+
+/* The chat pane fills edge-to-edge — AiPanel owns its own message/composer
+   insets, so undo the panes' inset for it. */
+.toc-panel-panes > .toc-panel-pane-ai {
+  margin: -12px -12px 0;
 }
 
 .toc-panel-pane {
@@ -1583,6 +1869,45 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   background: hsl(142 71% 45%);
 }
 
+/* Model picker (replaces the static "connected" chip when models are known). */
+.ai-provider-dot-active {
+  background: hsl(142 71% 45%);
+}
+.ai-model-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 3px 6px 3px 8px;
+  border: none;
+  border-radius: 8px;
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.ai-model-select:hover,
+.ai-model-select[data-expanded] {
+  background: hsl(var(--bg-hover));
+}
+.ai-model-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.ai-model-chevron {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+}
+.ai-model-menu {
+  min-width: 12rem;
+  max-width: 280px;
+}
+
 .ai-messages {
   flex: 1;
   min-height: 0;
@@ -1591,7 +1916,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 4px 2px 12px;
+  padding: 12px 12px 12px;
 }
 
 .ai-message {
@@ -1752,36 +2077,187 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   color: hsl(var(--destructive));
 }
 
+/* Composer as a single "box" (modern-editor style): a bordered container with
+   a borderless textarea on top and a footer row — model chip on the left, the
+   context-usage button + an embedded send arrow on the right. */
 .ai-composer {
+  margin: 8px 12px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 2px 4px;
-  border-top: 1px solid hsl(var(--border));
+  border: 1px solid hsl(var(--input));
+  border-radius: 12px;
+  background: hsl(var(--background));
+}
+.ai-composer:focus-within {
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25);
+}
+.ai-composer-dragover {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.3);
+}
+
+/* Context chips (attached files / selections) above the textarea. */
+.ai-context-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 8px 0;
+}
+.ai-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 2px 4px 2px 7px;
+  border-radius: 6px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--secondary));
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+.ai-context-chip-active {
+  border-style: dashed;
+}
+.ai-context-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: hsl(var(--foreground));
+}
+.ai-context-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: none;
+  background: none;
+  border-radius: 3px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+.ai-context-chip-x:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--bg-hover));
 }
 
 .ai-composer-input {
   width: 100%;
   resize: none;
-  border-radius: 8px;
-  border: 1px solid hsl(var(--input));
-  background: hsl(var(--background));
+  border: none;
+  background: transparent;
   color: hsl(var(--foreground));
   font-size: 13px;
-  line-height: 1.4;
-  padding: 8px 10px;
+  line-height: 1.45;
+  padding: 10px 12px 2px;
   font-family: inherit;
-}
-
-.ai-composer-input:focus-visible {
   outline: none;
-  border-color: hsl(var(--ring));
-  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.3);
 }
 
-.ai-composer-actions {
+.ai-composer-footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 6px 8px;
+}
+
+.ai-composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ai-send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    opacity 0.1s;
+}
+.ai-send-btn:hover {
+  background: hsl(var(--primary) / 0.9);
+}
+.ai-send-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ai-stop-btn {
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+}
+.ai-stop-btn:hover {
+  background: hsl(var(--bg-hover-deep));
+}
+
+/* Same footprint as the send button (28×28) for visual balance. */
+.ai-context-btn {
+  background: none;
+  color: hsl(var(--muted-foreground));
+}
+.ai-context-btn:hover {
+  background: hsl(var(--bg-hover));
+  color: hsl(var(--foreground));
+}
+.ai-context-btn[data-expanded] {
+  background: hsl(var(--bg-selected));
+  color: hsl(var(--foreground));
+}
+
+/* Context-usage ring (fills as the conversation approaches the window). */
+.ai-ctx-ring-track {
+  stroke: hsl(var(--muted-foreground) / 0.25);
+}
+.ai-ctx-ring-fill {
+  stroke: hsl(var(--primary));
+  transition: stroke-dashoffset 0.3s ease;
+}
+
+/* Context-usage popover */
+.ai-context-pop {
+  width: 240px;
+  padding: 10px 12px;
+}
+.ai-context-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 6px;
+}
+.ai-context-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  padding: 3px 0;
+  color: hsl(var(--foreground));
+}
+.ai-context-row b {
+  font-variant-numeric: tabular-nums;
+}
+.ai-context-total {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid hsl(var(--border));
+  font-weight: 600;
+}
+.ai-context-note {
+  margin-top: 8px;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
 }
 
 /* ── AI inline overlay (DJA-13) — floating ⌘I widget on the selection ─────── */

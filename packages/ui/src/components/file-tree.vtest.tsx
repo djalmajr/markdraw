@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
-import { fireEvent, render } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+
+afterEach(cleanup);
 import type { WorkspaceRoot, FSEntry } from "@asciimark/core/types.ts";
 import { AppProvider } from "../context/app-context.tsx";
 import type { AppState } from "../composables/create-app-state.ts";
@@ -196,6 +198,42 @@ describe("FileTree", () => {
       // with the dropdown trigger.
       const triggers = container.querySelectorAll(".tree-item-more");
       expect(triggers.length).toBe(4);
+    });
+
+    function openFileMenu(container: HTMLElement, name: string) {
+      const row = Array.from(container.querySelectorAll<HTMLElement>(".tree-item-wrapper")).find(
+        (el) => el.querySelector(".tree-name")?.textContent?.trim() === name,
+      );
+      const item = row!.querySelector<HTMLElement>(".tree-item") ?? row!;
+      // The row's Kobalte ContextMenu opens on a right-click (contextmenu event).
+      fireEvent.contextMenu(item);
+    }
+
+    it("offers 'Add to chat' in a file's menu when onAddToChat is provided", () => {
+      const { container } = render(() => (
+        <AppProvider state={makeAppStub()}>
+          <FileTree
+            roots={SINGLE_ROOT}
+            selectedPath={null}
+            selectedRootId={null}
+            onSelect={() => {}}
+            onAddToChat={() => {}}
+          />
+        </AppProvider>
+      ));
+      openFileMenu(container, "README.md");
+      // The menu portals to document.body — use the global `screen` query.
+      expect(screen.getByText(/add to chat|adicionar ao chat|añadir al chat/i)).not.toBeNull();
+    });
+
+    it("omits 'Add to chat' when onAddToChat is not provided", () => {
+      const { container } = render(() => (
+        <AppProvider state={makeAppStub()}>
+          <FileTree roots={SINGLE_ROOT} selectedPath={null} selectedRootId={null} onSelect={() => {}} />
+        </AppProvider>
+      ));
+      openFileMenu(container, "README.md");
+      expect(screen.queryByText(/add to chat|adicionar ao chat|añadir al chat/i)).toBeNull();
     });
 
     it("hides the menu on root-level rows when showItemMenu={false}", () => {

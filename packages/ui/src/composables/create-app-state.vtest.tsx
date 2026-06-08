@@ -339,3 +339,57 @@ describe("AppState — reader mode slice (DJA-42)", () => {
     });
   });
 });
+
+describe("AppState — AI multi-chat tab routing", () => {
+  const stubProvider = {
+    async *chat() {
+      yield { type: "done" as const };
+    },
+    async complete() {
+      return "";
+    },
+    async embed() {
+      return [];
+    },
+  };
+  const aiConfig = { createAIProvider: () => stubProvider };
+
+  it("starts on the TOC tab with no chats", () => {
+    withState((state) => {
+      expect(state.aiActiveTab()).toBe("toc");
+      expect(state.aiSessions.sessions()).toEqual([]);
+    }, aiConfig);
+  });
+
+  it("focusAiComposer creates a chat when none exist and fronts it", () => {
+    // ⌘L must always land in a usable composer — if no chat is open it
+    // creates one rather than fronting an empty surface.
+    withState((state) => {
+      state.focusAiComposer();
+      expect(state.aiActiveTab().startsWith("chat:")).toBe(true);
+      expect(state.aiSessions.sessions()).toHaveLength(1);
+    }, aiConfig);
+  });
+
+  it("setAiActiveTab routes a chat tab through activateSession", () => {
+    withState((state) => {
+      const id = state.newChat();
+      state.setAiActiveTab("toc");
+      expect(state.aiActiveTab()).toBe("toc");
+      state.setAiActiveTab(`chat:${id}`);
+      expect(state.aiActiveTab()).toBe(`chat:${id}`);
+      expect(state.aiSessions.activeId()).toBe(id);
+    }, aiConfig);
+  });
+
+  it("follows the manager back to TOC when the active chat is closed", () => {
+    // closeChat reconciles the encoded tab synchronously: closing the active
+    // (and only) chat drops it from sessions() → fall back to TOC.
+    withState((state) => {
+      const id = state.newChat();
+      expect(state.aiActiveTab()).toBe(`chat:${id}`);
+      state.closeChat(id);
+      expect(state.aiActiveTab()).toBe("toc");
+    }, aiConfig);
+  });
+});

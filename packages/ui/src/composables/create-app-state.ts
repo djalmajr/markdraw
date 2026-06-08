@@ -1,5 +1,6 @@
 import {
   createEffect,
+  createMemo,
   createSignal,
   onCleanup,
   onMount,
@@ -7,8 +8,10 @@ import {
 } from "solid-js";
 import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@asciimark/core/types.ts";
 import { createPaneManager, type PaneManager } from "./create-pane-manager.ts";
-import { createAiChatStore } from "./create-ai-chat-store.ts";
+import { createAiChatSessions } from "./create-ai-chat-sessions.ts";
 import { createAiInlineStore } from "./create-ai-inline-store.ts";
+import { type AiContextItem, buildContextPreamble } from "./ai-context.ts";
+import { getChatSessionsIndex } from "@asciimark/core/ai-chat-sessions.ts";
 import type { AIProvider, AITool } from "@asciimark/ai/types.ts";
 import type { ConvertOptions, ConvertResult } from "@asciimark/core/converter.ts";
 import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
@@ -222,7 +225,7 @@ export function createAppState(config: AppStateConfig) {
     (paneManager.activePane().setSelectedFile as (v: unknown) => unknown)(value)) as Setter<FSEntry | null>;
   const DEFAULT_SIDEBAR_WIDTH = 280;
   const [sidebarWidth, setSidebarWidth] = createSignal(DEFAULT_SIDEBAR_WIDTH);
-  const DEFAULT_TOC_WIDTH = 260;
+  const DEFAULT_TOC_WIDTH = 340;
   const [tocWidth, setTocWidth] = createSignal(DEFAULT_TOC_WIDTH);
   const [sidebarVisible, setSidebarVisible] = createSignal(true);
   const [showAllDirs, setShowAllDirs] = createSignal(false);
@@ -455,27 +458,133 @@ export function createAppState(config: AppStateConfig) {
     setPreviewFindTrigger((value) => value + 1);
   }
 
-  // ── AI assistant (DJA-11D) ─────────────────────────────────────────
-  // One shared chat store + the AI panel's active-tab and composer-focus
-  // signals, so the sidebar (DJA-12), inline actions (DJA-13) and
-  // diagram-from-text (DJA-14) all drive a single place. The provider is
-  // injected by the host (MockProvider in M1; a real engine in DJA-11F).
-  const aiChat = createAiChatStore({
+  // ── AI context (chips) ─────────────────────────────────────────────
+  // Explicit context the user attaches to the chat (files via the tree menu /
+  // drag-and-drop / @mention, or an editor selection). Hybrid model: the ACTIVE
+  // document is shown as a chip but read by the `getActiveDoc` tool (not
+  // injected — no double tokens); these items carry resolved content that IS
+  // injected into the message sent to the model.
+  const [aiContextItems, setAiContextItems] = createSignal<AiContextItem[]>([]);
+  const [activeFileContextDismissed, setActiveFileContextDismissed] = createSignal(false);
+
+  // The active-document chip (Markdown/AsciiDoc only — a drawing/image isn't
+  // useful as text context). Re-appears when the user switches files.
+  const activeFileContext = createMemo<{ label: string; path: string } | null>(() => {
+    if (activeFileContextDismissed()) return null;
+    const f = selectedFile();
+    if (!f || fileKind(f.name) !== "document") return null;
+    return { label: f.name, path: f.path };
+  });
+  createEffect(() => {
+    selectedFile()?.path; // re-show the active-file chip on a file switch
+    setActiveFileContextDismissed(false);
+  });
+
+  function addAiContext(item: AiContextItem): void {
+    setAiContextItems((prev) => (prev.some((i) => i.id === item.id) ? prev : [...prev, item]));
+  }
+  function removeAiContext(id: string): void {
+    setAiContextItems((prev) => prev.filter((i) => i.id !== id));
+  }
+  function dismissActiveFileContext(): void {
+    setActiveFileContextDismissed(true);
+  }
+
+  // ── AI assistant ───────────────────────────────────────────────────
+  // Multi-chat sidebar: a manager owning N chat-session stores (one per OPEN
+  // tab) plus persistent history. The right-panel active tab is an ENCODED
+  // string so a chat tab can carry its id: "toc" | "backlinks" | "chat:<id>".
+  // Inline actions (DJA-13) and diagram-from-text (DJA-14) keep their own
+  // ephemeral store. The provider is injected by the host.
+  const aiSessions = createAiChatSessions({
     getProvider: () => config.createAIProvider?.() ?? null,
     ...(config.getAITools ? { getTools: config.getAITools } : {}),
+    getContext: () => buildContextPreamble(aiContextItems()),
   });
+  // Restore persisted chats (open tabs + active) on boot, while this owner is
+  // live so each rebuilt session store nests under it.
+  aiSessions.hydrate(getChatSessionsIndex() ?? { sessions: [], activeId: null });
+
   // Inline overlay (DJA-13): floating ⌘I widget on the editor selection.
   const aiInline = createAiInlineStore({
     getProvider: () => config.createAIProvider?.() ?? null,
   });
-  const [aiActiveTab, setAiActiveTab] = createSignal<
-    "toc" | "backlinks" | "ai"
-  >("toc");
+
+  const restoredActive = aiSessions.activeId();
+  const [aiActiveTab, setActiveTabSig] = createSignal<string>(
+    restoredActive ? `chat:${restoredActive}` : "toc",
+  );
   const [aiComposerFocusTrigger, setAiComposerFocusTrigger] = createSignal(0);
-  /** Front the AI segment and pulse the composer-focus trigger (⌘L). */
-  function focusAiComposer() {
-    setAiActiveTab("ai");
+
+  /** Activate a chat session and front its tab together. */
+  function activateChatTab(id: string): void {
+    aiSessions.activateSession(id);
+    setActiveTabSig(`chat:${id}`);
+  }
+
+  /** Route a right-panel tab selection from the strip. Chat tabs also activate
+   *  their session so `activeStore()` follows. */
+  function setAiActiveTab(tab: string): void {
+    if (tab.startsWith("chat:")) {
+      activateChatTab(tab.slice(5));
+      return;
+    }
+    setActiveTabSig(tab);
+  }
+
+  /** Create a chat, front it, and focus the composer (the `+` button). */
+  function newChat(): string {
+    const id = aiSessions.createSession();
+    setActiveTabSig(`chat:${id}`);
     setAiComposerFocusTrigger((value) => value + 1);
+    return id;
+  }
+
+  /** Reopen a chat from the history dropdown (un-archives if needed) and front it. */
+  function openChatFromHistory(id: string): void {
+    aiSessions.openFromHistory(id);
+    setActiveTabSig(`chat:${id}`);
+  }
+
+  /** Front a chat and pulse the composer-focus trigger (⌘L). Creates a chat if
+   *  none is open so ⌘L always lands in a usable composer. */
+  function focusAiComposer(): void {
+    const cur = aiActiveTab();
+    let id = cur.startsWith("chat:") ? cur.slice(5) : aiSessions.activeId();
+    if (!id) id = aiSessions.createSession();
+    activateChatTab(id);
+    setAiComposerFocusTrigger((value) => value + 1);
+  }
+
+  // Keep the encoded tab consistent with the manager: when the active chat tab
+  // leaves `sessions()` (closed/archived/deleted) follow the manager's new
+  // active id (a neighbor) or fall back to the always-present TOC tab. Done
+  // imperatively (not via an effect) so the tab updates synchronously with the
+  // action. Eviction never removes the active session, so close/archive/delete
+  // are the only paths that need this.
+  function reconcileActiveTab(): void {
+    const tab = aiActiveTab();
+    if (!tab.startsWith("chat:")) return;
+    const id = tab.slice(5);
+    if (aiSessions.sessions().some((s) => s.id === id)) return;
+    const next = aiSessions.activeId();
+    setActiveTabSig(next ? `chat:${next}` : "toc");
+  }
+
+  /** Close a chat tab (keeps it in history) and reconcile the active tab. */
+  function closeChat(id: string): void {
+    aiSessions.closeSession(id);
+    reconcileActiveTab();
+  }
+  /** Archive a chat (Archived group in history) and reconcile the active tab. */
+  function archiveChat(id: string): void {
+    aiSessions.archiveSession(id);
+    reconcileActiveTab();
+  }
+  /** Permanently delete a chat and reconcile the active tab. */
+  function deleteChat(id: string): void {
+    aiSessions.deleteSession(id);
+    reconcileActiveTab();
   }
 
   function handleClearRecentFiles() {
@@ -905,11 +1014,23 @@ export function createAppState(config: AppStateConfig) {
     // to splitFromActive / setActivePane.
     paneManager,
 
-    // AI assistant (DJA-11D) — shared chat store + panel tab/focus controls
-    aiChat,
+    // AI assistant — multi-chat session manager + encoded right-panel tab
+    aiSessions,
     aiInline,
     aiActiveTab,
     setAiActiveTab,
+    activateChatTab,
+    newChat,
+    openChatFromHistory,
+    closeChat,
+    archiveChat,
+    deleteChat,
+    // AI context chips
+    aiContextItems,
+    activeFileContext,
+    addAiContext,
+    removeAiContext,
+    dismissActiveFileContext,
     aiComposerFocusTrigger,
     setAiComposerFocusTrigger,
     focusAiComposer,

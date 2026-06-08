@@ -55,6 +55,12 @@ export interface AiChatStore {
   cancel(): void;
   /** Clear history, error and any in-flight turn. */
   clear(): void;
+  /** The default system prompt applied to turns, if the host configured one
+   *  (used by the context-usage display). */
+  systemPrompt(): string | undefined;
+  /** Resolve the tools the assistant may call — for the context-usage display.
+   *  Swallows errors (returns []), like the send path. */
+  listTools(): Promise<AITool[]>;
 }
 
 export interface AiChatStoreConfig {
@@ -68,10 +74,18 @@ export interface AiChatStoreConfig {
   getTools?: () => AITool[] | Promise<AITool[]>;
   /** Max tool-calling steps, forwarded to the engine (default 8). */
   maxSteps?: number;
+  /** Restored turns to seed history on construction (multi-chat hydration).
+   *  Omitted for the single-session and inline stores. */
+  initialMessages?: ChatTurn[];
+  /** Explicit context preamble (attached files/selections) injected into the
+   *  message SENT to the model. The displayed turn stays clean — only the
+   *  outgoing copy carries it. Resolved per send so it reflects the current
+   *  context chips. */
+  getContext?: () => string | undefined;
 }
 
 export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
-  const [messages, setMessages] = createSignal<ChatTurn[]>([]);
+  const [messages, setMessages] = createSignal<ChatTurn[]>(config.initialMessages ?? []);
   const [streamingText, setStreamingText] = createSignal("");
   const [toolActivity, setToolActivity] = createSignal<ToolActivity[]>([]);
   const [streaming, setStreaming] = createSignal(false);
@@ -103,9 +117,14 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     setStreaming(true);
     controller = new AbortController();
 
-    const aiMessages: AIMessage[] = history.map((t) => ({
+    // Inject the explicit context (attached files/selections) into the latest
+    // user message that's SENT to the model — the stored/displayed turn above
+    // stays clean so the chat doesn't show the raw context dump.
+    const context = config.getContext?.();
+    const lastIndex = history.length - 1;
+    const aiMessages: AIMessage[] = history.map((t, i) => ({
       role: t.role,
-      content: t.content,
+      content: i === lastIndex && context ? `${context}\n\n${t.content}` : t.content,
     }));
 
     // Resolve tools lazily so newly-connected MCP servers are picked up. A
@@ -200,6 +219,18 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     setError(null);
   }
 
+  function systemPrompt(): string | undefined {
+    return config.system?.();
+  }
+
+  async function listTools(): Promise<AITool[]> {
+    try {
+      return config.getTools ? await config.getTools() : [];
+    } catch {
+      return [];
+    }
+  }
+
   return {
     messages,
     streamingText,
@@ -210,5 +241,7 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     sendMessage,
     cancel,
     clear,
+    systemPrompt,
+    listTools,
   };
 }

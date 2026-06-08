@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { TocPanel } from "./toc-panel.tsx";
 
@@ -35,35 +35,55 @@ const BASE_PROPS = {
  *   - moving the placeholder INSIDE `.toc-panel-tree` (would survive
  *     the first render but get wiped by Preview)
  */
-describe("TocPanel — AI segment (DJA-12)", () => {
-  it("shows only two segments when no aiSlot is provided", () => {
+describe("TocPanel — strip + chat panes", () => {
+  it("always renders the pinned TOC tab in the strip", () => {
     const { baseElement } = render(() => <TocPanel {...BASE_PROPS} />);
-    expect(baseElement.querySelectorAll('[role="tab"]').length).toBe(2);
-    expect(baseElement.querySelector('[data-pane="ai"]')).toBeNull();
+    expect(baseElement.querySelector(".rp-tab-pinned")).not.toBeNull();
   });
 
-  it("renders the third AI segment + pane when aiSlot is provided", () => {
-    const { baseElement } = render(() => (
-      <TocPanel {...BASE_PROPS} aiSlot={<div class="ai-test-slot">AI</div>} />
-    ));
-    expect(baseElement.querySelectorAll('[role="tab"]').length).toBe(3);
-    expect(baseElement.querySelector('[data-pane="ai"]')).not.toBeNull();
-    expect(baseElement.querySelector(".ai-test-slot")).not.toBeNull();
-  });
-
-  it("respects a controlled activeTab (host can front the AI segment)", () => {
+  it("renders one chat tab per open session", () => {
     const { baseElement } = render(() => (
       <TocPanel
         {...BASE_PROPS}
-        activeTab="ai"
+        onNewChat={() => {}}
+        chatSessions={[
+          { id: "s1", title: "Chat 1" },
+          { id: "s2", title: "Chat 2" },
+        ]}
+      />
+    ));
+    expect(baseElement.querySelectorAll(".rp-tab:not(.rp-tab-pinned)")).toHaveLength(2);
+  });
+
+  it("mounts the chat pane only when a chat tab is active", () => {
+    // On the TOC tab the chat pane is unmounted (no imperative DOM contract,
+    // so mount/unmount is safe and keeps a single store rendered).
+    const { baseElement } = render(() => (
+      <TocPanel {...BASE_PROPS} chatSessions={[{ id: "s1", title: "Chat 1" }]} aiSlot={<div class="ai-test-slot">AI</div>} />
+    ));
+    expect(baseElement.querySelector('[data-pane="ai"]')).toBeNull();
+  });
+
+  it("renders the AI slot in the chat pane when a chat tab is active", () => {
+    const { baseElement } = render(() => (
+      <TocPanel
+        {...BASE_PROPS}
+        activeTab="chat:s1"
         onActiveTabChange={() => {}}
+        chatSessions={[{ id: "s1", title: "Chat 1" }]}
         aiSlot={<div class="ai-test-slot">AI</div>}
       />
     ));
-    const aiPane = baseElement.querySelector('[data-pane="ai"]')!;
-    expect(aiPane.hasAttribute("hidden")).toBe(false);
-    const tocPane = baseElement.querySelector('[data-pane="toc"]')!;
-    expect(tocPane.hasAttribute("hidden")).toBe(true);
+    expect(baseElement.querySelector('[data-pane="ai"]')).not.toBeNull();
+    expect(baseElement.querySelector(".ai-test-slot")).not.toBeNull();
+    // The TOC + backlinks panes stay mounted-but-hidden.
+    expect(baseElement.querySelector('[data-pane="toc"]')!.hasAttribute("hidden")).toBe(true);
+    expect(baseElement.querySelector(".toc-panel-tree")).not.toBeNull();
+  });
+
+  it("hides the + control when AI is not wired (no onNewChat)", () => {
+    const { baseElement } = render(() => <TocPanel {...BASE_PROPS} />);
+    expect(baseElement.querySelector('[aria-label="New chat"]')).toBeNull();
   });
 });
 
@@ -193,86 +213,66 @@ describe("TocPanel — refs and dropdown", () => {
   });
 });
 
-describe("TocPanel — segment tabs", () => {
-  it("starts on the TOC tab by default", () => {
-    // Mutation: defaulting to "backlinks" would surprise the user
-    // — TOC is the primary content of the gutter.
+describe("TocPanel — References via overflow + mounted panes", () => {
+  // Opens the strip's "…" overflow (kobalte DropdownMenu opens on the pointer
+  // sequence, not a bare click).
+  function openOverflow(baseElement: HTMLElement) {
+    const trigger = baseElement.querySelector('[aria-label="More options"]')!;
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
+    fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });
+    fireEvent.click(trigger);
+  }
+
+  it("starts on the TOC tab by default (References never opens on its own)", () => {
     const { baseElement } = render(() => (
       <TocPanel {...BASE_PROPS} backlinksSlot={<div data-testid="bl">x</div>} />
     ));
-    const tocPane = baseElement.querySelector('[data-pane="toc"]')!;
-    const blPane = baseElement.querySelector('[data-pane="backlinks"]')!;
-    expect(tocPane.hasAttribute("hidden")).toBe(false);
-    expect(blPane.hasAttribute("hidden")).toBe(true);
+    expect(baseElement.querySelector('[data-pane="toc"]')!.hasAttribute("hidden")).toBe(false);
+    expect(baseElement.querySelector('[data-pane="backlinks"]')!.hasAttribute("hidden")).toBe(true);
   });
 
-  it("clicking the References tab swaps which pane is hidden", () => {
-    // Mutation: forgetting to flip both `hidden` attributes (or
-    // inverting the predicate) would leave both panes visible at
-    // once or both hidden — neither is a valid UI state.
-    const { baseElement, getAllByRole } = render(() => (
-      <TocPanel {...BASE_PROPS} backlinksSlot={<div data-testid="bl">x</div>} />
+  it("fronts the backlinks pane when References is selected, keeping TOC mounted", () => {
+    const { baseElement } = render(() => (
+      <TocPanel
+        {...BASE_PROPS}
+        activeTab="backlinks"
+        onActiveTabChange={() => {}}
+        backlinksSlot={<div data-testid="bl">x</div>}
+      />
     ));
-    const tabs = getAllByRole("tab");
-    const refsTab = tabs.find((t) =>
-      /references|referências|referencias/i.test(t.textContent || ""),
-    )!;
-    fireEvent.click(refsTab);
-    const tocPane = baseElement.querySelector('[data-pane="toc"]')!;
-    const blPane = baseElement.querySelector('[data-pane="backlinks"]')!;
-    expect(tocPane.hasAttribute("hidden")).toBe(true);
-    expect(blPane.hasAttribute("hidden")).toBe(false);
-  });
-
-  it("keeps the TOC pane mounted when on the References tab (Preview's contentRef must remain valid)", () => {
-    // Regression: Preview moves the rendered `#toc` node into the
-    // tree via `contentRef`. If the TOC pane were unmounted when
-    // not active, the move would target a detached element and
-    // the toc would never appear when the user switches back.
-    const { baseElement, getAllByRole } = render(() => (
-      <TocPanel {...BASE_PROPS} backlinksSlot={<div data-testid="bl">x</div>} />
-    ));
-    const tabs = getAllByRole("tab");
-    fireEvent.click(tabs[1]!); // References
+    expect(baseElement.querySelector('[data-pane="toc"]')!.hasAttribute("hidden")).toBe(true);
+    expect(baseElement.querySelector('[data-pane="backlinks"]')!.hasAttribute("hidden")).toBe(false);
+    // Regression: Preview moves `#toc` into the tree via contentRef — the TOC
+    // pane must stay mounted even when References is fronted.
     expect(baseElement.querySelector(".toc-panel-tree")).not.toBeNull();
   });
 
-  it("renders the count badge on the References tab when there are inbound references", () => {
-    // Mutation: hiding the count badge masks the discoverability of
-    // the feature — users wouldn't know the tab has data without
-    // clicking it.
-    const { baseElement } = render(() => (
-      <TocPanel {...BASE_PROPS} backlinksCount={3} />
-    ));
-    const badge = baseElement.querySelector(".toc-panel-tab-count");
-    expect(badge).not.toBeNull();
-    expect(badge!.textContent).toBe("3");
+  it("offers References in the overflow with the backlinks count", () => {
+    const { baseElement } = render(() => <TocPanel {...BASE_PROPS} backlinksCount={3} />);
+    openOverflow(baseElement);
+    expect(screen.getByText(/references|referências|referencias/i)).not.toBeNull();
+    expect(baseElement.querySelector(".rp-overflow-count")!.textContent).toBe("3");
   });
 
-  it("omits the count badge when there are no backlinks", () => {
-    // Mutation: rendering `0` instead of hiding would clutter every
-    // doc that doesn't have inbound refs — most docs in a typical
-    // workspace.
-    const { baseElement } = render(() => (
-      <TocPanel {...BASE_PROPS} backlinksCount={0} />
+  it("shows TOC depth options in the overflow only on the TOC tab", () => {
+    const { baseElement, unmount } = render(() => <TocPanel {...BASE_PROPS} />);
+    openOverflow(baseElement);
+    expect(screen.queryByText(/expand all|expandir|expandir/i)).not.toBeNull();
+    unmount();
+    // On a chat tab the TOC depth controls drop out; References remains.
+    const { baseElement: b2 } = render(() => (
+      <TocPanel {...BASE_PROPS} activeTab="chat:s1" onActiveTabChange={() => {}} chatSessions={[{ id: "s1", title: "C1" }]} />
     ));
-    expect(baseElement.querySelector(".toc-panel-tab-count")).toBeNull();
+    openOverflow(b2);
+    expect(screen.queryByText(/expand all|expandir/i)).toBeNull();
+    expect(screen.getByText(/references|referências|referencias/i)).not.toBeNull();
   });
 
-  it("renders distinct section headers per pane (TABLE OF CONTENTS / BACKLINKS)", () => {
-    // Mutation: collapsing the per-pane section headers into a
-    // single shared header would lose the action-button isolation
-    // (TOC's gear menu must apply only to the TOC tree).
+  it("renders the backlinks section header", () => {
     const { baseElement } = render(() => (
       <TocPanel {...BASE_PROPS} backlinksSlot={<div>x</div>} />
     ));
-    const tocPane = baseElement.querySelector('[data-pane="toc"]')!;
     const blPane = baseElement.querySelector('[data-pane="backlinks"]')!;
-    expect(tocPane.querySelector(".toc-panel-section-title")).not.toBeNull();
     expect(blPane.querySelector(".toc-panel-section-title")).not.toBeNull();
-    expect(tocPane.querySelector('[aria-label="TOC options"]')).not.toBeNull();
-    // Backlinks pane must NOT carry the TOC options trigger — that
-    // gear targets only TOC behaviour.
-    expect(blPane.querySelector('[aria-label="TOC options"]')).toBeNull();
   });
 });

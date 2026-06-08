@@ -5,6 +5,7 @@ import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
 import type { RecentFile } from "@asciimark/core/recent-files.ts";
 import { flattenWorkspace, type IndexedFile } from "@asciimark/core/file-index.ts";
+import { fileKind } from "@asciimark/core/utils.ts";
 import type { AppState } from "../composables/create-app-state.ts";
 import type { PaneStore } from "../composables/create-pane-store.ts";
 import type { TabStore } from "../composables/create-tab-store.ts";
@@ -21,6 +22,7 @@ import { fromTabDndId } from "./tab-bar.tsx";
 import { TocPanel } from "./toc-panel.tsx";
 import { BacklinksList, type BacklinkEntry } from "./backlinks-list.tsx";
 import { AiPanel } from "./ai-panel.tsx";
+import { ChatHistoryMenu } from "./chat-history-menu.tsx";
 import { AiInlineOverlay } from "./ai-inline-overlay.tsx";
 import {
   SettingsDialog,
@@ -85,6 +87,14 @@ interface AppShellProps {
   /** Label for the AI provider chip (e.g. "Ollama · local"), or null/undefined
    *  → "No provider". DJA-12. */
   aiProviderLabel?: string | null;
+  /** Model options for the active provider (footer model picker in the chat). */
+  aiModels?: Array<{ value: string; label: string }>;
+  /** Currently selected model ref (`providerId/modelId`). */
+  aiCurrentModel?: string;
+  /** Context window (tokens) of the active model — drives the usage ring. */
+  aiContextLimit?: number;
+  /** Persist a model selection from the chat footer picker. */
+  onSelectAiModel?: (modelRef: string) => void;
   /** Opens Settings → AI (AI panel empty-state CTA). Wired by DJA-15. */
   onOpenSettings?: () => void;
   // Settings modal (DJA-15)
@@ -128,6 +138,8 @@ interface AppShellProps {
     modelId: string;
   }) => void | Promise<void>;
   onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;
+  /** Attach a file to the AI chat as context (desktop-only). */
+  onAddToChat?: (entry: FSEntry, rootId: string) => void;
   onDoubleClickFile?: (entry: FSEntry, rootId: string) => void;
   onNavigate: (path: string, fragment?: string | null) => void;
   onOpenExternal?: (url: string) => void;
@@ -389,15 +401,18 @@ export function AppShell(props: AppShellProps) {
     }
   }
 
-  // When no file is open the active pane unmounts its <Preview>, so
-  // `onTocChange` never gets called to clear `hasToc` — without this
-  // effect the panel keeps showing the previous file's toc tree (left
-  // over from when it was the active doc) instead of the empty-state
-  // message. We also drop the orphan DOM nodes from the shared
-  // container so the `<Show when={!s.hasToc()}>` placeholder gets a
-  // clean canvas to render on.
+  // A non-document active file (Excalidraw, image, PDF, or no file at all)
+  // never mounts a <Preview>, so `onTocChange` is never called to clear
+  // `hasToc` — without this effect the panel keeps showing the PREVIOUS
+  // markdown doc's toc tree (e.g. a stale heading lingering while an
+  // Excalidraw file is open) instead of the empty-state message. Only
+  // `document` kinds (Markdown/AsciiDoc) run the preview pipeline that owns
+  // `hasToc`; for everything else we clear it and drop the orphan DOM nodes
+  // from the shared container so the `<Show when={!s.hasToc()}>` placeholder
+  // gets a clean canvas.
   createEffect(() => {
-    if (s.hasFile()) return;
+    const file = s.selectedFile();
+    if (file && fileKind(file.name) === "document") return;
     s.setHasToc(false);
     if (tocContainerRef) tocContainerRef.textContent = "";
   });
@@ -640,6 +655,7 @@ export function AppShell(props: AppShellProps) {
                 onReorderRoots={props.onReorderRoots}
                 onSelect={(entry, rootId) => props.onLoadFile(entry, rootId)}
                 onOpenInNewTab={props.onOpenInNewTab}
+                onAddToChat={props.onAddToChat}
                 onDoubleClickFile={props.onDoubleClickFile}
                 onToggleRootCollapsed={(id) => s.toggleRootCollapsed(id)}
                 onToggleShowHiddenEntries={props.onToggleShowHiddenEntries
@@ -773,11 +789,38 @@ export function AppShell(props: AppShellProps) {
             backlinksCount={s.activeBacklinks().length}
             activeTab={s.aiActiveTab()}
             onActiveTabChange={s.setAiActiveTab}
+            chatSessions={s.aiSessions.sessions().map((sess) => ({
+              id: sess.id,
+              title: sess.title,
+              streaming: s.aiSessions.storeFor(sess.id)?.streaming() ?? false,
+            }))}
+            onNewChat={s.newChat}
+            onCloseChat={s.closeChat}
+            defaultChatTitle={(useLocale(), m.ai_chat_default_title())}
+            historySlot={
+              <ChatHistoryMenu
+                items={s.aiSessions.allSessions()}
+                activeId={s.aiSessions.activeId()}
+                defaultTitle={(useLocale(), m.ai_chat_default_title())}
+                onActivate={s.openChatFromHistory}
+                onArchive={s.archiveChat}
+                onRestore={s.openChatFromHistory}
+                onDelete={s.deleteChat}
+              />
+            }
             aiSlot={
               <AiPanel
-                store={s.aiChat}
+                store={s.aiSessions.activeStore()}
                 focusTrigger={s.aiComposerFocusTrigger()}
                 providerLabel={props.aiProviderLabel}
+                models={props.aiModels}
+                currentModel={props.aiCurrentModel}
+                contextLimit={props.aiContextLimit}
+                onSelectModel={props.onSelectAiModel}
+                contextItems={s.aiContextItems()}
+                activeFileContext={s.activeFileContext()}
+                onRemoveContext={s.removeAiContext}
+                onDismissActiveFile={s.dismissActiveFileContext}
                 onOpenSettings={props.onOpenSettings}
               />
             }
