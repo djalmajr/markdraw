@@ -426,6 +426,11 @@ export function AppShell(props: AppShellProps) {
     return flattenWorkspace(s.rootsList());
   });
 
+  // Workspace files for @-mention autocomplete in the chat composer.
+  const mentionFiles = createMemo(() =>
+    flattenWorkspace(s.rootsList()).map((f) => ({ label: f.name, path: f.path, rootId: f.rootId })),
+  );
+
   // Symbol palette source: parse headings from the active file's editor
   // content, dispatched by extension. Computed lazily — only when the
   // overlay is open. Falls back to empty when no file is selected.
@@ -827,6 +832,10 @@ export function AppShell(props: AppShellProps) {
                 activeFileContext={s.activeFileContext()}
                 onRemoveContext={s.removeAiContext}
                 onDismissActiveFile={s.dismissActiveFileContext}
+                mentionFiles={mentionFiles()}
+                onMention={(f) =>
+                  props.onAddToChat?.({ name: f.label, kind: "file", path: f.path }, f.rootId)
+                }
                 onOpenSettings={props.onOpenSettings}
               />
             }

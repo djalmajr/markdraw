@@ -90,6 +90,30 @@ describe("AiPanel", () => {
     expect(onRemoveContext).toHaveBeenCalledWith("f1");
   });
 
+  it("shows the @-mention list, filters it by query, and fires onMention on click", () => {
+    const store = readyStore();
+    const onMention = vi.fn();
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        mentionFiles={[
+          { label: "alpha.md", path: "a/alpha.md", rootId: "r" },
+          { label: "beta.md", path: "b/beta.md", rootId: "r" },
+        ]}
+        onMention={onMention}
+      />
+    ));
+    const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    ta.value = "@al";
+    ta.setSelectionRange(3, 3);
+    fireEvent.input(ta);
+    const items = baseElement.querySelectorAll(".ai-mention-item");
+    expect(items).toHaveLength(1); // filtered to "alpha.md"
+    expect(items[0]!.textContent).toContain("alpha.md");
+    fireEvent.mouseDown(items[0]!);
+    expect(onMention).toHaveBeenCalledWith({ label: "alpha.md", path: "a/alpha.md", rootId: "r" });
+  });
+
   it("opens the context-usage popover with an estimated breakdown", async () => {
     const store = readyStore();
     render(() => <AiPanel store={store} providerLabel="Mock" />);

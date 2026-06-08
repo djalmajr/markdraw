@@ -46,6 +46,10 @@ export interface AiPanelProps {
   onDismissActiveFile?: () => void;
   /** Handle a file dropped onto the composer (host reads it + adds context). */
   onContextDrop?: (e: DragEvent) => void;
+  /** Workspace files for @-mention autocomplete in the composer. */
+  mentionFiles?: Array<{ label: string; path: string; rootId: string }>;
+  /** A file was @-mentioned — host reads it + adds it as context. */
+  onMention?: (file: { label: string; path: string; rootId: string }) => void;
   /** Opens Settings → AI (empty-state CTA). */
   onOpenSettings?: () => void;
 }
@@ -81,7 +85,69 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     void props.store.sendMessage(text);
   }
 
+  // ── @-mention autocomplete ─────────────────────────────────────────────
+  const MENTION_RE = /(^|\s)@([^\s@]*)$/;
+  const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
+  const [mentionIndex, setMentionIndex] = createSignal(0);
+
+  const mentionMatches = createMemo(() => {
+    const q = mentionQuery();
+    if (q === null || !props.mentionFiles?.length) return [];
+    const ql = q.toLowerCase();
+    return props.mentionFiles.filter((f) => f.label.toLowerCase().includes(ql)).slice(0, 8);
+  });
+
+  function syncMention(ta: HTMLTextAreaElement): void {
+    if (!props.mentionFiles?.length) {
+      setMentionQuery(null);
+      return;
+    }
+    const upToCaret = ta.value.slice(0, ta.selectionStart ?? ta.value.length);
+    const match = MENTION_RE.exec(upToCaret);
+    if (match) {
+      setMentionQuery(match[2]!);
+      setMentionIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
+  }
+
+  function selectMention(file: { label: string; path: string; rootId: string }): void {
+    const ta = textarea;
+    if (!ta) return;
+    const caret = ta.selectionStart ?? input().length;
+    const before = input().slice(0, caret).replace(MENTION_RE, (_full, pre: string) => `${pre}@${file.label} `);
+    setInput(before + input().slice(caret));
+    setMentionQuery(null);
+    props.onMention?.(file);
+    queueMicrotask(() => ta.focus());
+  }
+
   function onKeyDown(e: KeyboardEvent): void {
+    // While the @-mention list is open, the arrows/Enter/Escape drive it.
+    if (mentionQuery() !== null && mentionMatches().length) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionIndex((i) => Math.min(i + 1, mentionMatches().length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const m = mentionMatches()[mentionIndex()];
+        if (m) selectMention(m);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionQuery(null);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submit();
@@ -180,13 +246,38 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
             </For>
           </div>
         </Show>
+        <Show when={mentionQuery() !== null && mentionMatches().length > 0}>
+          <div class="ai-mention-list">
+            <For each={mentionMatches()}>
+              {(file, i) => (
+                <button
+                  type="button"
+                  class="ai-mention-item"
+                  classList={{ "ai-mention-item-active": i() === mentionIndex() }}
+                  onMouseEnter={() => setMentionIndex(i())}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectMention(file);
+                  }}
+                >
+                  <IconFileText width={12} height={12} />
+                  <span class="ai-mention-name">{file.label}</span>
+                  <span class="ai-mention-path">{file.path}</span>
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
         <textarea
           ref={(el) => (textarea = el)}
           class="ai-composer-input"
           rows={2}
           placeholder={(useLocale(), m.ai_composer_placeholder())}
           value={input()}
-          onInput={(e) => setInput(e.currentTarget.value)}
+          onInput={(e) => {
+            setInput(e.currentTarget.value);
+            syncMention(e.currentTarget);
+          }}
           onKeyDown={onKeyDown}
         />
         <div class="ai-composer-footer">
