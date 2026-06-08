@@ -52,14 +52,14 @@ describe("AiPanel", () => {
         onSelectModel={onSelectModel}
       />
     ));
-    // The static "connected" chip is replaced by a clickable model picker that
+    // The static "connected" chip is replaced by a SolidUI Select whose trigger
     // shows the current model's label.
-    const trigger = baseElement.querySelector(".ai-model-select") as HTMLElement;
+    const trigger = baseElement.querySelector('[aria-haspopup="listbox"]') as HTMLElement;
     expect(trigger).not.toBeNull();
     expect(baseElement.querySelector(".ai-provider-chip")).toBeNull();
     expect(trigger.textContent).toContain("Model 1");
-    // Open the menu (kobalte DropdownMenu opens on the pointer sequence) and
-    // confirm both models are listed (onSelect wiring is Kobalte's concern).
+    // Open the listbox (kobalte Select opens on the pointer sequence) and confirm
+    // the other model is listed.
     fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
     fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });
     fireEvent.click(trigger);
@@ -181,21 +181,18 @@ describe("AiPanel", () => {
 
   it("hides the Build/Plan mode picker when onModeChange is absent", () => {
     const store = readyStore();
-    const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
-    expect(baseElement.querySelector(".ai-mode-select")).toBeNull();
+    render(() => <AiPanel store={store} providerLabel="Mock" />);
+    expect(screen.queryByLabelText("Chat mode")).toBeNull();
   });
 
   it("renders the mode picker showing the active mode, and fires onModeChange on select", () => {
     const store = readyStore();
     const onModeChange = vi.fn();
-    const { baseElement } = render(() => (
-      <AiPanel store={store} providerLabel="Mock" mode="plan" onModeChange={onModeChange} />
-    ));
-    // The trigger shows the current mode's label (like the model picker).
-    const trigger = baseElement.querySelector(".ai-mode-select") as HTMLElement;
-    expect(trigger).not.toBeNull();
+    render(() => <AiPanel store={store} providerLabel="Mock" mode="plan" onModeChange={onModeChange} />);
+    // The SolidUI Select trigger shows the current mode's label.
+    const trigger = screen.getByLabelText("Chat mode");
     expect(trigger.textContent).toContain("Plan");
-    // Open the dropdown (kobalte opens on the pointer sequence) and pick Build.
+    // Open the listbox (kobalte opens on the pointer sequence) and pick Build.
     fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
     fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });
     fireEvent.click(trigger);

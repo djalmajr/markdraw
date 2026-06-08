@@ -4,8 +4,6 @@ import { useLocale } from "@asciimark/i18n/solid";
 import IconSparkles from "~icons/lucide/sparkles";
 import IconArrowUp from "~icons/lucide/arrow-up";
 import IconSquare from "~icons/lucide/square";
-import IconCheck from "~icons/lucide/check";
-import IconChevronDown from "~icons/lucide/chevron-down";
 import IconX from "~icons/lucide/x";
 import IconFileText from "~icons/lucide/file-text";
 import IconTextSelect from "~icons/lucide/text-select";
@@ -14,13 +12,14 @@ import type { AiChatStore } from "../composables/create-ai-chat-store.ts";
 import type { AiContextItem } from "../composables/ai-context.ts";
 import { Button } from "./ui/button.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu.tsx";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "./ui/select.tsx";
 import { AiMessage } from "./ai-message.tsx";
+
+/** Compact pill styling for the composer's Select triggers (mode + model),
+ *  overriding the SolidUI Select's full-width default. Keeps its teal
+ *  `focus:ring-ring` so keyboard focus matches the primary, not the UA blue. */
+const PILL_SELECT =
+  "h-7 w-auto justify-start gap-1.5 rounded-md border-transparent bg-secondary px-2 py-0 text-xs font-medium text-foreground hover:bg-accent focus:ring-offset-1";
 
 export interface AiPanelProps {
   store: AiChatStore;
@@ -333,33 +332,31 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
         />
         <div class="ai-composer-footer">
           <Show when={props.onModeChange}>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                as="button"
-                class="ai-model-select ai-mode-select"
+            <Select
+              value={props.mode ?? "build"}
+              onChange={(v) => {
+                if (v) props.onModeChange?.(v as AIChatMode);
+              }}
+              options={["build", "plan"]}
+              gutter={4}
+              sameWidth={false}
+              itemComponent={(ip) => (
+                <SelectItem item={ip.item}>
+                  {ip.item.rawValue === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
+                </SelectItem>
+              )}
+            >
+              <SelectTrigger
+                class={PILL_SELECT}
                 aria-label={(useLocale(), m.ai_mode_label())}
                 title={(useLocale(), props.mode === "plan" ? m.ai_mode_plan_hint() : m.ai_mode_build_hint())}
               >
-                <span class="ai-model-label">
+                <span class="truncate">
                   {props.mode === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
                 </span>
-                <IconChevronDown width={13} height={13} class="ai-model-chevron" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent class="ai-model-menu">
-                <DropdownMenuItem onSelect={() => props.onModeChange?.("build")}>
-                  <span class="flex-1">{(useLocale(), m.ai_mode_build())}</span>
-                  <Show when={(props.mode ?? "build") === "build"}>
-                    <IconCheck width={14} height={14} />
-                  </Show>
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => props.onModeChange?.("plan")}>
-                  <span class="flex-1">{(useLocale(), m.ai_mode_plan())}</span>
-                  <Show when={props.mode === "plan"}>
-                    <IconCheck width={14} height={14} />
-                  </Show>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </SelectTrigger>
+              <SelectContent class="min-w-[7rem]" />
+            </Select>
           </Show>
           <Show
             when={props.models && props.models.length > 0}
@@ -373,25 +370,26 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
               </span>
             }
           >
-            <DropdownMenu>
-              <DropdownMenuTrigger as="button" class="ai-model-select" title={currentModelLabel()}>
+            <Select
+              value={props.currentModel}
+              onChange={(v) => {
+                if (v) props.onSelectModel?.(v);
+              }}
+              options={(props.models ?? []).map((mdl) => mdl.value)}
+              gutter={4}
+              sameWidth={false}
+              itemComponent={(ip) => (
+                <SelectItem item={ip.item}>
+                  {props.models?.find((mdl) => mdl.value === ip.item.rawValue)?.label ?? ip.item.rawValue}
+                </SelectItem>
+              )}
+            >
+              <SelectTrigger class={PILL_SELECT} title={currentModelLabel()} aria-label={currentModelLabel()}>
                 <span class="ai-provider-dot ai-provider-dot-active" aria-hidden="true" />
-                <span class="ai-model-label">{currentModelLabel()}</span>
-                <IconChevronDown width={13} height={13} class="ai-model-chevron" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent class="ai-model-menu">
-                <For each={props.models}>
-                  {(mdl) => (
-                    <DropdownMenuItem onSelect={() => props.onSelectModel?.(mdl.value)}>
-                      <span class="flex-1">{mdl.label}</span>
-                      <Show when={mdl.value === props.currentModel}>
-                        <IconCheck width={14} height={14} />
-                      </Show>
-                    </DropdownMenuItem>
-                  )}
-                </For>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                <span class="truncate max-w-[120px]">{currentModelLabel()}</span>
+              </SelectTrigger>
+              <SelectContent class="min-w-[10rem]" />
+            </Select>
           </Show>
           <div class="ai-composer-tools">
             <ContextUsage store={props.store} contextLimit={props.contextLimit} />

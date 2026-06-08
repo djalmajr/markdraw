@@ -1973,41 +1973,6 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .ai-provider-dot-active {
   background: hsl(142 71% 45%);
 }
-.ai-model-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 1 auto;
-  min-width: 0;
-  padding: 3px 6px 3px 8px;
-  border: none;
-  border-radius: 8px;
-  background: hsl(var(--secondary));
-  color: hsl(var(--foreground));
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.ai-model-select:hover,
-.ai-model-select[data-expanded] {
-  background: hsl(var(--bg-hover));
-}
-.ai-model-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.ai-model-chevron {
-  flex-shrink: 0;
-  color: hsl(var(--muted-foreground));
-}
-.ai-model-menu {
-  min-width: 12rem;
-  max-width: 280px;
-}
-
 .ai-messages {
   flex: 1;
   min-height: 0;
@@ -2315,11 +2280,6 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   gap: 4px;
   flex-shrink: 0;
   margin-left: auto;
-}
-
-/* Build / Plan mode picker — same dropdown chrome as the model select. */
-.ai-mode-select {
-  flex-shrink: 0;
 }
 
 .ai-send-btn {
