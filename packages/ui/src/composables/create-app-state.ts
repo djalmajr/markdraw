@@ -516,6 +516,26 @@ export function createAppState(config: AppStateConfig) {
     });
   }
 
+  // File references (@mention + file-tree "Add to chat") — these appear INLINE
+  // as "@file" in the composer text (not a top chip). Their content is injected
+  // only while the "@label" is still present in the composer (the AiPanel parses
+  // the text and reports the active labels), so deleting the text drops the ref.
+  const [aiMentions, setAiMentions] = createSignal<Array<{ label: string; path?: string; content: string }>>([]);
+  const [aiActiveMentionLabels, setAiActiveMentionLabels] = createSignal<string[]>([]);
+  let composerInsertNonce = 0;
+  const [composerInsert, setComposerInsert] = createSignal<{ text: string; nonce: number } | null>(null);
+
+  /** Resolve a file as an inline reference. `insert` appends "@label" to the
+   *  composer (used by the file-tree menu, where the cursor isn't in the input;
+   *  the @-mention already typed the text itself). */
+  function addFileMention(file: { label: string; path?: string; content: string }, opts?: { insert?: boolean }): void {
+    setAiMentions((prev) => (prev.some((mn) => mn.label === file.label) ? prev : [...prev, file]));
+    if (opts?.insert) setComposerInsert({ text: `@${file.label} `, nonce: ++composerInsertNonce });
+  }
+  function setActiveMentionLabels(labels: string[]): void {
+    setAiActiveMentionLabels(labels);
+  }
+
   // ── AI assistant ───────────────────────────────────────────────────
   // Multi-chat sidebar: a manager owning N chat-session stores (one per OPEN
   // tab) plus persistent history. The right-panel active tab is an ENCODED
@@ -525,7 +545,19 @@ export function createAppState(config: AppStateConfig) {
   const aiSessions = createAiChatSessions({
     getProvider: () => config.createAIProvider?.() ?? null,
     ...(config.getAITools ? { getTools: config.getAITools } : {}),
-    getContext: () => buildContextPreamble(aiContextItems()),
+    getContext: () => {
+      const active = aiActiveMentionLabels();
+      const mentionItems: AiContextItem[] = aiMentions()
+        .filter((mn) => active.includes(mn.label))
+        .map((mn) => ({
+          id: `mention:${mn.label}`,
+          kind: "file",
+          label: mn.label,
+          content: mn.content,
+          ...(mn.path ? { path: mn.path } : {}),
+        }));
+      return buildContextPreamble([...aiContextItems(), ...mentionItems]);
+    },
   });
   // Restore persisted chats (open tabs + active) on boot, while this owner is
   // live so each rebuilt session store nests under it.
@@ -1067,6 +1099,9 @@ export function createAppState(config: AppStateConfig) {
     removeAiContext,
     dismissActiveFileContext,
     addSelectionToContext,
+    addFileMention,
+    setActiveMentionLabels,
+    composerInsert,
     selectionPopover,
     setSelectionPopover,
     addSelectionContextFromPopover,

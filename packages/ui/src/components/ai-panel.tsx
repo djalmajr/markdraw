@@ -48,8 +48,14 @@ export interface AiPanelProps {
   onContextDrop?: (e: DragEvent) => void;
   /** Workspace files for @-mention autocomplete in the composer. */
   mentionFiles?: Array<{ label: string; path: string; rootId: string }>;
-  /** A file was @-mentioned — host reads it + adds it as context. */
+  /** A file was @-mentioned — host reads it + tracks it as an inline reference. */
   onMention?: (file: { label: string; path: string; rootId: string }) => void;
+  /** Host request to insert text into the composer (file-tree "Add to chat"):
+   *  inserts at the cursor, or appends when the textarea isn't focused. */
+  insertRequest?: { text: string; nonce: number } | null;
+  /** Reports which "@label" references are currently present in the composer so
+   *  the host injects only those files' content. */
+  onMentionLabelsChange?: (labels: string[]) => void;
   /** Opens Settings → AI (empty-state CTA). */
   onOpenSettings?: () => void;
 }
@@ -75,6 +81,42 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     props.store.streamingText();
     queueMicrotask(() => {
       if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    });
+  });
+
+  // Which "@label" file references are present in the composer (so the host
+  // injects only those files' content; deleting the text drops the reference).
+  function activeMentionLabels(text: string): string[] {
+    const labels = props.mentionFiles?.map((f) => f.label) ?? [];
+    const found = new Set<string>();
+    for (const match of text.matchAll(/@([^\s@]+)/g)) {
+      if (labels.includes(match[1]!)) found.add(match[1]!);
+    }
+    return [...found];
+  }
+  function syncMentionLabels(text: string): void {
+    props.onMentionLabelsChange?.(activeMentionLabels(text));
+  }
+
+  // Host-driven insert (file-tree "Add to chat"): at the cursor when the
+  // composer is focused, else appended.
+  let lastInsertNonce = 0;
+  createEffect(() => {
+    const req = props.insertRequest;
+    if (!req || req.nonce === lastInsertNonce) return;
+    lastInsertNonce = req.nonce;
+    const ta = textarea;
+    const cur = input();
+    const focused = !!ta && document.activeElement === ta && ta.selectionStart != null;
+    const at = focused ? ta!.selectionStart! : cur.length;
+    const sep = !focused && cur && !cur.endsWith(" ") ? " " : "";
+    const next = cur.slice(0, at) + sep + req.text + cur.slice(at);
+    setInput(next);
+    syncMentionLabels(next);
+    const caret = at + sep.length + req.text.length;
+    queueMicrotask(() => {
+      ta?.focus();
+      ta?.setSelectionRange(caret, caret);
     });
   });
 
@@ -117,9 +159,11 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     if (!ta) return;
     const caret = ta.selectionStart ?? input().length;
     const before = input().slice(0, caret).replace(MENTION_RE, (_full, pre: string) => `${pre}@${file.label} `);
-    setInput(before + input().slice(caret));
+    const next = before + input().slice(caret);
+    setInput(next);
     setMentionQuery(null);
     props.onMention?.(file);
+    syncMentionLabels(next);
     queueMicrotask(() => ta.focus());
   }
 
@@ -277,6 +321,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           onInput={(e) => {
             setInput(e.currentTarget.value);
             syncMention(e.currentTarget);
+            syncMentionLabels(e.currentTarget.value);
           }}
           onKeyDown={onKeyDown}
         />

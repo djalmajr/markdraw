@@ -401,6 +401,42 @@ describe("AppState — AI multi-chat tab routing", () => {
     }, aiConfig);
   });
 
+  it("addFileMention(insert) pulses composerInsert; mentions are NOT top chips", () => {
+    withState((state) => {
+      expect(state.composerInsert()).toBeNull();
+      state.addFileMention({ label: "a.md", content: "x" }, { insert: true });
+      expect(state.composerInsert()?.text).toBe("@a.md ");
+      // File references are inline, not top context chips.
+      expect(state.aiContextItems()).toHaveLength(0);
+    }, aiConfig);
+  });
+
+  it("injects only ACTIVE @-mention content into the sent message", async () => {
+    let sent: { role: string; content: string }[] | undefined;
+    const provider = {
+      async *chat(messages: { role: string; content: string }[]) {
+        sent = messages;
+        yield { type: "done" as const };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    await withState(async (state) => {
+      state.addFileMention({ label: "a.md", content: "ALPHA" }, {});
+      state.addFileMention({ label: "b.md", content: "BETA" }, {});
+      state.setActiveMentionLabels(["a.md"]); // only a.md is present in the composer
+      const id = state.newChat();
+      await state.aiSessions.storeFor(id)!.sendMessage("hi");
+      expect(sent?.at(-1)?.content).toContain("ALPHA");
+      expect(sent?.at(-1)?.content).not.toContain("BETA");
+      expect(sent?.at(-1)?.content).toContain("hi");
+    }, { createAIProvider: () => provider });
+  });
+
   it("follows the manager back to TOC when the active chat is closed", () => {
     // closeChat reconciles the encoded tab synchronously: closing the active
     // (and only) chat drops it from sessions() → fall back to TOC.

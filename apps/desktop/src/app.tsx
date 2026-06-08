@@ -1126,22 +1126,16 @@ export function App() {
     });
   }
 
-  /** Attach a file to the AI chat as context (file-tree "Add to chat"). Reads
-   *  the file text and fronts the chat so the new context chip is visible. */
-  async function addFileToChat(entry: import("@asciimark/core/types.ts").FSEntry, rootId: string) {
-    const rootPath = rootPaths().get(rootId);
+  /** Resolve a file as an inline "@" reference for the chat (file-tree
+   *  "Add to chat" / @-mention). Reads the file text; `insert` appends "@file"
+   *  to the composer (file-tree) and fronts the chat. */
+  async function addFileMention(file: { label: string; path: string; rootId: string }, insert: boolean) {
+    const rootPath = rootPaths().get(file.rootId);
     if (!rootPath) return;
     try {
-      const content = await readFileContent(`${rootPath}/${entry.path}`);
-      state.addAiContext({
-        id: `file:${rootId}:${entry.path}`,
-        kind: "file",
-        label: entry.name,
-        path: entry.path,
-        rootId,
-        content,
-      });
-      state.focusAiComposer();
+      const content = await readFileContent(`${rootPath}/${file.path}`);
+      state.addFileMention({ label: file.label, path: file.path, content }, { insert });
+      if (insert) state.focusAiComposer();
     } catch {
       // Unreadable (binary / deleted) — silently skip.
     }
@@ -1891,7 +1885,7 @@ export function App() {
       onGoForward={navigation.handleGoForward}
       onLoadFile={handleLoadFileWithTab}
       onOpenInNewTab={handleOpenInNewTab}
-      onAddToChat={(entry, rootId) => void addFileToChat(entry, rootId)}
+      onAddFileMention={(f, insert) => void addFileMention(f, insert)}
       onDoubleClickFile={handleOpenInNewTab}
       onNavigate={navigation.handleNavigate}
       onOpenExternal={(url) => openUrl(url)}

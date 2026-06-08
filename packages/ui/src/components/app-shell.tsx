@@ -138,8 +138,10 @@ interface AppShellProps {
     modelId: string;
   }) => void | Promise<void>;
   onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;
-  /** Attach a file to the AI chat as context (desktop-only). */
-  onAddToChat?: (entry: FSEntry, rootId: string) => void;
+  /** Resolve a file as an inline "@" reference for the chat (desktop reads the
+   *  content). `insert` appends "@file" to the composer (file-tree menu);
+   *  @-mentions type the text themselves so they pass false. */
+  onAddFileMention?: (file: { label: string; path: string; rootId: string }, insert: boolean) => void;
   onDoubleClickFile?: (entry: FSEntry, rootId: string) => void;
   onNavigate: (path: string, fragment?: string | null) => void;
   onOpenExternal?: (url: string) => void;
@@ -663,7 +665,9 @@ export function AppShell(props: AppShellProps) {
                 onReorderRoots={props.onReorderRoots}
                 onSelect={(entry, rootId) => props.onLoadFile(entry, rootId)}
                 onOpenInNewTab={props.onOpenInNewTab}
-                onAddToChat={props.onAddToChat}
+                onAddToChat={(entry, rootId) =>
+                  props.onAddFileMention?.({ label: entry.name, path: entry.path, rootId }, true)
+                }
                 onDoubleClickFile={props.onDoubleClickFile}
                 onToggleRootCollapsed={(id) => s.toggleRootCollapsed(id)}
                 onToggleShowHiddenEntries={props.onToggleShowHiddenEntries
@@ -830,9 +834,9 @@ export function AppShell(props: AppShellProps) {
                 onRemoveContext={s.removeAiContext}
                 onDismissActiveFile={s.dismissActiveFileContext}
                 mentionFiles={mentionFiles()}
-                onMention={(f) =>
-                  props.onAddToChat?.({ name: f.label, kind: "file", path: f.path }, f.rootId)
-                }
+                onMention={(f) => props.onAddFileMention?.(f, false)}
+                insertRequest={s.composerInsert()}
+                onMentionLabelsChange={s.setActiveMentionLabels}
                 onOpenSettings={props.onOpenSettings}
               />
             }
