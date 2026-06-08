@@ -1301,6 +1301,72 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   font-size: 13px;
 }
 
+/* === AI inline diff (Cursor-style Keep/Undo review) === */
+/* Added lines: green background + left accent. The class lands on `.cm-line`. */
+.cm-line.cm-ai-diff-add {
+  background: color-mix(in oklab, hsl(140 70% 45%) 16%, transparent);
+  box-shadow: inset 2px 0 0 0 hsl(140 60% 45%);
+}
+
+/* Removed lines: a struck-through red block placed above the applied text. */
+.cm-ai-diff-del-block {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: color-mix(in oklab, hsl(0 75% 55%) 12%, transparent);
+  box-shadow: inset 2px 0 0 0 hsl(0 70% 55%);
+  padding: 1px 0;
+}
+
+.cm-ai-diff-del-line {
+  padding: 0 4px 0 6px;
+  color: color-mix(in oklab, hsl(0 60% 50%) 85%, hsl(var(--foreground)));
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, hsl(0 70% 55%) 70%, transparent);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Per-region action bar, anchored below the applied block. */
+.cm-ai-diff-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 4px 6px;
+  font-family: var(--font-sans);
+}
+
+.cm-ai-diff-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    opacity 0.1s;
+}
+
+.cm-ai-diff-btn:hover {
+  background: hsl(var(--bg-hover, var(--accent)));
+}
+
+.cm-ai-diff-btn-keep {
+  border-color: transparent;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.cm-ai-diff-btn-keep:hover {
+  background: hsl(var(--primary));
+  opacity: 0.9;
+}
+
 /* === Content / Preview === */
 .content {
   flex: 1;

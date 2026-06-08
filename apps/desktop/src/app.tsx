@@ -103,13 +103,6 @@ export function App() {
   // `mcpStatuses` mirrors live connection state for the settings UI.
   const mcpBridge = createMcpBridge();
   const [mcpStatuses, setMcpStatuses] = createSignal<McpServerStatus[]>([]);
-  // An AI-proposed edit awaiting the user's Accept/Reject (app__propose_edit).
-  const [pendingEdit, setPendingEdit] = createSignal<{
-    find: string;
-    replace: string;
-    apply: () => void;
-    reject: () => void;
-  } | null>(null);
 
   // A prompt-tier tool call (MCP / unknown) awaiting Accept/Reject before it
   // runs. Human-in-the-loop gating on top of the current non-streaming loop.
@@ -337,36 +330,22 @@ export function App() {
     return () => setPendingApproval(null);
   });
 
-  /** Stage an AI-proposed find→replace edit for the user to Accept/Reject.
-   *  Resolves to a short status the model sees; never mutates without approval. */
+  /** The imperative editor handle of the active pane, or undefined when the
+   *  active pane isn't a text editor (preview/diagram). */
+  function activeEditorApi(): EditorApi | undefined {
+    const pane = state.paneManager.activePane() as { editorApi?: EditorApi } | null;
+    return pane?.editorApi;
+  }
+
+  /** Apply an AI-proposed find→replace edit optimistically and overlay a
+   *  Cursor-style inline diff the user can Keep/Undo. Resolves immediately to a
+   *  short status the model sees (the review happens after, in the editor). */
   function proposeAiEdit(edit: { find: string; replace: string }): Promise<string> {
-    const content = state.editorContent();
-    const idx = content.indexOf(edit.find);
-    if (idx < 0) {
-      return Promise.resolve("The text to replace was not found in the document.");
-    }
-    const pane = state.paneManager.activePane() as { editorApi?: EditorApi };
-    const api = pane.editorApi;
+    const api = activeEditorApi();
     if (!api) {
       return Promise.resolve("No active editor is available to apply the edit.");
     }
-    const from = idx;
-    const to = idx + edit.find.length;
-    return new Promise<string>((resolve) => {
-      setPendingEdit({
-        find: edit.find,
-        replace: edit.replace,
-        apply: () => {
-          api.replaceRange(from, to, edit.replace);
-          setPendingEdit(null);
-          resolve("The edit was applied by the user.");
-        },
-        reject: () => {
-          setPendingEdit(null);
-          resolve("The user rejected the proposed edit.");
-        },
-      });
-    });
+    return Promise.resolve(api.proposeDiff(edit.find, edit.replace).message);
   }
 
   async function refreshMcpStatuses(): Promise<void> {
@@ -1659,6 +1638,31 @@ export function App() {
       const isMac = navigator.platform.startsWith("Mac");
       const platform: "mac" | "other" = isMac ? "mac" : "other";
 
+      // Inline AI-diff review keys are CONTEXTUAL: they take precedence only
+      // while a diff is pending (so ⌘N still means "new file" otherwise).
+      // ⌘Y keep nearest · ⌘N undo nearest · ⌘↵ keep all.
+      {
+        const diffApi = activeEditorApi();
+        const diffMod = isMac ? e.metaKey : e.ctrlKey;
+        if (diffApi?.hasPendingDiffs() && diffMod && !e.shiftKey && !e.altKey) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            diffApi.keepAllDiffs();
+            return;
+          }
+          if (e.key === "y" || e.key === "Y") {
+            e.preventDefault();
+            diffApi.keepNearestDiff();
+            return;
+          }
+          if (e.key === "n" || e.key === "N") {
+            e.preventDefault();
+            diffApi.undoNearestDiff();
+            return;
+          }
+        }
+      }
+
       // Open exactly one overlay at a time. Each shortcut closes the siblings
       // before toggling its own — otherwise two palettes can stack on screen.
       function openOnly(target: "quick" | "command" | "symbol" | "wsymbol" | "find" | "help") {
@@ -1981,66 +1985,9 @@ export function App() {
     />
     {/* Capture-to-Figma button hidden for now (per request).
         Restore: {import.meta.env.DEV && <FigmaCaptureButton />} + its import. */}
-    {/* AI edit approval (app__propose_edit): the assistant never mutates the
-        document without an explicit Accept here. */}
-    <Show when={pendingEdit()}>
-      {(edit) => (
-        <div
-          role="dialog"
-          aria-label={m.ai_panel_title()}
-          style={{
-            position: "fixed",
-            bottom: "16px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            "z-index": "60",
-            "max-width": "min(640px, 92vw)",
-            display: "flex",
-            "flex-direction": "column",
-            gap: "10px",
-            padding: "12px 14px",
-            "border-radius": "10px",
-            border: "1px solid hsl(var(--border))",
-            background: "hsl(var(--popover))",
-            color: "hsl(var(--popover-foreground))",
-            "box-shadow": "0 10px 30px rgba(0, 0, 0, 0.25)",
-          }}
-        >
-          <div
-            style={{
-              "font-size": "13px",
-              "line-height": "1.45",
-              "white-space": "pre-wrap",
-              "word-break": "break-word",
-              "max-height": "40vh",
-              "overflow-y": "auto",
-            }}
-          >
-            <span style={{ "text-decoration": "line-through", opacity: "0.6" }}>
-              {edit().find}
-            </span>
-            <span style={{ opacity: "0.6" }}>{"  →  "}</span>
-            <span style={{ color: "hsl(var(--primary))" }}>{edit().replace}</span>
-          </div>
-          <div style={{ display: "flex", "justify-content": "flex-end", gap: "8px" }}>
-            <button
-              type="button"
-              class="inline-flex items-center justify-center rounded-md h-8 px-3 text-sm hover:bg-accent hover:text-accent-foreground border border-input"
-              onClick={() => edit().reject()}
-            >
-              {m.ai_inline_reject()}
-            </button>
-            <button
-              type="button"
-              class="inline-flex items-center justify-center rounded-md h-8 px-3 text-sm bg-primary text-primary-foreground hover:opacity-90"
-              onClick={() => edit().apply()}
-            >
-              {m.ai_inline_accept()}
-            </button>
-          </div>
-        </div>
-      )}
-    </Show>
+    {/* AI edits (app__propose_edit) apply optimistically and are reviewed via a
+        Cursor-style inline diff in the editor — Keep/Undo per region (⌘Y/⌘N) or
+        Keep all (⌘↵). No modal here anymore. */}
 
     {/* Prompt-tier tool approval (MCP / unknown tools): the model never runs an
         arbitrary server tool without an explicit Accept here. */}

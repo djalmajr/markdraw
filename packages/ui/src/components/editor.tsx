@@ -16,6 +16,16 @@ import { defaultKeymap, history, historyKeymap, redo, redoDepth, undo, undoDepth
 import { markdown } from "@codemirror/lang-markdown";
 import { bracketMatching, defaultHighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { findTextMatches, SearchOverlay, type SearchOptions } from "./search-overlay.tsx";
+import {
+  aiDiffCount,
+  aiDiffField,
+  clearAiDiffs,
+  keepAllAiDiffs,
+  keepAiDiff,
+  nearestAiDiffId,
+  proposeAiDiff,
+  undoAiDiff,
+} from "./editor-diff.ts";
 
 /**
  * Marks a CodeMirror dispatch as "content swapped from outside" —
@@ -84,6 +94,18 @@ export interface EditorApi {
   /** The current cursor offset (selection head). */
   getCursorOffset(): number;
   focus(): void;
+  /** Apply an AI-proposed edit (`find → replace`, first match) optimistically and
+   *  overlay a Cursor-style inline diff the user can Keep/Undo. Returns a
+   *  model-visible status (e.g. "not found"). */
+  proposeDiff(find: string, replace: string): { ok: boolean; message: string };
+  /** Whether any inline AI diff is awaiting Keep/Undo. */
+  hasPendingDiffs(): boolean;
+  /** Keep the diff at/nearest the cursor (drop its decorations, keep the text). */
+  keepNearestDiff(): void;
+  /** Undo the diff at/nearest the cursor (restore the original text). */
+  undoNearestDiff(): void;
+  /** Keep every pending diff in one step. */
+  keepAllDiffs(): void;
 }
 
 class VisibleWhitespaceWidget extends WidgetType {
@@ -344,6 +366,7 @@ export function Editor(props: EditorProps) {
         themeCompartment.of(props.darkMode ? darkTheme : lightTheme),
         wrapCompartment.of(props.wrapText ? EditorView.lineWrapping : []),
         searchHighlightCompartment.of([]),
+        aiDiffField,
         EditorView.updateListener.of((update) => {
           emitHistoryState(update.state);
           // Selection popover (Add to chat / Quick Edit). Lazy: only when wired,
@@ -404,6 +427,24 @@ export function Editor(props: EditorProps) {
       },
       getCursorOffset: () => view?.state.selection.main.head ?? 0,
       focus: () => view?.focus(),
+      proposeDiff: (find, replace) =>
+        view
+          ? proposeAiDiff(view, find, replace)
+          : { ok: false, message: "No active editor is available to apply the edit." },
+      hasPendingDiffs: () => (view ? aiDiffCount(view.state) > 0 : false),
+      keepNearestDiff: () => {
+        if (!view) return;
+        const id = nearestAiDiffId(view.state);
+        if (id) keepAiDiff(view, id);
+      },
+      undoNearestDiff: () => {
+        if (!view) return;
+        const id = nearestAiDiffId(view.state);
+        if (id) undoAiDiff(view, id);
+      },
+      keepAllDiffs: () => {
+        if (view) keepAllAiDiffs(view);
+      },
     });
 
     const scrollEl = view.scrollDOM;
@@ -469,6 +510,8 @@ export function Editor(props: EditorProps) {
         // Tag the dispatch so updateListener can skip onChange —
         // this is a content swap from the parent, not a user edit.
         annotations: externalContentSwap.of(true),
+        // A pending AI diff belongs to the old document — drop it on swap.
+        effects: clearAiDiffs.of(null),
       });
       if (props.searchOpen && searchQuery()) {
         recomputeMatches(searchQuery(), searchOptions());
