@@ -203,12 +203,12 @@ export function Editor(props: EditorProps) {
       pointerEvents: "none",
     },
     ".cm-search-match": {
-      backgroundColor: "hsl(211 52% 24% / 0.45)",
+      backgroundColor: "hsl(188 52% 24% / 0.45)",
       borderRadius: "2px",
     },
     ".cm-search-match-active": {
-      backgroundColor: "hsl(211 52% 24% / 0.65)",
-      outline: "1px solid hsl(211 72% 55% / 0.8)",
+      backgroundColor: "hsl(188 52% 24% / 0.65)",
+      outline: "1px solid hsl(188 72% 55% / 0.8)",
     },
   }, { dark: true });
 

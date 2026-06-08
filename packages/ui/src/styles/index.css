@@ -2990,12 +2990,12 @@ mark.search-highlight.search-active {
 }
 
 .dark mark.search-highlight {
-  background: hsl(211 52% 24% / 0.45);
+  background: hsl(188 52% 24% / 0.45);
 }
 
 .dark mark.search-highlight.search-active {
-  background: hsl(211 52% 24% / 0.65);
-  outline-color: hsl(211 72% 55% / 0.8);
+  background: hsl(188 52% 24% / 0.65);
+  outline-color: hsl(188 72% 55% / 0.8);
 }
 
 /* === Pane layout (split editor) === */
@@ -3188,7 +3188,7 @@ mark.quick-open-hit {
 }
 
 .dark mark.quick-open-hit {
-  background: hsl(211 52% 24% / 0.55);
+  background: hsl(188 52% 24% / 0.55);
 }
 
 .quick-open-empty {
