@@ -16,10 +16,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "./ui/select.ts
 import { AiMessage } from "./ai-message.tsx";
 
 /** Compact pill styling for the composer's Select triggers (mode + model),
- *  overriding the SolidUI Select's full-width default. Keeps its teal
- *  `focus:ring-ring` so keyboard focus matches the primary, not the UA blue. */
+ *  overriding the SolidUI Select's full-width default. The base ring is dropped
+ *  (a click ring inside the composer reads as noise) — only keyboard focus shows
+ *  a thin teal ring (the primary, never the UA blue). */
 const PILL_SELECT =
-  "h-7 w-auto justify-start gap-1.5 rounded-md border-transparent bg-secondary px-2 py-0 text-xs font-medium text-foreground hover:bg-accent focus:ring-offset-1";
+  "h-7 w-auto justify-start gap-1.5 rounded-md border-transparent bg-secondary px-2 py-0 text-xs font-medium text-foreground hover:bg-accent focus:ring-0 focus:ring-offset-0 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1";
 
 export interface AiPanelProps {
   store: AiChatStore;
@@ -385,7 +386,6 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
               )}
             >
               <SelectTrigger class={PILL_SELECT} title={currentModelLabel()} aria-label={currentModelLabel()}>
-                <span class="ai-provider-dot ai-provider-dot-active" aria-hidden="true" />
                 <span class="truncate max-w-[120px]">{currentModelLabel()}</span>
               </SelectTrigger>
               <SelectContent class="min-w-[10rem]" />
