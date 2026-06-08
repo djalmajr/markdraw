@@ -355,6 +355,9 @@ export function PaneView(props: PaneViewProps) {
                 // can read the selection and apply AI edits to THIS pane.
                 (pane() as PaneStore & { editorApi?: EditorApi }).editorApi = api;
               }}
+              onSelectionPopover={
+                props.isActive ? (info) => s.setSelectionPopover(info) : undefined
+              }
               redoTrigger={editorRedoTrigger()}
               searchOpen={s.editorSearchOpen()}
               undoTrigger={editorUndoTrigger()}

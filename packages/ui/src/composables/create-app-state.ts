@@ -490,6 +490,32 @@ export function createAppState(config: AppStateConfig) {
     setActiveFileContextDismissed(true);
   }
 
+  // Selection popover (Add to chat / Quick Edit) — the editor emits the current
+  // selection + its screen coords; the AppShell renders a small floating menu.
+  const [selectionPopover, setSelectionPopover] = createSignal<{
+    from: number;
+    to: number;
+    text: string;
+    left: number;
+    bottom: number;
+  } | null>(null);
+
+  /** Add an editor selection to the chat as a context chip (labelled file:lines). */
+  function addSelectionToContext(sel: { from: number; to: number; text: string }): void {
+    if (!sel.text.trim()) return;
+    const file = selectedFile();
+    const fileName = file?.name ?? "selection";
+    const content = editorContent();
+    const lineOf = (off: number) => content.slice(0, Math.max(0, off)).split("\n").length;
+    addAiContext({
+      id: `selection:${file?.path ?? ""}:${sel.from}-${sel.to}`,
+      kind: "selection",
+      label: `${fileName}:${lineOf(sel.from)}-${lineOf(sel.to)}`,
+      ...(file ? { path: file.path } : {}),
+      content: sel.text,
+    });
+  }
+
   // ── AI assistant ───────────────────────────────────────────────────
   // Multi-chat sidebar: a manager owning N chat-session stores (one per OPEN
   // tab) plus persistent history. The right-panel active tab is an ENCODED
@@ -585,6 +611,36 @@ export function createAppState(config: AppStateConfig) {
   function deleteChat(id: string): void {
     aiSessions.deleteSession(id);
     reconcileActiveTab();
+  }
+
+  /** Selection popover → "Add to chat": chip the selection + front the chat. */
+  function addSelectionContextFromPopover(): void {
+    const info = selectionPopover();
+    if (!info) return;
+    addSelectionToContext(info);
+    setSelectionPopover(null);
+    focusAiComposer();
+  }
+
+  /** Selection popover → "Quick Edit": open the inline (⌘I) overlay on the selection. */
+  function quickEditFromPopover(): void {
+    const info = selectionPopover();
+    if (!info) return;
+    const api = (
+      paneManager.activePane() as {
+        editorApi?: {
+          coordsAtPos: (p: number) => { left: number; top: number; bottom: number } | null;
+          replaceRange: (from: number, to: number, insert: string) => void;
+        };
+      }
+    ).editorApi;
+    if (!api) return;
+    aiInline.openFor(
+      { from: info.from, to: info.to, text: info.text },
+      api.coordsAtPos(info.to),
+      api.replaceRange,
+    );
+    setSelectionPopover(null);
   }
 
   function handleClearRecentFiles() {
@@ -1031,6 +1087,11 @@ export function createAppState(config: AppStateConfig) {
     addAiContext,
     removeAiContext,
     dismissActiveFileContext,
+    addSelectionToContext,
+    selectionPopover,
+    setSelectionPopover,
+    addSelectionContextFromPopover,
+    quickEditFromPopover,
     aiComposerFocusTrigger,
     setAiComposerFocusTrigger,
     focusAiComposer,

@@ -382,6 +382,25 @@ describe("AppState — AI multi-chat tab routing", () => {
     }, aiConfig);
   });
 
+  it("addSelectionToContext adds a labelled selection chip", () => {
+    withState((state) => {
+      state.addSelectionToContext({ from: 0, to: 5, text: "hello" });
+      const items = state.aiContextItems();
+      expect(items).toHaveLength(1);
+      expect(items[0]!.kind).toBe("selection");
+      expect(items[0]!.content).toBe("hello");
+      // No active file in this stub → label falls back to "selection:lines".
+      expect(items[0]!.label).toMatch(/:\d+-\d+$/);
+    }, aiConfig);
+  });
+
+  it("ignores a blank/whitespace selection", () => {
+    withState((state) => {
+      state.addSelectionToContext({ from: 0, to: 3, text: "   " });
+      expect(state.aiContextItems()).toHaveLength(0);
+    }, aiConfig);
+  });
+
   it("follows the manager back to TOC when the active chat is closed", () => {
     // closeChat reconciles the encoded tab synchronously: closing the active
     // (and only) chat drops it from sessions() → fall back to TOC.

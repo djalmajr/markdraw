@@ -2260,6 +2260,40 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   color: hsl(var(--muted-foreground));
 }
 
+/* Selection popover — floating "Add to chat / Quick Edit" bubble on a selection. */
+.selection-popover {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--popover));
+  box-shadow: 0 8px 24px hsl(0 0% 0% / 0.16);
+}
+.selection-popover-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  border-radius: 5px;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.selection-popover-btn:hover {
+  background: hsl(var(--bg-hover));
+}
+.selection-popover-kbd {
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
 /* ── AI inline overlay (DJA-13) — floating ⌘I widget on the selection ─────── */
 .ai-inline-overlay {
   position: fixed;

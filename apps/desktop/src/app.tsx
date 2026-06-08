@@ -1147,26 +1147,14 @@ export function App() {
   }
 
   /** Attach the current editor selection to the chat as a context chip. Returns
-   *  true when a non-empty selection was added (so ⌘L / the selection popover
-   *  can decide whether to also front the chat). */
+   *  true when a non-empty selection was added (so ⌘L can decide whether to
+   *  also front the chat). The chip-building lives in AppState so the selection
+   *  popover reuses it. */
   function addSelectionToChat(): boolean {
     const pane = state.paneManager.activePane() as { editorApi?: EditorApi };
-    const api = pane.editorApi;
-    if (!api) return false;
-    const sel = api.getSelection();
+    const sel = pane.editorApi?.getSelection();
     if (!sel || !sel.text.trim()) return false;
-    const file = state.selectedFile();
-    const fileName = file?.name ?? "selection";
-    const content = state.editorContent();
-    const lineOf = (off: number) => content.slice(0, Math.max(0, off)).split("\n").length;
-    const label = `${fileName}:${lineOf(sel.from)}-${lineOf(sel.to)}`;
-    state.addAiContext({
-      id: `selection:${file?.path ?? ""}:${sel.from}-${sel.to}`,
-      kind: "selection",
-      label,
-      ...(file ? { path: file.path } : {}),
-      content: sel.text,
-    });
+    state.addSelectionToContext(sel);
     return true;
   }
 

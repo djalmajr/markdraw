@@ -205,6 +205,7 @@
   "ai_context_note": "Recuento aproximado de tokens.",
   "ai_context_remove": "Quitar del contexto",
   "ai_add_to_chat": "Añadir al chat",
+  "ai_quick_edit": "Edición rápida",
   "ai_panel_title": "Asistente de IA",
   "ai_provider_none": "Sin proveedor",
   "ai_empty_title": "Pregunta lo que quieras sobre este documento",

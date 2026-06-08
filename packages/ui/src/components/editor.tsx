@@ -63,6 +63,12 @@ interface EditorProps {
    *  read the selection/cursor, anchor the inline overlay, and apply AI edits.
    *  New pattern (not the prop-driven scrollToLine) — kept narrow on purpose. */
   onReady?: (api: EditorApi) => void;
+  /** Fired when the selection changes: a non-empty selection (with screen
+   *  coords for anchoring a popover) or `null` when it collapses. Only emitted
+   *  when a consumer is wired, so the listener stays cheap otherwise. */
+  onSelectionPopover?: (
+    info: { from: number; to: number; text: string; left: number; bottom: number } | null,
+  ) => void;
 }
 
 /** Imperative editor handle for the AI surfaces (DJA-13/14). `replaceRange`
@@ -340,6 +346,18 @@ export function Editor(props: EditorProps) {
         searchHighlightCompartment.of([]),
         EditorView.updateListener.of((update) => {
           emitHistoryState(update.state);
+          // Selection popover (Add to chat / Quick Edit). Lazy: only when wired,
+          // and only on a real selection change.
+          if (props.onSelectionPopover && update.selectionSet) {
+            const sel = update.state.selection.main;
+            const text = sel.empty ? "" : update.state.doc.sliceString(sel.from, sel.to);
+            const coords = sel.empty ? null : update.view.coordsAtPos(sel.to);
+            props.onSelectionPopover(
+              !sel.empty && text.trim() && coords
+                ? { from: sel.from, to: sel.to, text, left: coords.left, bottom: coords.bottom }
+                : null,
+            );
+          }
           if (update.docChanged) {
             // Skip onChange when the doc swap came from the parent
             // setting `props.content` (file load, etc.). Otherwise

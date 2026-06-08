@@ -24,6 +24,7 @@ import { BacklinksList, type BacklinkEntry } from "./backlinks-list.tsx";
 import { AiPanel } from "./ai-panel.tsx";
 import { ChatHistoryMenu } from "./chat-history-menu.tsx";
 import { AiInlineOverlay } from "./ai-inline-overlay.tsx";
+import { SelectionPopover } from "./selection-popover.tsx";
 import {
   SettingsDialog,
   type IndexingTier,
@@ -474,6 +475,11 @@ export function AppShell(props: AppShellProps) {
         onClose={() => props.onShortcutsHelpClose?.()}
       />
       <AiInlineOverlay store={s.aiInline} />
+      <SelectionPopover
+        info={s.selectionPopover()}
+        onAddToChat={s.addSelectionContextFromPopover}
+        onQuickEdit={s.quickEditFromPopover}
+      />
       <Show when={props.settingsOpen}>
         <SettingsDialog
           open={!!props.settingsOpen}
