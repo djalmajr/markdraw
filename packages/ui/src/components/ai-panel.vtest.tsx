@@ -179,29 +179,30 @@ describe("AiPanel", () => {
     expect(chip.querySelector(".ai-tool-chip-source")).toBeNull();
   });
 
-  it("hides the Build/Plan toggle when onModeChange is absent", () => {
+  it("hides the Build/Plan mode picker when onModeChange is absent", () => {
     const store = readyStore();
     const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
-    expect(baseElement.querySelector(".ai-mode-toggle")).toBeNull();
+    expect(baseElement.querySelector(".ai-mode-select")).toBeNull();
   });
 
-  it("renders the Build/Plan toggle, reflects the active mode, and fires onModeChange", () => {
+  it("renders the mode picker showing the active mode, and fires onModeChange on select", () => {
     const store = readyStore();
     const onModeChange = vi.fn();
     const { baseElement } = render(() => (
       <AiPanel store={store} providerLabel="Mock" mode="plan" onModeChange={onModeChange} />
     ));
-    const toggle = baseElement.querySelector(".ai-mode-toggle")!;
-    expect(toggle).not.toBeNull();
-    const btns = [...toggle.querySelectorAll(".ai-mode-btn")] as HTMLButtonElement[];
-    expect(btns).toHaveLength(2);
-    // "plan" is active → the Plan button carries the active class + aria-pressed.
-    const planBtn = btns.find((b) => b.textContent?.includes("Plan"))!;
-    const buildBtn = btns.find((b) => b.textContent?.includes("Build"))!;
-    expect(planBtn.classList.contains("ai-mode-btn-active")).toBe(true);
-    expect(buildBtn.classList.contains("ai-mode-btn-active")).toBe(false);
-    // Clicking Build switches the mode.
-    fireEvent.click(buildBtn);
+    // The trigger shows the current mode's label (like the model picker).
+    const trigger = baseElement.querySelector(".ai-mode-select") as HTMLElement;
+    expect(trigger).not.toBeNull();
+    expect(trigger.textContent).toContain("Plan");
+    // Open the dropdown (kobalte opens on the pointer sequence) and pick Build.
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
+    fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });
+    fireEvent.click(trigger);
+    const build = screen.getByText("Build");
+    fireEvent.pointerDown(build, { button: 0, pointerType: "mouse" });
+    fireEvent.pointerUp(build, { button: 0, pointerType: "mouse" });
+    fireEvent.click(build);
     expect(onModeChange).toHaveBeenCalledWith("build");
   });
 });

@@ -9,8 +9,6 @@ import IconChevronDown from "~icons/lucide/chevron-down";
 import IconX from "~icons/lucide/x";
 import IconFileText from "~icons/lucide/file-text";
 import IconTextSelect from "~icons/lucide/text-select";
-import IconHammer from "~icons/lucide/hammer";
-import IconListChecks from "~icons/lucide/list-checks";
 import type { AIChatMode } from "@asciimark/core/ai-prefs.ts";
 import type { AiChatStore } from "../composables/create-ai-chat-store.ts";
 import type { AiContextItem } from "../composables/ai-context.ts";
@@ -335,30 +333,33 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
         />
         <div class="ai-composer-footer">
           <Show when={props.onModeChange}>
-            <div class="ai-mode-toggle" role="group" aria-label={(useLocale(), m.ai_mode_label())}>
-              <button
-                type="button"
-                class="ai-mode-btn"
-                classList={{ "ai-mode-btn-active": (props.mode ?? "build") === "build" }}
-                aria-pressed={(props.mode ?? "build") === "build"}
-                onClick={() => props.onModeChange?.("build")}
-                title={(useLocale(), m.ai_mode_build_hint())}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                as="button"
+                class="ai-model-select ai-mode-select"
+                aria-label={(useLocale(), m.ai_mode_label())}
+                title={(useLocale(), props.mode === "plan" ? m.ai_mode_plan_hint() : m.ai_mode_build_hint())}
               >
-                <IconHammer width={12} height={12} />
-                <span>{(useLocale(), m.ai_mode_build())}</span>
-              </button>
-              <button
-                type="button"
-                class="ai-mode-btn"
-                classList={{ "ai-mode-btn-active": props.mode === "plan" }}
-                aria-pressed={props.mode === "plan"}
-                onClick={() => props.onModeChange?.("plan")}
-                title={(useLocale(), m.ai_mode_plan_hint())}
-              >
-                <IconListChecks width={12} height={12} />
-                <span>{(useLocale(), m.ai_mode_plan())}</span>
-              </button>
-            </div>
+                <span class="ai-model-label">
+                  {props.mode === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
+                </span>
+                <IconChevronDown width={13} height={13} class="ai-model-chevron" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent class="ai-model-menu">
+                <DropdownMenuItem onSelect={() => props.onModeChange?.("build")}>
+                  <span class="flex-1">{(useLocale(), m.ai_mode_build())}</span>
+                  <Show when={(props.mode ?? "build") === "build"}>
+                    <IconCheck width={14} height={14} />
+                  </Show>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => props.onModeChange?.("plan")}>
+                  <span class="flex-1">{(useLocale(), m.ai_mode_plan())}</span>
+                  <Show when={props.mode === "plan"}>
+                    <IconCheck width={14} height={14} />
+                  </Show>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </Show>
           <Show
             when={props.models && props.models.length > 0}
