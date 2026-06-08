@@ -7,9 +7,9 @@ import {
   type RightPanelTab,
 } from "./right-panel-tabs.tsx";
 
-/** Encoded right-panel tab: the pinned TOC tab, the References (backlinks)
- *  view fronted from the overflow menu, or a specific chat session. */
-export type TocPanelTab = "toc" | "backlinks" | `chat:${string}`;
+/** Encoded right-panel tab: the Outline pane, the References (backlinks) pane,
+ *  or a specific chat session. "" means no tab is active. */
+export type TocPanelTab = "" | "toc" | "backlinks" | `chat:${string}`;
 
 export interface TocPanelProps {
   /** Toolbar toggle. Drives panel visibility — only `false` should
@@ -40,33 +40,43 @@ export interface TocPanelProps {
   /** Controlled active tab (encoded string). Falls back to internal state. */
   activeTab?: string;
   onActiveTabChange?: (tab: string) => void;
-  /** Open chat sessions for the strip (host builds from the session manager). */
-  chatSessions?: Array<{ id: string; title: string; streaming?: boolean }>;
+  /** Ordered strip tabs (host builds from open specials + chat sessions). */
+  tabs?: RightPanelTab[];
   /** AiPanel bound to the active chat — rendered only when a chat tab is active. */
   aiSlot?: JSX.Element;
   onNewChat?: () => void;
-  onCloseChat?: (id: string) => void;
+  /** Generic tab actions (encoded id: "toc" | "backlinks" | "chat:<id>"). */
+  onClose?: (encodedId: string) => void;
+  onCloseOthers?: (encodedId: string) => void;
+  onCloseToRight?: (encodedId: string) => void;
+  onCloseAll?: () => void;
+  onTogglePin?: (encodedId: string) => void;
+  /** Chat-only actions (by session id). */
+  onRenameChat?: (id: string, title: string) => void;
+  onExportChat?: (id: string) => void;
+  onArchiveChat?: (id: string) => void;
+  onDeleteChat?: (id: string) => void;
+  /** Open a special pane (Outline / References) as a strip tab from "…". */
+  onOpenSpecial?: (kind: "toc" | "backlinks") => void;
   /** ChatHistoryMenu element, rendered in the strip's actions cluster. */
   historySlot?: JSX.Element;
-  /** Localized fallback title for untitled chats. */
-  defaultChatTitle?: string;
   /** Panel width in px (user-resizable). Falls back to the CSS default. */
   width?: number;
 }
 
 /**
- * The right gutter. A single unified tab strip (pinned TOC + N chat tabs, plus
- * `+`/history/overflow/collapse controls) sits above three content panes. The
- * TOC and References panes stay MOUNTED at all times (hidden via attribute) —
- * Preview moves the `#toc` node into the TOC tree imperatively and a re-mount
- * would lose that wiring; References must keep its empty-state stable. Only the
- * active chat pane mounts/unmounts (chat content has no imperative DOM
- * contract). References is reachable from the "…" overflow, not a strip tab.
+ * The right gutter. A single unified tab strip (openable Outline / References
+ * specials + N chat tabs, plus `+`/history/overflow controls) sits above three
+ * content panes. The TOC and References panes stay MOUNTED at all times (hidden
+ * via attribute) — Preview moves the `#toc` node into the TOC tree imperatively
+ * and a re-mount would lose that wiring; References must keep its empty-state
+ * stable. Only the active chat pane mounts/unmounts. Outline and References are
+ * opened on demand from the "…" overflow; the AI chat is the default open tab.
  */
 export function TocPanel(props: TocPanelProps) {
   // Controlled-with-fallback so the host can drive the active tab (⌘L fronts a
   // chat); otherwise the panel keeps its own state for standalone rendering.
-  const [localTab, setLocalTab] = createSignal<string>("toc");
+  const [localTab, setLocalTab] = createSignal<string>("");
   const activeTab = (): string => props.activeTab ?? localTab();
   const changeTab = (tab: string): void => {
     setLocalTab(tab);
@@ -74,28 +84,19 @@ export function TocPanel(props: TocPanelProps) {
   };
   const isChatActive = (): boolean => activeTab().startsWith("chat:");
 
-  const tabs = (): RightPanelTab[] => [
-    { id: "toc", kind: "toc", title: (useLocale(), m.toc_tab_outline()) },
-    ...(props.chatSessions ?? []).map((s) => ({
-      id: s.id,
-      kind: "chat" as const,
-      title: s.title || props.defaultChatTitle || (useLocale(), m.ai_chat_default_title()),
-      streaming: s.streaming,
-    })),
-  ];
-
   const overflowItems = (): RightPanelOverflowItem[] => {
     useLocale();
     const items: RightPanelOverflowItem[] = [
+      { id: "outline", label: m.toc_tab_outline(), onSelect: () => props.onOpenSpecial?.("toc") },
       {
         id: "references",
         label: m.toc_tab_references(),
         count: props.backlinksCount,
-        onSelect: () => changeTab("backlinks"),
+        onSelect: () => props.onOpenSpecial?.("backlinks"),
       },
     ];
-    // The TOC depth/expand controls live in the overflow only while the TOC tab
-    // is active (they don't apply to chats or references).
+    // The TOC depth/expand controls live in the overflow only while the Outline
+    // tab is active (they don't apply to chats or references).
     if (activeTab() === "toc") {
       items.push(
         { id: "expand", label: m.toc_expand_all(), separatorBefore: true, onSelect: () => props.setTocExpanded(true) },
@@ -126,10 +127,18 @@ export function TocPanel(props: TocPanelProps) {
       ref={(el) => props.panelRef?.(el)}
     >
       <RightPanelTabs
-        tabs={tabs()}
+        tabs={props.tabs ?? []}
         activeId={activeTab()}
         onSelect={changeTab}
-        onCloseChat={(id) => props.onCloseChat?.(id)}
+        onClose={(id) => props.onClose?.(id)}
+        onCloseOthers={(id) => props.onCloseOthers?.(id)}
+        onCloseToRight={(id) => props.onCloseToRight?.(id)}
+        onCloseAll={() => props.onCloseAll?.()}
+        onTogglePin={(id) => props.onTogglePin?.(id)}
+        onRenameChat={props.onRenameChat}
+        onExportChat={props.onExportChat}
+        onArchiveChat={props.onArchiveChat}
+        onDeleteChat={props.onDeleteChat}
         onNewChat={props.onNewChat}
         overflowItems={overflowItems()}
         historySlot={props.historySlot}
@@ -150,7 +159,7 @@ export function TocPanel(props: TocPanelProps) {
           </div>
         </div>
 
-        {/* References pane — ALWAYS mounted; fronted from the "…" overflow. */}
+        {/* References pane — ALWAYS mounted; opened from the "…" overflow. */}
         <div class="toc-panel-pane" data-pane="backlinks" role="tabpanel" hidden={activeTab() !== "backlinks"}>
           <div class="toc-panel-section-header">
             <span class="toc-panel-section-title">{(useLocale(), m.backlinks_title())}</span>

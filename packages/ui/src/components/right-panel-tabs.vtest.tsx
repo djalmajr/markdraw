@@ -15,7 +15,15 @@ function baseProps(over: Partial<RightPanelTabsProps> = {}): RightPanelTabsProps
     tabs: TABS,
     activeId: "toc",
     onSelect: vi.fn(),
-    onCloseChat: vi.fn(),
+    onClose: vi.fn(),
+    onCloseOthers: vi.fn(),
+    onCloseToRight: vi.fn(),
+    onCloseAll: vi.fn(),
+    onTogglePin: vi.fn(),
+    onRenameChat: vi.fn(),
+    onExportChat: vi.fn(),
+    onArchiveChat: vi.fn(),
+    onDeleteChat: vi.fn(),
     onNewChat: vi.fn(),
     overflowItems: [{ id: "references", label: "References", count: 2, onSelect: vi.fn() }],
     ...over,
@@ -23,18 +31,27 @@ function baseProps(over: Partial<RightPanelTabsProps> = {}): RightPanelTabsProps
 }
 
 describe("RightPanelTabs — tabs", () => {
-  it("renders the pinned TOC tab with no close button", () => {
+  it("renders one closeable tab per entry (specials + chats)", () => {
     const { baseElement } = render(() => <RightPanelTabs {...baseProps()} />);
-    const pinned = baseElement.querySelector(".rp-tab-pinned")!;
-    expect(pinned).not.toBeNull();
-    expect(pinned.querySelector(".rp-tab-close")).toBeNull();
+    const tabs = baseElement.querySelectorAll(".rp-tab");
+    expect(tabs).toHaveLength(3);
+    for (const t of tabs) expect(t.querySelector(".rp-tab-close")).not.toBeNull();
   });
 
-  it("renders one chat tab per session, each with a close button", () => {
+  it("gives specials an icon and chats none", () => {
     const { baseElement } = render(() => <RightPanelTabs {...baseProps()} />);
-    const chatTabs = baseElement.querySelectorAll(".rp-tab:not(.rp-tab-pinned)");
-    expect(chatTabs).toHaveLength(2);
-    for (const t of chatTabs) expect(t.querySelector(".rp-tab-close")).not.toBeNull();
+    expect(baseElement.querySelector('[data-rp-tab="toc"] .rp-tab-icon')).not.toBeNull();
+    expect(baseElement.querySelector('[data-rp-tab="chat:s1"] .rp-tab-icon')).toBeNull();
+  });
+
+  it("shows a pin glyph on a pinned tab (still closeable)", () => {
+    const { baseElement } = render(() => (
+      <RightPanelTabs {...baseProps({ tabs: [{ id: "s1", kind: "chat", title: "Pinned", pinned: true }] })} />
+    ));
+    const tab = baseElement.querySelector('[data-rp-tab="chat:s1"]')!;
+    expect(tab.classList.contains("rp-tab-pinned")).toBe(true);
+    expect(tab.querySelector(".rp-tab-pin")).not.toBeNull();
+    expect(tab.querySelector(".rp-tab-close")).not.toBeNull();
   });
 
   it("marks the active tab (toc and chat encodings)", () => {
@@ -46,27 +63,21 @@ describe("RightPanelTabs — tabs", () => {
     expect(b2.querySelector('[data-rp-tab="toc"]')!.classList.contains("rp-tab-active")).toBe(false);
   });
 
-  it("clicking the TOC tab emits onSelect('toc')", () => {
+  it("clicking a tab emits onSelect with its encoded id", () => {
     const onSelect = vi.fn();
     const { baseElement } = render(() => <RightPanelTabs {...baseProps({ onSelect })} />);
     fireEvent.click(baseElement.querySelector('[data-rp-tab="toc"]')!);
     expect(onSelect).toHaveBeenCalledWith("toc");
-  });
-
-  it("clicking a chat tab emits onSelect('chat:<id>')", () => {
-    const onSelect = vi.fn();
-    const { baseElement } = render(() => <RightPanelTabs {...baseProps({ onSelect })} />);
     fireEvent.click(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
     expect(onSelect).toHaveBeenCalledWith("chat:s1");
   });
 
-  it("clicking close fires onCloseChat and NOT onSelect", () => {
+  it("clicking close fires onClose(encoded) and NOT onSelect", () => {
     const onSelect = vi.fn();
-    const onCloseChat = vi.fn();
-    const { baseElement } = render(() => <RightPanelTabs {...baseProps({ onSelect, onCloseChat })} />);
-    const close = baseElement.querySelector('[data-rp-tab="chat:s1"] .rp-tab-close')!;
-    fireEvent.click(close);
-    expect(onCloseChat).toHaveBeenCalledWith("s1");
+    const onClose = vi.fn();
+    const { baseElement } = render(() => <RightPanelTabs {...baseProps({ onSelect, onClose })} />);
+    fireEvent.click(baseElement.querySelector('[data-rp-tab="chat:s1"] .rp-tab-close')!);
+    expect(onClose).toHaveBeenCalledWith("chat:s1");
     expect(onSelect).not.toHaveBeenCalled();
   });
 
@@ -77,6 +88,60 @@ describe("RightPanelTabs — tabs", () => {
     unmount();
     const { baseElement: b2 } = render(() => <RightPanelTabs {...baseProps({ activeId: "chat:s2" })} />);
     expect(b2.querySelector('[data-rp-tab="chat:s2"] .rp-tab-dot')).toBeNull();
+  });
+});
+
+describe("RightPanelTabs — context menu", () => {
+  it("a chat tab menu offers Pin, Rename, Export, Archive, the close group and Delete", () => {
+    const { baseElement } = render(() => <RightPanelTabs {...baseProps()} />);
+    fireEvent.contextMenu(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
+    expect(screen.getByText("Pin")).not.toBeNull();
+    expect(screen.getByText("Rename")).not.toBeNull();
+    expect(screen.getByText("Export…")).not.toBeNull();
+    expect(screen.getByText("Archive")).not.toBeNull();
+    expect(screen.getByText("Close All")).not.toBeNull();
+    expect(screen.getByText("Delete")).not.toBeNull();
+  });
+
+  it("a special tab menu offers Pin + the close group but no chat actions", () => {
+    const { baseElement } = render(() => <RightPanelTabs {...baseProps()} />);
+    fireEvent.contextMenu(baseElement.querySelector('[data-rp-tab="toc"]')!);
+    expect(screen.getByText("Pin")).not.toBeNull();
+    expect(screen.getByText("Close to the Right")).not.toBeNull();
+    expect(screen.queryByText("Export…")).toBeNull();
+    expect(screen.queryByText("Delete")).toBeNull();
+  });
+
+  it("menu actions invoke the right callbacks", () => {
+    const onTogglePin = vi.fn();
+    const onDeleteChat = vi.fn();
+    const { baseElement } = render(() => <RightPanelTabs {...baseProps({ onTogglePin, onDeleteChat })} />);
+    // Kobalte menu items select on the pointer sequence, not a bare click.
+    const select = (label: string): void => {
+      const item = screen.getByText(label);
+      fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      fireEvent.click(item);
+    };
+    fireEvent.contextMenu(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
+    select("Pin");
+    expect(onTogglePin).toHaveBeenCalledWith("chat:s1");
+    fireEvent.contextMenu(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
+    select("Delete");
+    expect(onDeleteChat).toHaveBeenCalledWith("s1");
+  });
+});
+
+describe("RightPanelTabs — inline rename", () => {
+  it("double-click a chat tab opens an input that commits on Enter", () => {
+    const onRenameChat = vi.fn();
+    const { baseElement } = render(() => <RightPanelTabs {...baseProps({ onRenameChat })} />);
+    fireEvent.dblClick(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
+    const input = baseElement.querySelector(".rp-tab-rename") as HTMLInputElement;
+    expect(input).not.toBeNull();
+    fireEvent.input(input, { target: { value: "Renamed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRenameChat).toHaveBeenCalledWith("s1", "Renamed");
   });
 });
 
@@ -91,13 +156,11 @@ describe("RightPanelTabs — actions", () => {
   it("hides the + control when onNewChat is absent (no AI host)", () => {
     const { baseElement } = render(() => <RightPanelTabs {...baseProps({ onNewChat: undefined })} />);
     expect(screen.queryByLabelText("New chat")).toBeNull();
-    // The overflow "…" is always present.
     expect(baseElement.querySelector(".rp-strip-actions")).not.toBeNull();
   });
 
   it("opens the overflow menu and renders its items with a count", () => {
     render(() => <RightPanelTabs {...baseProps()} />);
-    // Kobalte's DropdownMenu trigger opens on the pointer sequence, not a bare click.
     const trigger = screen.getByLabelText("More options");
     fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
     fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });

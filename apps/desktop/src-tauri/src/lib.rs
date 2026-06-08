@@ -187,6 +187,26 @@ async fn open_directory_dialog(app: AppHandle) -> Result<Option<String>, String>
 }
 
 #[tauri::command]
+async fn save_file_dialog(
+    app: AppHandle,
+    default_dir: Option<String>,
+    default_name: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut builder = app.dialog().file().set_file_name(&default_name);
+    if let Some(dir) = default_dir {
+        // Ensure the suggested directory exists so the dialog opens into it
+        // (e.g. a not-yet-created `.asciimark/chats`). Best-effort.
+        let _ = std::fs::create_dir_all(&dir);
+        builder = builder.set_directory(std::path::PathBuf::from(&dir));
+    }
+    let path = builder
+        .add_filter("Markdown", &["md", "markdown"])
+        .blocking_save_file();
+    Ok(path.map(|p| p.to_string()))
+}
+
+#[tauri::command]
 async fn read_dir(
     path: String,
     include_hidden_entries: Option<bool>,
@@ -1077,6 +1097,7 @@ pub fn run() {
         .manage(McpManager::default())
         .invoke_handler(tauri::generate_handler![
             open_directory_dialog,
+            save_file_dialog,
             read_dir,
             read_file,
             read_file_relative,

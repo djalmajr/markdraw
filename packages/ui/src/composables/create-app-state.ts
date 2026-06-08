@@ -12,7 +12,13 @@ import { createAiChatSessions } from "./create-ai-chat-sessions.ts";
 import { createAiInlineStore } from "./create-ai-inline-store.ts";
 import { type AiContextItem, buildContextPreamble } from "./ai-context.ts";
 import { getChatSessionsIndex } from "@asciimark/core/ai-chat-sessions.ts";
+import {
+  getRightPanelTabsState,
+  setRightPanelTabsState,
+  type SpecialTabState,
+} from "@asciimark/core/right-panel-tabs.ts";
 import { getStoredAiMode, setStoredAiMode, type AIChatMode } from "@asciimark/core/ai-prefs.ts";
+import { formatChatTranscript } from "../lib/chat-export.ts";
 import type { AIProvider, AITool } from "@asciimark/ai/types.ts";
 import type { ConvertOptions, ConvertResult } from "@asciimark/core/converter.ts";
 import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
@@ -131,9 +137,24 @@ interface AppStateConfig {
   /** Persist a plan produced in Plan mode (the host writes it to
    *  `.asciimark/plans`). Called with the assistant's plan text. */
   onPlanComplete?: (content: string) => void;
+  /** Export a chat transcript (the host shows a Save dialog + writes the file). */
+  onExportChat?: (payload: { title: string; markdown: string }) => void;
 }
 
 export { FontFamilies, FontSizes };
+
+/** One ordered right-panel strip tab (an open special pane or a chat session). */
+export interface RightPanelTabModel {
+  /** "toc" | "backlinks" | chat session id. */
+  id: string;
+  kind: "toc" | "backlinks" | "chat";
+  /** Chat title (empty for specials — the strip derives their label). */
+  title: string;
+  streaming: boolean;
+  pinned: boolean;
+  /** Sort key: special.openedAt or chat.createdAt (pinned float left first). */
+  orderKey: number;
+}
 
 export function createAppState(config: AppStateConfig) {
   // ── Pane manager (per-document signals proxy through here) ─────────────
@@ -594,11 +615,83 @@ export function createAppState(config: AppStateConfig) {
     getProvider: () => config.createAIProvider?.() ?? null,
   });
 
+  // ── Right-panel tabs (specials + chats) ────────────────────────────────────
+  // The strip mixes "special" panes (Outline / References — always mounted,
+  // opened on demand from the "…" menu) with chat tabs. `aiActiveTab` is the
+  // single source of truth for the encoded active tab ("toc" | "backlinks" |
+  // "chat:<id>" | ""); specials track open/pinned/openedAt here, chats carry
+  // `isPinned` on their session meta. Order: pinned first, then by openedAt /
+  // createdAt so the default boot chat stays leftmost.
+  type SpecialKind = "toc" | "backlinks";
+  const SPECIAL_KINDS: readonly SpecialKind[] = ["toc", "backlinks"];
+
+  const persistedRp = getRightPanelTabsState();
+  const [rpSpecials, setRpSpecials] = createSignal<Record<SpecialKind, SpecialTabState>>(
+    persistedRp
+      ? { toc: persistedRp.toc, backlinks: persistedRp.backlinks }
+      : {
+          toc: { open: false, pinned: false, openedAt: 0 },
+          backlinks: { open: false, pinned: false, openedAt: 0 },
+        },
+  );
+
   const restoredActive = aiSessions.activeId();
   const [aiActiveTab, setActiveTabSig] = createSignal<string>(
-    restoredActive ? `chat:${restoredActive}` : "toc",
+    (() => {
+      const want = persistedRp?.activeTab ?? "";
+      if (want.startsWith("chat:")) {
+        if (aiSessions.sessions().some((s) => s.id === want.slice(5))) return want;
+      } else if (want === "toc" || want === "backlinks") {
+        if (rpSpecials()[want].open) return want;
+      }
+      return restoredActive ? `chat:${restoredActive}` : "";
+    })(),
   );
   const [aiComposerFocusTrigger, setAiComposerFocusTrigger] = createSignal(0);
+
+  // AI-first default: the right panel always boots onto a usable chat. With no
+  // open chats and no open specials, create one so the assistant is the first tab.
+  if (aiSessions.sessions().length === 0 && !rpSpecials().toc.open && !rpSpecials().backlinks.open) {
+    setActiveTabSig(`chat:${aiSessions.createSession()}`);
+  } else if (aiActiveTab() === "") {
+    const firstChat = aiSessions.sessions()[0];
+    setActiveTabSig(firstChat ? `chat:${firstChat.id}` : rpSpecials().toc.open ? "toc" : "backlinks");
+  }
+
+  // Persist the special-tab state + the encoded active tab (chats persist via
+  // the sessions manager). Direct write — low frequency, localStorage is cheap.
+  createEffect(() => {
+    const specials = rpSpecials();
+    setRightPanelTabsState({ toc: specials.toc, backlinks: specials.backlinks, activeTab: aiActiveTab() });
+  });
+
+  function patchSpecial(kind: SpecialKind, patch: Partial<SpecialTabState>): void {
+    setRpSpecials((s) => ({ ...s, [kind]: { ...s[kind], ...patch } }));
+  }
+
+  const encodeTab = (t: { kind: string; id: string }): string =>
+    t.kind === "chat" ? `chat:${t.id}` : t.id;
+
+  /** The ordered strip model: open specials + open chats, pinned-first. */
+  const rightPanelTabs = createMemo<RightPanelTabModel[]>(() => {
+    const specials = rpSpecials();
+    const out: RightPanelTabModel[] = [];
+    for (const kind of SPECIAL_KINDS) {
+      const st = specials[kind];
+      if (st.open) out.push({ id: kind, kind, title: "", streaming: false, pinned: st.pinned, orderKey: st.openedAt });
+    }
+    for (const s of aiSessions.sessions()) {
+      out.push({
+        id: s.id,
+        kind: "chat",
+        title: s.title,
+        streaming: aiSessions.storeFor(s.id)?.streaming() ?? false,
+        pinned: s.isPinned ?? false,
+        orderKey: s.createdAt,
+      });
+    }
+    return out.sort((a, b) => (a.pinned === b.pinned ? a.orderKey - b.orderKey : a.pinned ? -1 : 1));
+  });
 
   /** Activate a chat session and front its tab together. */
   function activateChatTab(id: string): void {
@@ -606,14 +699,18 @@ export function createAppState(config: AppStateConfig) {
     setActiveTabSig(`chat:${id}`);
   }
 
-  /** Route a right-panel tab selection from the strip. Chat tabs also activate
-   *  their session so `activeStore()` follows. */
+  /** Open a special pane as a strip tab (if needed) and activate it. */
+  function openSpecial(kind: SpecialKind): void {
+    if (!rpSpecials()[kind].open) patchSpecial(kind, { open: true, openedAt: Date.now() });
+    setActiveTabSig(kind);
+  }
+
+  /** Route a right-panel tab selection. Chats activate their session; specials
+   *  are opened/fronted; "" clears the active tab. */
   function setAiActiveTab(tab: string): void {
-    if (tab.startsWith("chat:")) {
-      activateChatTab(tab.slice(5));
-      return;
-    }
-    setActiveTabSig(tab);
+    if (tab.startsWith("chat:")) activateChatTab(tab.slice(5));
+    else if (tab === "toc" || tab === "backlinks") openSpecial(tab);
+    else setActiveTabSig(tab);
   }
 
   /** Create a chat, front it, and focus the composer (the `+` button). */
@@ -640,19 +737,27 @@ export function createAppState(config: AppStateConfig) {
     setAiComposerFocusTrigger((value) => value + 1);
   }
 
-  // Keep the encoded tab consistent with the manager: when the active chat tab
-  // leaves `sessions()` (closed/archived/deleted) follow the manager's new
-  // active id (a neighbor) or fall back to the always-present TOC tab. Done
-  // imperatively (not via an effect) so the tab updates synchronously with the
-  // action. Eviction never removes the active session, so close/archive/delete
-  // are the only paths that need this.
+  function tabPresent(tab: string): boolean {
+    if (tab.startsWith("chat:")) return aiSessions.sessions().some((s) => s.id === tab.slice(5));
+    if (tab === "toc" || tab === "backlinks") return rpSpecials()[tab].open;
+    return false;
+  }
+
+  // Keep the encoded active tab valid after a close/archive/delete: prefer the
+  // manager's neighbor chat, else any open chat, else an open special, else
+  // none. Done imperatively so the tab updates synchronously with the action.
   function reconcileActiveTab(): void {
-    const tab = aiActiveTab();
-    if (!tab.startsWith("chat:")) return;
-    const id = tab.slice(5);
-    if (aiSessions.sessions().some((s) => s.id === id)) return;
+    if (tabPresent(aiActiveTab())) return;
     const next = aiSessions.activeId();
-    setActiveTabSig(next ? `chat:${next}` : "toc");
+    if (next && aiSessions.sessions().some((s) => s.id === next)) {
+      setActiveTabSig(`chat:${next}`);
+      return;
+    }
+    const firstChat = aiSessions.sessions()[0];
+    if (firstChat) setActiveTabSig(`chat:${firstChat.id}`);
+    else if (rpSpecials().toc.open) setActiveTabSig("toc");
+    else if (rpSpecials().backlinks.open) setActiveTabSig("backlinks");
+    else setActiveTabSig("");
   }
 
   /** Close a chat tab (keeps it in history) and reconcile the active tab. */
@@ -669,6 +774,72 @@ export function createAppState(config: AppStateConfig) {
   function deleteChat(id: string): void {
     aiSessions.deleteSession(id);
     reconcileActiveTab();
+  }
+  /** Rename a chat (overrides the auto-derived title). */
+  function renameChat(id: string, title: string): void {
+    aiSessions.renameSession(id, title);
+  }
+
+  /** Close any right-panel tab by encoded id (special → hide its chip but keep
+   *  the pane mounted; chat → close to history). */
+  function closeRightPanelTab(encoded: string): void {
+    if (encoded.startsWith("chat:")) {
+      closeChat(encoded.slice(5));
+    } else if (encoded === "toc" || encoded === "backlinks") {
+      patchSpecial(encoded, { open: false });
+      reconcileActiveTab();
+    }
+  }
+  /** Close every unpinned tab except the given one. */
+  function closeOtherRightPanelTabs(encoded: string): void {
+    for (const t of rightPanelTabs()) {
+      if (!t.pinned && encodeTab(t) !== encoded) closeRightPanelTab(encodeTab(t));
+    }
+  }
+  /** Close every unpinned tab to the right of the given one. */
+  function closeRightPanelTabsToRight(encoded: string): void {
+    const tabs = rightPanelTabs();
+    const idx = tabs.findIndex((t) => encodeTab(t) === encoded);
+    if (idx < 0) return;
+    for (const t of tabs.slice(idx + 1)) if (!t.pinned) closeRightPanelTab(encodeTab(t));
+  }
+  /** Close every unpinned tab. */
+  function closeAllRightPanelTabs(): void {
+    for (const t of rightPanelTabs()) if (!t.pinned) closeRightPanelTab(encodeTab(t));
+  }
+
+  /** Pin/unpin any right-panel tab by encoded id. */
+  function togglePinRightPanelTab(encoded: string): void {
+    if (encoded.startsWith("chat:")) {
+      const id = encoded.slice(5);
+      const m = aiSessions.sessions().find((s) => s.id === id);
+      aiSessions.setPinned(id, !(m?.isPinned ?? false));
+    } else if (encoded === "toc" || encoded === "backlinks") {
+      patchSpecial(encoded, { pinned: !rpSpecials()[encoded].pinned });
+    }
+  }
+
+  /** Export a chat transcript (the host shows a Save dialog + writes the file).
+   *  Includes the in-flight streaming turn so exporting mid-stream isn't lossy. */
+  function exportChat(id: string): void {
+    const store = aiSessions.storeFor(id);
+    if (!store) return;
+    const meta = aiSessions.allSessions().find((s) => s.id === id);
+    const title = meta?.title?.trim() || "Chat";
+    const base = store.messages();
+    const tools = store.toolActivity();
+    const turns =
+      store.streaming() && (store.streamingText() || tools.length > 0)
+        ? [
+            ...base,
+            {
+              role: "assistant" as const,
+              content: store.streamingText(),
+              ...(tools.length ? { tools } : {}),
+            },
+          ]
+        : base;
+    config.onExportChat?.({ title, markdown: formatChatTranscript(title, turns) });
   }
 
   /** Selection popover → "Add to chat": chip the selection + front the chat. */
@@ -1120,6 +1291,16 @@ export function createAppState(config: AppStateConfig) {
     closeChat,
     archiveChat,
     deleteChat,
+    renameChat,
+    exportChat,
+    // Right-panel tab strip (specials + chats)
+    rightPanelTabs,
+    openSpecial,
+    closeRightPanelTab,
+    closeOtherRightPanelTabs,
+    closeRightPanelTabsToRight,
+    closeAllRightPanelTabs,
+    togglePinRightPanelTab,
     // AI context chips
     aiContextItems,
     activeFileContext,

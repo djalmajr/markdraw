@@ -36,30 +36,27 @@ const BASE_PROPS = {
  *     the first render but get wiped by Preview)
  */
 describe("TocPanel — strip + chat panes", () => {
-  it("always renders the pinned TOC tab in the strip", () => {
-    const { baseElement } = render(() => <TocPanel {...BASE_PROPS} />);
-    expect(baseElement.querySelector(".rp-tab-pinned")).not.toBeNull();
-  });
-
-  it("renders one chat tab per open session", () => {
+  it("renders one strip tab per entry the host passes in `tabs`", () => {
     const { baseElement } = render(() => (
       <TocPanel
         {...BASE_PROPS}
         onNewChat={() => {}}
-        chatSessions={[
-          { id: "s1", title: "Chat 1" },
-          { id: "s2", title: "Chat 2" },
+        tabs={[
+          { id: "toc", kind: "toc", title: "Outline" },
+          { id: "s1", kind: "chat", title: "Chat 1" },
+          { id: "s2", kind: "chat", title: "Chat 2" },
         ]}
       />
     ));
-    expect(baseElement.querySelectorAll(".rp-tab:not(.rp-tab-pinned)")).toHaveLength(2);
+    expect(baseElement.querySelectorAll(".rp-tab")).toHaveLength(3);
+    expect(baseElement.querySelector('[data-rp-tab="toc"]')).not.toBeNull();
   });
 
   it("mounts the chat pane only when a chat tab is active", () => {
-    // On the TOC tab the chat pane is unmounted (no imperative DOM contract,
-    // so mount/unmount is safe and keeps a single store rendered).
+    // No active chat tab → the chat pane is unmounted (no imperative DOM
+    // contract, so mount/unmount is safe).
     const { baseElement } = render(() => (
-      <TocPanel {...BASE_PROPS} chatSessions={[{ id: "s1", title: "Chat 1" }]} aiSlot={<div class="ai-test-slot">AI</div>} />
+      <TocPanel {...BASE_PROPS} aiSlot={<div class="ai-test-slot">AI</div>} />
     ));
     expect(baseElement.querySelector('[data-pane="ai"]')).toBeNull();
   });
@@ -70,7 +67,7 @@ describe("TocPanel — strip + chat panes", () => {
         {...BASE_PROPS}
         activeTab="chat:s1"
         onActiveTabChange={() => {}}
-        chatSessions={[{ id: "s1", title: "Chat 1" }]}
+        tabs={[{ id: "s1", kind: "chat", title: "Chat 1" }]}
         aiSlot={<div class="ai-test-slot">AI</div>}
       />
     ));
@@ -223,12 +220,25 @@ describe("TocPanel — References via overflow + mounted panes", () => {
     fireEvent.click(trigger);
   }
 
-  it("starts on the TOC tab by default (References never opens on its own)", () => {
-    const { baseElement } = render(() => (
+  it("hides both special panes by default; fronts Outline when its tab is active", () => {
+    const { baseElement, unmount } = render(() => (
       <TocPanel {...BASE_PROPS} backlinksSlot={<div data-testid="bl">x</div>} />
     ));
-    expect(baseElement.querySelector('[data-pane="toc"]')!.hasAttribute("hidden")).toBe(false);
+    // No active tab (AI-first default lives in app-state) → specials hidden.
+    expect(baseElement.querySelector('[data-pane="toc"]')!.hasAttribute("hidden")).toBe(true);
     expect(baseElement.querySelector('[data-pane="backlinks"]')!.hasAttribute("hidden")).toBe(true);
+    unmount();
+    const { baseElement: b2 } = render(() => (
+      <TocPanel {...BASE_PROPS} activeTab="toc" onActiveTabChange={() => {}} />
+    ));
+    expect(b2.querySelector('[data-pane="toc"]')!.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("the overflow offers Outline and References as openers", () => {
+    const { baseElement } = render(() => <TocPanel {...BASE_PROPS} backlinksCount={2} onOpenSpecial={() => {}} />);
+    openOverflow(baseElement);
+    expect(screen.getByText(/^outline$|^estrutura$|^esquema$/i)).not.toBeNull();
+    expect(screen.getByText(/references|referências|referencias/i)).not.toBeNull();
   });
 
   it("fronts the backlinks pane when References is selected, keeping TOC mounted", () => {
@@ -254,14 +264,21 @@ describe("TocPanel — References via overflow + mounted panes", () => {
     expect(baseElement.querySelector(".rp-overflow-count")!.textContent).toBe("3");
   });
 
-  it("shows TOC depth options in the overflow only on the TOC tab", () => {
-    const { baseElement, unmount } = render(() => <TocPanel {...BASE_PROPS} />);
+  it("shows TOC depth options in the overflow only on the Outline tab", () => {
+    const { baseElement, unmount } = render(() => (
+      <TocPanel {...BASE_PROPS} activeTab="toc" onActiveTabChange={() => {}} />
+    ));
     openOverflow(baseElement);
     expect(screen.queryByText(/expand all|expandir|expandir/i)).not.toBeNull();
     unmount();
     // On a chat tab the TOC depth controls drop out; References remains.
     const { baseElement: b2 } = render(() => (
-      <TocPanel {...BASE_PROPS} activeTab="chat:s1" onActiveTabChange={() => {}} chatSessions={[{ id: "s1", title: "C1" }]} />
+      <TocPanel
+        {...BASE_PROPS}
+        activeTab="chat:s1"
+        onActiveTabChange={() => {}}
+        tabs={[{ id: "s1", kind: "chat", title: "C1" }]}
+      />
     ));
     openOverflow(b2);
     expect(screen.queryByText(/expand all|expandir/i)).toBeNull();

@@ -47,6 +47,8 @@ export interface AiChatSessions {
   closeSession: (id: string) => void;
   activateSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
+  /** Pin/unpin a session (tab strip sort + bulk-close protection). */
+  setPinned: (id: string, pinned: boolean) => void;
   archiveSession: (id: string) => void;
   /** Un-archive (if needed), reopen as a live tab, and activate. Used by the
    *  history dropdown's row-click and "Restore". */
@@ -260,7 +262,15 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     const now = Date.now();
     setMetas((ms) => [
       ...ms,
-      { id, title: opts?.title ?? "", createdAt: now, lastActiveAt: now, isArchived: false, isOpen: true },
+      {
+        id,
+        title: opts?.title ?? "",
+        createdAt: now,
+        lastActiveAt: now,
+        isArchived: false,
+        isOpen: true,
+        isPinned: false,
+      },
     ]);
     records.set(id, instantiate(id, []));
     if (opts?.activate ?? true) setActiveId(id);
@@ -333,6 +343,12 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     schedulePersistIndex();
   }
 
+  function setPinned(id: string, pinned: boolean): void {
+    patchMeta(id, { isPinned: pinned });
+    bump();
+    schedulePersistIndex();
+  }
+
   function activeStore(): AiChatStore {
     const id = activeId();
     return (id !== null && records.get(id)?.store) || EMPTY_STORE;
@@ -380,6 +396,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     closeSession,
     activateSession,
     renameSession,
+    setPinned,
     archiveSession,
     openFromHistory,
     restoreSession,

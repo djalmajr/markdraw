@@ -1612,8 +1612,15 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   background: hsl(var(--primary));
 }
 .rp-tab-pinned {
-  padding-left: 12px;
-  padding-right: 12px;
+  max-width: 130px;
+}
+.rp-tab-pin {
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.rp-tab-active .rp-tab-pin {
+  color: hsl(var(--primary));
 }
 .rp-tab-icon {
   color: hsl(var(--muted-foreground));
@@ -1661,6 +1668,33 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   opacity: 1;
   color: hsl(var(--foreground));
   background: hsl(var(--bg-hover));
+}
+.rp-tab-rename {
+  flex: 1;
+  min-width: 60px;
+  max-width: 150px;
+  height: 20px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--primary));
+  border-radius: 4px;
+  outline: none;
+}
+/* Keep a visible focus indicator (the input autofocuses on rename). */
+.rp-tab-rename:focus {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.35);
+}
+/* The chat-tab "Delete" context-menu item reads as destructive. */
+.rp-tab-menu-danger {
+  color: hsl(var(--destructive));
+}
+.rp-tab-menu-danger:hover,
+.rp-tab-menu-danger[data-highlighted] {
+  color: hsl(var(--destructive));
 }
 
 .rp-strip-actions {

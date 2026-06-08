@@ -11,6 +11,7 @@ import { invoke } from "./lib/chaos-invoke.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@asciimark/ui/composables/create-app-state.ts";
+import { slugifyTitle } from "@asciimark/ui/lib/chat-export.ts";
 import { createMockProvider } from "@asciimark/ai/mock-provider.ts";
 import type { AIConfig, MCPServerConfig } from "@asciimark/ai/config-schema.ts";
 import type { AIProvider, AITool } from "@asciimark/ai/types.ts";
@@ -164,6 +165,8 @@ export function App() {
     getAITools,
     // Plan mode persists each produced plan under the workspace's .asciimark/plans.
     onPlanComplete: handlePlanComplete,
+    // Chat tab "Export" → native Save As, defaulting to .asciimark/chats.
+    onExportChat: handleExportChat,
   });
 
   // Load the AI config (ai.json merged with builtins) once at startup, then
@@ -307,6 +310,29 @@ export function App() {
       console.info(`[plan] saved ${path}`);
     } catch (e) {
       console.error("[plan] failed to save:", e);
+    }
+  }
+
+  /** Export a chat transcript via a native Save As dialog, defaulting to
+   *  `<root>/.asciimark/chats/<slug>-<stamp>.md` (the dir is created on demand). */
+  async function handleExportChat(payload: { title: string; markdown: string }): Promise<void> {
+    const root = Array.from(rootPaths().values())[0];
+    const d = new Date();
+    const pad = (n: number): string => String(n).padStart(2, "0");
+    const stamp =
+      `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+      `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    const defaultName = `${slugifyTitle(payload.title)}-${stamp}.md`;
+    try {
+      const path = await invoke<string | null>("save_file_dialog", {
+        defaultDir: root ? `${root}/.asciimark/chats` : null,
+        defaultName,
+      });
+      if (!path) return; // user cancelled
+      await invoke("write_file", { path, content: payload.markdown });
+      console.info(`[export] chat saved ${path}`);
+    } catch (e) {
+      console.error("[export] failed to save chat:", e);
     }
   }
 

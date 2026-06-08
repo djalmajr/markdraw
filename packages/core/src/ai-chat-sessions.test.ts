@@ -146,6 +146,29 @@ describe("sessions index round-trip", () => {
     localStorage.setItem(INDEX_KEY, "{not json");
     expect(getChatSessionsIndex()).toBeNull();
   });
+
+  it("round-trips a pinned session and persists isPinned only when true", () => {
+    setChatSessionsIndex({ sessions: [meta({ isPinned: true }), meta({ id: "s2" })], activeId: "s1" });
+    const raw = JSON.parse(localStorage.getItem(INDEX_KEY)!);
+    expect(raw.sessions[0].isPinned).toBe(true);
+    // Unpinned sessions stay lean — the key is omitted on write.
+    expect(raw.sessions[1]).not.toHaveProperty("isPinned");
+    expect(getChatSessionsIndex()!.sessions[0]!.isPinned).toBe(true);
+  });
+
+  it("migrates pre-pinning sessions (no isPinned key) without dropping them", () => {
+    // A session persisted before pinning existed has no isPinned field.
+    localStorage.setItem(
+      INDEX_KEY,
+      JSON.stringify({
+        sessions: [{ id: "old", title: "Old", createdAt: 1, lastActiveAt: 2, isArchived: false, isOpen: true }],
+        activeId: "old",
+      }),
+    );
+    const index = getChatSessionsIndex()!;
+    expect(index.sessions).toHaveLength(1);
+    expect(index.sessions[0]!.isPinned).toBeUndefined();
+  });
 });
 
 describe("messages round-trip", () => {

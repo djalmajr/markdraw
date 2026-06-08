@@ -60,6 +60,11 @@ const PersistedChatSessionMetaSchema = v.object({
   /** Currently mounted as a tab in the strip (has a live store). Closed chats
    *  stay in history with `isOpen: false` until reopened. */
   isOpen: v.boolean(),
+  /** Pinned tabs sort to the left and are protected from bulk close
+   *  (Close others / to the right / all). Optional (absent ⇒ not pinned) so
+   *  sessions persisted before pinning existed still parse; consumers read it
+   *  as `isPinned ?? false`. */
+  isPinned: v.optional(v.boolean()),
 });
 
 // Strict write-boundary schema.
@@ -212,6 +217,7 @@ function normalizeIndex(index: ChatSessionsIndex): ChatSessionsIndex {
       lastActiveAt: s.lastActiveAt,
       isArchived: s.isArchived,
       isOpen: s.isOpen,
+      ...(s.isPinned ? { isPinned: true } : {}),
     })),
     activeId: index.activeId,
   };

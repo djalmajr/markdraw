@@ -354,10 +354,10 @@ describe("AppState — AI multi-chat tab routing", () => {
   };
   const aiConfig = { createAIProvider: () => stubProvider };
 
-  it("starts on the TOC tab with no chats", () => {
+  it("boots onto an AI chat by default (AI-first)", () => {
     withState((state) => {
-      expect(state.aiActiveTab()).toBe("toc");
-      expect(state.aiSessions.sessions()).toEqual([]);
+      expect(state.aiActiveTab().startsWith("chat:")).toBe(true);
+      expect(state.aiSessions.sessions()).toHaveLength(1);
     }, aiConfig);
   });
 
@@ -437,15 +437,121 @@ describe("AppState — AI multi-chat tab routing", () => {
     }, { createAIProvider: () => provider });
   });
 
-  it("follows the manager back to TOC when the active chat is closed", () => {
-    // closeChat reconciles the encoded tab synchronously: closing the active
-    // (and only) chat drops it from sessions() → fall back to TOC.
+  it("closing the active chat falls back to a neighbor, then to empty", () => {
+    // closeChat reconciles synchronously: it falls back to a remaining chat,
+    // and only when nothing is left does the active tab become "".
     withState((state) => {
-      const id = state.newChat();
-      expect(state.aiActiveTab()).toBe(`chat:${id}`);
-      state.closeChat(id);
-      expect(state.aiActiveTab()).toBe("toc");
+      const boot = state.aiSessions.sessions()[0]!.id;
+      const b = state.newChat();
+      expect(state.aiActiveTab()).toBe(`chat:${b}`);
+      state.closeChat(b);
+      expect(state.aiActiveTab()).toBe(`chat:${boot}`);
+      state.closeChat(boot);
+      expect(state.aiActiveTab()).toBe("");
     }, aiConfig);
+  });
+});
+
+describe("AppState — right-panel tab model (specials + pin)", () => {
+  const stubProvider = {
+    async *chat() {
+      yield { type: "done" as const };
+    },
+    async complete() {
+      return "";
+    },
+    async embed() {
+      return [];
+    },
+  };
+  const aiConfig = { createAIProvider: () => stubProvider };
+
+  it("opens a special (Outline) as a strip tab and activates it", () => {
+    withState((state) => {
+      expect(state.rightPanelTabs().some((t) => t.kind === "toc")).toBe(false);
+      state.openSpecial("toc");
+      expect(state.aiActiveTab()).toBe("toc");
+      expect(state.rightPanelTabs().some((t) => t.kind === "toc")).toBe(true);
+    }, aiConfig);
+  });
+
+  it("closing a special hides its chip but keeps a fallback active tab", () => {
+    withState((state) => {
+      const boot = state.aiSessions.sessions()[0]!.id;
+      state.openSpecial("toc");
+      expect(state.aiActiveTab()).toBe("toc");
+      state.closeRightPanelTab("toc");
+      expect(state.rightPanelTabs().some((t) => t.kind === "toc")).toBe(false);
+      // Falls back to the open chat.
+      expect(state.aiActiveTab()).toBe(`chat:${boot}`);
+    }, aiConfig);
+  });
+
+  it("pinning a chat sorts it to the front of the strip", () => {
+    withState((state) => {
+      const boot = state.aiSessions.sessions()[0]!.id;
+      const b = state.newChat();
+      // Default order: boot (older) before b (newer).
+      expect(state.rightPanelTabs().map((t) => t.id)).toEqual([boot, b]);
+      state.togglePinRightPanelTab(`chat:${b}`);
+      // Pinned floats left.
+      expect(state.rightPanelTabs()[0]!.id).toBe(b);
+      expect(state.rightPanelTabs()[0]!.pinned).toBe(true);
+    }, aiConfig);
+  });
+
+  it("Close all spares pinned tabs", () => {
+    withState((state) => {
+      const boot = state.aiSessions.sessions()[0]!.id;
+      const b = state.newChat();
+      state.togglePinRightPanelTab(`chat:${boot}`);
+      state.closeAllRightPanelTabs();
+      const remaining = state.rightPanelTabs().map((t) => t.id);
+      expect(remaining).toEqual([boot]);
+      expect(remaining).not.toContain(b);
+    }, aiConfig);
+  });
+
+  it("Close others spares the target and pinned tabs", () => {
+    withState((state) => {
+      const boot = state.aiSessions.sessions()[0]!.id;
+      const b = state.newChat();
+      const c = state.newChat();
+      state.togglePinRightPanelTab(`chat:${boot}`);
+      state.closeOtherRightPanelTabs(`chat:${b}`);
+      const ids = state.rightPanelTabs().map((t) => t.id).sort();
+      expect(ids).toEqual([boot, b].sort());
+      expect(ids).not.toContain(c);
+    }, aiConfig);
+  });
+
+  it("exportChat forwards a Markdown transcript to onExportChat", async () => {
+    const onExportChat = vi.fn();
+    const provider = {
+      async *chat() {
+        yield { type: "text-delta" as const, text: "hello world" };
+        yield { type: "done" as const };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    await withState(
+      async (state) => {
+        const id = state.aiSessions.sessions()[0]!.id;
+        await state.aiSessions.storeFor(id)!.sendMessage("hi");
+        state.exportChat(id);
+        expect(onExportChat).toHaveBeenCalledTimes(1);
+        const payload = onExportChat.mock.calls[0]![0] as { title: string; markdown: string };
+        expect(payload.markdown).toContain("## You");
+        expect(payload.markdown).toContain("hi");
+        expect(payload.markdown).toContain("hello world");
+      },
+      { createAIProvider: () => provider, onExportChat },
+    );
   });
 });
 

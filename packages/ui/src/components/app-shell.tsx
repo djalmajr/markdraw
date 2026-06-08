@@ -801,14 +801,18 @@ export function AppShell(props: AppShellProps) {
             backlinksCount={s.activeBacklinks().length}
             activeTab={s.aiActiveTab()}
             onActiveTabChange={s.setAiActiveTab}
-            chatSessions={s.aiSessions.sessions().map((sess) => ({
-              id: sess.id,
-              title: sess.title,
-              streaming: s.aiSessions.storeFor(sess.id)?.streaming() ?? false,
-            }))}
+            tabs={s.rightPanelTabs()}
             onNewChat={s.newChat}
-            onCloseChat={s.closeChat}
-            defaultChatTitle={(useLocale(), m.ai_chat_default_title())}
+            onClose={s.closeRightPanelTab}
+            onCloseOthers={s.closeOtherRightPanelTabs}
+            onCloseToRight={s.closeRightPanelTabsToRight}
+            onCloseAll={s.closeAllRightPanelTabs}
+            onTogglePin={s.togglePinRightPanelTab}
+            onRenameChat={s.renameChat}
+            onExportChat={s.exportChat}
+            onArchiveChat={s.archiveChat}
+            onDeleteChat={s.deleteChat}
+            onOpenSpecial={s.openSpecial}
             historySlot={
               <ChatHistoryMenu
                 items={s.aiSessions.allSessions()}

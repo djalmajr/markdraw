@@ -1,5 +1,7 @@
 import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 import IconListTree from "~icons/lucide/list-tree";
+import IconLink from "~icons/lucide/link";
+import IconPin from "~icons/lucide/pin";
 import IconPlus from "~icons/lucide/plus";
 import IconEllipsis from "~icons/lucide/ellipsis";
 import IconX from "~icons/lucide/x";
@@ -15,17 +17,26 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu.tsx";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "./ui/context-menu.tsx";
 
 const SCROLL_STEP = 150;
 
 export interface RightPanelTab {
-  /** "toc" for the pinned tab, or the chat session id for chat tabs. */
+  /** "toc" | "backlinks" (special panes) or a chat session id. */
   id: string;
-  kind: "toc" | "chat";
+  kind: "toc" | "backlinks" | "chat";
+  /** Chat title (specials derive their label from `kind`). */
   title: string;
   /** Chat only — drives the activity dot on inactive tabs. */
   streaming?: boolean;
+  /** Pinned tabs sort left, show a pin glyph, and resist bulk close. */
+  pinned?: boolean;
 }
 
 export interface RightPanelOverflowItem {
@@ -39,14 +50,23 @@ export interface RightPanelOverflowItem {
 }
 
 export interface RightPanelTabsProps {
+  /** Ordered (pinned-first) strip tabs. */
   tabs: RightPanelTab[];
-  /** Encoded active id: "toc" | "backlinks" | "chat:<id>". When "backlinks" the
-   *  References content is fronted from the overflow menu and no strip tab is
-   *  highlighted. */
+  /** Encoded active id: "toc" | "backlinks" | "chat:<id>" | "". */
   activeId: string;
-  /** Emits "toc" | "chat:<id>" when a strip tab is clicked. */
+  /** Emits the encoded id when a strip tab is clicked. */
   onSelect: (encodedId: string) => void;
-  onCloseChat: (sessionId: string) => void;
+  /** Close one tab (encoded id). */
+  onClose: (encodedId: string) => void;
+  onCloseOthers: (encodedId: string) => void;
+  onCloseToRight: (encodedId: string) => void;
+  onCloseAll: () => void;
+  onTogglePin: (encodedId: string) => void;
+  // Chat-only actions (by session id).
+  onRenameChat?: (id: string, title: string) => void;
+  onExportChat?: (id: string) => void;
+  onArchiveChat?: (id: string) => void;
+  onDeleteChat?: (id: string) => void;
   onNewChat?: () => void;
   /** "…" overflow contents (host-built so they reflect the active tab). */
   overflowItems: RightPanelOverflowItem[];
@@ -54,17 +74,23 @@ export interface RightPanelTabsProps {
   historySlot?: JSX.Element;
 }
 
+const encode = (tab: RightPanelTab): string => (tab.kind === "chat" ? `chat:${tab.id}` : tab.id);
+
 /**
- * The unified right-panel tab strip: a pinned TOC tab + N chat tabs, with the
- * `+` (new chat), history, "…" overflow (References + TOC options) and a
- * panel-collapse control on the right. Mirrors the document `.tab-bar`
- * (overflow scroll, active underline, close button). Purely presentational —
- * all state arrives via props.
+ * The unified right-panel tab strip. All tabs (the openable Outline / References
+ * specials and N chat tabs) render uniformly: pinned-first, each with a
+ * right-click context menu (Pin/Unpin, Close, Close others/to the right/all, and
+ * for chats Export / Rename / Archive / Delete) and inline rename. The `+` (new
+ * chat), history and "…" overflow controls live on the right. Purely
+ * presentational — all state arrives via props.
  */
 export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
   const [hasOverflow, setHasOverflow] = createSignal(false);
   const [canScrollLeft, setCanScrollLeft] = createSignal(false);
   const [canScrollRight, setCanScrollRight] = createSignal(false);
+  // The chat session id currently being renamed inline, or null.
+  const [editingId, setEditingId] = createSignal<string | null>(null);
+  const [draft, setDraft] = createSignal("");
   let listRef: HTMLDivElement | undefined;
 
   function updateScrollState(): void {
@@ -88,10 +114,25 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
     });
   });
 
-  const isActive = (tab: RightPanelTab): boolean =>
-    tab.kind === "toc" ? props.activeId === "toc" : props.activeId === `chat:${tab.id}`;
+  const isActive = (tab: RightPanelTab): boolean => props.activeId === encode(tab);
 
-  const encode = (tab: RightPanelTab): string => (tab.kind === "toc" ? "toc" : `chat:${tab.id}`);
+  const labelOf = (tab: RightPanelTab): string => {
+    useLocale();
+    if (tab.kind === "toc") return m.toc_tab_outline();
+    if (tab.kind === "backlinks") return m.toc_tab_references();
+    return tab.title || m.ai_chat_default_title();
+  };
+
+  function startRename(tab: RightPanelTab): void {
+    if (tab.kind !== "chat") return;
+    setDraft(tab.title || "");
+    setEditingId(tab.id);
+  }
+  function commitRename(): void {
+    const id = editingId();
+    if (id) props.onRenameChat?.(id, draft());
+    setEditingId(null);
+  }
 
   return (
     <div class="rp-strip">
@@ -109,58 +150,117 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
       <div class="rp-strip-tabs" ref={listRef} onScroll={updateScrollState} role="tablist">
         <For each={props.tabs}>
           {(tab) => (
-            <Show
-              when={tab.kind === "chat"}
-              fallback={
-                <button
-                  type="button"
-                  class="rp-tab rp-tab-pinned"
-                  classList={{ "rp-tab-active": isActive(tab) }}
-                  data-rp-tab={encode(tab)}
-                  role="tab"
-                  aria-selected={isActive(tab)}
-                  onClick={() => props.onSelect(encode(tab))}
-                >
+            <ContextMenu>
+              <ContextMenuTrigger
+                as="div"
+                class="rp-tab"
+                classList={{ "rp-tab-active": isActive(tab), "rp-tab-pinned": !!tab.pinned }}
+                data-rp-tab={encode(tab)}
+                title={labelOf(tab)}
+                role="tab"
+                aria-selected={isActive(tab)}
+                onClick={() => {
+                  if (editingId() !== tab.id) props.onSelect(encode(tab));
+                }}
+                onDblClick={() => startRename(tab)}
+                onMouseDown={(e: MouseEvent) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    props.onClose(encode(tab));
+                  }
+                }}
+              >
+                <Show when={tab.pinned}>
+                  <IconPin width={11} height={11} class="rp-tab-pin" />
+                </Show>
+                <Show when={tab.kind === "toc"}>
                   <IconListTree width={13} height={13} class="rp-tab-icon" />
-                  <span class="rp-tab-name">{tab.title}</span>
-                </button>
-              }
-            >
-              <Tooltip openDelay={600}>
-                <TooltipTrigger
-                  as="div"
-                  class="rp-tab"
-                  classList={{ "rp-tab-active": isActive(tab) }}
-                  data-rp-tab={encode(tab)}
-                  role="tab"
-                  aria-selected={isActive(tab)}
-                  onClick={() => props.onSelect(encode(tab))}
-                  onMouseDown={(e: MouseEvent) => {
-                    if (e.button === 1) {
-                      e.preventDefault();
-                      props.onCloseChat(tab.id);
-                    }
-                  }}
+                </Show>
+                <Show when={tab.kind === "backlinks"}>
+                  <IconLink width={12} height={12} class="rp-tab-icon" />
+                </Show>
+                <Show when={tab.kind === "chat" && tab.streaming && !isActive(tab)}>
+                  <span class="rp-tab-dot" aria-hidden="true" />
+                </Show>
+                <Show
+                  when={editingId() === tab.id}
+                  fallback={<span class="rp-tab-name">{labelOf(tab)}</span>}
                 >
-                  <Show when={tab.streaming && !isActive(tab)}>
-                    <span class="rp-tab-dot" aria-hidden="true" />
-                  </Show>
-                  <span class="rp-tab-name">{tab.title}</span>
+                  <input
+                    class="rp-tab-rename"
+                    value={draft()}
+                    autofocus
+                    aria-label={(useLocale(), `${m.ai_tab_rename()}: ${labelOf(tab)}`)}
+                    onClick={(e) => e.stopPropagation()}
+                    onInput={(e) => setDraft(e.currentTarget.value)}
+                    onBlur={(e) => {
+                      // Don't commit if focus is moving into a menu/popover (e.g.
+                      // right-clicking the tab while editing) — that isn't "done".
+                      const next = e.relatedTarget;
+                      if (next instanceof HTMLElement && next.closest('[role="menu"]')) return;
+                      commitRename();
+                    }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") commitRename();
+                      else if (e.key === "Escape") setEditingId(null);
+                    }}
+                  />
+                </Show>
+                {/* Hide close while renaming so a stray Tab/click can't drop the
+                    tab mid-edit. */}
+                <Show when={editingId() !== tab.id}>
                   <button
                     type="button"
                     class="rp-tab-close"
-                    aria-label={(useLocale(), m.ai_close_chat())}
+                    aria-label={(useLocale(), m.tab_close())}
                     onClick={(e) => {
                       e.stopPropagation();
-                      props.onCloseChat(tab.id);
+                      props.onClose(encode(tab));
                     }}
                   >
                     <IconX width={12} height={12} />
                   </button>
-                </TooltipTrigger>
-                <TooltipContent>{tab.title}</TooltipContent>
-              </Tooltip>
-            </Show>
+                </Show>
+              </ContextMenuTrigger>
+
+              <ContextMenuContent class="rp-tab-menu">
+                <ContextMenuItem onSelect={() => props.onTogglePin(encode(tab))}>
+                  {tab.pinned ? (useLocale(), m.ai_tab_unpin()) : (useLocale(), m.ai_tab_pin())}
+                </ContextMenuItem>
+                <Show when={tab.kind === "chat"}>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => startRename(tab)}>
+                    {(useLocale(), m.ai_tab_rename())}
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => props.onExportChat?.(tab.id)}>
+                    {(useLocale(), m.ai_tab_export())}
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => props.onArchiveChat?.(tab.id)}>
+                    {(useLocale(), m.ai_chat_archive())}
+                  </ContextMenuItem>
+                </Show>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={() => props.onClose(encode(tab))}>
+                  {(useLocale(), m.tab_close())}
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => props.onCloseOthers(encode(tab))}>
+                  {(useLocale(), m.tab_close_others())}
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => props.onCloseToRight(encode(tab))}>
+                  {(useLocale(), m.tab_close_to_right())}
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => props.onCloseAll()}>
+                  {(useLocale(), m.tab_close_all())}
+                </ContextMenuItem>
+                <Show when={tab.kind === "chat"}>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem class="rp-tab-menu-danger" onSelect={() => props.onDeleteChat?.(tab.id)}>
+                    {(useLocale(), m.ai_chat_delete())}
+                  </ContextMenuItem>
+                </Show>
+              </ContextMenuContent>
+            </ContextMenu>
           )}
         </For>
       </div>
