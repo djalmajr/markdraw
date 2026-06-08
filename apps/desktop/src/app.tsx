@@ -47,6 +47,8 @@ import type { TabStore } from "@asciimark/ui/composables/create-tab-store.ts";
 import { AppShell } from "@asciimark/ui/components/app-shell.tsx";
 import type { EditorApi } from "@asciimark/ui/components/editor.tsx";
 import { mermaidBlockAtOffset } from "@asciimark/core/block-detection.ts";
+import { SHORTCUTS } from "@asciimark/core/keyboard-shortcuts.ts";
+import { effectiveKeys, getStoredKeybindings, matchBinding } from "@asciimark/core/keybindings.ts";
 import * as m from "@asciimark/i18n";
 import { switchLocale, useLocale, locales as i18nLocales } from "@asciimark/i18n/solid";
 import { getStoredTheme, applyTheme } from "./main.tsx";
@@ -1638,34 +1640,10 @@ export function App() {
   onMount(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const isMac = navigator.platform.startsWith("Mac");
-      const mod = isMac ? e.metaKey : e.ctrlKey;
+      const platform: "mac" | "other" = isMac ? "mac" : "other";
 
-      // Cmd/Ctrl+W: close active tab
-      if (mod && e.key === "w" && !e.shiftKey) {
-        const activeTab = tabStore().activeTabId();
-        if (activeTab) {
-          e.preventDefault();
-          handleCloseTab(activeTab);
-        }
-      }
-
-      // Cmd/Ctrl+T: new tab
-      if (mod && !e.shiftKey && e.key === "t") {
-        e.preventDefault();
-        handleNewTab();
-      }
-
-      // Cmd/Ctrl+N: new file; Cmd/Ctrl+Shift+N: new folder (inline in the tree)
-      if (mod && (e.key === "n" || e.key === "N")) {
-        e.preventDefault();
-        if (rootPaths().size === 0) return;
-        startInlineCreate(e.shiftKey ? "folder" : "file");
-      }
-
-      // Open exactly one overlay at a time. Each shortcut closes the
-      // siblings before toggling its own — without this, hitting
-      // Cmd+Shift+P while Cmd+Shift+O is up stacks two palettes on
-      // screen (the second one renders over the first).
+      // Open exactly one overlay at a time. Each shortcut closes the siblings
+      // before toggling its own — otherwise two palettes can stack on screen.
       function openOnly(target: "quick" | "command" | "symbol" | "wsymbol" | "find" | "help") {
         if (target !== "quick") setQuickOpenVisible(false);
         if (target !== "command") setCommandPaletteVisible(false);
@@ -1695,114 +1673,18 @@ export function App() {
         }
       }
 
-      // Cmd/Ctrl+P: open the Quick Open overlay. preventDefault stops the
-      // webview from triggering its native print dialog (Ctrl+P), even when
-      // the workspace is empty — leaking the print dialog there would be a
-      // worse surprise than the shortcut doing nothing.
-      if (mod && !e.shiftKey && e.key === "p") {
-        e.preventDefault();
-        if (rootPaths().size === 0) return;
-        openOnly("quick");
+      function cycleTab(prev: boolean) {
+        const tabs = tabStore().tabs();
+        const activeId = tabStore().activeTabId();
+        if (tabs.length < 2 || !activeId) return;
+        const i = tabs.findIndex((t) => t.id === activeId);
+        const nextIdx = prev ? (i - 1 + tabs.length) % tabs.length : (i + 1) % tabs.length;
+        void handleActivateTab(tabs[nextIdx]!.id);
       }
 
-      // Cmd/Ctrl+Shift+P: open the command palette. Available even when
-      // no workspace is open — some commands (Open Folder, Theme) are
-      // workspace-agnostic.
-      if (mod && e.shiftKey && (e.key === "p" || e.key === "P")) {
-        e.preventDefault();
-        openOnly("command");
-      }
-
-      // Cmd/Ctrl+Shift+O: open the Go-to-Symbol palette. Only useful when
-      // a file is open — silent no-op otherwise.
-      if (mod && e.shiftKey && (e.key === "o" || e.key === "O")) {
-        e.preventDefault();
-        if (!state.selectedFile()) return;
-        openOnly("symbol");
-      }
-
-      // Cmd/Ctrl+Alt+O: workspace-wide symbol search. Requires a
-      // workspace; no-op on the dropzone home screen. Note: macOS
-      // sends `ø` as the e.key when Option+O is pressed because the
-      // option key composes diacritics — accept both forms.
-      if (mod && e.altKey && (e.key === "o" || e.key === "O" || e.key === "ø" || e.key === "Ø")) {
-        e.preventDefault();
-        if (rootPaths().size === 0) return;
-        openOnly("wsymbol");
-      }
-
-      // Cmd/Ctrl+Shift+F: open the Find in Files panel. Requires a workspace.
-      if (mod && e.shiftKey && (e.key === "f" || e.key === "F")) {
-        e.preventDefault();
-        if (rootPaths().size === 0) return;
-        openOnly("find");
-      }
-
-      // Cmd/Ctrl+/: toggle the keyboard shortcuts help modal. CodeMirror's
-      // default + history keymaps don't bind Mod-/ in editor.tsx so this is
-      // safe even with focus inside the editor.
-      if (mod && !e.shiftKey && e.key === "/") {
-        e.preventDefault();
-        openOnly("help");
-      }
-
-      // Cmd/Ctrl+\\: split the editor into a second pane (or collapse
-      // back when already split — toggle behaviour matches Cmd/Ctrl+P).
-      if (mod && !e.shiftKey && e.key === "\\") {
-        if (rootPaths().size === 0) return;
-        e.preventDefault();
-        if (state.paneManager.panes().length >= 2) {
-          state.paneManager.collapseRightPane();
-        } else {
-          state.paneManager.splitFromActive();
-        }
-      }
-
-      // Cmd/Ctrl+1 / Cmd/Ctrl+2: focus pane N (only meaningful when split).
-      if (mod && !e.shiftKey && (e.key === "1" || e.key === "2")) {
-        if (state.paneManager.panes().length < 2) return;
-        e.preventDefault();
-        state.paneManager.setActivePane(e.key === "1" ? 0 : 1);
-      }
-
-      // Cmd/Ctrl+Shift+T: reopen last closed tab
-      if (mod && e.shiftKey && e.key === "t") {
-        e.preventDefault();
-        const reopened = tabStore().reopenClosedTab();
-        if (reopened) {
-          void handleActivateTab(reopened.id);
-        }
-      }
-
-      // Cmd/Ctrl+.: toggle Reader / Zen mode. F11 is hijacked by
-      // macOS Mission Control / Show Desktop and never reaches the
-      // webview reliably, so the primary binding is the period
-      // chord. F11 is still accepted as a fallback for keyboards
-      // that map it independently.
-      if ((mod && !e.shiftKey && e.key === ".") || (e.key === "F11" && !mod && !e.shiftKey)) {
-        e.preventDefault();
-        state.setReaderMode((v) => !v);
-      }
-
-      // ⌘L / Ctrl+L: add the current selection to the chat as context (visible
-      // chip, Cursor-style), then open & focus the AI chat. With no selection
-      // it just fronts the chat.
-      if (mod && !e.shiftKey && (e.key === "l" || e.key === "L")) {
-        e.preventDefault();
-        addSelectionToChat();
-        state.focusAiComposer();
-      }
-
-      // ⌘, / Ctrl+,: open Settings (DJA-15)
-      if (mod && !e.shiftKey && e.key === ",") {
-        e.preventDefault();
-        setSettingsOpen(true);
-      }
-
-      // ⌘I / Ctrl+I: inline AI overlay. A mermaid block under the cursor wins
-      // (diagram mode, DJA-14); otherwise a non-empty selection (DJA-13).
-      if (mod && !e.shiftKey && (e.key === "i" || e.key === "I")) {
-        e.preventDefault();
+      // ⌘I — inline AI overlay. A mermaid block under the cursor wins (diagram
+      // mode); otherwise a non-empty selection.
+      function openInlineAi() {
         const pane = state.paneManager.activePane() as { editorApi?: EditorApi };
         const api = pane.editorApi;
         if (!api) return;
@@ -1828,17 +1710,126 @@ export function App() {
         }
       }
 
-      // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs
-      if (e.ctrlKey && e.key === "Tab") {
+      // Action per catalog shortcut id. A single dispatcher below matches the
+      // event against each shortcut's EFFECTIVE keys (user override or default),
+      // so all of these are user-remappable from Settings → Keybindings.
+      const keyCommands: Record<string, (e: KeyboardEvent) => void> = {
+        "tab.close": (ev) => {
+          const activeTab = tabStore().activeTabId();
+          if (activeTab) {
+            ev.preventDefault();
+            handleCloseTab(activeTab);
+          }
+        },
+        "tab.new": (ev) => {
+          ev.preventDefault();
+          handleNewTab();
+        },
+        "tab.reopen": (ev) => {
+          ev.preventDefault();
+          const reopened = tabStore().reopenClosedTab();
+          if (reopened) void handleActivateTab(reopened.id);
+        },
+        "tab.next": (ev) => {
+          ev.preventDefault();
+          cycleTab(false);
+        },
+        "tab.prev": (ev) => {
+          ev.preventDefault();
+          cycleTab(true);
+        },
+        "nav.quickOpen": (ev) => {
+          // preventDefault even on an empty workspace so the webview's native
+          // print dialog (Ctrl+P) never leaks through.
+          ev.preventDefault();
+          if (rootPaths().size === 0) return;
+          openOnly("quick");
+        },
+        "nav.commandPalette": (ev) => {
+          ev.preventDefault();
+          openOnly("command");
+        },
+        "nav.goToSymbol": (ev) => {
+          ev.preventDefault();
+          if (!state.selectedFile()) return;
+          openOnly("symbol");
+        },
+        "nav.workspaceSymbols": (ev) => {
+          ev.preventDefault();
+          if (rootPaths().size === 0) return;
+          openOnly("wsymbol");
+        },
+        "nav.findInFiles": (ev) => {
+          ev.preventDefault();
+          if (rootPaths().size === 0) return;
+          openOnly("find");
+        },
+        "help.shortcuts": (ev) => {
+          ev.preventDefault();
+          openOnly("help");
+        },
+        "view.splitEditor": (ev) => {
+          if (rootPaths().size === 0) return;
+          ev.preventDefault();
+          if (state.paneManager.panes().length >= 2) state.paneManager.collapseRightPane();
+          else state.paneManager.splitFromActive();
+        },
+        "view.focusFirstPane": (ev) => {
+          if (state.paneManager.panes().length < 2) return;
+          ev.preventDefault();
+          state.paneManager.setActivePane(0);
+        },
+        "view.focusSecondPane": (ev) => {
+          if (state.paneManager.panes().length < 2) return;
+          ev.preventDefault();
+          state.paneManager.setActivePane(1);
+        },
+        "view.toggleReaderMode": (ev) => {
+          ev.preventDefault();
+          state.setReaderMode((v) => !v);
+        },
+        "ai.openChat": (ev) => {
+          // Add the current selection as context (visible chip), then front the
+          // chat. With no selection it just fronts the chat.
+          ev.preventDefault();
+          addSelectionToChat();
+          state.focusAiComposer();
+        },
+        "ai.inlineAction": (ev) => {
+          ev.preventDefault();
+          openInlineAi();
+        },
+        "app.settings": (ev) => {
+          ev.preventDefault();
+          setSettingsOpen(true);
+        },
+      };
+
+      // Single configurable dispatch: first catalog shortcut whose effective
+      // keys match the event wins.
+      const overrides = getStoredKeybindings();
+      for (const sc of SHORTCUTS) {
+        const cmd = keyCommands[sc.id];
+        if (cmd && matchBinding(e, effectiveKeys(sc.id, platform, overrides))) {
+          cmd(e);
+          return;
+        }
+      }
+
+      // ── Shortcuts NOT in the catalog (not user-remappable) ──────────────────
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      // Cmd/Ctrl+N: new file; Cmd/Ctrl+Shift+N: new folder (inline in the tree).
+      if (mod && (e.key === "n" || e.key === "N")) {
         e.preventDefault();
-        const tabs = tabStore().tabs();
-        const activeId = tabStore().activeTabId();
-        if (tabs.length < 2 || !activeId) return;
-        const currentIdx = tabs.findIndex((t) => t.id === activeId);
-        const nextIdx = e.shiftKey
-          ? (currentIdx - 1 + tabs.length) % tabs.length
-          : (currentIdx + 1) % tabs.length;
-        handleActivateTab(tabs[nextIdx]!.id);
+        if (rootPaths().size === 0) return;
+        startInlineCreate(e.shiftKey ? "folder" : "file");
+        return;
+      }
+      // F11: Reader/Zen fallback (the catalog binding ⌘. is handled above). F11
+      // is hijacked by macOS Mission Control, so ⌘. is the primary chord.
+      if (e.key === "F11" && !mod && !e.shiftKey) {
+        e.preventDefault();
+        state.setReaderMode((v) => !v);
       }
     }
 

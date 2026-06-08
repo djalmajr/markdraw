@@ -2629,16 +2629,52 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 .settings-kb-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 4px 0;
   font-size: 13px;
+}
+
+.settings-kb-desc {
+  flex: 1;
+  min-width: 0;
 }
 
 .settings-kb-keys {
   font-family: ui-monospace, monospace;
   font-size: 12px;
+  color: hsl(var(--foreground));
+  min-width: 64px;
+  padding: 3px 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--secondary));
+  cursor: pointer;
+  text-align: center;
+}
+.settings-kb-keys:hover {
+  border-color: hsl(var(--ring));
+}
+.settings-kb-recording {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+  background: hsl(var(--accent));
+}
+.settings-kb-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  border-radius: 5px;
   color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+.settings-kb-reset:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--bg-hover));
 }
 
 /* Inner scroll container — only this scrolls. Header above stays

@@ -4,6 +4,7 @@ import {
   Show,
   Switch,
   createSignal,
+  onCleanup,
   type JSX,
 } from "solid-js";
 import IconX from "~icons/lucide/x";
@@ -13,6 +14,7 @@ import IconLayers from "~icons/lucide/layers";
 import IconPencil from "~icons/lucide/pencil";
 import IconPalette from "~icons/lucide/palette";
 import IconKeyboard from "~icons/lucide/keyboard";
+import IconRotate from "~icons/lucide/rotate-ccw";
 import IconShield from "~icons/lucide/shield";
 import IconInfo from "~icons/lucide/info";
 import * as m from "@asciimark/i18n";
@@ -20,9 +22,15 @@ import { useLocale } from "@asciimark/i18n/solid";
 import {
   SHORTCUTS,
   groupShortcuts,
-  shortcutKeys,
   type Platform,
 } from "@asciimark/core/keyboard-shortcuts.ts";
+import {
+  effectiveKeys,
+  formatBinding,
+  getStoredKeybindings,
+  resetStoredKeybinding,
+  setStoredKeybinding,
+} from "@asciimark/core/keybindings.ts";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -581,11 +589,96 @@ function IndexingSection(props: SettingsDialogProps): JSX.Element {
   );
 }
 
+// Shortcuts handled outside the webview keydown dispatcher (OS menu accelerator
+// / editor keymap) — shown read-only would mislead, so we omit them here.
+const NON_REMAPPABLE = new Set(["file.openFolder", "file.save"]);
+
+/** Build display key-tokens for both platforms from a recorded keydown. */
+function eventToKeys(e: KeyboardEvent): { mac: string[]; other: string[] } | null {
+  const mac: string[] = [];
+  const other: string[] = [];
+  if (e.metaKey) {
+    mac.push("⌘");
+    other.push("Ctrl");
+  }
+  if (e.ctrlKey && !e.metaKey) {
+    mac.push("⌃");
+    other.push("Ctrl");
+  }
+  if (e.altKey) {
+    mac.push("⌥");
+    other.push("Alt");
+  }
+  if (e.shiftKey) {
+    mac.push("⇧");
+    other.push("Shift");
+  }
+  const key = keyToken(e);
+  if (!key) return null;
+  mac.push(key);
+  other.push(key);
+  return { mac, other };
+}
+
+function keyToken(e: KeyboardEvent): string {
+  const code = e.code;
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  const punct: Record<string, string> = {
+    Slash: "/",
+    Backslash: "\\",
+    Comma: ",",
+    Period: ".",
+    Semicolon: ";",
+    Minus: "-",
+    Equal: "=",
+    Tab: "Tab",
+    Enter: "Enter",
+    Space: "Space",
+  };
+  if (punct[code]) return punct[code];
+  if (e.key === "Meta" || e.key === "Control" || e.key === "Shift" || e.key === "Alt") return "";
+  return e.key.length === 1 ? e.key.toUpperCase() : e.key;
+}
+
 function KeybindingsSection(props: { platform: Platform }): JSX.Element {
-  const grouped = groupShortcuts(SHORTCUTS);
+  const [version, setVersion] = createSignal(0);
+  const [recordingId, setRecordingId] = createSignal<string | null>(null);
+  const grouped = groupShortcuts(SHORTCUTS.filter((s) => !NON_REMAPPABLE.has(s.id)));
+
+  function startRecording(id: string): void {
+    setRecordingId(id);
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === "Escape") {
+        stop();
+        return;
+      }
+      if (e.key === "Meta" || e.key === "Control" || e.key === "Shift" || e.key === "Alt") return;
+      const keys = eventToKeys(e);
+      if (keys) {
+        setStoredKeybinding(id, keys);
+        setVersion((v) => v + 1);
+      }
+      stop();
+    };
+    function stop(): void {
+      window.removeEventListener("keydown", onKey, true);
+      setRecordingId(null);
+    }
+    // Capture phase + stopImmediatePropagation so the global shortcut dispatcher
+    // doesn't also fire while the user is recording a chord.
+    window.addEventListener("keydown", onKey, true);
+    onCleanup(() => window.removeEventListener("keydown", onKey, true));
+  }
+
+  const isOverridden = (id: string): boolean => (version(), !!getStoredKeybindings()[id]);
+
   return (
     <div class="settings-section">
       <h3 class="settings-h3">{(useLocale(), label("settings_nav_keybindings"))}</h3>
+      <p class="settings-hint">{(useLocale(), m.settings_kb_hint())}</p>
       <For each={[...grouped.entries()]}>
         {([group, items]) => (
           <div class="settings-kb-group">
@@ -594,9 +687,34 @@ function KeybindingsSection(props: { platform: Platform }): JSX.Element {
               {(s) => (
                 <div class="settings-kb-row">
                   <span class="settings-kb-desc">{label(s.descriptionKey)}</span>
-                  <span class="settings-kb-keys">
-                    {shortcutKeys(s, props.platform).join(props.platform === "mac" ? " " : "+")}
-                  </span>
+                  <Show when={isOverridden(s.id)}>
+                    <button
+                      type="button"
+                      class="settings-kb-reset"
+                      onClick={() => {
+                        resetStoredKeybinding(s.id);
+                        setVersion((v) => v + 1);
+                      }}
+                      title={(useLocale(), m.settings_kb_reset())}
+                      aria-label={(useLocale(), m.settings_kb_reset())}
+                    >
+                      <IconRotate width={13} height={13} />
+                    </button>
+                  </Show>
+                  <button
+                    type="button"
+                    class="settings-kb-keys"
+                    classList={{ "settings-kb-recording": recordingId() === s.id }}
+                    onClick={() => startRecording(s.id)}
+                    title={(useLocale(), m.settings_kb_change())}
+                  >
+                    <Show
+                      when={recordingId() === s.id}
+                      fallback={(version(), formatBinding(effectiveKeys(s.id, props.platform), props.platform)) || "—"}
+                    >
+                      {(useLocale(), m.settings_kb_recording())}
+                    </Show>
+                  </button>
                 </div>
               )}
             </For>
