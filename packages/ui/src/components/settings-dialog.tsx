@@ -3,11 +3,13 @@ import {
   Match,
   Show,
   Switch,
+  createMemo,
   createSignal,
   onCleanup,
   type JSX,
 } from "solid-js";
 import IconX from "~icons/lucide/x";
+import IconSearch from "~icons/lucide/search";
 import IconSparkles from "~icons/lucide/sparkles";
 import IconPlug from "~icons/lucide/plug";
 import IconLayers from "~icons/lucide/layers";
@@ -242,6 +244,35 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
   const [loading, setLoading] = createSignal(false);
   const [saved, setSaved] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [modelQuery, setModelQuery] = createSignal("");
+
+  // ── Manage models (OpenCode pattern: search + provider header w/ a group
+  //    toggle + per-model toggles) ────────────────────────────────────────────
+  const hiddenSet = createMemo(() => new Set(props.hiddenModels ?? []));
+  const filteredGroups = createMemo(() => {
+    const q = modelQuery().trim().toLowerCase();
+    const groups = q
+      ? (props.allModels ?? []).map((g) => ({
+          ...g,
+          models: g.models.filter(
+            (mdl) => mdl.label.toLowerCase().includes(q) || g.name.toLowerCase().includes(q),
+          ),
+        }))
+      : (props.allModels ?? []);
+    return groups.filter((g) => g.models.length > 0);
+  });
+  /** Whether every model of a provider is currently visible (drives the group toggle). */
+  const providerAllVisible = (group: { models: { value: string }[] }): boolean =>
+    group.models.every((mdl) => !hiddenSet().has(mdl.value));
+  /** Flip a whole provider: if all visible → hide all, else → show all. */
+  function toggleProvider(group: { models: { value: string }[] }): void {
+    const hidden = hiddenSet();
+    const allVisible = group.models.every((mdl) => !hidden.has(mdl.value));
+    for (const mdl of group.models) {
+      const isHidden = hidden.has(mdl.value);
+      if (allVisible ? !isHidden : isHidden) props.onToggleModel?.(mdl.value);
+    }
+  }
 
   function selectProvider(id: string): void {
     setProviderId(id);
@@ -349,20 +380,40 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
         <label class="settings-label" style={{ "margin-top": "16px" }}>
           {(useLocale(), label("settings_ai_manage_models"))}
         </label>
-        <p class="settings-prose" style={{ margin: "0 0 6px" }}>
+        <p class="settings-prose" style={{ margin: "0 0 8px" }}>
           {(useLocale(), label("settings_ai_manage_models_desc"))}
         </p>
+        <div class="settings-models-search">
+          <IconSearch width={14} height={14} />
+          <input
+            type="text"
+            placeholder={(useLocale(), label("ai_model_search"))}
+            value={modelQuery()}
+            onInput={(e) => setModelQuery(e.currentTarget.value)}
+          />
+        </div>
         <div class="settings-models">
-          <For each={props.allModels}>
+          <For each={filteredGroups()}>
             {(group) => (
               <>
-                <div class="settings-models-group">{group.name}</div>
+                <div class="settings-models-group">
+                  <span class="settings-models-group-name">{group.name}</span>
+                  <ToggleSwitch
+                    checked={providerAllVisible(group)}
+                    onChange={() => toggleProvider(group)}
+                    aria-label={group.name}
+                  >
+                    <SwitchControl>
+                      <SwitchThumb />
+                    </SwitchControl>
+                  </ToggleSwitch>
+                </div>
                 <For each={group.models}>
                   {(mdl) => (
                     <div class="settings-models-row">
                       <span class="settings-models-name">{mdl.label}</span>
                       <ToggleSwitch
-                        checked={!(props.hiddenModels ?? []).includes(mdl.value)}
+                        checked={!hiddenSet().has(mdl.value)}
                         onChange={() => props.onToggleModel?.(mdl.value)}
                         aria-label={mdl.label}
                       >
@@ -376,6 +427,9 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               </>
             )}
           </For>
+          <Show when={filteredGroups().length === 0}>
+            <p class="settings-models-empty">{(useLocale(), label("ai_model_none"))}</p>
+          </Show>
         </div>
       </Show>
 

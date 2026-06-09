@@ -117,6 +117,53 @@ describe("SettingsDialog", () => {
     expect(onToggleModel).toHaveBeenCalledWith("openai/gpt-4o");
   });
 
+  it("Manage models: a provider header toggle flips all its models", () => {
+    const onToggleModel = vi.fn();
+    const { baseElement } = setup({
+      allModels: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          models: [
+            { value: "openai/a", label: "A" },
+            { value: "openai/b", label: "B" },
+          ],
+        },
+      ],
+      hiddenModels: [],
+      onToggleModel,
+    });
+    const group = [...baseElement.querySelectorAll(".settings-models-group")].find((g) =>
+      /OpenAI/i.test(g.textContent ?? ""),
+    )!;
+    fireEvent.click(group.querySelector('[role="switch"]') as HTMLElement);
+    // All visible → the group toggle hides every model.
+    expect(onToggleModel).toHaveBeenCalledWith("openai/a");
+    expect(onToggleModel).toHaveBeenCalledWith("openai/b");
+  });
+
+  it("Manage models: the search box filters the list", () => {
+    const { baseElement } = setup({
+      allModels: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          models: [
+            { value: "openai/gpt", label: "GPT-4o" },
+            { value: "openai/o1", label: "o1" },
+          ],
+        },
+      ],
+      hiddenModels: [],
+      onToggleModel: vi.fn(),
+    });
+    const search = baseElement.querySelector(".settings-models-search input") as HTMLInputElement;
+    fireEvent.input(search, { target: { value: "gpt" } });
+    const rows = [...baseElement.querySelectorAll(".settings-models-row")].map((r) => r.textContent ?? "");
+    expect(rows.some((t) => /GPT-4o/.test(t))).toBe(true);
+    expect(rows.some((t) => /o1/.test(t))).toBe(false);
+  });
+
   it("selecting a tier calls onTierChange", () => {
     const { baseElement, onTierChange } = setup();
     const indexingTab = [...baseElement.querySelectorAll('[role="tab"]')].find((t) =>
