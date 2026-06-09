@@ -155,7 +155,15 @@ export interface SettingsDialogProps {
   /** Streaming-responses beta toggle (real incremental deltas). */
   aiStreaming?: boolean;
   onAiStreamingChange?: (enabled: boolean) => void;
+  /** Current theme ("system" | "light" | "dark") + change handler — drives the
+   *  Appearance section's theme picker (moved here from the toolbar menu). */
+  themeMode?: string;
+  onThemeChange?: (mode: string) => void;
+  /** Open the release-notes dialog from Settings → About. */
+  onShowReleaseNotes?: () => void;
 }
+
+const THEME_MODES = ["system", "light", "dark"] as const;
 
 const NAV: ReadonlyArray<{ id: SettingsSection; key: string; icon: () => JSX.Element }> = [
   { id: "ai", key: "settings_nav_ai", icon: () => <IconSparkles width={15} height={15} /> },
@@ -231,13 +239,45 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                 <div class="settings-prose">
                   <p class="font-semibold">AsciiMark{props.appVersion ? ` v${props.appVersion}` : ""}</p>
                   <p>{(useLocale(), label("about_tagline"))}</p>
+                  <Show when={props.onShowReleaseNotes}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      style={{ "margin-top": "12px" }}
+                      onClick={() => props.onShowReleaseNotes?.()}
+                    >
+                      {(useLocale(), label("menu_release_notes"))}
+                    </Button>
+                  </Show>
                 </div>
               </Match>
               <Match when={section() === "editor"}>
                 <p class="settings-prose">{(useLocale(), label("settings_placeholder"))}</p>
               </Match>
               <Match when={section() === "appearance"}>
-                <p class="settings-prose">{(useLocale(), label("settings_placeholder"))}</p>
+                <h3 class="settings-h3">{(useLocale(), label("settings_nav_appearance"))}</h3>
+                <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
+                  <label class="settings-label" style={{ margin: "0" }}>
+                    {(useLocale(), label("menu_theme"))}
+                  </label>
+                  <Select<string>
+                    value={props.themeMode ?? "system"}
+                    onChange={(value) => value && props.onThemeChange?.(value)}
+                    options={[...THEME_MODES]}
+                    itemComponent={(itemProps) => (
+                      <SelectItem item={itemProps.item}>
+                        {(useLocale(), label(`menu_theme_${itemProps.item.rawValue}`))}
+                      </SelectItem>
+                    )}
+                  >
+                    <SelectTrigger class="w-40">
+                      <SelectValue<string>>
+                        {(state) => (useLocale(), label(`menu_theme_${state.selectedOption()}`))}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent />
+                  </Select>
+                </div>
               </Match>
             </Switch>
           </div>

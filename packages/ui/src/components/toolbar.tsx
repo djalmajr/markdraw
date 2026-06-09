@@ -9,11 +9,7 @@ import IconDownload from "~icons/lucide/download";
 import IconFileDown from "~icons/lucide/file-down";
 import IconFileText from "~icons/lucide/file-text";
 import IconFolder from "~icons/lucide/folder-open";
-import IconInfo from "~icons/lucide/info";
-import IconKeyboard from "~icons/lucide/keyboard";
 import IconLink from "~icons/lucide/link-2";
-import IconMonitor from "~icons/lucide/monitor";
-import IconMoon from "~icons/lucide/moon";
 import IconPanelLeft from "~icons/lucide/panel-left";
 import IconPanelRight from "~icons/lucide/panel-right";
 import IconColumns from "~icons/lucide/columns-2";
@@ -21,7 +17,6 @@ import IconMenu from "~icons/lucide/menu";
 import IconAppWindow from "~icons/lucide/app-window";
 import IconRefreshCw from "~icons/lucide/refresh-cw";
 import IconSettings from "~icons/lucide/settings";
-import IconSun from "~icons/lucide/sun";
 import IconLogOut from "~icons/lucide/log-out";
 import IconMinimize2 from "~icons/lucide/minimize-2";
 import * as m from "@asciimark/i18n";
@@ -45,7 +40,6 @@ import {
 interface ToolbarProps {
   canGoBack?: boolean;
   canGoForward?: boolean;
-  darkMode: boolean;
   editorMode: "edit" | "split" | "preview";
   hasFile: boolean;
   hasRoot: boolean;
@@ -68,7 +62,6 @@ interface ToolbarProps {
   showNavButtons?: boolean;
   showRecentHistory?: boolean;
   sidebarVisible: boolean;
-  themeMode: string;
   /** Desktop-only: which behaviour the OS close gesture takes. The
    *  submenu is hidden when this prop is undefined (Chrome extension
    *  has no tray, no window lifecycle to manage). */
@@ -76,19 +69,9 @@ interface ToolbarProps {
   tocVisible: boolean;
   onEditorModeChange: (mode: "edit" | "split" | "preview") => void;
   onCheckForUpdates?: () => void;
-  /** Open the read-only Release Notes dialog. Standalone from the
-   *  pending-update flow — lets the user reread the changelog of the
-   *  currently-installed version any time. When omitted (extension)
-   *  the menu item is hidden. */
-  onReleaseNotes?: () => void;
-  /** Open the keyboard shortcuts help modal. Wired to a menu item; if
-   *  omitted the item is hidden. */
-  onShortcutsHelp?: () => void;
-  /** Open the About dialog. Wired to a menu item; if omitted the
-   *  item is hidden (extension passes nothing). */
-  onAbout?: () => void;
   /** Open the app Settings dialog. Wired to a menu item; if omitted
-   *  the item is hidden (extension passes nothing). */
+   *  the item is hidden (extension passes nothing). Theme, keyboard
+   *  shortcuts, release notes and about now live inside this dialog. */
   onOpenSettings?: () => void;
   /** Toggle the split editor (open second pane / collapse). When
    *  omitted, the toolbar split button is hidden — handy for
@@ -103,7 +86,6 @@ interface ToolbarProps {
   onOpenFolder?: () => void;
   onOpenRecentFile?: (recentFile: RecentFile) => void | Promise<void>;
   onOpenRecentFolder?: (path: string) => void | Promise<void>;
-  onThemeChange: (mode: string) => void;
   /** Desktop-only: change the OS-close behaviour. Paired with
    *  `closeBehavior`; both undefined hides the submenu. */
   onCloseBehaviorChange?: (value: "tray" | "quit") => void;
@@ -304,33 +286,6 @@ export function Toolbar(props: ToolbarProps) {
         <Show when={props.onOpenFolder || hasRecentItems()}>
           <DropdownMenuSeparator />
         </Show>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            <Show when={props.darkMode} fallback={<IconSun width={14} height={14} />}>
-              <IconMoon width={14} height={14} />
-            </Show>
-            {(useLocale(), m.menu_theme())}
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent class="w-40">
-            <DropdownMenuRadioGroup
-              value={props.themeMode}
-              onChange={props.onThemeChange}
-            >
-              <DropdownMenuRadioItem value="system">
-                <IconMonitor width={14} height={14} />
-                {(useLocale(), m.menu_theme_system())}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="light">
-                <IconSun width={14} height={14} />
-                {(useLocale(), m.menu_theme_light())}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="dark">
-                <IconMoon width={14} height={14} />
-                {(useLocale(), m.menu_theme_dark())}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
         {/* Window-close behaviour submenu — desktop only. Hidden
             in the extension where there's no tray / no window
             lifecycle to choose between. Items mirror the Theme
@@ -361,19 +316,10 @@ export function Toolbar(props: ToolbarProps) {
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         </Show>
-        {/* Action group — Export, Shortcuts, Updates, About all
-              belong to "things you do from the menu" so they read as
-              a single block. One separator before the group divides
-              it from the open/recent/theme cluster above; items
-              inside the group are flat. */}
-        <Show when={
-          (props.hasFile && props.onExportPdf)
-          || props.onShortcutsHelp
-          || props.onCheckForUpdates
-          || props.onReleaseNotes
-          || props.onAbout
-          || props.onOpenSettings
-        }>
+        {/* Action group — Settings + Export. Theme, Keyboard shortcuts,
+            Release notes and About moved into the Settings dialog (their
+            own sections); only the genuinely menu-first actions remain. */}
+        <Show when={(props.hasFile && props.onExportPdf) || props.onOpenSettings}>
           <DropdownMenuSeparator />
         </Show>
         {/* App settings — opens the Settings dialog. Hidden when the host
@@ -390,37 +336,12 @@ export function Toolbar(props: ToolbarProps) {
             {(useLocale(), m.menu_export_pdf())}
           </DropdownMenuItem>
         </Show>
-        <Show when={props.onShortcutsHelp}>
-          <DropdownMenuItem onSelect={props.onShortcutsHelp}>
-            <IconKeyboard width={14} height={14} />
-            {(useLocale(), m.menu_keyboard_shortcuts())}
-          </DropdownMenuItem>
-        </Show>
-        {/* Divider before the update/about cluster — Shortcuts is the
-            last item of the "things you do regularly" group; updates
-            and About read as a separate, lower-traffic block. */}
-        <Show when={
-          props.onShortcutsHelp
-          && (props.onCheckForUpdates || props.onReleaseNotes || props.onAbout)
-        }>
-          <DropdownMenuSeparator />
-        </Show>
+        {/* Updates — lower-traffic, kept in its own block. */}
         <Show when={props.onCheckForUpdates}>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={props.onCheckForUpdates}>
             <IconDownload width={14} height={14} />
             {(useLocale(), m.menu_check_for_updates())}
-          </DropdownMenuItem>
-        </Show>
-        <Show when={props.onReleaseNotes}>
-          <DropdownMenuItem onSelect={props.onReleaseNotes}>
-            <IconFileText width={14} height={14} />
-            {(useLocale(), m.menu_release_notes())}
-          </DropdownMenuItem>
-        </Show>
-        <Show when={props.onAbout}>
-          <DropdownMenuItem onSelect={props.onAbout}>
-            <IconInfo width={14} height={14} />
-            {(useLocale(), m.menu_about())}
           </DropdownMenuItem>
         </Show>
       </DropdownMenuContent>

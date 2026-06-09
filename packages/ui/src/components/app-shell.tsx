@@ -532,6 +532,9 @@ export function AppShell(props: AppShellProps) {
           aiStreaming={props.aiStreaming ?? false}
           onAiStreamingChange={(v) => props.onAiStreamingChange?.(v)}
           appVersion={props.aboutVersion}
+          themeMode={s.themeMode()}
+          onThemeChange={s.handleThemeChange}
+          onShowReleaseNotes={props.onReleaseNotes}
         />
       </Show>
       <Show when={props.aboutVersion}>
@@ -617,14 +620,10 @@ export function AppShell(props: AppShellProps) {
           <Toolbar
             canGoBack={s.canGoBack()}
             canGoForward={s.canGoForward()}
-            darkMode={s.darkMode()}
             editorMode={s.editorMode()}
             hasFile={s.hasFile()}
             hasRoot={props.hasRoot}
             onCheckForUpdates={props.onCheckForUpdates}
-            onReleaseNotes={props.onReleaseNotes}
-            onShortcutsHelp={props.onShortcutsHelpOpen}
-            onAbout={props.aboutVersion ? props.onAboutOpen : undefined}
             onOpenSettings={props.onOpenSettings}
             isSplit={visiblePanes().length > 1}
             onToggleSplit={
@@ -648,7 +647,6 @@ export function AppShell(props: AppShellProps) {
             showNavButtons={props.showNavButtons}
             showRecentHistory={!!props.showRecentHistory}
             sidebarVisible={s.sidebarVisible()}
-            themeMode={s.themeMode()}
             closeBehavior={props.showCloseBehaviorToggle ? s.closeBehavior() : undefined}
             tocVisible={s.tocVisible()}
             onEditorModeChange={(m) => s.setEditorMode(m)}
@@ -658,7 +656,6 @@ export function AppShell(props: AppShellProps) {
             onOpenFolder={props.onOpenFolder}
             onOpenRecentFile={props.onOpenRecentFile}
             onOpenRecentFolder={props.onOpenRecentFolder}
-            onThemeChange={s.handleThemeChange}
             onCloseBehaviorChange={
               props.showCloseBehaviorToggle ? s.handleCloseBehaviorChange : undefined
             }
