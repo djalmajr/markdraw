@@ -180,12 +180,18 @@ fn is_html(rel: &str) -> bool {
 /// <ScrollArea> reach inside it — without this, a page that doesn't style its
 /// own scrollbar shows WKWebView's thick default. Injected at the very top of
 /// <head> so a page that DOES style its scrollbar still overrides ours.
+///
+/// Deliberately uses ONLY `::-webkit-scrollbar` (a fixed-width custom bar) and
+/// NOT the standard `scrollbar-width`/`scrollbar-color`: in WebKit, setting
+/// those switches the element to the NATIVE macOS overlay scrollbar (which
+/// fattens on hover/scroll) and makes WebKit ignore `::-webkit-scrollbar`. So
+/// the standard props are intentionally absent — they'd reintroduce the thick
+/// native bar this fix removes.
 const PREVIEW_SCROLLBAR_CSS: &str = "<style data-asciimark-preview>\
 ::-webkit-scrollbar{width:8px;height:8px}\
 ::-webkit-scrollbar-track{background:transparent}\
 ::-webkit-scrollbar-thumb{background-color:rgba(128,128,128,.45);border:1px solid transparent;background-clip:padding-box;border-radius:9999px}\
 ::-webkit-scrollbar-thumb:hover{background-color:rgba(128,128,128,.65)}\
-html{scrollbar-width:thin;scrollbar-color:rgba(128,128,128,.45) transparent}\
 </style>";
 
 /// Insert `PREVIEW_SCROLLBAR_CSS` right after the opening `<head>` (so the page
