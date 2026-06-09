@@ -25,7 +25,11 @@ const DropdownMenuContent = <T extends ValidComponent = "div">(
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
         class={cn(
-          "z-50 min-w-[8rem] origin-[var(--kb-menu-content-transform-origin)] animate-content-hide overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[expanded]:animate-content-show",
+          // `outline-none`: the menu container is focusable (focus lands here
+          // when the pointer is over a non-item like a separator); without it
+          // the browser paints its default blue focus ring. Items show their
+          // own `focus:bg-accent`, so nothing else needs the outline.
+          "z-50 min-w-[8rem] origin-[var(--kb-menu-content-transform-origin)] animate-content-hide overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md outline-none data-[expanded]:animate-content-show",
           local.class
         )}
         {...others}

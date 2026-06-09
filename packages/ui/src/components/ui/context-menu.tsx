@@ -29,7 +29,9 @@ const ContextMenuContent = <T extends ValidComponent = "div">(
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
         class={cn(
-          "z-50 min-w-32 origin-[var(--kb-menu-content-transform-origin)] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in",
+          // outline-none: focus can land on the menu container (e.g. pointer
+          // over a separator); avoid the browser's default blue focus ring.
+          "z-50 min-w-32 origin-[var(--kb-menu-content-transform-origin)] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md outline-none animate-in",
           local.class
         )}
         {...others}

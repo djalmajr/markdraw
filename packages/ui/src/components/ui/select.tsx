@@ -50,7 +50,7 @@ const SelectContent = <T extends ValidComponent = "div">(
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         class={cn(
-          "relative z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md animate-content-hide data-[expanded]:animate-content-show",
+          "relative z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md outline-none animate-content-hide data-[expanded]:animate-content-show",
           local.class
         )}
         {...others}
