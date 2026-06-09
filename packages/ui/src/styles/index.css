@@ -4359,9 +4359,12 @@ kbd.shortcuts-help-key {
 }
 
 /* === Scrollbar (standard + webkit) === */
+/* Discreet, cross-platform: a thin, light, fully-rounded thumb on a transparent
+   track. The 1px transparent border + padding-box clip insets the thumb to ~6px
+   inside the 8px gutter, matching the <ScrollArea> overlay thumb. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -4374,12 +4377,14 @@ kbd.shortcuts-help-key {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.4);
-  border-radius: 4px;
+  background-color: hsl(var(--muted-foreground) / 0.3);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.6);
+  background-color: hsl(var(--muted-foreground) / 0.5);
 }
 
 /* === Release notes inside <UpdateAvailableDialog> === */

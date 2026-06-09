@@ -258,7 +258,7 @@ const ScrollArea = (props: ScrollAreaProps) => {
           }}
         >
           <div
-            class="relative flex-1 rounded-full bg-muted-foreground/40 transition-colors hover:bg-muted-foreground/60"
+            class="relative flex-1 rounded-full bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/50"
             style={{ height: `${v().size}px`, transform: `translateY(${v().offset}px)` }}
             onPointerDown={(e) => dragThumb("v", e)}
           />
@@ -279,7 +279,7 @@ const ScrollArea = (props: ScrollAreaProps) => {
           }}
         >
           <div
-            class="relative h-full rounded-full bg-muted-foreground/40 transition-colors hover:bg-muted-foreground/60"
+            class="relative h-full rounded-full bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/50"
             style={{ width: `${h().size}px`, transform: `translateX(${h().offset}px)` }}
             onPointerDown={(e) => dragThumb("h", e)}
           />
