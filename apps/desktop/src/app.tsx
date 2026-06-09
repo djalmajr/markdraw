@@ -207,19 +207,29 @@ export function App() {
     aiConfig();
     return getStoredAiModel() ?? "";
   });
-  // Every configured model grouped by provider (drives Settings → Manage models).
+  // Every configured model grouped by provider (drives Settings → Manage models
+  // and the chat picker). Providers whose display name shares a base — e.g.
+  // "OpenCode Go" (kind: anthropic) and "OpenCode Go (chat)" (kind:
+  // openai-compatible), two entries for the same backend — are MERGED into one
+  // group; each model's `value` keeps its own provider id so routing/`kind`
+  // stays correct.
   const aiModelGroupsAll = createMemo<{ id: string; name: string; models: { value: string; label: string }[] }[]>(
-    () =>
-      Object.entries(aiConfig().provider)
-        .map(([pid, p]) => ({
-          id: pid,
-          name: p.name,
-          models: Object.entries(p.models).map(([mid, mdl]) => ({
-            value: `${pid}/${mid}`,
-            label: mdl.name ?? mid,
-          })),
-        }))
-        .filter((g) => g.models.length > 0),
+    () => {
+      const groups = new Map<string, { id: string; name: string; models: { value: string; label: string }[] }>();
+      for (const [pid, p] of Object.entries(aiConfig().provider)) {
+        const models = Object.entries(p.models).map(([mid, mdl]) => ({
+          value: `${pid}/${mid}`,
+          label: mdl.name ?? mid,
+        }));
+        if (models.length === 0) continue;
+        // Drop a trailing parenthetical variant suffix ("(chat)") to find the base.
+        const base = p.name.replace(/\s*\([^)]*\)\s*$/, "").trim() || p.name;
+        const existing = groups.get(base);
+        if (existing) existing.models.push(...models);
+        else groups.set(base, { id: base, name: base, models });
+      }
+      return [...groups.values()];
+    },
   );
   // Models the user hid via "Manage models" — filtered out of the chat picker.
   const [hiddenModels, setHiddenModels] = createSignal<string[]>(getStoredHiddenModels());
