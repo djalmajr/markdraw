@@ -6,6 +6,11 @@
 // (it never mutates the document without approval).
 
 import { invoke } from "./chaos-invoke.ts";
+import type {
+  ExcalidrawApplyMode,
+  ExcalidrawWriteInput,
+  ExcalidrawWriteResult,
+} from "../components/excalidraw-frame.tsx";
 import type { AITool } from "@asciimark/ai/types.ts";
 
 export interface InProcessToolDeps {
@@ -18,7 +23,12 @@ export interface InProcessToolDeps {
   /** Stage an edit proposal for the user to Accept/Reject. Resolves to a short
    *  status string fed back to the model (applied / rejected / not found). */
   proposeEdit: (edit: { find: string; replace: string }) => Promise<string>;
+  /** Draw/update a diagram in the active `.excalidraw` from Mermaid text.
+   *  Returns a failure result (not a throw) when no diagram is open. */
+  applyExcalidrawMermaid: (input: ExcalidrawWriteInput) => Promise<ExcalidrawWriteResult>;
 }
+
+const APPLY_MODES: readonly ExcalidrawApplyMode[] = ["replace-selection", "append", "replace-all"];
 
 /** Mirror of the Rust `FileMatch` (find_in_files), camelCased over IPC. */
 interface FileMatch {
@@ -118,5 +128,46 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
     },
   };
 
-  return [readActiveDoc, searchWorkspace, listFiles, proposeEdit];
+  const writeExcalidraw: AITool = {
+    name: "app__excalidraw_write",
+    source: APP,
+    description:
+      "Draw or update a diagram in the Excalidraw canvas the user currently has open, by " +
+      "providing the diagram as Mermaid text. Excalidraw renders ONLY these Mermaid diagram " +
+      "types as editable shapes: flowchart, sequenceDiagram, classDiagram, and " +
+      "erDiagram — prefer them. Other types (pie, gantt, state, mindmap, …) come in as a " +
+      "single flat image, so avoid them. `mode` controls placement: " +
+      "'replace-selection' swaps the user's current diagram selection for the new one (use " +
+      "when they asked to change/fix the selected part; falls back to append if nothing is " +
+      "selected); 'append' adds the diagram below existing content (the default — use to add " +
+      "to the canvas); 'replace-all' clears the canvas first (only when explicitly asked to " +
+      "start over). Only works when a .excalidraw file is the active document.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mermaid: {
+          type: "string",
+          description: "The diagram as Mermaid syntax (flowchart/sequenceDiagram/classDiagram/erDiagram).",
+        },
+        mode: {
+          type: "string",
+          enum: ["replace-selection", "append", "replace-all"],
+          description: "Where to place the diagram. Defaults to 'append'.",
+        },
+      },
+      required: ["mermaid"],
+      additionalProperties: false,
+    },
+    execute: async (args) => {
+      const a = args as { mermaid?: unknown; mode?: unknown };
+      const mermaid = String(a?.mermaid ?? "").trim();
+      if (!mermaid) return { ok: false, error: "`mermaid` is required." };
+      const mode: ExcalidrawApplyMode = APPLY_MODES.includes(a?.mode as ExcalidrawApplyMode)
+        ? (a.mode as ExcalidrawApplyMode)
+        : "append";
+      return deps.applyExcalidrawMermaid({ mermaid, mode });
+    },
+  };
+
+  return [readActiveDoc, searchWorkspace, listFiles, proposeEdit, writeExcalidraw];
 }

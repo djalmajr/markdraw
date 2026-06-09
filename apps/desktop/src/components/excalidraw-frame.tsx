@@ -7,18 +7,47 @@ import type { ExcalidrawScene } from "@asciimark/ui/composables/ai-context.ts";
 interface Scene {
   appState?: Record<string, unknown>;
   elements?: unknown[];
+  /** Binary blobs backing image elements (Excalidraw's top-level `files` map).
+   *  Round-trips through disk so images (pasted, or a Mermaid image fallback)
+   *  don't reopen broken. */
+  files?: Record<string, unknown>;
+}
+
+/** Where an AI-generated diagram lands relative to existing canvas content.
+ *  MIRRORS the guest's `ApplyMode` (frame repo, app-excalidraw/src/App.tsx) —
+ *  keep the two string unions in sync. */
+export type ExcalidrawApplyMode = "replace-selection" | "append" | "replace-all";
+
+export interface ExcalidrawWriteInput {
+  /** Mermaid source (flowchart/sequence/class/ER — the editable types). */
+  mermaid: string;
+  mode: ExcalidrawApplyMode;
+}
+
+export interface ExcalidrawWriteResult {
+  ok: boolean;
+  /** The mode actually used — `replace-selection` degrades to `append` when
+   *  nothing is selected, so the caller (and the model) sees what happened. */
+  mode: ExcalidrawApplyMode;
+  added: number;
+  removed: number;
+  error?: string;
+}
+
+/** The host-facing handle a mounted `<ExcalidrawFrame>` registers for its file:
+ *  read the live scene (⌘I context) and write a diagram into it (AI tool). */
+export interface ExcalidrawFrameApi {
+  getScene: () => Promise<ExcalidrawScene | null>;
+  applyMermaid: (input: ExcalidrawWriteInput) => Promise<ExcalidrawWriteResult>;
 }
 
 interface ExcalidrawFrameProps {
   /** Absolute path of the `.excalidraw` file on disk. */
   filePath: string;
-  /** Register/unregister a getter for THIS file's live scene (selection +
-   *  elements) so ⌘I can attach the diagram selection to the AI chat. Called
-   *  with a getter on mount and `null` on cleanup. */
-  onSceneApi?: (
-    filePath: string,
-    getScene: (() => Promise<ExcalidrawScene | null>) | null,
-  ) => void;
+  /** Register/unregister the host handle for THIS file (read scene + write
+   *  diagram). Called with the API while mounted and `null` on cleanup; re-keyed
+   *  if `filePath` changes on a reused instance. */
+  onFrameApi?: (filePath: string, api: ExcalidrawFrameApi | null) => void;
 }
 
 const RESERVED = new Set([
@@ -91,6 +120,7 @@ function sceneToFile(scene: Scene): string {
     source: "asciimark",
     appState: scene.appState ?? {},
     elements: scene.elements ?? [],
+    files: scene.files ?? {},
   });
 }
 
@@ -125,10 +155,14 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
     invoke<string>("read_file", { path })
       .then((content) => {
         const json = JSON.parse(content) as Scene;
-        setScene({ appState: json.appState ?? {}, elements: json.elements ?? [] });
+        setScene({
+          appState: json.appState ?? {},
+          elements: json.elements ?? [],
+          files: json.files ?? {},
+        });
       })
       .catch(() => {
-        setScene({ appState: {}, elements: [] });
+        setScene({ appState: {}, elements: [], files: {} });
       });
 
     onCleanup(() => {
@@ -165,20 +199,48 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
   // `pathname`. `src` is also absolute, as the z-frame does `new URL(this.src)`.
   const guestOrigin = window.location.origin;
 
-  // Captured z-frame element — the guest registers `getScene` as a callable
-  // method on it (RPC) once the iframe handshake completes.
-  let frameEl: (HTMLElement & { getScene?: () => Promise<ExcalidrawScene> }) | undefined;
-  onMount(() => {
-    props.onSceneApi?.(props.filePath, async () => {
+  // Captured z-frame element — the guest registers `getScene`/`applyMermaid` as
+  // callable methods on it (RPC) once the iframe handshake completes.
+  let frameEl:
+    | (HTMLElement & {
+        getScene?: () => Promise<ExcalidrawScene>;
+        applyMermaid?: (input: ExcalidrawWriteInput) => Promise<ExcalidrawWriteResult>;
+      })
+    | undefined;
+
+  // The handle is stable (its closures read the stable `frameEl`); only its
+  // registry key (filePath) is reactive — so register in an effect that re-keys
+  // on a file switch rather than a one-shot onMount.
+  const api: ExcalidrawFrameApi = {
+    getScene: async () => {
       if (typeof frameEl?.getScene !== "function") return null;
       try {
         return (await frameEl.getScene()) ?? null;
       } catch {
         return null;
       }
-    });
+    },
+    applyMermaid: async (input) => {
+      const fail = (error: string): ExcalidrawWriteResult => ({
+        ok: false,
+        mode: input.mode,
+        added: 0,
+        removed: 0,
+        error,
+      });
+      if (typeof frameEl?.applyMermaid !== "function") return fail("Excalidraw editor not ready");
+      try {
+        return await frameEl.applyMermaid(input);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    },
+  };
+  createEffect(() => {
+    const path = props.filePath;
+    props.onFrameApi?.(path, api);
+    onCleanup(() => props.onFrameApi?.(path, null));
   });
-  onCleanup(() => props.onSceneApi?.(props.filePath, null));
 
   return (
     <Frame

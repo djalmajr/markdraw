@@ -58,12 +58,14 @@ import { FileWatcher } from "./lib/watcher.ts";
 import { createFileLoader } from "./lib/file-loader.ts";
 import { createNavigation } from "./lib/navigation.ts";
 import { createFolder } from "./lib/folder.ts";
-import { ExcalidrawFrame } from "./components/excalidraw-frame.tsx";
-import { fileKind, isSupportedFile } from "@asciimark/core/utils.ts";
 import {
-  excalidrawSelectionToContext,
-  type ExcalidrawScene,
-} from "@asciimark/ui/composables/ai-context.ts";
+  ExcalidrawFrame,
+  type ExcalidrawFrameApi,
+  type ExcalidrawWriteInput,
+  type ExcalidrawWriteResult,
+} from "./components/excalidraw-frame.tsx";
+import { fileKind, isSupportedFile } from "@asciimark/core/utils.ts";
+import { excalidrawSelectionToContext } from "@asciimark/ui/composables/ai-context.ts";
 import { buildBacklinkIndex } from "@asciimark/core/backlinks.ts";
 import { flattenWorkspace } from "@asciimark/core/file-index.ts";
 import { readFileContent } from "./lib/fs.ts";
@@ -380,6 +382,7 @@ export function App() {
       getActiveDocPath: () => state.selectedFile()?.path ?? null,
       getWorkspaceRoots: () => Array.from(rootPaths().values()),
       proposeEdit: proposeAiEdit,
+      applyExcalidrawMermaid,
     });
     let mcp: AITool[] = [];
     try {
@@ -1058,33 +1061,55 @@ export function App() {
       invoke("html_preview_clear_overlay", { token }) as Promise<void>,
   };
 
-  // Live scene getters for mounted Excalidraw frames, keyed by absolute file
-  // path (so ⌘I on the active pane can read THAT diagram's selection even with
-  // split panes). Registered/cleared by each <ExcalidrawFrame> via onSceneApi.
-  const excalidrawScenes = new Map<string, () => Promise<ExcalidrawScene | null>>();
-  function registerExcalidrawScene(
-    filePath: string,
-    getScene: (() => Promise<ExcalidrawScene | null>) | null,
-  ): void {
-    if (getScene) excalidrawScenes.set(filePath, getScene);
-    else excalidrawScenes.delete(filePath);
+  // Live host handles for mounted Excalidraw frames, keyed by absolute file path
+  // (so ⌘I / the AI write tool act on the ACTIVE pane's diagram even with split
+  // panes). Registered/cleared by each <ExcalidrawFrame> via onFrameApi.
+  const excalidrawFrames = new Map<string, ExcalidrawFrameApi>();
+  function registerExcalidrawFrame(filePath: string, api: ExcalidrawFrameApi | null): void {
+    if (api) excalidrawFrames.set(filePath, api);
+    else excalidrawFrames.delete(filePath);
+  }
+
+  /** The host handle for the Excalidraw shown in the ACTIVE pane, or null when
+   *  the active view isn't a `.excalidraw` (used by ⌘I and the AI write tool). */
+  function activeExcalidrawFrame(): ExcalidrawFrameApi | null {
+    const pane = state.paneManager.activePane();
+    const file = pane.selectedFile();
+    const rootId = pane.selectedRootId();
+    if (!file || fileKind(file.name) !== "excalidraw" || !rootId) return null;
+    const abs = `${rootPaths().get(rootId) ?? ""}/${file.path}`;
+    return excalidrawFrames.get(abs) ?? null;
   }
 
   // ⌘I over an open `.excalidraw`: attach the current diagram selection to the
   // chat as a context chip. Returns false (→ caller falls back to the editor
   // text selection) when the active view isn't an Excalidraw with a selection.
   async function addExcalidrawSelectionToChat(): Promise<boolean> {
-    const pane = state.paneManager.activePane();
-    const file = pane.selectedFile();
-    const rootId = pane.selectedRootId();
-    if (!file || fileKind(file.name) !== "excalidraw" || !rootId) return false;
-    const abs = `${rootPaths().get(rootId) ?? ""}/${file.path}`;
-    const getScene = excalidrawScenes.get(abs);
-    if (!getScene) return false;
-    const item = excalidrawSelectionToContext(await getScene(), file);
+    const api = activeExcalidrawFrame();
+    if (!api) return false;
+    const file = state.paneManager.activePane().selectedFile();
+    if (!file) return false;
+    const item = excalidrawSelectionToContext(await api.getScene(), file);
     if (!item) return false;
     state.addAiContext(item);
     return true;
+  }
+
+  /** Render a Mermaid diagram into the active `.excalidraw` (the AI write tool).
+   *  Returns a structured result the model can read — including a clear failure
+   *  when no diagram is open, so it knows to tell the user to open one. */
+  async function applyExcalidrawMermaid(input: ExcalidrawWriteInput): Promise<ExcalidrawWriteResult> {
+    const api = activeExcalidrawFrame();
+    if (!api) {
+      return {
+        ok: false,
+        mode: input.mode,
+        added: 0,
+        removed: 0,
+        error: "No Excalidraw diagram is open. Ask the user to open a .excalidraw file first.",
+      };
+    }
+    return api.applyMermaid(input);
   }
 
   async function handleOpenRecentFile(recentFile: RecentFile) {
@@ -2143,7 +2168,7 @@ export function App() {
       renderExcalidraw={(file, rootId) => {
         const root = rootPaths().get(rootId);
         return root ? (
-          <ExcalidrawFrame filePath={`${root}/${file.path}`} onSceneApi={registerExcalidrawScene} />
+          <ExcalidrawFrame filePath={`${root}/${file.path}`} onFrameApi={registerExcalidrawFrame} />
         ) : null;
       }}
       onToggleShowHiddenEntries={() => folder.refreshAllRoots()}
