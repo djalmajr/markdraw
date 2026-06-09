@@ -128,7 +128,7 @@ pub fn serve<R: Runtime>(app: &AppHandle<R>, request: Request<Vec<u8>>) -> Respo
     // is HTML, never a CSS module or JS, so serve it verbatim.
     if let Some((orel, content)) = inner.overlay.get(&token) {
         if *orel == rel {
-            return ok(content.clone().into_bytes(), content_type_for("page.html"));
+            return ok(inject_preview_chrome(content).into_bytes(), content_type_for("page.html"));
         }
     }
     drop(inner);
@@ -162,7 +162,43 @@ pub fn serve<R: Runtime>(app: &AppHandle<R>, request: Request<Vec<u8>>) -> Respo
             );
         }
     }
+    if is_html(&rel) {
+        if let Ok(html) = std::str::from_utf8(&bytes) {
+            return ok(inject_preview_chrome(html).into_bytes(), content_type_for(&rel));
+        }
+    }
     ok(bytes, content_type_for(&rel))
+}
+
+fn is_html(rel: &str) -> bool {
+    let lower = rel.to_ascii_lowercase();
+    lower.ends_with(".html") || lower.ends_with(".htm")
+}
+
+/// A discreet, theme-agnostic scrollbar for the previewed page. The iframe is a
+/// separate document/origin, so neither the app's global scrollbar CSS nor
+/// <ScrollArea> reach inside it — without this, a page that doesn't style its
+/// own scrollbar shows WKWebView's thick default. Injected at the very top of
+/// <head> so a page that DOES style its scrollbar still overrides ours.
+const PREVIEW_SCROLLBAR_CSS: &str = "<style data-asciimark-preview>\
+::-webkit-scrollbar{width:8px;height:8px}\
+::-webkit-scrollbar-track{background:transparent}\
+::-webkit-scrollbar-thumb{background-color:rgba(128,128,128,.45);border:1px solid transparent;background-clip:padding-box;border-radius:9999px}\
+::-webkit-scrollbar-thumb:hover{background-color:rgba(128,128,128,.65)}\
+html{scrollbar-width:thin;scrollbar-color:rgba(128,128,128,.45) transparent}\
+</style>";
+
+/// Insert `PREVIEW_SCROLLBAR_CSS` right after the opening `<head>` (so the page
+/// can still override it), or prepend it when there's no head.
+fn inject_preview_chrome(html: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    if let Some(h) = lower.find("<head") {
+        if let Some(gt) = lower[h..].find('>') {
+            let pos = h + gt + 1;
+            return format!("{}{}{}", &html[..pos], PREVIEW_SCROLLBAR_CSS, &html[pos..]);
+        }
+    }
+    format!("{PREVIEW_SCROLLBAR_CSS}{html}")
 }
 
 /// True for files the browser loads as ES modules (where CSS-module imports may
@@ -360,5 +396,32 @@ mod tests {
         assert!(is_js_module("c.cjs"));
         assert!(!is_js_module("style.css"));
         assert!(!is_js_module("page.html"));
+    }
+
+    #[test]
+    fn injects_scrollbar_style_after_head() {
+        let out = inject_preview_chrome("<html><head><title>x</title></head><body>y</body></html>");
+        // Lands right after <head>, before the page's own head content, so the
+        // page can still override it.
+        assert!(out.contains("<head><style data-asciimark-preview>"), "{out}");
+        assert!(out.find("data-asciimark-preview").unwrap() < out.find("<title>").unwrap());
+        assert!(out.contains("::-webkit-scrollbar-thumb"));
+    }
+
+    #[test]
+    fn injects_scrollbar_style_when_no_head() {
+        // Mutation: skipping the prepend would leave a head-less fragment with
+        // WKWebView's thick default scrollbar.
+        let out = inject_preview_chrome("<p>fragment</p>");
+        assert!(out.starts_with("<style data-asciimark-preview>"));
+        assert!(out.ends_with("<p>fragment</p>"));
+    }
+
+    #[test]
+    fn is_html_matches_html_extensions() {
+        assert!(is_html("index.html"));
+        assert!(is_html("a/b.htm"));
+        assert!(!is_html("app.js"));
+        assert!(!is_html("style.css"));
     }
 }
