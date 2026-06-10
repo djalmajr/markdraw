@@ -95,12 +95,68 @@ pub struct McpServerStatus {
     pub tool_count: usize,
 }
 
+/// Pure PATH × PATHEXT scan (first hit wins, directories outrank extensions —
+/// the same order cmd.exe uses), split from the env/filesystem reads so it
+/// unit-tests on every platform.
+#[cfg(any(windows, test))]
+fn find_in_path(
+    program: &str,
+    dirs: &[std::path::PathBuf],
+    exts: &[String],
+    is_file: &dyn Fn(&std::path::Path) -> bool,
+) -> Option<std::path::PathBuf> {
+    for dir in dirs {
+        for ext in exts {
+            let candidate = dir.join(format!("{program}{ext}"));
+            if is_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// CreateProcess only auto-appends `.exe`, so a bare `npx`/`bunx` (Node/Bun CLI
+/// shims are `.cmd` scripts on Windows) fails with "program not found" even
+/// though it runs fine in any shell. Resolve bare names through PATH × PATHEXT
+/// like the shell would; names with a path separator or an explicit extension
+/// pass through untouched. Returning the full `…\npx.cmd` path is enough:
+/// std::process routes `.bat`/`.cmd` through cmd.exe itself (with safe arg
+/// escaping post-BatBadBut), and tokio's Command wraps std's.
+#[cfg(windows)]
+fn resolve_program(program: &str) -> String {
+    if program.contains('/')
+        || program.contains('\\')
+        || std::path::Path::new(program).extension().is_some()
+    {
+        return program.to_string();
+    }
+    let exts: Vec<String> = std::env::var("PATHEXT")
+        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string())
+        .split(';')
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .collect();
+    let dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    find_in_path(program, &dirs, &exts, &|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| program.to_string())
+}
+
 fn build_command(config: &McpServerConfig) -> Result<Command, String> {
     let program = config
         .command
         .clone()
         .ok_or_else(|| "stdio transport requires `command`".to_string())?;
+    #[cfg(windows)]
+    let program = resolve_program(&program);
     let mut cmd = Command::new(program);
+    // Stdio servers are background children — without this every spawn flashes
+    // a console window on Windows.
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     if let Some(args) = &config.args {
         cmd.args(args);
     }
@@ -407,6 +463,41 @@ mod tests {
         assert!(keep_tool(TaskSupport::Forbidden));
         assert!(keep_tool(TaskSupport::Optional));
         assert!(!keep_tool(TaskSupport::Required));
+    }
+
+    #[test]
+    fn find_in_path_resolves_a_cmd_shim() {
+        use std::path::{Path, PathBuf};
+        let dirs = vec![PathBuf::from("C:/util"), PathBuf::from("C:/nodejs")];
+        let exts = vec![".COM".to_string(), ".EXE".to_string(), ".CMD".to_string()];
+        let exists = |p: &Path| p == Path::new("C:/nodejs/npx.CMD");
+        assert_eq!(
+            find_in_path("npx", &dirs, &exts, &exists),
+            Some(PathBuf::from("C:/nodejs/npx.CMD")),
+        );
+    }
+
+    #[test]
+    fn find_in_path_earlier_dir_wins_over_earlier_ext() {
+        use std::path::{Path, PathBuf};
+        let dirs = vec![PathBuf::from("/a"), PathBuf::from("/b")];
+        let exts = vec![".EXE".to_string(), ".CMD".to_string()];
+        // /a has only the .CMD; /b has the .EXE. cmd.exe picks /a/tool.CMD —
+        // directory order outranks extension order.
+        let exists =
+            |p: &Path| p == Path::new("/a/tool.CMD") || p == Path::new("/b/tool.EXE");
+        assert_eq!(
+            find_in_path("tool", &dirs, &exts, &exists),
+            Some(PathBuf::from("/a/tool.CMD")),
+        );
+    }
+
+    #[test]
+    fn find_in_path_returns_none_when_absent() {
+        use std::path::PathBuf;
+        let dirs = vec![PathBuf::from("/a")];
+        let exts = vec![".EXE".to_string()];
+        assert_eq!(find_in_path("ghost", &dirs, &exts, &|_| false), None);
     }
 
     #[test]
