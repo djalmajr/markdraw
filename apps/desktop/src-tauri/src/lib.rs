@@ -23,6 +23,11 @@ use ai_mcp::{
     ai_mcp_list_tools, McpManager,
 };
 
+// Streaming provider HTTP — Rust-side POST + SSE line framing over an ipc
+// Channel (tauri-plugin-http buffers whole responses, so SSE never streamed).
+mod ai_http;
+use ai_http::{ai_http_stream, ai_http_stream_cancel, HttpStreamManager};
+
 // `asciimark-preview://` custom scheme — serves an HTML file's directory as an
 // isolated web origin so multi-file pages / SPAs preview with full fidelity
 // (root-absolute paths, ES modules, importmaps, hash routing). Commands
@@ -1119,6 +1124,7 @@ pub fn run() {
         .manage(WatcherHolder(Mutex::new(None)))
         .manage(DirWatcherHolder(Mutex::new(None)))
         .manage(McpManager::default())
+        .manage(HttpStreamManager::default())
         .manage(html_preview::HtmlPreviewState::default())
         .invoke_handler(tauri::generate_handler![
             open_directory_dialog,
@@ -1155,6 +1161,8 @@ pub fn run() {
             ai_mcp_list_tools,
             ai_mcp_call_tool,
             ai_mcp_cancel_call,
+            ai_http_stream,
+            ai_http_stream_cancel,
             html_preview_register,
             html_preview_set_overlay,
             html_preview_clear_overlay,

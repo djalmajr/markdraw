@@ -46,6 +46,12 @@ rmcp = { version = "1", default-features = false, features = [
 ] }
 # For typed HTTP header names/values when passing custom MCP auth headers.
 http = "1"
+# Streaming provider HTTP (ai_http.rs): tauri-plugin-http buffers whole
+# responses so SSE never streams — the POST happens here in Rust instead and
+# body chunks flow to the webview over an ipc Channel. Already compiled
+# transitively via rmcp's reqwest transport; `stream` adds bytes_stream().
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"
 # Percent-decode the path of `htmlpreview://` requests (the custom scheme that
 # serves an HTML file's directory as an isolated origin for SPA previews).
 percent-encoding = "2"
