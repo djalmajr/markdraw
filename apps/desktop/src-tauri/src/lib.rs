@@ -1090,6 +1090,17 @@ pub fn run() {
                     }
                 }
             }
+            // Windows-only: drop the native window frame. `titleBarStyle:
+            // "Overlay"` in the config is a macOS-only setting, so Windows
+            // keeps native decorations — and the app already draws its own
+            // caption buttons there (`<WindowControls />` in app.tsx), which
+            // showed BOTH sets of min/max/close. Disabling decorations at
+            // runtime avoids duplicating the whole `app.windows` array into a
+            // tauri.windows.conf.json (platform configs replace arrays whole).
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_decorations(false);
+            }
             let _ = app;
             Ok(())
         })
