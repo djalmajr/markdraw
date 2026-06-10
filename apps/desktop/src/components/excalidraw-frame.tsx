@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 // Registers the <z-frame> custom element (from the published @zomme/frame core).
 import "@zomme/frame";
+import { SHORTCUTS, detectPlatform } from "@asciimark/core/keyboard-shortcuts.ts";
+import { effectiveKeys, matchBinding } from "@asciimark/core/keybindings.ts";
 import type { ExcalidrawScene } from "@asciimark/ui/composables/ai-context.ts";
 
 interface Scene {
@@ -242,6 +244,68 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
     onCleanup(() => props.onFrameApi?.(path, null));
   });
 
+  // ── Host shortcut forwarding ──────────────────────────────────────────────
+  // Keydown never crosses the iframe boundary, so with the canvas focused no
+  // host shortcut (e.g. ⌘I "ai.inlineAction") would ever fire. The guest is
+  // same-origin (served from our own origin, see `guestOrigin`), so once the
+  // z-frame handshake completes we can reach into its document and listen in
+  // the capture phase. Only chords that match the SHORTCUTS catalog (with the
+  // user's overrides) are forwarded — window also hosts opportunistic listeners
+  // (e.g. the preview's Ctrl+F) that would happily claim any forwarded clone
+  // and steal chords Excalidraw owns natively, so everything off-catalog stays
+  // inside the canvas. A matched clone is dispatched on the HOST window, and
+  // only if a binding consumes it (defaultPrevented) do we swallow the
+  // original. The clone lands on the host window, never back inside the
+  // iframe, so forwarding cannot recurse.
+  const forwardedDocs = new WeakSet<Document>();
+  let detachKeyForwarding: (() => void) | undefined;
+
+  const hostClaimsChord = (e: KeyboardEvent): boolean => {
+    const platform = detectPlatform(typeof navigator === "undefined" ? "" : navigator.platform);
+    return SHORTCUTS.some((s) => matchBinding(e, effectiveKeys(s.id, platform)));
+  };
+
+  const forwardHostShortcuts = (e: KeyboardEvent) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    if (!hostClaimsChord(e)) return;
+    const clone = new KeyboardEvent("keydown", {
+      altKey: e.altKey,
+      bubbles: true,
+      cancelable: true,
+      code: e.code,
+      ctrlKey: e.ctrlKey,
+      key: e.key,
+      metaKey: e.metaKey,
+      shiftKey: e.shiftKey,
+    });
+    window.dispatchEvent(clone);
+    if (clone.defaultPrevented) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
+  // Runs on every z-frame "ready" — which re-fires on reconnect. The WeakSet
+  // keeps the listener single per document while still re-attaching when the
+  // iframe (and thus its document) is recreated; the stale document's listener
+  // is detached before the new one is wired.
+  const attachKeyForwarding = () => {
+    const doc = frameEl?.querySelector("iframe")?.contentDocument;
+    if (!doc || forwardedDocs.has(doc)) return;
+    detachKeyForwarding?.();
+    forwardedDocs.add(doc);
+    doc.addEventListener("keydown", forwardHostShortcuts, true);
+    detachKeyForwarding = () => {
+      forwardedDocs.delete(doc);
+      doc.removeEventListener("keydown", forwardHostShortcuts, true);
+    };
+  };
+
+  onCleanup(() => {
+    detachKeyForwarding?.();
+    detachKeyForwarding = undefined;
+  });
+
   return (
     <Frame
       name="excalidraw"
@@ -250,6 +314,7 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
       style="width:100%;height:100%;border:0;display:block"
       drawingData={scene()}
       save={save}
+      onReady={attachKeyForwarding}
       ref={(el: HTMLElement) => (frameEl = el as typeof frameEl)}
     />
   );
