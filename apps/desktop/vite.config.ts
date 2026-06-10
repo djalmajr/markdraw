@@ -24,6 +24,14 @@ export default defineConfig({
     },
   },
   clearScreen: false,
+  optimizeDeps: {
+    // The dep optimizer crawls every `**/*.html` under the project root as a scan
+    // entry by default. `src-tauri/target/doc/` holds 24k+ rustdoc HTML files
+    // (`cargo doc` output), so on Windows the scan never finishes — the optimizer
+    // hangs, `.vite/deps` stays empty, the dev server can't serve, and the WebView2
+    // window is left stuck at about:blank. Pin the crawl to the real app entry.
+    entries: ["index.html"],
+  },
   server: {
     port: 2444,
     strictPort: true,
