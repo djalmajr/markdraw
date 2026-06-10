@@ -477,6 +477,39 @@ describe("AppState — AI multi-chat tab routing", () => {
     }, { createAIProvider: () => provider });
   });
 
+  it("injects a folder mention as a kind=\"folder\" context block, tracked by its @label", async () => {
+    let sent: { role: string; content: string }[] | undefined;
+    const provider = {
+      async *chat(messages: { role: string; content: string }[]) {
+        sent = messages;
+        yield { type: "done" as const };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    await withState(async (state) => {
+      // Folder mentions ride the exact same registration path as files — only
+      // the kind/id mapping differs, so label tracking stays shared.
+      state.addFileMention(
+        { content: "- src/a.md", kind: "folder", label: "src/", path: "src", rootId: "r" },
+        {},
+      );
+      state.setActiveMentionLabels(["src/"]);
+      const id = state.newChat();
+      await state.aiSessions.storeFor(id)!.sendMessage("hi");
+      expect(sent?.at(-1)?.content).toContain('<context kind="folder" source="src/">');
+      expect(sent?.at(-1)?.content).toContain("- src/a.md");
+      // Deleting "@src/" from the composer drops the listing from the next send.
+      state.setActiveMentionLabels([]);
+      await state.aiSessions.storeFor(id)!.sendMessage("again");
+      expect(sent?.at(-1)?.content).not.toContain("- src/a.md");
+    }, { createAIProvider: () => provider });
+  });
+
   it("closing the active chat falls back to a neighbor, then to empty", () => {
     // closeChat reconciles synchronously: it falls back to a remaining chat,
     // and only when nothing is left does the active tab become "".

@@ -121,6 +121,37 @@ describe("SettingsDialog", () => {
     expect(onToggleModel).toHaveBeenCalledWith("openai/b");
   });
 
+  it("Manage models: each group header has a remove button firing onRemoveProvider with the group's ids", () => {
+    const onRemoveProvider = vi.fn();
+    const { baseElement } = setup({
+      allModels: [
+        {
+          // Merged group: two provider ids behind one base name — remove must
+          // receive BOTH (each model ref carries its own "provider/" prefix).
+          id: "OpenCode Go",
+          name: "OpenCode Go",
+          models: [
+            { value: "opencode-go/big-model", label: "Big Model" },
+            { value: "opencode-go-chat/chat-model", label: "Chat Model" },
+          ],
+        },
+        { id: "openai", name: "OpenAI", models: [{ value: "openai/gpt-4o", label: "GPT-4o" }] },
+      ],
+      hiddenModels: [],
+      onRemoveProvider,
+      onToggleModel: vi.fn(),
+    });
+    const buttons = [
+      ...baseElement.querySelectorAll('.settings-models-group button[aria-label="Remove provider"]'),
+    ];
+    // One remove button per rendered provider group header.
+    expect(buttons.length).toBe(2);
+    fireEvent.click(buttons[0] as HTMLElement);
+    expect(onRemoveProvider).toHaveBeenCalledWith(["opencode-go", "opencode-go-chat"]);
+    fireEvent.click(buttons[1] as HTMLElement);
+    expect(onRemoveProvider).toHaveBeenCalledWith(["openai"]);
+  });
+
   it("Manage models: the search box filters the list", () => {
     const { baseElement } = setup({
       allModels: [

@@ -44,7 +44,7 @@ import {
   type McpServerStatus,
 } from "./lib/ai-mcp.ts";
 import { buildInProcessTools } from "./lib/ai-tools.ts";
-import { getApiKey, setApiKey } from "./lib/ai-credentials.ts";
+import { deleteApiKey, getApiKey, hasApiKey, setApiKey } from "./lib/ai-credentials.ts";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import type { TabStore } from "@asciimark/ui/composables/create-tab-store.ts";
 import { AppShell } from "@asciimark/ui/components/app-shell.tsx";
@@ -68,7 +68,7 @@ import { fileKind, isSupportedFile } from "@asciimark/core/utils.ts";
 import { excalidrawSceneToOutline, excalidrawSelectionToContext } from "@asciimark/ui/composables/ai-context.ts";
 import { buildBacklinkIndex } from "@asciimark/core/backlinks.ts";
 import { flattenWorkspace } from "@asciimark/core/file-index.ts";
-import { readFileContent } from "./lib/fs.ts";
+import { createDir, createFile, readFileByPath, readFileContent, writeFile } from "./lib/fs.ts";
 import {
   buildWorkspaceSymbols,
   type WorkspaceSymbol,
@@ -102,6 +102,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 const { convertAdoc, convertMarkdown } = createConverter(new ConvertWorker());
 
+// Providers that talk to a localhost server and need no API key — they count
+// as "connected" without a keychain or config credential.
+const LOCAL_PROVIDER_IDS = new Set(["ollama", "lmstudio"]);
+
 export function App() {
   // AI provider catalog (ai.json merged over builtins). Starts with builtins so
   // a provider is resolvable before the async load completes; refreshed onMount.
@@ -125,13 +129,14 @@ export function App() {
     deny: () => void;
   } | null>(null);
 
-  // Build the active provider from ai-prefs + config + keychain. Falls back to
-  // the mock when no model is configured, so the AI surfaces always work.
-  function buildAIProvider(): AIProvider {
+  // Build the active provider from ai-prefs + config + keychain. With no model
+  // configured, DEV falls back to the mock (AI surfaces stay testable without
+  // keys); release returns null so the panel shows the honest no-provider
+  // state instead of a "Mock (dev)" model answering with fake text.
+  function buildAIProvider(): AIProvider | null {
     const modelId = getStoredAiModel();
-    if (!modelId) return createMockProvider();
-    const resolved = resolveModel(aiConfig(), modelId);
-    if (!resolved) return createMockProvider();
+    const resolved = modelId ? resolveModel(aiConfig(), modelId) : null;
+    if (!resolved) return import.meta.env.DEV ? createMockProvider() : null;
     // If the user put the key in ai.json (config), use it directly and skip the
     // keychain — avoids touching the OS keychain when it isn't the source.
     const hasConfigKey = !!resolved.provider.options?.apiKey;
@@ -156,11 +161,13 @@ export function App() {
     );
   }
 
-  /** Provider chip label: real "Provider · model" when configured, else mock. */
-  const aiProviderLabel = (): string => {
+  /** Provider chip label: real "Provider · model" when configured; the mock
+   *  only ever shows in DEV — release renders the localized "no provider". */
+  const aiProviderLabel = (): string | null => {
     const modelId = getStoredAiModel();
     const resolved = modelId ? resolveModel(aiConfig(), modelId) : null;
-    return resolved ? `${resolved.provider.name} · ${resolved.modelId}` : "Mock (dev)";
+    if (resolved) return `${resolved.provider.name} · ${resolved.modelId}`;
+    return import.meta.env.DEV ? "Mock (dev)" : null;
   };
 
   const state = createAppState({
@@ -190,6 +197,9 @@ export function App() {
     } catch {
       // keep the builtins-only config
     }
+    // Independent of config-load success — the builtins-only fallback still
+    // needs its keychain probe so connected providers surface in the pickers.
+    await refreshConnectedProviders();
   });
 
   // ── Settings modal (DJA-15) ────────────────────────────────────────────
@@ -209,14 +219,29 @@ export function App() {
     })),
   );
 
+  // Which provider ids are CONNECTED — local (no key needed), key in ai.json,
+  // or key in the OS keychain. The keychain check is async, so this is a signal
+  // refreshed on mount and after every connect/disconnect rather than a memo.
+  // It gates the model groups (chat picker + Manage models): a builtin with
+  // hardcoded models but no credential must not surface as pickable.
+  const [connectedProviders, setConnectedProviders] = createSignal<Record<string, boolean>>({});
+  async function refreshConnectedProviders(): Promise<void> {
+    const next: Record<string, boolean> = {};
+    for (const [id, p] of Object.entries(aiConfig().provider)) {
+      next[id] =
+        LOCAL_PROVIDER_IDS.has(id) || !!p.options?.apiKey || (await hasApiKey(id));
+    }
+    setConnectedProviders(next);
+  }
+
   // Model picker shown in the chat composer footer. Reads `aiConfig()` so it
   // re-derives when the selection changes (selectAiModel bumps the config).
   const aiCurrentModel = createMemo<string>(() => {
     aiConfig();
     return getStoredAiModel() ?? "";
   });
-  // Every configured model grouped by provider (drives Settings → Manage models
-  // and the chat picker). Providers whose display name shares a base — e.g.
+  // Every CONNECTED provider's models grouped by provider (drives Settings →
+  // Manage models and the chat picker). Providers whose display name shares a base — e.g.
   // "OpenCode Go" (kind: anthropic) and "OpenCode Go (chat)" (kind:
   // openai-compatible), two entries for the same backend — are MERGED into one
   // group; each model's `value` keeps its own provider id so routing/`kind`
@@ -224,7 +249,11 @@ export function App() {
   const aiModelGroupsAll = createMemo<{ id: string; name: string; models: { value: string; label: string }[] }[]>(
     () => {
       const groups = new Map<string, { id: string; name: string; models: { value: string; label: string }[] }>();
+      const connected = connectedProviders();
       for (const [pid, p] of Object.entries(aiConfig().provider)) {
+        // Connected providers only — `aiModelGroups` (chat picker) derives from
+        // this memo, so the filter covers both it and Manage models.
+        if (!connected[pid]) continue;
         const models = Object.entries(p.models).map(([mid, mdl]) => ({
           value: `${pid}/${mid}`,
           label: mdl.name ?? mid,
@@ -307,6 +336,7 @@ export function App() {
     );
     setStoredAiModel(modelRef);
     setAiConfig(await loadAIConfig());
+    await refreshConnectedProviders();
   }
 
   /** Add a custom OpenAI-compatible provider to ai.json (+ key → keychain).
@@ -342,6 +372,7 @@ export function App() {
       }),
     );
     setAiConfig(await loadAIConfig());
+    await refreshConnectedProviders();
   }
 
   /** Connect a built-in provider: store its key (keychain) and, when it lists no
@@ -373,6 +404,37 @@ export function App() {
       }
     }
     setAiConfig(await loadAIConfig());
+    await refreshConnectedProviders();
+  }
+
+  /** Disconnect a provider group ("Remove provider" in Manage models). Receives
+   *  EVERY id behind a merged base name (connect set the key on each, so each
+   *  is cleared). Custom providers — present in the raw user config with
+   *  kind+name — are also dropped from ai.json; built-ins keep their catalog
+   *  entry and merely lose the credential (the connected filter hides them). */
+  async function removeProvider(ids: string[]): Promise<void> {
+    for (const id of ids) await deleteApiKey(id);
+    const user = await loadUserAIConfig();
+    const provider = { ...(user.provider ?? {}) };
+    let changed = false;
+    for (const id of ids) {
+      const up = provider[id];
+      if (up?.kind && up.name) {
+        delete provider[id];
+        changed = true;
+      }
+    }
+    // Read-modify-write so sibling sections (mcp, other providers) survive.
+    if (changed) await saveAIConfig(JSON.stringify({ ...user, provider }));
+    // A selection pointing at the removed provider would resolve to a dead
+    // model — clear it so the chat shows the honest no-provider state.
+    const selected = getStoredAiModel();
+    const selectedProvider = selected?.includes("/")
+      ? selected.slice(0, selected.indexOf("/"))
+      : null;
+    if (selectedProvider && ids.includes(selectedProvider)) setStoredAiModel(null);
+    setAiConfig(await loadAIConfig());
+    await refreshConnectedProviders();
   }
 
   // ── MCP servers + in-process tools (chat tool-calling) ─────────────────
@@ -380,6 +442,14 @@ export function App() {
    *  edits via Accept/Reject) plus every connected MCP server's tools. */
   async function getAITools(): Promise<AITool[]> {
     const inProcess = buildInProcessTools({
+      // Reuses the file-tree's root-validated Rust commands (reject ../ and
+      // absolute paths, refuse overwrite); the tree refreshes via the watcher.
+      fs: {
+        createDir,
+        createFile,
+        readFileRelative: readFileByPath,
+        writeFileAbs: writeFile,
+      },
       getActiveDoc: () => state.editorContent(),
       getActiveDocPath: () => state.selectedFile()?.path ?? null,
       // Same frame-handle path ⌘I uses (activeExcalidrawFrame) — null when the
@@ -1353,10 +1423,63 @@ export function App() {
     });
   }
 
-  /** Resolve a file as an inline "@" reference for the chat (file-tree
-   *  "Add to chat" / @-mention). Reads the file text; `insert` appends "@file"
-   *  to the composer (file-tree) and fronts the chat. */
-  async function addFileMention(file: { label: string; path: string; rootId: string }, insert: boolean) {
+  /** Build a folder @-mention's content from the in-memory workspace tree:
+   *  every descendant file as a workspace-relative forward-slash path (capped
+   *  so a huge folder can't blow the prompt budget), plus a hint pointing the
+   *  model at `app__read_file`. `path: ""` lists the whole root. Returns null
+   *  when the root/subtree is gone (stale entry). */
+  function buildFolderListing(rootId: string, path: string, label: string): string | null {
+    const FOLDER_MENTION_CAP = 200;
+    type Entry = import("@asciimark/core/types.ts").FSEntry;
+    const collect = (entries: Entry[], out: string[]): void => {
+      for (const entry of entries) {
+        if (entry.kind === "file") out.push(entry.path);
+        else if (entry.children) collect(entry.children, out);
+      }
+    };
+    const findSubtree = (entries: Entry[], target: string): Entry[] | null => {
+      for (const entry of entries) {
+        if (entry.kind !== "directory") continue;
+        if (entry.path === target) return entry.children ?? [];
+        // The trailing "/" guards sibling prefix collisions ("src" vs "src-old").
+        if (target.startsWith(`${entry.path}/`)) {
+          return entry.children ? findSubtree(entry.children, target) : null;
+        }
+      }
+      return null;
+    };
+    const root = state.rootsList().find((r) => r.id === rootId);
+    if (!root) return null;
+    const subtree = path === "" ? root.entries : findSubtree(root.entries, path);
+    if (!subtree) return null;
+    const paths: string[] = [];
+    collect(subtree, paths);
+    const lines = paths.slice(0, FOLDER_MENTION_CAP).map((p) => `- ${p}`);
+    if (paths.length > FOLDER_MENTION_CAP) lines.push(`- (+${paths.length - FOLDER_MENTION_CAP} more)`);
+    if (lines.length === 0) lines.push("- (no files)");
+    return `Folder listing of ${label}:\n${lines.join("\n")}\n\nUse app__read_file with one of these paths to read a specific file.`;
+  }
+
+  /** Resolve a file or folder as an inline "@" reference for the chat
+   *  (file-tree "Add to chat" / @-mention). Files carry their text; `kind:
+   *  "dir"` entries carry a subtree listing so the model can pick files to
+   *  read. Either way the reference registers through the same
+   *  `state.addFileMention` path, so its content follows the "@label" text in
+   *  the composer. `insert` appends "@label" (file-tree) and fronts the chat. */
+  async function addFileMention(
+    file: { kind?: "dir" | "file"; label: string; path: string; rootId: string },
+    insert: boolean,
+  ) {
+    if (file.kind === "dir") {
+      const content = buildFolderListing(file.rootId, file.path, file.label);
+      if (content === null) return;
+      state.addFileMention(
+        { content, kind: "folder", label: file.label, path: file.path, rootId: file.rootId },
+        { insert },
+      );
+      if (insert) state.focusAiComposer();
+      return;
+    }
     const rootPath = rootPaths().get(file.rootId);
     if (!rootPath) return;
     try {
@@ -2091,6 +2214,7 @@ export function App() {
       onSaveAiProvider={saveAiProvider}
       onSaveCustomProvider={saveCustomProvider}
       onConnectProvider={connectProvider}
+      onRemoveProvider={removeProvider}
       mcpServers={mcpServersView()}
       onSaveMcpServer={saveMcpServer}
       onRemoveMcpServer={removeMcpServer}

@@ -4,6 +4,7 @@
 // chat store; shares the provider + the pure action prompts.
 
 import { createSignal } from "solid-js";
+import * as m from "@asciimark/i18n";
 import type { AIProvider } from "@asciimark/ai/types.ts";
 import {
   buildInlineActionPrompt,
@@ -116,7 +117,7 @@ export function createAiInlineStore(config: AiInlineStoreConfig): AiInlineStore 
   ): Promise<void> {
     const provider = config.getProvider();
     if (!provider) {
-      setError("No AI provider configured");
+      setError(m.ai_error_no_provider());
       setStatus("error");
       return;
     }

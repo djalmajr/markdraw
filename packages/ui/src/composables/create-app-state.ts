@@ -114,6 +114,19 @@ export type MoveClipboard = {
   mode: "cut" | "copy";
 };
 
+/** An inline "@label" chat reference: a file's text, or — for `kind: "folder"`
+ *  — a subtree listing the host built from the workspace tree. Injected only
+ *  while its "@label" is still present in the composer. */
+export interface AiMentionRef {
+  /** The resolved text injected into the prompt (file content / folder listing). */
+  content: string;
+  kind?: "file" | "folder";
+  /** The "@label" text tracked in the composer (folders end with "/"). */
+  label: string;
+  path?: string;
+  rootId?: string;
+}
+
 interface AppStateConfig {
   applyTheme: (mode: ThemeMode) => void;
   convertAdoc: (opts: ConvertOptions) => Promise<ConvertResult>;
@@ -545,19 +558,20 @@ export function createAppState(config: AppStateConfig) {
     });
   }
 
-  // File references (@mention + file-tree "Add to chat") — these appear INLINE
-  // as "@file" in the composer text (not a top chip). Their content is injected
-  // only while the "@label" is still present in the composer (the AiPanel parses
-  // the text and reports the active labels), so deleting the text drops the ref.
-  const [aiMentions, setAiMentions] = createSignal<Array<{ label: string; path?: string; content: string }>>([]);
+  // File/folder references (@mention + file-tree "Add to chat") — these appear
+  // INLINE as "@label" in the composer text (not a top chip). Their content is
+  // injected only while the "@label" is still present in the composer (the
+  // AiPanel parses the text and reports the active labels), so deleting the
+  // text drops the ref. `kind: "folder"` entries carry a subtree listing.
+  const [aiMentions, setAiMentions] = createSignal<AiMentionRef[]>([]);
   const [aiActiveMentionLabels, setAiActiveMentionLabels] = createSignal<string[]>([]);
   let composerInsertNonce = 0;
   const [composerInsert, setComposerInsert] = createSignal<{ text: string; nonce: number } | null>(null);
 
-  /** Resolve a file as an inline reference. `insert` appends "@label" to the
-   *  composer (used by the file-tree menu, where the cursor isn't in the input;
-   *  the @-mention already typed the text itself). */
-  function addFileMention(file: { label: string; path?: string; content: string }, opts?: { insert?: boolean }): void {
+  /** Resolve a file (or folder listing) as an inline reference. `insert`
+   *  appends "@label" to the composer (used by the file-tree menu, where the
+   *  cursor isn't in the input; the @-mention already typed the text itself). */
+  function addFileMention(file: AiMentionRef, opts?: { insert?: boolean }): void {
     setAiMentions((prev) => (prev.some((mn) => mn.label === file.label) ? prev : [...prev, file]));
     if (opts?.insert) setComposerInsert({ text: `@${file.label} `, nonce: ++composerInsertNonce });
   }
@@ -601,11 +615,15 @@ export function createAppState(config: AppStateConfig) {
       const mentionItems: AiContextItem[] = aiMentions()
         .filter((mn) => active.includes(mn.label))
         .map((mn) => ({
-          id: `mention:${mn.label}`,
-          kind: "file",
+          id:
+            mn.kind === "folder"
+              ? `folder:${mn.rootId ?? ""}:${mn.path ?? ""}`
+              : `mention:${mn.label}`,
+          kind: mn.kind ?? "file",
           label: mn.label,
           content: mn.content,
           ...(mn.path ? { path: mn.path } : {}),
+          ...(mn.rootId ? { rootId: mn.rootId } : {}),
         }));
       return buildContextPreamble([...aiContextItems(), ...mentionItems]);
     },

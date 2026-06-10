@@ -13,7 +13,22 @@ import type {
 } from "../components/excalidraw-frame.tsx";
 import type { AITool } from "@asciimark/ai/types.ts";
 
+/** Filesystem bridge for the creation/read tools. Paths are workspace-relative
+ *  and validated by the Rust side (rejects `..`/absolute paths, creates parent
+ *  dirs, refuses overwrite on create). Optional: hosts without a real fs (the
+ *  extension) simply don't register those tools. */
+export interface ToolFsBridge {
+  createDir: (root: string, relative: string) => Promise<void>;
+  createFile: (root: string, relative: string) => Promise<void>;
+  readFileRelative: (root: string, relative: string) => Promise<string | null>;
+  /** Write content to an ABSOLUTE path (host joins root + relative). */
+  writeFileAbs: (absPath: string, content: string) => Promise<void>;
+}
+
 export interface InProcessToolDeps {
+  /** Filesystem bridge enabling app__read_file / app__create_file /
+   *  app__create_folder. Omitted -> those tools are not offered. */
+  fs?: ToolFsBridge;
   /** Full text of the document the user is currently editing. */
   getActiveDoc: () => string;
   /** Active document's path (or null when an untitled/empty tab is focused). */
@@ -192,5 +207,129 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
     },
   };
 
-  return [readActiveDoc, searchWorkspace, listFiles, proposeEdit, writeExcalidraw];
+  const tools = [readActiveDoc, searchWorkspace, listFiles, proposeEdit, writeExcalidraw];
+
+  // ── Filesystem tools (desktop only — gated on the fs bridge) ─────────────
+  // Reads run automatically; create_file/create_folder declare
+  // `approval: "prompt"` so the host's Accept/Reject bar gates every write
+  // (read/write tiers as policy — same model the omp agent uses).
+  const fs = deps.fs;
+  if (fs) {
+    const requireRoot = (): string | null => deps.getWorkspaceRoots()[0] ?? null;
+
+    const readFile: AITool = {
+      name: "app__read_file",
+      source: APP,
+      description:
+        "Read a file from the open workspace by its workspace-relative path (as returned by app__list_files / app__search_workspace).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Workspace-relative path, e.g. 'docs/notes.md'." },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      execute: async (args) => {
+        const path = String((args as { path?: unknown })?.path ?? "").trim();
+        if (!path) return { status: "error", message: "`path` is required." };
+        const root = requireRoot();
+        if (!root) return { status: "error", message: "No workspace is open." };
+        const content = await fs.readFileRelative(root, path);
+        if (content === null) {
+          return {
+            status: "error",
+            message: `File not found: ${path}. Use app__list_files or app__search_workspace to discover valid paths.`,
+          };
+        }
+        if (content.length > READ_FILE_CAP) {
+          return { content: content.slice(0, READ_FILE_CAP), path, truncated: true };
+        }
+        return { content, path };
+      },
+    };
+
+    const createFolder: AITool = {
+      name: "app__create_folder",
+      source: APP,
+      approval: "prompt",
+      description:
+        "Create a folder (and any missing parents) at a workspace-relative path. The user approves each call.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Workspace-relative folder path, e.g. 'notes/drafts'." },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      execute: async (args) => {
+        const path = String((args as { path?: unknown })?.path ?? "").trim();
+        if (!path) return { status: "error", message: "`path` is required." };
+        const root = requireRoot();
+        if (!root) return { status: "error", message: "No workspace is open." };
+        try {
+          await fs.createDir(root, path);
+          return { status: "created", path };
+        } catch (err) {
+          return { status: "error", message: creationErrorMessage(err, path) };
+        }
+      },
+    };
+
+    const createFile: AITool = {
+      name: "app__create_file",
+      source: APP,
+      approval: "prompt",
+      description:
+        "Create a NEW file at a workspace-relative path, optionally with initial content. Refuses to overwrite an existing file — to change one, use app__propose_edit on the active document instead. The user approves each call.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "Initial file content. Defaults to empty." },
+          path: { type: "string", description: "Workspace-relative file path, e.g. 'notes/ideas.md'." },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      execute: async (args) => {
+        const a = args as { content?: unknown; path?: unknown };
+        const path = String(a?.path ?? "").trim();
+        if (!path) return { status: "error", message: "`path` is required." };
+        const root = requireRoot();
+        if (!root) return { status: "error", message: "No workspace is open." };
+        try {
+          await fs.createFile(root, path);
+        } catch (err) {
+          return { status: "error", message: creationErrorMessage(err, path) };
+        }
+        const content = typeof a?.content === "string" ? a.content : "";
+        if (content) {
+          // create_file validated the path against the root; writing through
+          // the joined absolute path reuses that vetted location.
+          await fs.writeFileAbs(`${root}/${path}`, content);
+        }
+        return { status: "created", path, bytes: content.length };
+      },
+    };
+
+    tools.push(readFile, createFolder, createFile);
+  }
+
+  return tools;
+}
+
+/** Cap for app__read_file so a huge file can't blow the model's context. */
+const READ_FILE_CAP = 50_000;
+
+/** Instructional error text (the model reads this — tell it what to do next). */
+function creationErrorMessage(err: unknown, path: string): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (/exists/i.test(raw)) {
+    return `${path} already exists — pick a different name, or read it first if you meant to build on it.`;
+  }
+  if (/invalid path/i.test(raw)) {
+    return `Invalid path: ${path}. Use a relative path inside the workspace (no '..' or absolute paths).`;
+  }
+  return raw;
 }

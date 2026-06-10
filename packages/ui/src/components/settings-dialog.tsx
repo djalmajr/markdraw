@@ -144,6 +144,9 @@ export interface SettingsDialogProps {
   }) => Promise<void> | void;
   /** Connect a built-in provider (store key + register its models). */
   onConnectProvider?: (input: { providerId: string; apiKey: string }) => Promise<void> | void;
+  /** Disconnect a provider group — receives EVERY provider id behind the merged
+   *  base name (e.g. "OpenCode Go" → ["opencode-go", "opencode-go-chat"]). */
+  onRemoveProvider?: (ids: string[]) => void | Promise<void>;
   appVersion?: string;
   platform?: Platform;
   /** Configured MCP servers with live connection/tool status. */
@@ -328,6 +331,13 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
   /** Whether every model of a provider is currently visible (drives the group toggle). */
   const providerAllVisible = (group: { models: { value: string }[] }): boolean =>
     group.models.every((mdl) => !hiddenSet().has(mdl.value));
+  /** Provider ids behind a merged group. Groups arrive keyed by base name (the
+   *  app merges e.g. "OpenCode Go" + "OpenCode Go (chat)") so the id set is
+   *  recovered from each model ref's "provider/model" prefix — the remove
+   *  button must disconnect every backing id, mirroring how connect set them. */
+  const groupProviderIds = (group: { models: { value: string }[] }): string[] => [
+    ...new Set(group.models.map((mdl) => mdl.value.slice(0, mdl.value.indexOf("/")))),
+  ];
   /** Flip a whole provider: if all visible → hide all, else → show all. */
   function toggleProvider(group: { models: { value: string }[] }): void {
     const hidden = hiddenSet();
@@ -621,15 +631,29 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               <>
                 <div class="settings-models-group">
                   <span class="settings-models-group-name">{group.name}</span>
-                  <ToggleSwitch
-                    checked={providerAllVisible(group)}
-                    onChange={() => toggleProvider(group)}
-                    aria-label={group.name}
-                  >
-                    <SwitchControl size="sm">
-                      <SwitchThumb size="sm" />
-                    </SwitchControl>
-                  </ToggleSwitch>
+                  {/* The header is space-between; keep remove + toggle together. */}
+                  <span style={{ "align-items": "center", display: "inline-flex", gap: "6px" }}>
+                    <Show when={props.onRemoveProvider}>
+                      <button
+                        aria-label={(useLocale(), label("settings_ai_disconnect"))}
+                        class="settings-mcp-remove"
+                        title={(useLocale(), label("settings_ai_disconnect"))}
+                        type="button"
+                        onClick={() => void props.onRemoveProvider?.(groupProviderIds(group))}
+                      >
+                        <IconTrash width={13} height={13} />
+                      </button>
+                    </Show>
+                    <ToggleSwitch
+                      checked={providerAllVisible(group)}
+                      onChange={() => toggleProvider(group)}
+                      aria-label={group.name}
+                    >
+                      <SwitchControl size="sm">
+                        <SwitchThumb size="sm" />
+                      </SwitchControl>
+                    </ToggleSwitch>
+                  </span>
                 </div>
                 <For each={group.models}>
                   {(mdl) => (

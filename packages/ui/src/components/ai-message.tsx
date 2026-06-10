@@ -1,16 +1,22 @@
-import { createSignal, For, Show, type JSX } from "solid-js";
+import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
+import IconCheck from "~icons/lucide/check";
+import IconCopy from "~icons/lucide/copy";
+import IconRefreshCw from "~icons/lucide/refresh-cw";
 import type { ToolActivity } from "../composables/create-ai-chat-store.ts";
 import { renderChatMarkdown } from "../lib/chat-markdown.ts";
 
 export interface AiMessageProps {
-  role: "user" | "assistant";
   content: string;
-  /** Tool activity to surface as compact chips with this turn. */
-  tools?: ToolActivity[];
+  role: "user" | "assistant";
   /** True for the in-flight assistant turn — renders a streaming cursor. */
   streaming?: boolean;
+  /** Tool activity to surface as compact chips with this turn. */
+  tools?: ToolActivity[];
+  /** Regenerate this reply. Only the host knows which turn is retryable (the
+   *  last assistant one), so the action renders only when this is provided. */
+  onRetry?: () => void;
 }
 
 /** Drop the `<source>__` namespace prefix so a chip reads "read_active_doc"
@@ -95,6 +101,28 @@ export function AiToolChips(props: { tools: ToolActivity[] }): JSX.Element {
 /** A single chat bubble. Kept separate from AiPanel so it's the extension point
  *  for markdown rendering / citation chips in M2. */
 export function AiMessage(props: AiMessageProps): JSX.Element {
+  // Copy feedback: the button briefly swaps to a check + "Copied" after a
+  // successful clipboard write, then reverts.
+  const [copied, setCopied] = createSignal(false);
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(copiedTimer));
+
+  function copyMessage(): void {
+    // clipboard is undefined in non-secure contexts (and write can be denied);
+    // same defensive idiom as the file tree's copy-path action.
+    void navigator.clipboard
+      ?.writeText(props.content)
+      .then(() => {
+        setCopied(true);
+        clearTimeout(copiedTimer);
+        copiedTimer = setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  }
+
+  const copyLabel = (): string =>
+    copied() ? (useLocale(), m.ai_message_copied()) : (useLocale(), m.ai_message_copy());
+
   return (
     <div
       class="ai-message"
@@ -119,6 +147,31 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
         </Show>
         <Show when={props.streaming}>
           <span class="ai-message-cursor" aria-hidden="true" />
+        </Show>
+      </div>
+      {/* Hover action bar (revealed by CSS on .ai-message:hover). */}
+      <div class="ai-msg-actions">
+        <button
+          aria-label={copyLabel()}
+          class="ai-msg-action-btn"
+          title={copyLabel()}
+          type="button"
+          onClick={copyMessage}
+        >
+          <Show when={copied()} fallback={<IconCopy width={13} height={13} />}>
+            <IconCheck width={13} height={13} />
+          </Show>
+        </button>
+        <Show when={props.onRetry}>
+          <button
+            aria-label={(useLocale(), m.ai_message_regenerate())}
+            class="ai-msg-action-btn"
+            title={(useLocale(), m.ai_message_regenerate())}
+            type="button"
+            onClick={() => props.onRetry?.()}
+          >
+            <IconRefreshCw width={13} height={13} />
+          </button>
         </Show>
       </div>
     </div>

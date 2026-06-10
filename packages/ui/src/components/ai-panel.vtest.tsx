@@ -119,6 +119,55 @@ describe("AiPanel", () => {
     expect(onMention).toHaveBeenCalledWith({ label: "alpha.md", path: "a/alpha.md", rootId: "r" });
   });
 
+  it("offers folders (and the workspace root itself) in the @-mention list with a trailing slash", () => {
+    const store = readyStore();
+    const onMention = vi.fn();
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        mentionFiles={[
+          { label: "alpha.md", path: "a/alpha.md", rootId: "r" },
+          { kind: "dir", label: "notes/", path: "notes", rootId: "r" },
+          // The workspace root itself: path "" attaches the whole-root listing.
+          { kind: "dir", label: "wksp/", path: "", rootId: "r" },
+        ]}
+        onMention={onMention}
+      />
+    ));
+    const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    ta.value = "@no";
+    ta.setSelectionRange(3, 3);
+    fireEvent.input(ta);
+    const items = baseElement.querySelectorAll(".ai-mention-item");
+    expect(items).toHaveLength(1); // filtered to the "notes/" dir
+    expect(items[0]!.querySelector(".ai-mention-name")?.textContent).toBe("notes/");
+    // Selecting a dir fires onMention with the full dir entry (kind included),
+    // so the host knows to attach a listing instead of file content.
+    fireEvent.mouseDown(items[0]!);
+    expect(onMention).toHaveBeenCalledWith({ kind: "dir", label: "notes/", path: "notes", rootId: "r" });
+    // The root entry is mentionable too.
+    ta.value = "@wk";
+    ta.setSelectionRange(3, 3);
+    fireEvent.input(ta);
+    const rootItems = baseElement.querySelectorAll(".ai-mention-item");
+    expect(rootItems).toHaveLength(1);
+    fireEvent.mouseDown(rootItems[0]!);
+    expect(onMention).toHaveBeenCalledWith({ kind: "dir", label: "wksp/", path: "", rootId: "r" });
+  });
+
+  it("renders a folder context chip (a mentioned directory's subtree listing)", () => {
+    const store = readyStore();
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        contextItems={[{ id: "folder:r:src", kind: "folder", label: "src/", content: "- src/a.md" }]}
+      />
+    ));
+    const chip = baseElement.querySelector(".ai-context-chip");
+    expect(chip).not.toBeNull();
+    expect(chip?.textContent).toContain("src/");
+  });
+
   it("opens the context-usage popover with an estimated breakdown", async () => {
     const store = readyStore();
     render(() => <AiPanel store={store} providerLabel="Mock" />);
@@ -250,6 +299,52 @@ describe("AiPanel", () => {
     const notCancelled = fireEvent.click(links[0]!);
     expect(notCancelled).toBe(false);
     expect(onOpenExternal).toHaveBeenCalledWith("https://example.com");
+  });
+
+  it("copies the message content to the clipboard via the hover copy action", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    // jsdom exposes `navigator.clipboard` as a getter-only accessor, so a plain
+    // Object.assign throws — redefine the property instead.
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const { baseElement } = render(() => <AiMessage content="copy me" role="assistant" />);
+    const btn = baseElement.querySelector(".ai-msg-action-btn") as HTMLButtonElement;
+    expect(btn.getAttribute("aria-label")).toBe("Copy");
+    fireEvent.click(btn);
+    expect(writeText).toHaveBeenCalledWith("copy me");
+    // After the write resolves the button shows the transient "copied" state.
+    await waitFor(() => {
+      expect(btn.getAttribute("aria-label")).toBe("Copied");
+    });
+  });
+
+  it("shows retry only on the last assistant message and regenerates on click", async () => {
+    const store = createAiChatStore({
+      getProvider: () => createMockProvider({ reply: () => "fresh reply", chunkDelayMs: 0 }),
+      initialMessages: [
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "q2" },
+        { role: "assistant", content: "a2" },
+      ],
+    });
+    const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
+    // Every bubble gets a copy action, but only the LAST assistant turn is
+    // retryable.
+    expect(baseElement.querySelectorAll('[aria-label="Copy"]')).toHaveLength(4);
+    const retries = baseElement.querySelectorAll('[aria-label="Regenerate"]');
+    expect(retries).toHaveLength(1);
+    const bubbles = baseElement.querySelectorAll(".ai-message");
+    expect(bubbles[bubbles.length - 1]!.contains(retries[0]!)).toBe(true);
+    // Clicking retry drops "a2" and streams a fresh reply in its place.
+    fireEvent.click(retries[0]!);
+    await waitFor(() => {
+      expect(store.messages().at(-1)).toEqual({ role: "assistant", content: "fresh reply" });
+    });
+    expect(store.messages()).toHaveLength(4);
+    expect(store.messages().filter((t) => t.role === "user")).toHaveLength(2);
   });
 
   it("hides the Build/Plan mode picker when onModeChange is absent", () => {

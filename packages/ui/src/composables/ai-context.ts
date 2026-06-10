@@ -6,10 +6,10 @@
 // and get injected into the next message sent to the model.
 
 export interface AiContextItem {
-  /** Stable id (e.g. `file:rootId:path` or `selection:...`) for dedupe/removal. */
+  /** Stable id (e.g. `file:rootId:path`, `folder:rootId:path` or `selection:...`) for dedupe/removal. */
   id: string;
-  kind: "file" | "selection";
-  /** Chip label — a file name, or "file.md:12-20" for a selection. */
+  kind: "file" | "folder" | "selection";
+  /** Chip label — a file name, "dir/" for a folder listing, or "file.md:12-20" for a selection. */
   label: string;
   path?: string;
   rootId?: string;

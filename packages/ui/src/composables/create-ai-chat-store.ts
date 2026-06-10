@@ -8,6 +8,7 @@
 // streaming buffer, and the message list.
 
 import { createSignal } from "solid-js";
+import * as m from "@asciimark/i18n";
 import type { AIErrorCode, AIMessage, AIProvider, AITool } from "@asciimark/ai/types.ts";
 
 /** One tool invocation surfaced during a turn (MCP server or in-process app
@@ -48,6 +49,10 @@ export interface AiChatStore {
   error: () => AiChatError | null;
   /** Whether a provider is configured (drives the empty-state vs ready UI). */
   providerReady: () => boolean;
+  /** Re-run the trailing user turn: drops the last assistant reply (when one is
+   *  trailing) and streams a fresh one in its place. No-op while streaming or
+   *  when there is no trailing conversation to retry. */
+  retryLast(): Promise<void>;
   /** Send a user message and stream the reply. No-op while already streaming or
    *  when the text is blank. */
   sendMessage(text: string, opts?: { system?: string }): Promise<void>;
@@ -106,15 +111,52 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     const trimmed = text.trim();
     if (!trimmed || streaming()) return;
 
-    const provider = config.getProvider();
-    if (!provider) {
-      setError({ code: "unknown", message: "No AI provider configured" });
+    // The no-provider check lives here (not only in runTurn) so the typed
+    // message is NOT pushed into history when nothing can answer it.
+    if (!providerReady()) {
+      setError({ code: "unknown", message: m.ai_error_no_provider() });
       return;
     }
 
     setError(null);
     const history: ChatTurn[] = [...messages(), { role: "user", content: trimmed }];
     setMessages(history);
+    await runTurn(history, opts);
+  }
+
+  /** Re-run the trailing user turn: drops the last assistant reply (when one is
+   *  trailing) and streams a fresh one. The user turn stays in place — no new
+   *  turn is pushed. */
+  async function retryLast(): Promise<void> {
+    if (streaming()) return;
+    // Check the provider BEFORE truncating: the slice below persists through
+    // the sessions effect, so a no-provider retry would otherwise permanently
+    // delete the old reply and leave only an error behind.
+    if (!providerReady()) {
+      setError({ code: "unknown", message: m.ai_error_no_provider() });
+      return;
+    }
+    const turns = messages();
+    if (turns.length === 0) return;
+    const history = turns.at(-1)?.role === "assistant" ? turns.slice(0, -1) : [...turns];
+    // Without a trailing user turn there is nothing to re-ask.
+    if (history.at(-1)?.role !== "user") return;
+    setError(null);
+    setMessages(history);
+    await runTurn(history);
+  }
+
+  /** Streams one assistant turn for `history` (which must end with the user
+   *  turn being answered): provider resolution, the streaming buffer, tool
+   *  activity, and the finally-append of the consolidated reply. Shared by
+   *  sendMessage and retryLast. */
+  async function runTurn(history: ChatTurn[], opts?: { system?: string }): Promise<void> {
+    const provider = config.getProvider();
+    if (!provider) {
+      setError({ code: "unknown", message: m.ai_error_no_provider() });
+      return;
+    }
+
     setStreamingText("");
     setToolActivity([]);
     setStreaming(true);
@@ -242,6 +284,7 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     streaming,
     error,
     providerReady,
+    retryLast,
     sendMessage,
     cancel,
     clear,

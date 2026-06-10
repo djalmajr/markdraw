@@ -21,7 +21,7 @@ import { PaneSplitter } from "./pane-splitter.tsx";
 import { fromTabDndId } from "./tab-bar.tsx";
 import { TocPanel } from "./toc-panel.tsx";
 import { BacklinksList, type BacklinkEntry } from "./backlinks-list.tsx";
-import { AiPanel } from "./ai-panel.tsx";
+import { AiPanel, type AiMentionEntry } from "./ai-panel.tsx";
 import { ChatHistoryMenu } from "./chat-history-menu.tsx";
 import { SelectionPopover } from "./selection-popover.tsx";
 import {
@@ -145,11 +145,18 @@ interface AppShellProps {
   }) => void | Promise<void>;
   /** Connect a built-in provider (store key + register its models). */
   onConnectProvider?: (input: { providerId: string; apiKey: string }) => void | Promise<void>;
+  /** Disconnect a provider group (every id behind a merged base name). */
+  onRemoveProvider?: (ids: string[]) => void | Promise<void>;
   onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;
-  /** Resolve a file as an inline "@" reference for the chat (desktop reads the
-   *  content). `insert` appends "@file" to the composer (file-tree menu);
-   *  @-mentions type the text themselves so they pass false. */
-  onAddFileMention?: (file: { label: string; path: string; rootId: string }, insert: boolean) => void;
+  /** Resolve a file or folder as an inline "@" reference for the chat (desktop
+   *  reads the file content, or builds a subtree listing for `kind: "dir"` —
+   *  `path: ""` means the workspace root itself). `insert` appends "@label" to
+   *  the composer (file-tree menu); @-mentions type the text themselves so they
+   *  pass false. */
+  onAddFileMention?: (
+    file: { kind?: "dir" | "file"; label: string; path: string; rootId: string },
+    insert: boolean,
+  ) => void;
   onDoubleClickFile?: (entry: FSEntry, rootId: string) => void;
   onNavigate: (path: string, fragment?: string | null) => void;
   onOpenExternal?: (url: string) => void;
@@ -443,10 +450,30 @@ export function AppShell(props: AppShellProps) {
     return flattenWorkspace(s.rootsList());
   });
 
-  // Workspace files for @-mention autocomplete in the chat composer.
-  const mentionFiles = createMemo(() =>
-    flattenWorkspace(s.rootsList()).map((f) => ({ label: f.name, path: f.path, rootId: f.rootId })),
-  );
+  // Workspace files + folders for @-mention autocomplete in the chat composer.
+  // Folders (including the workspace roots themselves, as `path: ""`) get a
+  // trailing "/" label and attach a subtree listing instead of file content.
+  const mentionFiles = createMemo((): AiMentionEntry[] => {
+    const roots = s.rootsList();
+    const entries: AiMentionEntry[] = flattenWorkspace(roots).map((f) => ({
+      kind: "file",
+      label: f.name,
+      path: f.path,
+      rootId: f.rootId,
+    }));
+    const walkDirs = (children: readonly FSEntry[], rootId: string): void => {
+      for (const entry of children) {
+        if (entry.kind !== "directory") continue;
+        entries.push({ kind: "dir", label: `${entry.name}/`, path: entry.path, rootId });
+        if (entry.children) walkDirs(entry.children, rootId);
+      }
+    };
+    for (const root of roots) {
+      entries.push({ kind: "dir", label: `${root.name}/`, path: "", rootId: root.id });
+      walkDirs(root.entries, root.id);
+    }
+    return entries;
+  });
 
   // Symbol palette source: parse headings from the active file's editor
   // content, dispatched by extension. Computed lazily — only when the
@@ -517,6 +544,7 @@ export function AppShell(props: AppShellProps) {
           onSaveProvider={(o) => props.onSaveAiProvider?.(o)}
           onSaveCustomProvider={(i) => props.onSaveCustomProvider?.(i)}
           onConnectProvider={(i) => props.onConnectProvider?.(i)}
+          onRemoveProvider={(ids) => props.onRemoveProvider?.(ids)}
           mcpServers={props.mcpServers ?? []}
           onSaveMcpServer={(s) => props.onSaveMcpServer?.(s)}
           onRemoveMcpServer={(id) => props.onRemoveMcpServer?.(id)}

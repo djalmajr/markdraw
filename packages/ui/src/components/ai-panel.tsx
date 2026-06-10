@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onMount, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
 import IconSparkles from "~icons/lucide/sparkles";
@@ -6,6 +6,7 @@ import IconArrowUp from "~icons/lucide/arrow-up";
 import IconSquare from "~icons/lucide/square";
 import IconX from "~icons/lucide/x";
 import IconFileText from "~icons/lucide/file-text";
+import IconFolder from "~icons/lucide/folder";
 import IconTextSelect from "~icons/lucide/text-select";
 import type { AIChatMode } from "@asciimark/core/ai-prefs.ts";
 import type { AiChatStore } from "../composables/create-ai-chat-store.ts";
@@ -23,6 +24,16 @@ import { AiMessage } from "./ai-message.tsx";
  *  a thin teal ring (the primary, never the UA blue). */
 const PILL_SELECT =
   "h-7 w-auto justify-start gap-1.5 rounded-md border-transparent bg-secondary px-2 py-0 text-xs font-medium text-foreground hover:bg-accent focus:ring-0 focus:ring-offset-0 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1";
+
+/** A workspace entry offered by the @-mention autocomplete. `kind: "dir"`
+ *  marks a folder (or a workspace root — `path: ""`) whose mention attaches a
+ *  subtree listing instead of file content; omitted kind means a file. */
+export interface AiMentionEntry {
+  kind?: "dir" | "file";
+  label: string;
+  path: string;
+  rootId: string;
+}
 
 export interface AiPanelProps {
   store: AiChatStore;
@@ -51,10 +62,12 @@ export interface AiPanelProps {
   onDismissActiveFile?: () => void;
   /** Handle a file dropped onto the composer (host reads it + adds context). */
   onContextDrop?: (e: DragEvent) => void;
-  /** Workspace files for @-mention autocomplete in the composer. */
-  mentionFiles?: Array<{ label: string; path: string; rootId: string }>;
-  /** A file was @-mentioned — host reads it + tracks it as an inline reference. */
-  onMention?: (file: { label: string; path: string; rootId: string }) => void;
+  /** Workspace files + folders (and the roots themselves) for @-mention
+   *  autocomplete in the composer. */
+  mentionFiles?: AiMentionEntry[];
+  /** An entry was @-mentioned — host resolves it (file content / folder
+   *  listing) + tracks it as an inline reference. */
+  onMention?: (file: AiMentionEntry) => void;
   /** Host request to insert text into the composer (file-tree "Add to chat"):
    *  inserts at the cursor, or appends when the textarea isn't focused. */
   insertRequest?: { text: string; nonce: number } | null;
@@ -168,7 +181,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     }
   }
 
-  function selectMention(file: { label: string; path: string; rootId: string }): void {
+  function selectMention(file: AiMentionEntry): void {
     const ta = textarea;
     if (!ta) return;
     const caret = ta.selectionStart ?? input().length;
@@ -255,7 +268,22 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       >
         <Show when={hasConversation()} fallback={<AiEmptyState {...props} />}>
           <For each={props.store.messages()}>
-            {(msg) => <AiMessage role={msg.role} content={msg.content} tools={msg.tools} />}
+            {(msg, i) => (
+              <AiMessage
+                content={msg.content}
+                role={msg.role}
+                tools={msg.tools}
+                // Retry only makes sense on the LAST assistant reply, and never
+                // while a fresh turn is already streaming.
+                onRetry={
+                  msg.role === "assistant" &&
+                  i() === props.store.messages().length - 1 &&
+                  !props.store.streaming()
+                    ? () => void props.store.retryLast()
+                    : undefined
+                }
+              />
+            )}
           </For>
           <Show when={props.store.streaming()}>
             <AiMessage
@@ -310,9 +338,14 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
             <For each={props.contextItems}>
               {(item) => (
                 <span class="ai-context-chip" title={item.label}>
-                  <Show when={item.kind === "selection"} fallback={<IconFileText width={12} height={12} />}>
-                    <IconTextSelect width={12} height={12} />
-                  </Show>
+                  <Switch fallback={<IconFileText width={12} height={12} />}>
+                    <Match when={item.kind === "folder"}>
+                      <IconFolder width={12} height={12} />
+                    </Match>
+                    <Match when={item.kind === "selection"}>
+                      <IconTextSelect width={12} height={12} />
+                    </Match>
+                  </Switch>
                   <span class="ai-context-chip-label">{item.label}</span>
                   <button
                     type="button"
@@ -341,8 +374,12 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
                     selectMention(file);
                   }}
                 >
-                  <IconFileText width={12} height={12} />
-                  <span class="ai-mention-name">{file.label}</span>
+                  <Show when={file.kind === "dir"} fallback={<IconFileText width={12} height={12} />}>
+                    <IconFolder width={12} height={12} />
+                  </Show>
+                  <span class="ai-mention-name">
+                    {file.kind === "dir" && !file.label.endsWith("/") ? `${file.label}/` : file.label}
+                  </span>
                   <span class="ai-mention-path">{file.path}</span>
                 </button>
               )}

@@ -115,3 +115,100 @@ describe("app__read_active_doc tool", () => {
     expect(res).toEqual({ path: "/w/a.md", content: "body" });
   });
 });
+
+/** Deps with an in-memory fs bridge spy for the creation/read tools. */
+function depsWithFsSpy() {
+  const calls: { op: string; args: string[] }[] = [];
+  const files = new Map<string, string>();
+  const { deps } = depsWithExcalidrawSpy();
+  deps.getWorkspaceRoots = () => ["/ws"];
+  deps.fs = {
+    createDir: async (root, rel) => {
+      calls.push({ op: "createDir", args: [root, rel] });
+    },
+    createFile: async (root, rel) => {
+      calls.push({ op: "createFile", args: [root, rel] });
+      if (files.has(rel)) throw new Error(`"${rel}" already exists`);
+      files.set(rel, "");
+    },
+    readFileRelative: async (_root, rel) => files.get(rel) ?? null,
+    writeFileAbs: async (abs, content) => {
+      calls.push({ op: "writeFileAbs", args: [abs, content] });
+    },
+  };
+  return { calls, deps, files };
+}
+
+const toolByName = (deps: InProcessToolDeps, name: string) =>
+  buildInProcessTools(deps).find((t) => t.name === name)!;
+
+describe("filesystem tools (app__read_file / app__create_*)", () => {
+  it("are offered only when the fs bridge is present", () => {
+    const { deps } = depsWithExcalidrawSpy(); // no fs
+    const names = buildInProcessTools(deps).map((t) => t.name);
+    expect(names).not.toContain("app__create_file");
+    const { deps: withFs } = depsWithFsSpy();
+    expect(buildInProcessTools(withFs).map((t) => t.name)).toContain("app__create_file");
+  });
+
+  // The write tools MUST be prompt-gated (human approval) while reads auto-run.
+  it("declares prompt approval on creation tools and none on read", () => {
+    const { deps } = depsWithFsSpy();
+    expect(toolByName(deps, "app__create_file").approval).toBe("prompt");
+    expect(toolByName(deps, "app__create_folder").approval).toBe("prompt");
+    expect(toolByName(deps, "app__read_file").approval).toBeUndefined();
+  });
+
+  it("creates a file and writes its content through the root-joined path", async () => {
+    const { calls, deps } = depsWithFsSpy();
+    const res = await toolByName(deps, "app__create_file").execute({
+      content: "# hi",
+      path: "notes/a.md",
+    });
+    expect(res).toEqual({ status: "created", path: "notes/a.md", bytes: 4 });
+    expect(calls).toEqual([
+      { op: "createFile", args: ["/ws", "notes/a.md"] },
+      { op: "writeFileAbs", args: ["/ws/notes/a.md", "# hi"] },
+    ]);
+  });
+
+  it("refuses overwrite with an instructional message (no write happens)", async () => {
+    const { calls, deps, files } = depsWithFsSpy();
+    files.set("a.md", "old");
+    const res = (await toolByName(deps, "app__create_file").execute({ path: "a.md" })) as {
+      status: string;
+      message: string;
+    };
+    expect(res.status).toBe("error");
+    expect(res.message).toContain("already exists");
+    expect(calls.filter((c) => c.op === "writeFileAbs")).toHaveLength(0);
+  });
+
+  it("creates folders and reads files back (missing file is instructional)", async () => {
+    const { deps, files } = depsWithFsSpy();
+    expect(await toolByName(deps, "app__create_folder").execute({ path: "drafts" })).toEqual({
+      status: "created",
+      path: "drafts",
+    });
+    files.set("readme.md", "content");
+    expect(await toolByName(deps, "app__read_file").execute({ path: "readme.md" })).toEqual({
+      content: "content",
+      path: "readme.md",
+    });
+    const missing = (await toolByName(deps, "app__read_file").execute({ path: "ghost.md" })) as {
+      status: string;
+      message: string;
+    };
+    expect(missing.status).toBe("error");
+    expect(missing.message).toContain("app__list_files");
+  });
+
+  it("errors cleanly when no workspace is open", async () => {
+    const { deps } = depsWithFsSpy();
+    deps.getWorkspaceRoots = () => [];
+    const res = (await toolByName(deps, "app__create_file").execute({ path: "a.md" })) as {
+      status: string;
+    };
+    expect(res.status).toBe("error");
+  });
+});

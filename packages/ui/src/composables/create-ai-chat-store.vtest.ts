@@ -190,6 +190,59 @@ describe("createAiChatStore", () => {
     expect(store.messages()[0]).toEqual({ role: "user", content: "hi" });
   });
 
+  it("retryLast drops the last assistant turn and streams a fresh reply without duplicating the user turn", async () => {
+    // Reply differs per call so the test proves a fresh turn really ran.
+    let calls = 0;
+    const provider: AIProvider = {
+      async *chat() {
+        calls += 1;
+        yield { type: "text-delta", text: calls === 1 ? "first" : "second" };
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const store = createAiChatStore({ getProvider: () => provider });
+    await store.sendMessage("hi");
+    expect(store.messages()).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "first" },
+    ]);
+    await store.retryLast();
+    expect(store.messages()).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "second" },
+    ]);
+    expect(store.messages().filter((t) => t.role === "user")).toHaveLength(1);
+    expect(store.streaming()).toBe(false);
+    expect(store.error()).toBeNull();
+  });
+
+  it("retryLast is a no-op when there are no messages", async () => {
+    let calls = 0;
+    const provider: AIProvider = {
+      async *chat() {
+        calls += 1;
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const store = createAiChatStore({ getProvider: () => provider });
+    await store.retryLast();
+    expect(store.messages()).toEqual([]);
+    expect(calls).toBe(0);
+    expect(store.streaming()).toBe(false);
+  });
+
   it("resolves and forwards tools to the provider chat opts", async () => {
     let receivedTools: unknown;
     const provider: AIProvider = {

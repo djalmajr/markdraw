@@ -27,6 +27,15 @@ describe("buildContextPreamble", () => {
     expect(out).toContain("world");
   });
 
+  it("wraps a folder item (a mentioned directory's subtree listing) with kind=\"folder\"", () => {
+    const items: AiContextItem[] = [
+      { id: "folder:r:src", kind: "folder", label: "src/", content: "- src/a.md\n- src/b.md" },
+    ];
+    const out = buildContextPreamble(items)!;
+    expect(out).toContain('<context kind="folder" source="src/">');
+    expect(out).toContain("- src/a.md");
+  });
+
   it("escapes quotes in the source label", () => {
     const out = buildContextPreamble([{ id: "x", kind: "file", label: 'a"b.md', content: "c" }])!;
     expect(out).toContain("a&quot;b.md");

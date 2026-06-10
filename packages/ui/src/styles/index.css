@@ -4677,3 +4677,31 @@ kbd.shortcuts-help-key {
   font-size: 11px;
   color: hsl(var(--muted-foreground));
 }
+
+/* ── AI message hover actions (copy / regenerate) — appended block ──────── */
+
+.ai-msg-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.ai-message:hover .ai-msg-actions {
+  opacity: 1;
+}
+
+.ai-msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+
+.ai-msg-action-btn:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--muted));
+}
