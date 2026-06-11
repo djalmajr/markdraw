@@ -27,6 +27,7 @@ import IconFilePlus from "~icons/lucide/file-plus";
 import IconFolderPlus from "~icons/lucide/folder-plus";
 import IconClipboard from "~icons/lucide/clipboard-copy";
 import IconClipboardPaste from "~icons/lucide/clipboard-paste";
+import IconSparkles from "~icons/lucide/sparkles";
 import IconTrash from "~icons/lucide/trash-2";
 import { fileKind, isSupportedFile } from "@asciimark/core/utils.ts";
 import type { FSEntry, WorkspaceRoot } from "@asciimark/core/types.ts";
@@ -532,6 +533,21 @@ export function FileTree(props: FileTreeProps) {
                     <span class="flex items-center gap-2"><IconClipboardPaste width={14} height={14} /> {m.tree_paste()}</span>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
+                </Show>
+                <Show when={props.onAddToChat}>
+                  {/* The whole workspace as a chat context chip — the host
+                      builds a subtree listing for the pseudo-entry (path ""). */}
+                  <DropdownMenuItem
+                    class="gap-2"
+                    onSelect={() =>
+                      props.onAddToChat?.(
+                        { kind: "directory", name: propsRoot.root().name, path: "" },
+                        rootId,
+                      )
+                    }
+                  >
+                    <span class="flex items-center gap-2"><IconSparkles width={14} height={14} /> {m.ai_add_to_chat()}</span>
+                  </DropdownMenuItem>
                 </Show>
                 <DropdownMenuItem
                   class="gap-2"

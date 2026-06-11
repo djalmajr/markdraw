@@ -736,8 +736,17 @@ export function AppShell(props: AppShellProps) {
                 onOpenInNewTab={props.onOpenInNewTab}
                 onAddToChat={(entry, rootId) => {
                   // Registers a context chip; front the chat so the chip is seen.
-                  props.onAddFileMention?.({ label: entry.name, path: entry.path, rootId });
-                  s.focusAiComposer();
+                  const isDir = entry.kind === "directory";
+                  props.onAddFileMention?.({
+                    ...(isDir ? { kind: "dir" } : {}),
+                    label: isDir ? `${entry.name}/` : entry.name,
+                    path: entry.path,
+                    rootId,
+                  });
+                  // Deferred OUT of the Kobalte menu's onSelect: focusing the
+                  // composer while the menu is still closing leaves its focus
+                  // trap and our focus fighting forever — a UI-thread freeze.
+                  setTimeout(() => s.focusAiComposer(), 0);
                 }}
                 onDoubleClickFile={props.onDoubleClickFile}
                 onToggleRootCollapsed={(id) => s.toggleRootCollapsed(id)}

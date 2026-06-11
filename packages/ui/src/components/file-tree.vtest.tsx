@@ -236,6 +236,56 @@ describe("FileTree", () => {
       expect(screen.queryByText(/add to chat|adicionar ao chat|añadir al chat/i)).toBeNull();
     });
 
+    it("offers 'Add to chat' in a DIRECTORY's menu (folder mention)", () => {
+      const onAddToChat = vi.fn();
+      const { container } = render(() => (
+        <AppProvider state={makeAppStub()}>
+          <FileTree
+            roots={SINGLE_ROOT}
+            selectedPath={null}
+            selectedRootId={null}
+            onSelect={() => {}}
+            onAddToChat={onAddToChat}
+          />
+        </AppProvider>
+      ));
+      openFileMenu(container, "notes");
+      const item = screen.getByText(/add to chat|adicionar ao chat|añadir al chat/i);
+      fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      fireEvent.click(item);
+      expect(onAddToChat).toHaveBeenCalledTimes(1);
+      expect(onAddToChat.mock.calls[0]![0].kind).toBe("directory");
+    });
+
+    it("offers 'Add to chat' in the workspace-root menu with a path:'' pseudo-entry", () => {
+      const onAddToChat = vi.fn();
+      const { container } = render(() => (
+        <AppProvider state={makeAppStub()}>
+          <FileTree
+            roots={SINGLE_ROOT}
+            selectedPath={null}
+            selectedRootId={null}
+            onSelect={() => {}}
+            onAddToChat={onAddToChat}
+          />
+        </AppProvider>
+      ));
+      const trigger = container.querySelector<HTMLElement>(".workspace-root-btn");
+      expect(trigger).not.toBeNull();
+      fireEvent.pointerDown(trigger!, { button: 0, pointerType: "mouse" });
+      fireEvent.pointerUp(trigger!, { button: 0, pointerType: "mouse" });
+      fireEvent.click(trigger!);
+      const item = screen.getByText(/add to chat|adicionar ao chat|añadir al chat/i);
+      fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      fireEvent.click(item);
+      expect(onAddToChat).toHaveBeenCalledTimes(1);
+      const [entry, rootId] = onAddToChat.mock.calls[0]!;
+      expect(entry).toMatchObject({ kind: "directory", path: "" });
+      expect(rootId).toBe(SINGLE_ROOT[0]!.id);
+    });
+
     it("hides the menu on root-level rows when showItemMenu={false}", () => {
       const { container } = render(() => (
         <AppProvider state={makeAppStub()}>

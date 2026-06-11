@@ -496,7 +496,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
         itemClass: "justify-between gap-3",
       });
     }
-    if (!isDirectory() && props.onAddToChat) {
+    // Files AND folders: a folder mention attaches its subtree listing.
+    if (props.onAddToChat) {
       list.push({
         id: "add-to-chat",
         icon: <IconSparkles width={14} height={14} />,
