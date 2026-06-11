@@ -149,20 +149,23 @@ export function listMcpServers(): Promise<McpServerStatus[]> {
   return invoke<McpServerStatus[]>("ai_mcp_list_servers");
 }
 
-/** Connect every enabled server, swallowing per-server failures so one bad
- *  server doesn't block the others. Returns the ids that connected. */
+/** Connect every enabled server in parallel (Promise.allSettled — a slow or
+ *  bad server must not block the others). Each entry still resolves its
+ *  secrets and connects independently; per-server failures are logged and
+ *  swallowed. Returns the ids that connected, in input order. */
 export async function connectEnabledServers(
   servers: MCPServerConfig[] | undefined,
 ): Promise<string[]> {
+  const enabled = (servers ?? []).filter((server) => server.enabled !== false);
+  const results = await Promise.allSettled(
+    enabled.map((server) => connectMcpServer(server)),
+  );
   const connected: string[] = [];
-  for (const server of servers ?? []) {
-    if (server.enabled === false) continue;
-    try {
-      await connectMcpServer(server);
-      connected.push(server.id);
-    } catch (e) {
-      console.warn(`[mcp] connect failed for "${server.id}":`, e);
-    }
-  }
+  results.forEach((result, index) => {
+    const server = enabled[index];
+    if (!server) return;
+    if (result.status === "fulfilled") connected.push(server.id);
+    else console.warn(`[mcp] connect failed for "${server.id}":`, result.reason);
+  });
   return connected;
 }

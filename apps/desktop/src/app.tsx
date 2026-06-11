@@ -11,7 +11,7 @@ import { invoke } from "./lib/chaos-invoke.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@asciimark/ui/composables/create-app-state.ts";
-import { slugifyTitle } from "@asciimark/ui/lib/chat-export.ts";
+import { exportChatArtifact, savePlanArtifact } from "./lib/ai-artifacts.ts";
 import { createMockProvider } from "@asciimark/ai/mock-provider.ts";
 import type { AIConfig, MCPServerConfig } from "@asciimark/ai/config-schema.ts";
 import type { AIProvider, AITool } from "@asciimark/ai/types.ts";
@@ -19,13 +19,17 @@ import { createApprovalGate } from "@asciimark/ai/approval-policy.ts";
 import { resolveModel } from "@asciimark/ai/resolve-model.ts";
 import { resolveCredential } from "@asciimark/ai/resolve-credential.ts";
 import { createProvider as createAiProvider } from "@asciimark/ai/adapter.ts";
+import { restoreSecrets, scrubSecrets } from "@asciimark/ai/secret-scrub.ts";
 import { withBuiltins } from "@asciimark/ai/builtin-providers.ts";
 import {
   getStoredAiEngine,
   getStoredAiModel,
   setStoredAiModel,
+  getStoredAiReasoning,
+  setStoredAiReasoning,
   getStoredAiStreaming,
   setStoredAiStreaming,
+  type AIReasoningEffort,
   getStoredHiddenModels,
   setStoredHiddenModels,
   getStoredIndexingTier,
@@ -44,6 +48,8 @@ import {
   type McpServerStatus,
 } from "./lib/ai-mcp.ts";
 import { buildInProcessTools } from "./lib/ai-tools.ts";
+import { loadCustomInstructions, loadSlashCommands } from "./lib/ai-commands.ts";
+import type { CustomInstructions, SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
 import { deleteApiKey, getApiKey, hasApiKey, setApiKey } from "./lib/ai-credentials.ts";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { streamingFetch } from "./lib/ai-sse-fetch.ts";
@@ -70,6 +76,7 @@ import { excalidrawSceneToOutline, excalidrawSelectionToContext } from "@asciima
 import { buildBacklinkIndex } from "@asciimark/core/backlinks.ts";
 import { flattenWorkspace } from "@asciimark/core/file-index.ts";
 import { createDir, createFile, readFileByPath, readFileContent, writeFile } from "./lib/fs.ts";
+import { extractPdfText } from "./lib/pdf-text.ts";
 import {
   buildWorkspaceSymbols,
   type WorkspaceSymbol,
@@ -120,6 +127,14 @@ export function App() {
   // Tool names grouped by server id — feeds the settings card tool chips.
   const [mcpTools, setMcpTools] = createSignal<Record<string, string[]>>({});
 
+  // Deterministic secret scrubbing (omp#5), session-scoped: one map per app
+  // run keeps `[secret-N]` placeholders stable across every outbound scrub
+  // (file reads, active doc, context chips) so inbound tool args and the chat
+  // display can restore the real values.
+  const aiSecretMap = new Map<string, string>();
+  const scrubAi = (text: string): string => scrubSecrets(text, aiSecretMap).text;
+  const restoreAi = (text: string): string => restoreSecrets(text, aiSecretMap);
+
   // A prompt-tier tool call (MCP / unknown) awaiting Accept/Reject before it
   // runs. Human-in-the-loop gating on top of the current non-streaming loop.
   const [pendingApproval, setPendingApproval] = createSignal<{
@@ -129,6 +144,18 @@ export function App() {
     approve: () => void;
     deny: () => void;
   } | null>(null);
+
+  /** Engine options read fresh per provider build: streaming picks the Rust
+   *  SSE transport (tauri-plugin-http buffers whole bodies); reasoning "off"
+   *  omits the option entirely (engines map low/medium/high only). */
+  function buildEngineOptions(): Parameters<typeof createAiProvider>[3] {
+    const reasoning: AIReasoningEffort = getStoredAiReasoning();
+    return {
+      fetch: getStoredAiStreaming() ? streamingFetch : tauriFetch,
+      streaming: getStoredAiStreaming(),
+      ...(reasoning !== "off" ? { reasoningEffort: reasoning } : {}),
+    };
+  }
 
   // Build the active provider from ai-prefs + config + keychain. With no model
   // configured, DEV falls back to the mock (AI surfaces stay testable without
@@ -156,12 +183,7 @@ export function App() {
       // Streaming ON swaps in the Rust SSE transport (ai_http.rs → Channel →
       // streaming Response), which actually delivers deltas — tauri-plugin-http
       // buffers whole bodies, so it stays the buffered default only.
-      {
-        fetch: getStoredAiStreaming()
-          ? streamingFetch
-          : (tauriFetch as unknown as typeof globalThis.fetch),
-        streaming: getStoredAiStreaming(),
-      },
+      buildEngineOptions(),
     );
   }
 
@@ -184,6 +206,9 @@ export function App() {
     createAIProvider: () => buildAIProvider(),
     // Tools for the chat tool-calling loop: in-process app tools + MCP servers.
     getAITools,
+    // Workspace custom instructions (.asciimark/instructions.md) merged into
+    // the system prompt (arrow defers the read — the signal is declared below).
+    getCustomInstructions: () => aiInstructions() ?? undefined,
     // Engine-enforced Accept/Reject for prompt-tier tools (arrow defers the
     // read — the gate is defined further down in this component).
     onToolApprovalRequest: (req) => requestToolApproval(req),
@@ -217,6 +242,8 @@ export function App() {
   // Streaming-responses beta toggle. Read fresh by buildAIProvider each turn, so
   // flipping it takes effect on the next message (no provider rebuild needed).
   const [aiStreaming, setAiStreaming] = createSignal(getStoredAiStreaming());
+  // Reasoning effort — same read-fresh pattern (buildEngineOptions).
+  const [aiReasoning, setAiReasoning] = createSignal<AIReasoningEffort>(getStoredAiReasoning());
 
   const aiProviders = createMemo(() =>
     Object.entries(aiConfig().provider).map(([id, p]) => ({
@@ -451,13 +478,18 @@ export function App() {
     const inProcess = buildInProcessTools({
       // Reuses the file-tree's root-validated Rust commands (reject ../ and
       // absolute paths, refuse overwrite); the tree refreshes via the watcher.
+      // Reads are scrubbed so file content reaches the model with `[secret-N]`
+      // placeholders; restoreSecretsIn below maps them back before writes.
       fs: {
         createDir,
         createFile,
-        readFileRelative: readFileByPath,
+        readFileRelative: async (root, relative) => {
+          const content = await readFileByPath(root, relative);
+          return content === null ? null : scrubAi(content);
+        },
         writeFileAbs: writeFile,
       },
-      getActiveDoc: () => state.editorContent(),
+      getActiveDoc: () => scrubAi(state.editorContent()),
       getActiveDocPath: () => state.selectedFile()?.path ?? null,
       // Same frame-handle path ⌘I uses (activeExcalidrawFrame) — null when the
       // active view isn't a mounted `.excalidraw`, so the read tool falls back.
@@ -469,6 +501,11 @@ export function App() {
       },
       getWorkspaceRoots: () => Array.from(rootPaths().values()),
       proposeEdit: proposeAiEdit,
+      restoreSecretsIn: restoreAi,
+      scrubSecretsIn: scrubAi,
+      // Live plan (app__update_plan): full-list replace into app state, null
+      // clears the card. UI-state only — the tool runs without approval.
+      updatePlan: (items) => (items === null ? state.clearAiPlan() : state.setAiPlanItems(items)),
       applyExcalidrawMermaid,
     });
     let mcp: AITool[] = [];
@@ -484,21 +521,20 @@ export function App() {
   }
 
   /** Persist a Plan-mode result to `<root>/.asciimark/plans/plan-<stamp>.md`.
-   *  write_file creates the parent dirs. No-op (logged) when no folder is open. */
+   *  Plan turns quote scrubbed `[secret-N]` placeholders, so the artifact
+   *  writer restores them before disk. No-op (logged) when no folder is open. */
   async function handlePlanComplete(content: string): Promise<void> {
     const root = Array.from(rootPaths().values())[0];
     if (!root) {
       console.warn("[plan] no workspace open — plan not saved");
       return;
     }
-    const d = new Date();
-    const pad = (n: number): string => String(n).padStart(2, "0");
-    const stamp =
-      `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
-      `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-    const path = `${root}/.asciimark/plans/plan-${stamp}.md`;
     try {
-      await invoke("write_file", { path, content });
+      const path = await savePlanArtifact(
+        { restoreSecrets: restoreAi, writeFile },
+        root,
+        content,
+      );
       console.info(`[plan] saved ${path}`);
     } catch (e) {
       console.error("[plan] failed to save:", e);
@@ -506,23 +542,23 @@ export function App() {
   }
 
   /** Export a chat transcript via a native Save As dialog, defaulting to
-   *  `<root>/.asciimark/chats/<slug>-<stamp>.md` (the dir is created on demand). */
+   *  `<root>/.asciimark/chats/<slug>-<stamp>.md` (the dir is created on demand).
+   *  Store turns keep `[secret-N]` placeholders by design — the artifact
+   *  writer restores them so the file matches the displayed transcript. */
   async function handleExportChat(payload: { title: string; markdown: string }): Promise<void> {
-    const root = Array.from(rootPaths().values())[0];
-    const d = new Date();
-    const pad = (n: number): string => String(n).padStart(2, "0");
-    const stamp =
-      `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
-      `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-    const defaultName = `${slugifyTitle(payload.title)}-${stamp}.md`;
+    const root = Array.from(rootPaths().values())[0] ?? null;
     try {
-      const path = await invoke<string | null>("save_file_dialog", {
-        defaultDir: root ? `${root}/.asciimark/chats` : null,
-        defaultName,
-      });
-      if (!path) return; // user cancelled
-      await invoke("write_file", { path, content: payload.markdown });
-      console.info(`[export] chat saved ${path}`);
+      const path = await exportChatArtifact(
+        {
+          restoreSecrets: restoreAi,
+          saveFileDialog: (defaultDir, defaultName) =>
+            invoke<string | null>("save_file_dialog", { defaultDir, defaultName }),
+          writeFile,
+        },
+        root,
+        payload,
+      );
+      if (path) console.info(`[export] chat saved ${path}`);
     } catch (e) {
       console.error("[export] failed to save chat:", e);
     }
@@ -681,6 +717,18 @@ export function App() {
   const tabStore = (): TabStore => state.paneManager.activePane().tabs;
 
   const [rootPaths, setRootPaths] = createSignal<Map<string, string>>(new Map());
+
+  // File-backed slash commands + custom instructions (omp#1). Reloaded
+  // whenever the primary workspace root changes — the project-level files
+  // live under <root>/.asciimark; builtin + global commands survive with no
+  // root open. Both loaders are best-effort and never throw.
+  const [aiSlashCommands, setAiSlashCommands] = createSignal<SlashCommandDef[]>([]);
+  const [aiInstructions, setAiInstructions] = createSignal<CustomInstructions | null>(null);
+  createEffect(() => {
+    const root = Array.from(rootPaths().values())[0] ?? null;
+    void loadSlashCommands(root).then(setAiSlashCommands);
+    void loadCustomInstructions(root).then(setAiInstructions);
+  });
 
   // Quick Open (Cmd/Ctrl+P) overlay visibility — owned here so the keyboard
   // handler can toggle it without round-tripping through AppShell.
@@ -1186,7 +1234,8 @@ export function App() {
     if (!file) return false;
     const item = excalidrawSelectionToContext(await api.getScene(), file);
     if (!item) return false;
-    state.addAiContext(item);
+    // Diagram text elements can carry pasted keys — scrub like any other chip.
+    state.addAiContext({ ...item, content: scrubAi(item.content) });
     return true;
   }
 
@@ -1468,11 +1517,41 @@ export function App() {
     return `Folder listing of ${label}:\n${lines.join("\n")}\n\nUse app__read_file with one of these paths to read a specific file.`;
   }
 
+  /** Read a mentioned PDF for the chat context. PDFs aren't UTF-8 text, so
+   *  instead of `readFileContent` the bytes come through the Tauri asset
+   *  protocol (`convertFileSrc` + fetch — the assetProtocol scope covers the
+   *  workspace) and run through `extractPdfText` (page-capped, `[page N]`
+   *  markers). Failures — encrypted, malformed, scanned-image-only documents
+   *  — yield an explanatory note so the chip is never silently empty. */
+  async function buildPdfMentionContent(absolutePath: string, label: string): Promise<string> {
+    try {
+      const response = await fetch(convertFileSrc(absolutePath));
+      if (!response.ok) throw new Error(`asset fetch failed (${response.status})`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const text = await extractPdfText(bytes);
+      // Ignore the structural `[page N]` / `[truncated: …]` markers; if no
+      // real text remains, the PDF is scanned images or empty — say so
+      // instead of attaching a blob of bare markers.
+      const hasText = text.split("\n").some((line) => {
+        const trimmed = line.trim();
+        return trimmed !== "" && !/^\[(?:page \d+|truncated: .*)\]$/.test(trimmed);
+      });
+      if (!hasText) {
+        return `PDF text of ${label}:\n(no extractable text — the PDF may be scanned images or empty)`;
+      }
+      return `PDF text of ${label}:\n${text}`;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return `PDF text of ${label}:\n(could not extract text: ${reason} — the PDF may be encrypted or corrupted)`;
+    }
+  }
+
   /** Resolve a file or folder as a chat context chip (file-tree "Add to
-   *  chat" / @-mention). Files carry their text; `kind: "dir"` entries carry
-   *  a subtree listing so the model can pick files to read. Either way the
-   *  reference registers through the same `state.addFileMention` chip path
-   *  (deduped by id; the chip's × removes it). */
+   *  chat" / @-mention). Files carry their text (PDFs via pdf.js text
+   *  extraction); `kind: "dir"` entries carry a subtree listing so the model
+   *  can pick files to read. Either way the reference registers through the
+   *  same `state.addFileMention` chip path (deduped by id; the chip's ×
+   *  removes it). */
   async function addFileMention(
     file: { kind?: "dir" | "file"; label: string; path: string; rootId: string },
   ) {
@@ -1484,8 +1563,16 @@ export function App() {
     }
     const rootPath = rootPaths().get(file.rootId);
     if (!rootPath) return;
+    // PDFs aren't readable as UTF-8 — route them through pdf.js extraction.
+    // Chip content goes straight into the prompt, so scrub it here (folder
+    // listings above are names only and stay unscrubbed).
+    if (file.path.toLowerCase().endsWith(".pdf")) {
+      const content = scrubAi(await buildPdfMentionContent(`${rootPath}/${file.path}`, file.label));
+      state.addFileMention({ content, label: file.label, path: file.path, rootId: file.rootId });
+      return;
+    }
     try {
-      const content = await readFileContent(`${rootPath}/${file.path}`);
+      const content = scrubAi(await readFileContent(`${rootPath}/${file.path}`));
       state.addFileMention({ content, label: file.label, path: file.path, rootId: file.rootId });
     } catch {
       // Unreadable (binary / deleted) — silently skip.
@@ -1500,7 +1587,7 @@ export function App() {
     const pane = state.paneManager.activePane() as { editorApi?: EditorApi };
     const sel = pane.editorApi?.getSelection();
     if (!sel || !sel.text.trim()) return false;
-    state.addSelectionToContext(sel);
+    state.addSelectionToContext({ ...sel, text: scrubAi(sel.text) });
     return true;
   }
 
@@ -1516,7 +1603,7 @@ export function App() {
     if (!anchorEl?.closest(".doc-body")) return false;
     const text = sel.toString();
     if (!text.trim()) return false;
-    state.addPreviewSelectionToContext(text);
+    state.addPreviewSelectionToContext(scrubAi(text));
     return true;
   }
 
@@ -2211,6 +2298,8 @@ export function App() {
       aiModelGroups={aiModelGroups()}
       aiCurrentModel={aiCurrentModel()}
       aiContextLimit={aiContextLimit()}
+      aiDisplayText={restoreAi}
+      aiSlashCommands={aiSlashCommands()}
       onSelectAiModel={selectAiModel}
       onOpenSettings={() => setSettingsOpen(true)}
       settingsOpen={settingsOpen()}
@@ -2224,6 +2313,15 @@ export function App() {
       onIndexingTierChange={(t) => {
         setIndexingTier(t);
         setStoredIndexingTier(t);
+      }}
+      aiReasoning={aiReasoning()}
+      onAiReasoningChange={(v) => {
+        // The Select hands back a plain string; the prefs setter narrows it
+        // through its lenient parse (unknown values fall back to "off").
+        const next: AIReasoningEffort =
+          v === "low" || v === "medium" || v === "high" ? v : "off";
+        setAiReasoning(next);
+        setStoredAiReasoning(next);
       }}
       aiStreaming={aiStreaming()}
       onAiStreamingChange={(v) => {

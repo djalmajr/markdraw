@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { buildInProcessTools, type InProcessToolDeps } from "./ai-tools.ts";
+import { restoreSecrets, scrubSecrets } from "@asciimark/ai/secret-scrub.ts";
+import { buildInProcessTools, type InProcessToolDeps, type PlanToolItem } from "./ai-tools.ts";
 import type { ExcalidrawWriteInput, ExcalidrawWriteResult } from "../components/excalidraw-frame.tsx";
 
 /** A deps stub that records the last excalidraw-write call and returns a canned
@@ -264,5 +265,411 @@ describe("app__edit_file tool", () => {
     })) as { status: string; message: string };
     expect(res.status).toBe("error");
     expect(res.message).toContain("app__create_file");
+  });
+});
+
+describe("app__read_file ranged + numbered reads", () => {
+  it("slices the line range BEFORE the 50k cap, so paging reaches deep into huge files", async () => {
+    // Mutation: capping first and slicing after would make every line past
+    // ~50k chars unreachable — the whole point of startLine/endLine paging.
+    const { deps, files } = depsWithFsSpy();
+    const lines = Array.from({ length: 3000 }, (_, i) => `line ${i + 1} ${"x".repeat(30)}`);
+    files.set("big.md", lines.join("\n")); // ~120k chars
+    const tool = toolByName(deps, "app__read_file");
+    const full = (await tool.execute({ path: "big.md" })) as { truncated?: boolean };
+    expect(full.truncated).toBe(true); // legacy whole-file read still caps
+    const ranged = await tool.execute({ endLine: 2902, path: "big.md", startLine: 2900 });
+    expect(ranged).toEqual({
+      content: `${lines[2899]}\n${lines[2900]}\n${lines[2901]}`,
+      endLine: 2902,
+      path: "big.md",
+      startLine: 2900,
+      totalLines: 3000,
+    });
+  });
+
+  it("numbers lines as 'N→' and reports totalLines for paging", async () => {
+    const { deps, files } = depsWithFsSpy();
+    files.set("doc.md", "alpha\nbravo\ncharlie");
+    const res = await toolByName(deps, "app__read_file").execute({
+      endLine: 3,
+      numbered: true,
+      path: "doc.md",
+      startLine: 2,
+    });
+    expect(res).toEqual({
+      content: "2→bravo\n3→charlie",
+      endLine: 3,
+      path: "doc.md",
+      startLine: 2,
+      totalLines: 3,
+    });
+  });
+
+  it("numbered without a range covers the whole file", async () => {
+    const { deps, files } = depsWithFsSpy();
+    files.set("doc.md", "a\nb");
+    const res = await toolByName(deps, "app__read_file").execute({ numbered: true, path: "doc.md" });
+    expect(res).toEqual({
+      content: "1→a\n2→b",
+      endLine: 2,
+      path: "doc.md",
+      startLine: 1,
+      totalLines: 2,
+    });
+  });
+
+  it("still caps a ranged read whose slice alone exceeds 50k chars", async () => {
+    const { deps, files } = depsWithFsSpy();
+    files.set("big.md", "y".repeat(60_000)); // a single huge line
+    const res = (await toolByName(deps, "app__read_file").execute({
+      endLine: 1,
+      path: "big.md",
+      startLine: 1,
+    })) as { content: string; truncated?: boolean };
+    expect(res.truncated).toBe(true);
+    expect(res.content).toHaveLength(50_000);
+  });
+
+  it("clamps an out-of-range request and says so in a note", async () => {
+    const { deps, files } = depsWithFsSpy();
+    files.set("doc.md", "a\nb\nc");
+    const res = await toolByName(deps, "app__read_file").execute({
+      endLine: 20,
+      path: "doc.md",
+      startLine: 10,
+    });
+    expect(res).toEqual({
+      content: "c",
+      endLine: 3,
+      note: expect.stringContaining("3 lines"),
+      path: "doc.md",
+      startLine: 3,
+      totalLines: 3,
+    });
+  });
+});
+
+describe("app__edit_file line-anchored edits", () => {
+  it("applies a single verified hunk", async () => {
+    const { calls, deps, files } = depsWithFsSpy();
+    files.set("doc.md", "l1\nl2\nl3");
+    const res = await toolByName(deps, "app__edit_file").execute({
+      edits: [{ endLine: 2, expectedText: "l2", replace: "L2", startLine: 2 }],
+      path: "doc.md",
+    });
+    expect(res).toEqual({ path: "doc.md", replacements: 1, status: "edited" });
+    expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "l1\nL2\nl3"] });
+  });
+
+  it("applies multiple hunks bottom-up so the read line numbers stay valid", async () => {
+    // Mutation: applying top-down would shift the second hunk after the first
+    // splice changes the line count — hunk 5-5 would land on the wrong line.
+    const { calls, deps, files } = depsWithFsSpy();
+    files.set("doc.md", "a\nb\nc\nd\ne\nf");
+    const res = await toolByName(deps, "app__edit_file").execute({
+      edits: [
+        { endLine: 2, expectedText: "a\nb", replace: "AB", startLine: 1 },
+        { endLine: 5, expectedText: "e", replace: "E1\nE2", startLine: 5 },
+      ],
+      path: "doc.md",
+    });
+    expect(res).toEqual({ path: "doc.md", replacements: 2, status: "edited" });
+    expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "AB\nc\nd\nE1\nE2\nf"] });
+  });
+
+  it("deletes the range when a hunk's replace is empty", async () => {
+    const { calls, deps, files } = depsWithFsSpy();
+    files.set("doc.md", "keep\ndrop\nkeep2");
+    await toolByName(deps, "app__edit_file").execute({
+      edits: [{ endLine: 2, expectedText: "drop", replace: "", startLine: 2 }],
+      path: "doc.md",
+    });
+    expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "keep\nkeep2"] });
+  });
+
+  it("rejects a stale anchor naming the first differing line, pointing at a numbered re-read", async () => {
+    const { calls, deps, files } = depsWithFsSpy();
+    files.set("doc.md", "a\nb\nc");
+    const res = (await toolByName(deps, "app__edit_file").execute({
+      edits: [{ endLine: 3, expectedText: "b\nWRONG", replace: "x", startLine: 2 }],
+      path: "doc.md",
+    })) as { status: string; message: string };
+    expect(res.status).toBe("error");
+    expect(res.message).toContain("line 3"); // line 2 matched; 3 is the first diff
+    expect(res.message).toContain("numbered");
+    expect(calls.filter((c) => c.op === "writeFileAbs")).toHaveLength(0);
+  });
+
+  it("rejects overlapping hunks before touching the file", async () => {
+    const { calls, deps, files } = depsWithFsSpy();
+    files.set("doc.md", "a\nb\nc\nd\ne");
+    const res = (await toolByName(deps, "app__edit_file").execute({
+      edits: [
+        { endLine: 3, expectedText: "a\nb\nc", replace: "x", startLine: 1 },
+        { endLine: 4, expectedText: "c\nd", replace: "y", startLine: 3 },
+      ],
+      path: "doc.md",
+    })) as { status: string; message: string };
+    expect(res.status).toBe("error");
+    expect(res.message).toContain("overlap");
+    expect(calls.filter((c) => c.op === "writeFileAbs")).toHaveLength(0);
+  });
+
+  it("rejects a hunk past the end of the file with an instructional message", async () => {
+    const { deps, files } = depsWithFsSpy();
+    files.set("doc.md", "a\nb");
+    const res = (await toolByName(deps, "app__edit_file").execute({
+      edits: [{ endLine: 5, expectedText: "b", replace: "x", startLine: 2 }],
+      path: "doc.md",
+    })) as { status: string; message: string };
+    expect(res.status).toBe("error");
+    expect(res.message).toContain("2 lines");
+    expect(res.message).toContain("app__read_file");
+  });
+
+  it("matches expectedText against CRLF files (trailing \\r normalized) and keeps CRLF on write", async () => {
+    // Mutation: comparing raw lines would make every CRLF file a permanent
+    // "stale anchor" — the model writes expectedText with plain \n.
+    const { calls, deps, files } = depsWithFsSpy();
+    files.set("doc.md", "l1\r\nl2\r\nl3");
+    const res = await toolByName(deps, "app__edit_file").execute({
+      edits: [{ endLine: 2, expectedText: "l2", replace: "L2", startLine: 2 }],
+      path: "doc.md",
+    });
+    expect(res).toEqual({ path: "doc.md", replacements: 1, status: "edited" });
+    expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "l1\r\nL2\r\nl3"] });
+  });
+
+  it("ignores find/replace when edits is present", async () => {
+    const { calls, deps, files } = depsWithFsSpy();
+    files.set("doc.md", "a\nb");
+    const res = await toolByName(deps, "app__edit_file").execute({
+      edits: [{ endLine: 1, expectedText: "a", replace: "A", startLine: 1 }],
+      find: "b",
+      path: "doc.md",
+      replace: "ZZZ",
+    });
+    expect(res).toEqual({ path: "doc.md", replacements: 1, status: "edited" });
+    expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "A\nb"] });
+  });
+});
+
+/** Deps mirroring the desktop's secret-scrub wiring (omp#5): the fs bridge
+ *  scrubs reads through a session map and restoreSecretsIn maps placeholders
+ *  the model echoes back to the real values. */
+function depsWithScrubbingFs() {
+  const { calls, deps, files } = depsWithFsSpy();
+  const secretMap = new Map<string, string>();
+  const rawRead = deps.fs!.readFileRelative;
+  deps.fs = {
+    ...deps.fs!,
+    readFileRelative: async (root, rel) => {
+      const content = await rawRead(root, rel);
+      return content === null ? null : scrubSecrets(content, secretMap).text;
+    },
+  };
+  deps.restoreSecretsIn = (s) => restoreSecrets(s, secretMap);
+  return { calls, deps, files, secretMap };
+}
+
+describe("secret scrubbing round-trip (restoreSecretsIn)", () => {
+  const SECRET = "sk-w7a4JDfGvnZklepfHyg1unjtehDPpY0b";
+
+  it("app__read_file serves placeholders, and app__edit_file matches via restore", async () => {
+    // Round-trip: scrub on read produces [secret-1]; the model echoes the
+    // placeholder in `find`; restore makes it match the REAL file content —
+    // and the write lands real values, never placeholders.
+    const { calls, deps, files } = depsWithScrubbingFs();
+    files.set("env.md", `key: ${SECRET}\nrest`);
+    const read = (await toolByName(deps, "app__read_file").execute({ path: "env.md" })) as {
+      content: string;
+    };
+    expect(read.content).toBe("key: [secret-1]\nrest");
+    const res = await toolByName(deps, "app__edit_file").execute({
+      find: "key: [secret-1]",
+      path: "env.md",
+      replace: "token: [secret-1]",
+    });
+    expect(res).toEqual({ path: "env.md", replacements: 1, status: "edited" });
+    expect(calls.at(-1)).toEqual({
+      op: "writeFileAbs",
+      args: [`/ws/env.md`, `token: ${SECRET}\nrest`],
+    });
+  });
+
+  it("app__edit_file line-anchored hunks anchor on the scrubbed text; the write restores", async () => {
+    const { calls, deps, files } = depsWithScrubbingFs();
+    files.set("env.md", `a\nkey: ${SECRET}\nc`);
+    // A prior read populated the map (the model can only know the placeholder).
+    await toolByName(deps, "app__read_file").execute({ numbered: true, path: "env.md" });
+    const res = await toolByName(deps, "app__edit_file").execute({
+      edits: [
+        { endLine: 2, expectedText: "key: [secret-1]", replace: "token: [secret-1]", startLine: 2 },
+      ],
+      path: "env.md",
+    });
+    expect(res).toEqual({ path: "env.md", replacements: 1, status: "edited" });
+    expect(calls.at(-1)).toEqual({
+      op: "writeFileAbs",
+      args: [`/ws/env.md`, `a\ntoken: ${SECRET}\nc`],
+    });
+  });
+
+  // A 3-line PEM block scrubs into ONE [secret-N] line, so scrubbed and real
+  // line numbers diverge below it. Numbered reads serve scrubbed coordinates;
+  // the edit must verify/splice in the SAME system or every hunk at/below the
+  // secret fails as a "stale anchor" — or worse, lands on the wrong real line.
+  const PEM =
+    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----";
+
+  it("a hunk below a multiline PEM secret applies to the intended line", async () => {
+    const { calls, deps, files } = depsWithScrubbingFs();
+    files.set("key.md", `intro\n${PEM}\nmiddle\ntarget\noutro`);
+    const read = (await toolByName(deps, "app__read_file").execute({
+      numbered: true,
+      path: "key.md",
+    })) as { content: string; totalLines: number };
+    // 7 real lines collapse to 5 scrubbed lines — the model anchors on these.
+    expect(read.totalLines).toBe(5);
+    expect(read.content).toBe("1→intro\n2→[secret-1]\n3→middle\n4→target\n5→outro");
+    const res = await toolByName(deps, "app__edit_file").execute({
+      edits: [{ endLine: 4, expectedText: "target", replace: "TARGET", startLine: 4 }],
+      path: "key.md",
+    });
+    expect(res).toEqual({ path: "key.md", replacements: 1, status: "edited" });
+    expect(calls.at(-1)).toEqual({
+      op: "writeFileAbs",
+      args: [`/ws/key.md`, `intro\n${PEM}\nmiddle\nTARGET\noutro`],
+    });
+  });
+
+  it("a hunk over the placeholder line itself is applicable (deletes the real block)", async () => {
+    const { calls, deps, files } = depsWithScrubbingFs();
+    files.set("key.md", `before\n${PEM}\nafter`);
+    await toolByName(deps, "app__read_file").execute({ numbered: true, path: "key.md" });
+    const res = await toolByName(deps, "app__edit_file").execute({
+      edits: [{ endLine: 2, expectedText: "[secret-1]", replace: "", startLine: 2 }],
+      path: "key.md",
+    });
+    expect(res).toEqual({ path: "key.md", replacements: 1, status: "edited" });
+    expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: [`/ws/key.md`, "before\nafter"] });
+  });
+
+  it("app__create_file writes restored content", async () => {
+    const { calls, deps, files } = depsWithScrubbingFs();
+    // The placeholder exists because the model read a scrubbed file earlier.
+    files.set("env.md", `key: ${SECRET}`);
+    await toolByName(deps, "app__read_file").execute({ path: "env.md" });
+    const res = await toolByName(deps, "app__create_file").execute({
+      content: "copied: [secret-1]",
+      path: "copy.md",
+    });
+    expect(res).toEqual({ status: "created", path: "copy.md", bytes: `copied: ${SECRET}`.length });
+    expect(calls.at(-1)).toEqual({
+      op: "writeFileAbs",
+      args: [`/ws/copy.md`, `copied: ${SECRET}`],
+    });
+  });
+
+  it("default behavior is unchanged when the dep is absent (placeholders pass through)", async () => {
+    const { calls, deps, files } = depsWithFsSpy(); // no scrubbing, no restore
+    files.set("doc.md", "plain [secret-1] text");
+    const res = await toolByName(deps, "app__edit_file").execute({
+      find: "[secret-1]",
+      path: "doc.md",
+      replace: "x",
+    });
+    expect(res).toEqual({ path: "doc.md", replacements: 1, status: "edited" });
+    expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "plain x text"] });
+  });
+});
+
+/** Deps with a plan spy: records every updatePlan call (the full item list,
+ *  or null for a clear) so we can assert exactly what reaches the host. */
+function depsWithPlanSpy() {
+  const planCalls: Array<PlanToolItem[] | null> = [];
+  const { deps } = depsWithExcalidrawSpy();
+  deps.updatePlan = (items) => {
+    planCalls.push(items);
+  };
+  return { deps, planCalls };
+}
+
+describe("app__update_plan tool", () => {
+  it("is offered only when the updatePlan dep is present", () => {
+    // Mutation: registering it unconditionally would offer a tool whose
+    // execute crashes on hosts (the extension) that have no plan surface.
+    const { deps } = depsWithExcalidrawSpy(); // no updatePlan
+    expect(buildInProcessTools(deps).map((t) => t.name)).not.toContain("app__update_plan");
+    const { deps: withPlan } = depsWithPlanSpy();
+    expect(buildInProcessTools(withPlan).map((t) => t.name)).toContain("app__update_plan");
+  });
+
+  it("declares no approval (source app → auto): it only mutates UI state", () => {
+    const { deps } = depsWithPlanSpy();
+    const tool = toolByName(deps, "app__update_plan");
+    expect(tool.source).toBe("app");
+    expect(tool.approval).toBeUndefined();
+    expect(tool.inputSchema).toMatchObject({ required: ["items"] });
+  });
+
+  it("replaces the plan with the full (trimmed) item list and reports the count", async () => {
+    const { deps, planCalls } = depsWithPlanSpy();
+    const res = await toolByName(deps, "app__update_plan").execute({
+      items: [
+        { done: true, text: "Read the brief" },
+        { done: false, text: "  Draft the outline  " },
+      ],
+    });
+    expect(res).toEqual({ status: "ok", itemCount: 2 });
+    expect(planCalls).toEqual([
+      [
+        { done: true, text: "Read the brief" },
+        { done: false, text: "Draft the outline" },
+      ],
+    ]);
+  });
+
+  it("an empty items array clears the plan (dep receives null)", async () => {
+    // Mutation: passing [] through would render an empty husk of a card
+    // instead of removing it.
+    const { deps, planCalls } = depsWithPlanSpy();
+    const res = await toolByName(deps, "app__update_plan").execute({ items: [] });
+    expect(res).toEqual({ status: "ok", itemCount: 0 });
+    expect(planCalls).toEqual([null]);
+  });
+
+  it("caps the plan at 30 items with an instructional error (state untouched)", async () => {
+    const { deps, planCalls } = depsWithPlanSpy();
+    const items = Array.from({ length: 31 }, (_, i) => ({ done: false, text: `step ${i + 1}` }));
+    const res = (await toolByName(deps, "app__update_plan").execute({ items })) as {
+      status: string;
+      message: string;
+    };
+    expect(res.status).toBe("error");
+    expect(res.message).toContain("30");
+    expect(planCalls).toHaveLength(0);
+    // Exactly the cap still passes.
+    const ok = await toolByName(deps, "app__update_plan").execute({ items: items.slice(0, 30) });
+    expect(ok).toEqual({ status: "ok", itemCount: 30 });
+  });
+
+  it("malformed input gets an instructive error naming the expected shape", async () => {
+    const { deps, planCalls } = depsWithPlanSpy();
+    const tool = toolByName(deps, "app__update_plan");
+    const badPayloads: unknown[] = [
+      {}, // items missing
+      { items: "not an array" },
+      { items: [{ done: "yes", text: "step" }] }, // done not a boolean
+      { items: [{ done: true, text: "   " }] }, // text blank
+      { items: [{ done: true }] }, // text missing
+    ];
+    for (const bad of badPayloads) {
+      const res = (await tool.execute(bad)) as { status: string; message: string };
+      expect(res.status).toBe("error");
+      expect(res.message).toMatch(/done|items/);
+    }
+    expect(planCalls).toHaveLength(0);
   });
 });
