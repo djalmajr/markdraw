@@ -49,5 +49,8 @@
   "overrides": {
     "jiti": "2.7.0",
     "entities": "6.0.1"
+  },
+  "patchedDependencies": {
+    "@asciidoctor/opal-runtime@3.0.1": "patches/@asciidoctor%2Fopal-runtime@3.0.1.patch"
   }
 }
