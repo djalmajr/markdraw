@@ -24,11 +24,22 @@ export interface ToolActivity {
   result?: unknown;
 }
 
+/** Per-run telemetry captured from the provider's terminal `usage` stream
+ *  part (token totals + tool-call count, all optional). */
+export interface TurnUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  toolCalls?: number;
+}
+
 export interface ChatTurn {
   role: "user" | "assistant";
   content: string;
   /** Tool calls the assistant made on this turn (assistant turns only). */
   tools?: ToolActivity[];
+  /** Per-run telemetry, attached when the provider reported it (assistant
+   *  turns only). */
+  usage?: TurnUsage;
 }
 
 export interface AiChatError {
@@ -53,6 +64,12 @@ export interface AiChatStore {
   queued: () => string | null;
   /** Drop the queued steering message without sending it. */
   cancelQueued(): void;
+  /** Edit a PAST user turn and re-run from it: truncates the history to the
+   *  turns before `index`, pushes the edited text as the new user turn and
+   *  streams a fresh reply — everything after the edited turn is dropped.
+   *  No-op while streaming, when `index` isn't a user turn, or when the text
+   *  is blank. */
+  editAndResend(index: number, text: string): Promise<void>;
   /** Re-run the trailing user turn: drops the last assistant reply (when one is
    *  trailing) and streams a fresh one in its place. No-op while streaming or
    *  when there is no trailing conversation to retry. */
@@ -176,6 +193,32 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     await drainQueue();
   }
 
+  /** Edit a past user turn and re-run the conversation from it: drops the
+   *  edited turn and everything after it, pushes the edited text as the new
+   *  user turn and streams a fresh reply. */
+  async function editAndResend(index: number, text: string): Promise<void> {
+    if (streaming()) return;
+    // Check the provider BEFORE truncating: the slice below persists through
+    // the sessions effect, so a no-provider edit would otherwise permanently
+    // delete the later turns and leave only an error behind (same reasoning
+    // as retryLast).
+    if (!providerReady()) {
+      setError({ code: "unknown", message: m.ai_error_no_provider() });
+      return;
+    }
+    if (messages()[index]?.role !== "user") return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setError(null);
+    const history: ChatTurn[] = [
+      ...messages().slice(0, index),
+      { role: "user", content: trimmed },
+    ];
+    setMessages(history);
+    await runTurn(history);
+    await drainQueue();
+  }
+
   /** Streams one assistant turn for `history` (which must end with the user
    *  turn being answered): provider resolution, the streaming buffer, tool
    *  activity, and the finally-append of the consolidated reply. Shared by
@@ -191,6 +234,9 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     setToolActivity([]);
     setStreaming(true);
     controller = new AbortController();
+    // Per-run telemetry (the `usage` part precedes `done`); attached to the
+    // finalized assistant turn in the finally-append below.
+    let turnUsage: TurnUsage | undefined;
 
     // Inject the explicit context (attached files/selections) into the latest
     // user message that's SENT to the model — the stored/displayed turn above
@@ -254,6 +300,12 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
                 : a,
             ),
           );
+        } else if (part.type === "usage") {
+          turnUsage = {
+            ...(part.inputTokens !== undefined ? { inputTokens: part.inputTokens } : {}),
+            ...(part.outputTokens !== undefined ? { outputTokens: part.outputTokens } : {}),
+            ...(part.toolCalls !== undefined ? { toolCalls: part.toolCalls } : {}),
+          };
         } else if (part.type === "error") {
           // `aborted` is user-initiated — keep the partial reply, no error UI.
           if (part.code !== "aborted") {
@@ -280,6 +332,7 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
             role: "assistant",
             content: finalText,
             ...(turnTools.length ? { tools: turnTools } : {}),
+            ...(turnUsage ? { usage: turnUsage } : {}),
           },
         ]);
       }
@@ -330,6 +383,7 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     providerReady,
     queued,
     cancelQueued,
+    editAndResend,
     retryLast,
     sendMessage,
     cancel,

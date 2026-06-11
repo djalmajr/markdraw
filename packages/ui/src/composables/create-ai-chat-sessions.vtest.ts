@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createRoot } from "solid-js";
 import type { AIProvider } from "@asciimark/ai/types.ts";
-import { setChatMessages } from "@asciimark/core/ai-chat-sessions.ts";
+import { getChatMessages, setChatMessages } from "@asciimark/core/ai-chat-sessions.ts";
 import { createAiChatSessions, deriveAiChatTitle } from "./create-ai-chat-sessions.ts";
 
 /** Replays a fixed stream. */
@@ -160,6 +160,48 @@ describe("createAiChatSessions — lifecycle", () => {
       await pending.catch(() => {});
       expect(mgr.allSessions().find((s) => s.id === a)).toBeUndefined();
       expect(localStorage.getItem("asciimark-ai-chat-msgs-" + a)).toBeNull();
+    });
+  });
+});
+
+describe("createAiChatSessions — fork", () => {
+  it("forkSession copies the messages into a new active session that evolves separately", async () => {
+    await withRoot(async () => {
+      const mgr = createAiChatSessions({ getProvider: () => stubProvider("ok") });
+      const a = mgr.createSession();
+      await mgr.storeFor(a)!.sendMessage("hello");
+      const fork = mgr.forkSession(a);
+      expect(fork).not.toBeNull();
+      expect(fork).not.toBe(a);
+      // The fork opens active with the source's turns copied over…
+      expect(mgr.activeId()).toBe(fork);
+      expect(mgr.storeFor(fork!)!.messages()).toEqual([
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "ok" },
+      ]);
+      // …in its OWN store (no shared state with the source).
+      expect(mgr.storeFor(fork!)).not.toBe(mgr.storeFor(a));
+      // Title carries over from the source.
+      expect(mgr.allSessions().find((s) => s.id === fork)?.title).toBe("hello");
+      // Separate evolution: a send on the fork must not touch the source.
+      const sourceBefore = mgr.storeFor(a)!.messages();
+      await mgr.storeFor(fork!)!.sendMessage("only in fork");
+      expect(mgr.storeFor(a)!.messages()).toEqual(sourceBefore);
+      expect(mgr.storeFor(fork!)!.messages()).toHaveLength(4);
+      // Persistence: the index gains the new session and the copied turns are
+      // durable immediately (no debounce window).
+      expect(mgr.snapshot().sessions.map((s) => s.id)).toContain(fork);
+      expect(getChatMessages(fork!).map((msg) => msg.content)).toEqual(
+        expect.arrayContaining(["hello", "ok"]),
+      );
+    });
+  });
+
+  it("forkSession returns null for an unknown id", async () => {
+    await withRoot(() => {
+      const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
+      expect(mgr.forkSession("nope")).toBeNull();
+      expect(mgr.allSessions()).toEqual([]);
     });
   });
 });

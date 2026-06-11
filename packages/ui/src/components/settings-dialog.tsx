@@ -158,6 +158,9 @@ export interface SettingsDialogProps {
   onRemoveMcpServer?: (id: string) => void | Promise<void>;
   /** Enable/disable an MCP server. */
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
+  /** Reasoning effort forwarded to the engine ("off" | "low" | "medium" | "high"). */
+  aiReasoning?: string;
+  onAiReasoningChange?: (value: string) => void;
   /** Streaming-responses beta toggle (real incremental deltas). */
   aiStreaming?: boolean;
   onAiStreamingChange?: (enabled: boolean) => void;
@@ -170,6 +173,9 @@ export interface SettingsDialogProps {
 }
 
 const THEME_MODES = ["system", "light", "dark"] as const;
+
+/** Rendered raw (same style as the MCP transport Select) — not translated. */
+const REASONING_EFFORTS = ["off", "low", "medium", "high"] as const;
 
 const NAV: ReadonlyArray<{ id: SettingsSection; key: string; icon: () => JSX.Element }> = [
   { id: "ai", key: "settings_nav_ai", icon: () => <IconSparkles width={15} height={15} /> },
@@ -752,6 +758,25 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
           </p>
             </div>
           </div>
+
+          <div class="settings-row" style={{ "align-items": "center", gap: "10px", "justify-content": "space-between", "margin-top": "12px" }}>
+            <label class="settings-label" style={{ margin: "0" }}>
+              {(useLocale(), label("settings_ai_reasoning_label"))}
+            </label>
+            <Select<string>
+              itemComponent={(itemProps) => (
+                <SelectItem item={itemProps.item}>{itemProps.item.rawValue}</SelectItem>
+              )}
+              options={[...REASONING_EFFORTS]}
+              value={props.aiReasoning ?? "off"}
+              onChange={(value) => value && props.onAiReasoningChange?.(value)}
+            >
+              <SelectTrigger aria-label={label("settings_ai_reasoning_label")} class="w-40">
+                <SelectValue<string>>{(state) => state.selectedOption()}</SelectValue>
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          </div>
         </Match>
       </Switch>
     </div>
@@ -1042,7 +1067,17 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
       </Show>
 
       <div class="settings-row settings-row-end">
-        <Button size="sm" onClick={save} disabled={!id().trim()}>
+        {/* Per-transport gate matches the schema's cross-field rule — a
+            stdio server without a command (or http without a url) would be
+            silently dropped by the lenient config parse on next load. */}
+        <Button
+          size="sm"
+          disabled={
+            !id().trim() ||
+            (transport() === "stdio" ? !command().trim() : !url().trim())
+          }
+          onClick={save}
+        >
           {(useLocale(), label("settings_mcp_add"))}
         </Button>
       </div>

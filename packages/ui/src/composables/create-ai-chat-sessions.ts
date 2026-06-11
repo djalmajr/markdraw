@@ -44,6 +44,12 @@ export interface AiChatSessions {
   version: () => number;
 
   createSession: (opts?: { activate?: boolean; title?: string }) => string;
+  /** Duplicate a session's CURRENT messages into a NEW session (own store —
+   *  no shared state with the source), opened and activated. Live sources
+   *  fork their in-memory turns (incl. an in-flight partial); closed/archived
+   *  ones fork their persisted messages. Returns the new id, or null when the
+   *  source id is unknown. */
+  forkSession: (id: string) => string | null;
   closeSession: (id: string) => void;
   activateSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
@@ -139,6 +145,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
       role: t.role,
       content: t.content,
       ...(t.tools && t.tools.length ? { tools: t.tools.map(toPersistedTool) } : {}),
+      ...(t.usage ? { usage: t.usage } : {}),
     }));
   }
 
@@ -240,6 +247,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
             })),
           }
         : {}),
+      ...(m.usage ? { usage: m.usage } : {}),
     }));
   }
 
@@ -285,6 +293,43 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     bump();
     schedulePersistIndex();
     return id;
+  }
+
+  /** Duplicate `id`'s current messages into a brand-new session. The copy is
+   *  instantiated like createSession/hydrate do (its OWN store seeded via
+   *  `initialMessages`), so the fork and the source evolve independently. */
+  function forkSession(id: string): string | null {
+    const src = metas().find((x) => x.id === id);
+    if (!src) return null;
+    // Live source → its in-memory turns (incl. an in-flight partial);
+    // closed/archived source → its persisted messages.
+    const rec = records.get(id);
+    const turns: ChatTurn[] = rec
+      ? durableTurns(rec.store).map((t) => ({ ...t }))
+      : hydrateTurns(getChatMessages(id));
+    const firstUser = turns.find((t) => t.role === "user");
+    const forkId = newId();
+    const now = Date.now();
+    setMetas((ms) => [
+      ...ms,
+      {
+        id: forkId,
+        title: src.title || (firstUser ? deriveTitle(firstUser.content) : ""),
+        createdAt: now,
+        lastActiveAt: now,
+        isArchived: false,
+        isOpen: true,
+        isPinned: false,
+      },
+    ]);
+    records.set(forkId, instantiate(forkId, turns));
+    // Make the copied turns durable immediately (same write path teardown
+    // uses) — the per-store effect only persists on the debounce.
+    flushMessages(forkId, turns);
+    setActiveId(forkId);
+    bump();
+    schedulePersistIndex();
+    return forkId;
   }
 
   function activateSession(id: string): void {
@@ -401,6 +446,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     storeFor,
     version,
     createSession,
+    forkSession,
     closeSession,
     activateSession,
     renameSession,

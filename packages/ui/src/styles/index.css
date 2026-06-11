@@ -2448,6 +2448,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   color: hsl(var(--muted-foreground));
   font-size: 10px;
 }
+/* "/" slash-command autocomplete — shares the mention list shell; only the
+   command name gets a slightly stronger weight so it reads as a command. */
+.ai-slash-name {
+  font-weight: 500;
+}
 .ai-composer:focus-within {
   border-color: hsl(var(--ring));
   box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25);
@@ -4777,4 +4782,132 @@ button.settings-models-group-name:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: hsl(var(--foreground));
+}
+
+/* ── Edit-and-resend bar (a past user turn loaded into the composer) ─────── */
+.ai-editing-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: hsl(var(--muted));
+  border: 1px dashed hsl(var(--border));
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.ai-editing-label {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 9px;
+}
+
+/* ── AI live plan card (app__update_plan checklist) ─────────────────────── */
+.ai-plan {
+  background: hsl(var(--muted) / 0.5);
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.ai-plan-header {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+}
+
+.ai-plan-toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  font: inherit;
+  font-weight: 600;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.ai-plan-chevron {
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.ai-plan-chevron-collapsed {
+  transform: rotate(-90deg);
+}
+
+.ai-plan-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-plan-counter {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.ai-plan-clear {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  padding: 2px;
+}
+
+.ai-plan-clear:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+}
+
+.ai-plan-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 8px;
+}
+
+.ai-plan-item-label {
+  align-items: flex-start;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+}
+
+.ai-plan-checkbox {
+  accent-color: hsl(var(--primary));
+  cursor: pointer;
+  flex-shrink: 0;
+  margin: 1px 0 0;
+}
+
+.ai-plan-item-text {
+  color: hsl(var(--foreground));
+  line-height: 1.4;
+  min-width: 0;
+}
+
+.ai-plan-item-done .ai-plan-item-text {
+  color: hsl(var(--muted-foreground));
+  text-decoration: line-through;
 }

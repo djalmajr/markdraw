@@ -21,6 +21,7 @@ import { PaneSplitter } from "./pane-splitter.tsx";
 import { fromTabDndId } from "./tab-bar.tsx";
 import { TocPanel } from "./toc-panel.tsx";
 import { BacklinksList, type BacklinkEntry } from "./backlinks-list.tsx";
+import type { SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
 import { AiPanel, type AiMentionEntry } from "./ai-panel.tsx";
 import { ChatHistoryMenu } from "./chat-history-menu.tsx";
 import { SelectionPopover } from "./selection-popover.tsx";
@@ -94,6 +95,11 @@ interface AppShellProps {
   aiCurrentModel?: string;
   /** Context window (tokens) of the active model — drives the usage ring. */
   aiContextLimit?: number;
+  /** Transform chat message text for DISPLAY only (e.g. restore scrubbed
+   *  secret placeholders) — the stored text stays untouched. */
+  aiDisplayText?: (text: string) => string;
+  /** File-backed slash commands for the chat composer's "/" autocomplete. */
+  aiSlashCommands?: SlashCommandDef[];
   /** Persist a model selection from the chat footer picker. */
   onSelectAiModel?: (modelRef: string) => void;
   /** Opens Settings → AI (AI panel empty-state CTA + the picker's "+"/"⚙"). */
@@ -127,6 +133,8 @@ interface AppShellProps {
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
   indexingTier?: IndexingTier;
   onIndexingTierChange?: (tier: IndexingTier) => void;
+  aiReasoning?: string;
+  onAiReasoningChange?: (value: string) => void;
   aiStreaming?: boolean;
   onAiStreamingChange?: (enabled: boolean) => void;
   onListModels?: (providerId: string, apiKey: string) => Promise<string[]>;
@@ -547,6 +555,8 @@ export function AppShell(props: AppShellProps) {
           onSaveMcpServer={(s) => props.onSaveMcpServer?.(s)}
           onRemoveMcpServer={(id) => props.onRemoveMcpServer?.(id)}
           onToggleMcpServer={(id, enabled) => props.onToggleMcpServer?.(id, enabled)}
+          aiReasoning={props.aiReasoning}
+          onAiReasoningChange={(v) => props.onAiReasoningChange?.(v)}
           aiStreaming={props.aiStreaming ?? false}
           onAiStreamingChange={(v) => props.onAiStreamingChange?.(v)}
           appVersion={props.aboutVersion}
@@ -869,6 +879,7 @@ export function AppShell(props: AppShellProps) {
                 onArchive={s.archiveChat}
                 onRestore={s.openChatFromHistory}
                 onDelete={s.deleteChat}
+                onForkSession={s.forkChat}
               />
             }
             aiSlot={
@@ -879,6 +890,7 @@ export function AppShell(props: AppShellProps) {
                 modelGroups={props.aiModelGroups}
                 currentModel={props.aiCurrentModel}
                 contextLimit={props.aiContextLimit}
+                displayText={props.aiDisplayText}
                 onSelectModel={props.onSelectAiModel}
                 onManageModels={props.onOpenSettings}
                 contextItems={s.aiContextItems()}
@@ -886,11 +898,15 @@ export function AppShell(props: AppShellProps) {
                 onRemoveContext={s.removeAiContext}
                 onDismissActiveFile={s.dismissActiveFileContext}
                 mentionFiles={mentionFiles()}
+                slashCommands={props.aiSlashCommands}
                 onMention={(f) => props.onAddFileMention?.(f)}
                 onOpenExternal={props.onOpenExternal}
                 onOpenSettings={props.onOpenSettings}
                 mode={s.aiMode()}
+                planItems={s.aiPlan()?.items}
+                onClearPlan={s.clearAiPlan}
                 onModeChange={s.setAiMode}
+                onTogglePlanItem={s.toggleAiPlanItem}
               />
             }
             backlinksSlot={

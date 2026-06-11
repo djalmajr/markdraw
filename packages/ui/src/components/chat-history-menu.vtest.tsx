@@ -87,4 +87,30 @@ describe("ChatHistoryMenu", () => {
     expect(screen.getByText("Archive")).not.toBeNull();
     expect(baseElement.querySelector(".rp-history-delete")).not.toBeNull();
   });
+
+  it("offers Duplicate chat when onForkSession is provided and fires it with the row id", () => {
+    const onForkSession = vi.fn();
+    open(baseProps({ onForkSession }));
+    const activeRow = screen.getByText("Project status").closest(".rp-history-row")!;
+    const menuBtn = activeRow.querySelector(".rp-history-row-menu")!;
+    fireEvent.pointerDown(menuBtn, { button: 0, pointerType: "mouse" });
+    fireEvent.pointerUp(menuBtn, { button: 0, pointerType: "mouse" });
+    fireEvent.click(menuBtn);
+    const fork = screen.getByText("Duplicate chat");
+    fireEvent.pointerDown(fork, { button: 0, pointerType: "mouse" });
+    fireEvent.pointerUp(fork, { button: 0, pointerType: "mouse" });
+    fireEvent.click(fork);
+    expect(onForkSession).toHaveBeenCalledWith("a");
+  });
+
+  it("hides Duplicate chat when onForkSession is absent", () => {
+    open(baseProps());
+    const activeRow = screen.getByText("Project status").closest(".rp-history-row")!;
+    const menuBtn = activeRow.querySelector(".rp-history-row-menu")!;
+    fireEvent.pointerDown(menuBtn, { button: 0, pointerType: "mouse" });
+    fireEvent.pointerUp(menuBtn, { button: 0, pointerType: "mouse" });
+    fireEvent.click(menuBtn);
+    expect(screen.getByText("Archive")).not.toBeNull(); // menu is open
+    expect(screen.queryByText("Duplicate chat")).toBeNull();
+  });
 });

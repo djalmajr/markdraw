@@ -68,6 +68,20 @@ export interface AiInlineStoreConfig {
   getProvider: () => AIProvider | null;
 }
 
+/** Validate generated Mermaid DSL with `mermaid.parse` before it may be
+ *  inserted, so a hallucinated/truncated diagram never lands in the document
+ *  as a broken block. The import is lazy (same module the preview bundles) so
+ *  the heavy mermaid code never loads until a diagram is actually generated. */
+async function isValidMermaid(dsl: string): Promise<boolean> {
+  try {
+    const { default: mermaid } = await import("mermaid");
+    await mermaid.parse(dsl);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function createAiInlineStore(config: AiInlineStoreConfig): AiInlineStore {
   const [open, setOpen] = createSignal(false);
   const [mode, setMode] = createSignal<InlineMode>("actions");
@@ -159,6 +173,15 @@ export function createAiInlineStore(config: AiInlineStoreConfig): AiInlineStore 
       [{ role: "user", content: prose }],
       diagramSystemPrompt(diagramTarget?.existingSource),
     );
+    // Gate the finished generation behind mermaid.parse: a response with no
+    // extractable diagram, or DSL mermaid rejects, becomes an error state so
+    // accept() can never insert a broken block.
+    if (status() !== "done") return;
+    const dsl = extractMermaid(result());
+    if (!dsl || !(await isValidMermaid(dsl))) {
+      setError(m.ai_error_generic());
+      setStatus("error");
+    }
   }
 
   async function run(actionId: InlineActionId, targetLang?: string): Promise<void> {
@@ -178,7 +201,9 @@ export function createAiInlineStore(config: AiInlineStoreConfig): AiInlineStore 
       return;
     }
     if (mode() === "diagram") {
-      const dsl = extractMermaid(result());
+      // Only a generation that passed validation in runDiagram (status "done")
+      // may be inserted — an "error" status means the DSL failed mermaid.parse.
+      const dsl = status() === "done" ? extractMermaid(result()) : "";
       if (dsl && diagramTarget) {
         // Empty block has a zero-width content range — add a trailing newline so
         // the closing delimiter stays on its own line.

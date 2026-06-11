@@ -185,6 +185,31 @@ describe("createAiChatStore", () => {
     expect(store.toolActivity()).toEqual([]);
   });
 
+  it("captures the usage part and attaches it to the finalized assistant turn", async () => {
+    const store = createAiChatStore({
+      getProvider: () =>
+        stubProvider([
+          { type: "text-delta", text: "hi" },
+          { type: "usage", inputTokens: 12, outputTokens: 34, toolCalls: 2 },
+          { type: "done" },
+        ]),
+    });
+    await store.sendMessage("q");
+    expect(store.messages().at(-1)).toEqual({
+      role: "assistant",
+      content: "hi",
+      usage: { inputTokens: 12, outputTokens: 34, toolCalls: 2 },
+    });
+  });
+
+  it("attaches no usage key when the stream carries no usage part", async () => {
+    const store = createAiChatStore({
+      getProvider: () => stubProvider([{ type: "text-delta", text: "hi" }, { type: "done" }]),
+    });
+    await store.sendMessage("q");
+    expect(store.messages().at(-1)).not.toHaveProperty("usage");
+  });
+
   it("marks a tool result carrying isError as error status", async () => {
     const store = createAiChatStore({
       getProvider: () =>
@@ -276,6 +301,108 @@ describe("createAiChatStore", () => {
     expect(store.messages()).toEqual([]);
     expect(calls).toBe(0);
     expect(store.streaming()).toBe(false);
+  });
+
+  it("editAndResend edits a middle user turn: later turns drop and a fresh reply streams", async () => {
+    let calls = 0;
+    const provider: AIProvider = {
+      async *chat() {
+        calls += 1;
+        yield { type: "text-delta", text: `reply-${calls}` };
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const store = createAiChatStore({
+      getProvider: () => provider,
+      initialMessages: [
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "q2" },
+        { role: "assistant", content: "a2" },
+      ],
+    });
+    await store.editAndResend(2, "q2-edited");
+    expect(store.messages()).toEqual([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "q2-edited" },
+      { role: "assistant", content: "reply-1" },
+    ]);
+    expect(calls).toBe(1);
+    expect(store.streaming()).toBe(false);
+    expect(store.error()).toBeNull();
+  });
+
+  it("editAndResend guards: an assistant index and blank text are no-ops", async () => {
+    let calls = 0;
+    const provider: AIProvider = {
+      async *chat() {
+        calls += 1;
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const store = createAiChatStore({
+      getProvider: () => provider,
+      initialMessages: [
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+      ],
+    });
+    await store.editAndResend(1, "not a user turn");
+    await store.editAndResend(5, "out of range");
+    await store.editAndResend(0, "   ");
+    expect(store.messages()).toEqual([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+    ]);
+    expect(calls).toBe(0);
+    expect(store.error()).toBeNull();
+  });
+
+  it("editAndResend is a no-op while a turn is streaming", async () => {
+    const store = createAiChatStore({ getProvider: () => pausingProvider() });
+    const pending = store.sendMessage("first");
+    expect(store.streaming()).toBe(true);
+    await store.editAndResend(0, "edited mid-stream");
+    // The in-flight turn is untouched — the original user turn stays put.
+    expect(store.messages()[0]).toEqual({ role: "user", content: "first" });
+    await pending;
+    expect(store.messages()).toEqual([
+      { role: "user", content: "first" },
+      { role: "assistant", content: "partial" },
+    ]);
+  });
+
+  it("editAndResend with no provider leaves the history intact (checked BEFORE truncating)", async () => {
+    const store = createAiChatStore({
+      getProvider: () => null,
+      initialMessages: [
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "q2" },
+        { role: "assistant", content: "a2" },
+      ],
+    });
+    await store.editAndResend(0, "edited");
+    expect(store.messages()).toEqual([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "q2" },
+      { role: "assistant", content: "a2" },
+    ]);
+    expect(store.error()?.message).toBe("No AI provider configured");
   });
 
   it("resolves and forwards tools to the provider chat opts", async () => {

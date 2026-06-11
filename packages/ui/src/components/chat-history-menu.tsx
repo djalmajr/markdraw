@@ -1,4 +1,5 @@
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
+import IconCopy from "~icons/lucide/copy";
 import IconHistory from "~icons/lucide/history";
 import IconSearch from "~icons/lucide/search";
 import IconArchive from "~icons/lucide/archive";
@@ -28,8 +29,11 @@ export interface ChatHistoryMenuProps {
   now?: () => number;
   onActivate: (id: string) => void;
   onArchive: (id: string) => void;
-  onRestore: (id: string) => void;
   onDelete: (id: string) => void;
+  /** Duplicate the session into a new chat. The row action renders only when
+   *  this is provided. */
+  onForkSession?: (id: string) => void;
+  onRestore: (id: string) => void;
 }
 
 /**
@@ -79,6 +83,12 @@ export function ChatHistoryMenu(props: ChatHistoryMenuProps): JSX.Element {
           <IconEllipsis width={14} height={14} />
         </DropdownMenuTrigger>
         <DropdownMenuContent>
+          <Show when={props.onForkSession}>
+            <DropdownMenuItem onSelect={() => props.onForkSession?.(p.s.id)}>
+              <IconCopy width={14} height={14} />
+              <span class="flex-1">{(useLocale(), m.chat_fork())}</span>
+            </DropdownMenuItem>
+          </Show>
           <Show
             when={p.s.isArchived}
             fallback={

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSignal } from "solid-js";
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createMockProvider } from "@asciimark/ai/mock-provider.ts";
+import type { SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
 import { createAiChatStore } from "../composables/create-ai-chat-store.ts";
 import { AiPanel } from "./ai-panel.tsx";
 import { AiMessage } from "./ai-message.tsx";
@@ -353,6 +355,110 @@ describe("AiPanel", () => {
     expect(store.messages().filter((t) => t.role === "user")).toHaveLength(2);
   });
 
+  it("clicking a user turn's edit action loads it into the composer and shows the editing bar", () => {
+    const store = createAiChatStore({
+      getProvider: () => createMockProvider({ reply: () => "x", chunkDelayMs: 0 }),
+      initialMessages: [
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "q2" },
+        { role: "assistant", content: "a2" },
+      ],
+    });
+    const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
+    // Every USER bubble (and only those) offers the edit action.
+    const edits = baseElement.querySelectorAll('[aria-label="Edit and resend"]');
+    expect(edits).toHaveLength(2);
+    fireEvent.click(edits[0]!);
+    const textarea = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("q1");
+    expect(baseElement.querySelector(".ai-editing-bar")).not.toBeNull();
+  });
+
+  it("submitting while editing calls editAndResend: the history truncates at the edited turn", async () => {
+    const store = createAiChatStore({
+      getProvider: () => createMockProvider({ reply: () => "edited reply", chunkDelayMs: 0 }),
+      initialMessages: [
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "q2" },
+        { role: "assistant", content: "a2" },
+      ],
+    });
+    const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
+    fireEvent.click(baseElement.querySelectorAll('[aria-label="Edit and resend"]')[0]!);
+    const textarea = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "q1 edited" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => {
+      expect(store.messages().at(-1)).toEqual({ role: "assistant", content: "edited reply" });
+    });
+    // Later turns dropped; the edited turn replaced the original.
+    expect(store.messages()).toEqual([
+      { role: "user", content: "q1 edited" },
+      { role: "assistant", content: "edited reply" },
+    ]);
+    // The editing state cleared along with the composer.
+    expect(baseElement.querySelector(".ai-editing-bar")).toBeNull();
+    expect(textarea.value).toBe("");
+  });
+
+  it("the editing bar's X and Escape both cancel editing and empty the composer", () => {
+    const store = createAiChatStore({
+      getProvider: () => createMockProvider({ reply: () => "x", chunkDelayMs: 0 }),
+      initialMessages: [
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+      ],
+    });
+    const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
+    const edit = baseElement.querySelector('[aria-label="Edit and resend"]') as HTMLElement;
+    const textarea = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    // X dismisses.
+    fireEvent.click(edit);
+    expect(textarea.value).toBe("q1");
+    fireEvent.click(baseElement.querySelector(".ai-editing-bar .ai-context-chip-x") as HTMLElement);
+    expect(baseElement.querySelector(".ai-editing-bar")).toBeNull();
+    expect(textarea.value).toBe("");
+    // Escape dismisses too.
+    fireEvent.click(edit);
+    expect(baseElement.querySelector(".ai-editing-bar")).not.toBeNull();
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(baseElement.querySelector(".ai-editing-bar")).toBeNull();
+    expect(textarea.value).toBe("");
+    // History untouched by cancelled edits.
+    expect(store.messages()).toHaveLength(2);
+  });
+
+  it("renders the usage stats span when an assistant message carries usage", () => {
+    const { baseElement } = render(() => (
+      <AiMessage content="done" role="assistant" usage={{ inputTokens: 1234, outputTokens: 800 }} />
+    ));
+    const span = baseElement.querySelector(".ai-msg-usage");
+    expect(span).not.toBeNull();
+    expect(span?.textContent).toBe("↑1.2k ↓800");
+    // The title carries the raw counts.
+    expect(span?.getAttribute("title")).toContain("1234");
+    expect(span?.getAttribute("title")).toContain("800");
+  });
+
+  it("renders no usage span when the message has no usage", () => {
+    const { baseElement } = render(() => <AiMessage content="done" role="assistant" />);
+    expect(baseElement.querySelector(".ai-msg-usage")).toBeNull();
+  });
+
+  it("passes a turn's usage through to the message bubble", () => {
+    const store = createAiChatStore({
+      getProvider: () => null,
+      initialMessages: [
+        { role: "user", content: "q" },
+        { role: "assistant", content: "a", usage: { inputTokens: 10, outputTokens: 20 } },
+      ],
+    });
+    const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
+    expect(baseElement.querySelector(".ai-msg-usage")?.textContent).toBe("↑10 ↓20");
+  });
+
   it("hides the Build/Plan mode picker when onModeChange is absent", () => {
     const store = readyStore();
     render(() => <AiPanel store={store} providerLabel="Mock" />);
@@ -375,5 +481,202 @@ describe("AiPanel", () => {
     fireEvent.pointerUp(build, { button: 0, pointerType: "mouse" });
     fireEvent.click(build);
     expect(onModeChange).toHaveBeenCalledWith("build");
+  });
+
+  it("displayText transforms the rendered content but the store text stays untouched", async () => {
+    // Display-only restore (omp#5): the chat shows real values while the
+    // stored transcript keeps the scrubbed placeholders the provider saw.
+    const store = createAiChatStore({
+      getProvider: () =>
+        createMockProvider({ reply: () => "token is [secret-1]", chunkDelayMs: 0 }),
+      initialMessages: [
+        { role: "user", content: "use [secret-1]" },
+        { role: "assistant", content: "noted [secret-1]" },
+      ],
+    });
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        displayText={(text) => text.split("[secret-1]").join("sk-realvalue")}
+        providerLabel="Mock"
+      />
+    ));
+    // History messages render the restored value...
+    expect(baseElement.textContent).toContain("noted sk-realvalue");
+    expect(baseElement.textContent).not.toContain("secret-1");
+    // ...while the store keeps the original placeholder text.
+    expect(store.messages()[1]?.content).toBe("noted [secret-1]");
+    // A streamed turn is transformed for display too, and consolidates into
+    // the store with the original text.
+    const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    fireEvent.input(ta, { target: { value: "go" } });
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => {
+      expect(store.messages().at(-1)).toEqual({ role: "assistant", content: "token is [secret-1]" });
+    });
+    expect(baseElement.textContent).toContain("token is sk-realvalue");
+    expect(baseElement.textContent).not.toContain("secret-1");
+  });
+});
+
+describe("AiPanel — slash commands (omp#1)", () => {
+  const SLASH_COMMANDS: SlashCommandDef[] = [
+    {
+      description: "Explain a topic",
+      name: "explain",
+      source: "builtin",
+      template: "Explain this:\n\n$ARGUMENTS",
+    },
+    {
+      description: "Summarize the conversation",
+      name: "summarize",
+      source: "project",
+      template: "Summarize the conversation.",
+    },
+  ];
+
+  function typeIntoComposer(baseElement: HTMLElement, value: string): HTMLTextAreaElement {
+    const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    ta.value = value;
+    ta.setSelectionRange(value.length, value.length);
+    fireEvent.input(ta);
+    return ta;
+  }
+
+  it("shows the list for a leading '/', filters by prefix, and inserts '/name ' on click", () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
+    typeIntoComposer(baseElement, "/");
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(2);
+    const ta = typeIntoComposer(baseElement, "/ex");
+    const items = baseElement.querySelectorAll(".ai-slash-item");
+    expect(items).toHaveLength(1);
+    expect(items[0]!.textContent).toContain("/explain");
+    expect(items[0]!.textContent).toContain("Explain a topic");
+    fireEvent.mouseDown(items[0]!);
+    // The typed "/ex" prefix is replaced by the full command + a trailing
+    // space, and the list closes (focus stays in the composer).
+    expect(ta.value).toBe("/explain ");
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
+  });
+
+  it("only triggers when the slash is the very first character with no whitespace yet", () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
+    typeIntoComposer(baseElement, "hi /ex");
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
+    typeIntoComposer(baseElement, "/explain now");
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
+  });
+
+  it("arrow keys move the highlight and Enter inserts the highlighted command", () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
+    const ta = typeIntoComposer(baseElement, "/");
+    fireEvent.keyDown(ta, { key: "ArrowDown" });
+    expect(baseElement.querySelector(".ai-mention-item-active")?.textContent).toContain(
+      "/summarize",
+    );
+    fireEvent.keyDown(ta, { key: "Enter" });
+    expect(ta.value).toBe("/summarize ");
+    // Enter consumed by the list — nothing was sent.
+    expect(store.messages()).toHaveLength(0);
+  });
+
+  it("Escape closes the list without touching the composer text", () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
+    const ta = typeIntoComposer(baseElement, "/su");
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(1);
+    fireEvent.keyDown(ta, { key: "Escape" });
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
+    expect(ta.value).toBe("/su");
+  });
+
+  it("submit expands $ARGUMENTS with the typed arguments", async () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
+    const ta = typeIntoComposer(baseElement, "/explain how panes work");
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => {
+      expect(store.messages()[0]?.content).toBe("Explain this:\n\nhow panes work");
+    });
+    expect(ta.value).toBe("");
+  });
+
+  it("a template without $ARGUMENTS gets free arguments appended after a blank line", async () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
+    const ta = typeIntoComposer(baseElement, "/summarize focus on risks");
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => {
+      expect(store.messages()[0]?.content).toBe(
+        "Summarize the conversation.\n\nfocus on risks",
+      );
+    });
+  });
+
+  it("an unknown command passes through as raw text", async () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
+    const ta = typeIntoComposer(baseElement, "/nope do it");
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => {
+      expect(store.messages()[0]?.content).toBe("/nope do it");
+    });
+  });
+
+  it("closes the open list when the store prop swaps (chat switch resets the draft)", async () => {
+    const [store, setStore] = createSignal(readyStore());
+    const { baseElement } = render(() => <AiPanel store={store()} slashCommands={SLASH_COMMANDS} />);
+    typeIntoComposer(baseElement, "/");
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(2);
+    // The panel is one instance fed the ACTIVE session's store — switching
+    // chats must drop the previous draft's popover too, or it would keep
+    // capturing Enter over the new chat's empty composer.
+    setStore(readyStore());
+    await waitFor(() => {
+      expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
+    });
+    const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    expect(ta.value).toBe("");
+  });
+
+  it("closes the open list when the send button is clicked with a partial '/name' typed", async () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
+    typeIntoComposer(baseElement, "/su");
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(1);
+    // The send button bypasses the textarea's input event — the popover must
+    // not linger over the streaming reply.
+    fireEvent.click(baseElement.querySelector(".ai-send-btn:not(.ai-context-btn)") as HTMLElement);
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
+    // "/su" matches no command, so it went through as raw text.
+    await waitFor(() => {
+      expect(store.messages()[0]?.content).toBe("/su");
+    });
+  });
+
+  it("'@' mentions still work alongside slash commands (the lists never coexist)", () => {
+    const store = readyStore();
+    const onMention = vi.fn();
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        mentionFiles={[{ label: "alpha.md", path: "a/alpha.md", rootId: "r" }]}
+        slashCommands={SLASH_COMMANDS}
+        onMention={onMention}
+      />
+    ));
+    typeIntoComposer(baseElement, "@al");
+    expect(baseElement.querySelectorAll(".ai-mention-item:not(.ai-slash-item)")).toHaveLength(1);
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
+    typeIntoComposer(baseElement, "/su");
+    expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(1);
+    expect(baseElement.querySelectorAll(".ai-mention-item:not(.ai-slash-item)")).toHaveLength(0);
+    // The mention path still resolves end-to-end.
+    typeIntoComposer(baseElement, "@al");
+    fireEvent.mouseDown(baseElement.querySelector(".ai-mention-item")!);
+    expect(onMention).toHaveBeenCalledWith({ label: "alpha.md", path: "a/alpha.md", rootId: "r" });
   });
 });

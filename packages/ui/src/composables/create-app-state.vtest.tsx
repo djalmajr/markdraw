@@ -660,6 +660,78 @@ describe("AppState — right-panel tab model (specials + pin)", () => {
   });
 });
 
+describe("AppState — AI live plan (omp#3)", () => {
+  it("starts with no plan (per-app-session, nothing restored from storage)", () => {
+    withState((state) => {
+      expect(state.aiPlan()).toBeNull();
+    });
+  });
+
+  it("setAiPlanItems replaces the whole plan; toggleAiPlanItem flips one entry", () => {
+    withState((state) => {
+      state.setAiPlanItems([
+        { done: false, text: "a" },
+        { done: false, text: "b" },
+      ]);
+      expect(state.aiPlan()).toEqual({
+        items: [
+          { done: false, text: "a" },
+          { done: false, text: "b" },
+        ],
+      });
+      state.toggleAiPlanItem(1);
+      // Mutation: flipping every item (or always index 0) would break the
+      // "only the clicked checkbox toggles" contract.
+      expect(state.aiPlan()!.items[0]!.done).toBe(false);
+      expect(state.aiPlan()!.items[1]!.done).toBe(true);
+      state.toggleAiPlanItem(1);
+      expect(state.aiPlan()!.items[1]!.done).toBe(false);
+    });
+  });
+
+  it("a later setAiPlanItems call REPLACES the previous plan (no merge)", () => {
+    // Domain rule: app__update_plan sends the FULL plan each time — state
+    // must mirror that, never append.
+    withState((state) => {
+      state.setAiPlanItems([{ done: true, text: "old" }]);
+      state.setAiPlanItems([{ done: false, text: "new" }]);
+      expect(state.aiPlan()).toEqual({ items: [{ done: false, text: "new" }] });
+    });
+  });
+
+  it("toggleAiPlanItem ignores a missing plan and an out-of-range index", () => {
+    withState((state) => {
+      state.toggleAiPlanItem(0); // no plan yet — must not throw
+      expect(state.aiPlan()).toBeNull();
+      state.setAiPlanItems([{ done: false, text: "a" }]);
+      state.toggleAiPlanItem(5);
+      state.toggleAiPlanItem(-1);
+      expect(state.aiPlan()).toEqual({ items: [{ done: false, text: "a" }] });
+    });
+  });
+
+  it("setAiPlanItems(null) and clearAiPlan both drop the plan", () => {
+    withState((state) => {
+      state.setAiPlanItems([{ done: true, text: "a" }]);
+      state.setAiPlanItems(null);
+      expect(state.aiPlan()).toBeNull();
+      state.setAiPlanItems([{ done: true, text: "a" }]);
+      state.clearAiPlan();
+      expect(state.aiPlan()).toBeNull();
+    });
+  });
+
+  it("the plan is per-app-session — nothing written to localStorage", () => {
+    // Mutation: persisting the plan would resurrect a stale checklist on the
+    // next boot — it's a working agreement for THIS run only.
+    withState((state) => {
+      state.setAiPlanItems([{ done: false, text: "a" }]);
+      const persisted = Object.keys(localStorage).some((k) => k.toLowerCase().includes("plan"));
+      expect(persisted).toBe(false);
+    });
+  });
+});
+
 describe("AppState — AI Plan/Build mode", () => {
   // Captures the per-turn provider options (system prompt + tools) so we can
   // assert the mode gating. Yields a non-empty turn so onPlanComplete can fire.
@@ -739,6 +811,116 @@ describe("AppState — AI Plan/Build mode", () => {
         createAIProvider: () => provider,
         getAITools: () => fakeTools,
         onPlanComplete,
+      },
+    );
+  });
+});
+
+describe("AppState — custom instructions in the system prompt (omp#1)", () => {
+  /** Captures the per-turn system prompt the chat hands the provider. */
+  function captureProvider() {
+    const calls: Array<{ system?: string }> = [];
+    const provider = {
+      async *chat(
+        _messages: { role: string; content: string }[],
+        opts?: { system?: string },
+      ) {
+        calls.push({ system: opts?.system });
+        yield { type: "text-delta" as const, text: "ok" };
+        yield { type: "done" as const };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    return { calls, provider };
+  }
+
+  it("append in build mode: the system prompt is exactly the instructions text", async () => {
+    const { calls, provider } = captureProvider();
+    await withState(
+      async (state) => {
+        const id = state.newChat();
+        await state.aiSessions.storeFor(id)!.sendMessage("hi");
+        expect(calls.at(-1)?.system).toBe("Be terse.");
+      },
+      {
+        createAIProvider: () => provider,
+        getCustomInstructions: () => ({ mode: "append", text: "Be terse." }),
+      },
+    );
+  });
+
+  it("append in plan mode: plan prompt + blank line + instructions", async () => {
+    const { calls, provider } = captureProvider();
+    await withState(
+      async (state) => {
+        state.setAiMode("plan");
+        const id = state.newChat();
+        await state.aiSessions.storeFor(id)!.sendMessage("hi");
+        const system = calls.at(-1)?.system ?? "";
+        expect(system.startsWith("You are in PLAN mode.")).toBe(true);
+        expect(system.endsWith("\n\nBe terse.")).toBe(true);
+      },
+      {
+        createAIProvider: () => provider,
+        getCustomInstructions: () => ({ mode: "append", text: "Be terse." }),
+      },
+    );
+  });
+
+  it("replace in build mode: the system prompt is exactly the instructions text", async () => {
+    const { calls, provider } = captureProvider();
+    await withState(
+      async (state) => {
+        const id = state.newChat();
+        await state.aiSessions.storeFor(id)!.sendMessage("hi");
+        expect(calls.at(-1)?.system).toBe("You are a pirate.");
+      },
+      {
+        createAIProvider: () => provider,
+        getCustomInstructions: () => ({ mode: "replace", text: "You are a pirate." }),
+      },
+    );
+  });
+
+  it("replace in plan mode: the functional plan prompt is ALWAYS kept, text appended", async () => {
+    // Domain rule: the plan prompt encodes the tool-less planning contract —
+    // "replace" must never strip it, or Plan mode would lose its behavior.
+    const { calls, provider } = captureProvider();
+    await withState(
+      async (state) => {
+        state.setAiMode("plan");
+        const id = state.newChat();
+        await state.aiSessions.storeFor(id)!.sendMessage("hi");
+        const system = calls.at(-1)?.system ?? "";
+        expect(system.startsWith("You are in PLAN mode.")).toBe(true);
+        expect(system.endsWith("\n\nYou are a pirate.")).toBe(true);
+      },
+      {
+        createAIProvider: () => provider,
+        getCustomInstructions: () => ({ mode: "replace", text: "You are a pirate." }),
+      },
+    );
+  });
+
+  it("no instructions (callback returns undefined): behavior unchanged in both modes", async () => {
+    const { calls, provider } = captureProvider();
+    await withState(
+      async (state) => {
+        const id = state.newChat();
+        await state.aiSessions.storeFor(id)!.sendMessage("hi");
+        expect(calls.at(-1)?.system).toBeUndefined();
+        state.setAiMode("plan");
+        await state.aiSessions.storeFor(id)!.sendMessage("again");
+        expect(calls.at(-1)?.system).toContain("PLAN mode");
+      },
+      {
+        createAIProvider: () => provider,
+        getCustomInstructions: () => undefined,
       },
     );
   });

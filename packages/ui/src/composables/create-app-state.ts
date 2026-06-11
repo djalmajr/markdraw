@@ -20,6 +20,7 @@ import {
 import { getStoredAiMode, setStoredAiMode, type AIChatMode } from "@asciimark/core/ai-prefs.ts";
 import { formatChatTranscript } from "../lib/chat-export.ts";
 import type { AIProvider, AITool } from "@asciimark/ai/types.ts";
+import type { CustomInstructions } from "@asciimark/ai/slash-commands.ts";
 import type { ConvertOptions, ConvertResult } from "@asciimark/core/converter.ts";
 import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
 import {
@@ -128,6 +129,17 @@ export interface AiMentionContext {
   rootId?: string;
 }
 
+/** One checklist entry of the live AI plan (model-maintained, user-steered). */
+export interface AiPlanItem {
+  done: boolean;
+  text: string;
+}
+
+/** The live plan the model maintains via app__update_plan. */
+export interface AiPlanState {
+  items: AiPlanItem[];
+}
+
 interface AppStateConfig {
   applyTheme: (mode: ThemeMode) => void;
   convertAdoc: (opts: ConvertOptions) => Promise<ConvertResult>;
@@ -148,6 +160,9 @@ interface AppStateConfig {
    *  manager + in-process app tools). Injected by the host so packages/ui stays
    *  free of Tauri. Resolved lazily per send. */
   getAITools?: () => AITool[] | Promise<AITool[]>;
+  /** Custom instructions merged into the chat system prompt (omp#1 — e.g. the
+   *  workspace's `.asciimark/instructions.md`). Read fresh per send. */
+  getCustomInstructions?: () => CustomInstructions | undefined;
   /** Persist a plan produced in Plan mode (the host writes it to
    *  `.asciimark/plans`). Called with the assistant's plan text. */
   onPlanComplete?: (content: string) => void;
@@ -612,6 +627,37 @@ export function createAppState(config: AppStateConfig) {
     "Markdown (goal, steps, files to touch, risks). The plan will be saved for " +
     "the user to execute later in Build mode. Output only the plan.";
 
+  // ── AI live plan (omp#3) ────────────────────────────────────────────
+  // The checklist the model maintains via app__update_plan and the user
+  // steers by checking items off. Per-app-session ONLY — deliberately NOT
+  // persisted: a plan is a working agreement for the current run of the app,
+  // not durable state, so a restart starts clean (no stale checklist).
+  const [aiPlan, setAiPlanSig] = createSignal<AiPlanState | null>(null);
+
+  /** Replace the whole plan (host/tool writes). `null` clears it. */
+  function setAiPlanItems(items: AiPlanItem[] | null): void {
+    setAiPlanSig(
+      items === null
+        ? null
+        : { items: items.map((item) => ({ done: item.done, text: item.text })) },
+    );
+  }
+  /** Flip one item's done flag (user click). Out-of-range indices are ignored. */
+  function toggleAiPlanItem(index: number): void {
+    setAiPlanSig((prev) => {
+      if (!prev || index < 0 || index >= prev.items.length) return prev;
+      return {
+        items: prev.items.map((item, i) =>
+          i === index ? { done: !item.done, text: item.text } : item,
+        ),
+      };
+    });
+  }
+  /** Drop the plan entirely (the card's × / end of the work). */
+  function clearAiPlan(): void {
+    setAiPlanSig(null);
+  }
+
   // ── AI assistant ───────────────────────────────────────────────────
   // Multi-chat sidebar: a manager owning N chat-session stores (one per OPEN
   // tab) plus persistent history. The right-panel active tab is an ENCODED
@@ -621,8 +667,17 @@ export function createAppState(config: AppStateConfig) {
   const aiSessions = createAiChatSessions({
     getProvider: () => config.createAIProvider?.() ?? null,
     // Plan mode runs tool-less and under a planning system prompt; Build mode
-    // exposes the full host tool set with no extra system prompt.
-    system: () => (aiMode() === "plan" ? PLAN_SYSTEM_PROMPT : undefined),
+    // exposes the full host tool set with no extra system prompt. Custom
+    // instructions (omp#1) merge on top: "replace" swaps the (build-mode)
+    // system text for the user's, while the plan prompt is functional — it
+    // encodes the tool-less planning contract — so plan mode ALWAYS keeps it
+    // and the instructions land after a blank line in both modes.
+    system: () => {
+      const base = aiMode() === "plan" ? PLAN_SYSTEM_PROMPT : undefined;
+      const instructions = config.getCustomInstructions?.();
+      if (!instructions) return base;
+      return base === undefined ? instructions.text : `${base}\n\n${instructions.text}`;
+    },
     getTools: async () => {
       if (aiMode() === "plan") return [];
       return config.getAITools ? await config.getAITools() : [];
@@ -809,6 +864,11 @@ export function createAppState(config: AppStateConfig) {
   /** Rename a chat (overrides the auto-derived title). */
   function renameChat(id: string, title: string): void {
     aiSessions.renameSession(id, title);
+  }
+  /** Duplicate a chat (deep-independent fork) and front the copy. */
+  function forkChat(id: string): void {
+    const forkId = aiSessions.forkSession(id);
+    if (forkId) setActiveTabSig(`chat:${forkId}`);
   }
 
   /** Close any right-panel tab by encoded id (special → hide its chip but keep
@@ -1316,6 +1376,11 @@ export function createAppState(config: AppStateConfig) {
     aiInline,
     aiMode,
     setAiMode,
+    // AI live plan (per-app-session, not persisted)
+    aiPlan,
+    setAiPlanItems,
+    toggleAiPlanItem,
+    clearAiPlan,
     aiActiveTab,
     setAiActiveTab,
     activateChatTab,
@@ -1325,6 +1390,7 @@ export function createAppState(config: AppStateConfig) {
     archiveChat,
     deleteChat,
     renameChat,
+    forkChat,
     exportChat,
     // Right-panel tab strip (specials + chats)
     rightPanelTabs,

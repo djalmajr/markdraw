@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onMount, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, on, onMount, type JSX } from "solid-js";
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
 import IconSparkles from "~icons/lucide/sparkles";
@@ -9,6 +9,7 @@ import IconFileText from "~icons/lucide/file-text";
 import IconFolder from "~icons/lucide/folder";
 import IconTextSelect from "~icons/lucide/text-select";
 import type { AIChatMode } from "@asciimark/core/ai-prefs.ts";
+import { expandSlashCommand, type SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
 import type { AiChatStore } from "../composables/create-ai-chat-store.ts";
 import type { AiContextItem } from "../composables/ai-context.ts";
 import { Button } from "./ui/button.tsx";
@@ -17,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "./ui/select.ts
 import { ScrollArea } from "./ui/scroll-area.tsx";
 import { ModelPicker, type ModelGroup } from "./model-picker.tsx";
 import { AiMessage } from "./ai-message.tsx";
+import { AiPlan, type AiPlanItemModel } from "./ai-plan.tsx";
 
 /** Compact pill styling for the composer's Select triggers (mode + model),
  *  overriding the SolidUI Select's full-width default. The base ring is dropped
@@ -50,6 +52,9 @@ export interface AiPanelProps {
   currentModel?: string;
   /** Context window (tokens) of the active model — drives the usage ring. */
   contextLimit?: number;
+  /** Transform message text for DISPLAY only (e.g. restore scrubbed secret
+   *  placeholders) — the store keeps the original text untouched. */
+  displayText?: (text: string) => string;
   /** Persist a model selection. */
   onSelectModel?: (modelRef: string) => void;
   /** "⚙" in the picker — open Settings → AI (manage models / connect providers). */
@@ -68,6 +73,9 @@ export interface AiPanelProps {
   /** An entry was @-mentioned — host resolves it (file content / folder
    *  listing) + attaches it as a context chip. */
   onMention?: (file: AiMentionEntry) => void;
+  /** File-backed slash commands for the composer's "/" autocomplete. A sent
+   *  "/name args" expands the matching template before reaching the store. */
+  slashCommands?: SlashCommandDef[];
   /** Opens Settings → AI (empty-state CTA). */
   onOpenSettings?: () => void;
   /** Open an http(s) link from a chat reply in the OS browser. Clicks on chat
@@ -77,8 +85,15 @@ export interface AiPanelProps {
   /** Active chat mode (Plan = no tools, saves a plan; Build = implements).
    *  When provided the composer shows a Build/Plan toggle. */
   mode?: AIChatMode;
+  /** Live plan items (app__update_plan) — when non-empty the checklist card
+   *  renders above the composer. */
+  planItems?: AiPlanItemModel[];
+  /** Dismiss the plan card entirely. */
+  onClearPlan?: () => void;
   /** Persist a mode change. */
   onModeChange?: (mode: AIChatMode) => void;
+  /** User checked/unchecked a plan item. */
+  onTogglePlanItem?: (index: number) => void;
 }
 
 /**
@@ -105,13 +120,119 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     });
   });
 
+  // ── Edit-and-resend (a past user turn loaded into the composer) ─────────
+  const [editing, setEditing] = createSignal<{ index: number } | null>(null);
+
+  // The panel is a single instance fed the ACTIVE session's store — a pending
+  // edit must die on chat switch or its index would truncate the wrong chat.
+  createEffect(
+    on(
+      () => props.store,
+      () => cancelEditing(),
+      { defer: true },
+    ),
+  );
+
+  function startEditing(index: number, content: string): void {
+    setEditing({ index });
+    setInput(content);
+    textarea?.focus();
+  }
+
+  function cancelEditing(): void {
+    setEditing(null);
+    setInput("");
+    // The autocomplete popovers belong to the abandoned draft — left open they
+    // would keep capturing arrows/Enter over the next chat's empty composer.
+    setMentionQuery(null);
+    setSlashQuery(null);
+  }
+
   function submit(): void {
     const text = input();
     if (!text.trim()) return;
+    const edit = editing();
+    if (edit) {
+      // editAndResend is a no-op while streaming — keep the editing state and
+      // the typed text instead of silently discarding the edit.
+      if (props.store.streaming()) return;
+      // Editing replaces the turn at `edit.index` (later turns drop) instead
+      // of appending a new one.
+      setEditing(null);
+      setInput("");
+      void props.store.editAndResend(edit.index, text);
+      return;
+    }
     // While a turn streams, the store queues the message (steering) — the
-    // composer clears either way so the user keeps typing.
+    // composer clears either way so the user keeps typing. A send-button click
+    // bypasses the textarea's input event, so the autocomplete popovers must
+    // close explicitly or they'd float over the streaming reply.
     setInput("");
-    void props.store.sendMessage(text);
+    setMentionQuery(null);
+    setSlashQuery(null);
+    void props.store.sendMessage(expandIfSlashCommand(text));
+  }
+
+  // ── "/" slash commands ─────────────────────────────────────────────────
+  /** A whole-message slash invocation: "/name" optionally followed by args. */
+  const SLASH_SUBMIT_RE = /^\/([a-z0-9_-]+)(?:\s+([\s\S]*))?$/i;
+
+  /** Text actually sent for a (non-editing) submit: "/name args" expands the
+   *  matching command's template; an unknown name passes through unchanged
+   *  (the model sees the raw "/name args" text). */
+  function expandIfSlashCommand(text: string): string {
+    const match = SLASH_SUBMIT_RE.exec(text.trim());
+    if (!match) return text;
+    const name = match[1]!.toLowerCase();
+    const command = props.slashCommands?.find((c) => c.name === name);
+    if (!command) return text;
+    return expandSlashCommand(command.template, match[2] ?? "");
+  }
+
+  // ── "/" command autocomplete ───────────────────────────────────────────
+  // Triggers ONLY while the text up to the caret is "/<partial-name>" — the
+  // slash must be the very first character and no whitespace typed yet, so a
+  // "/" mid-sentence stays plain text.
+  const SLASH_RE = /^\/([a-z0-9_-]*)$/i;
+  const [slashQuery, setSlashQuery] = createSignal<string | null>(null);
+  const [slashIndex, setSlashIndex] = createSignal(0);
+
+  const slashMatches = createMemo(() => {
+    const q = slashQuery();
+    if (q === null || !props.slashCommands?.length) return [];
+    const ql = q.toLowerCase();
+    return props.slashCommands.filter((c) => c.name.startsWith(ql)).slice(0, 8);
+  });
+
+  function syncSlash(ta: HTMLTextAreaElement): void {
+    if (!props.slashCommands?.length) {
+      setSlashQuery(null);
+      return;
+    }
+    const upToCaret = ta.value.slice(0, ta.selectionStart ?? ta.value.length);
+    const match = SLASH_RE.exec(upToCaret);
+    if (match) {
+      setSlashQuery(match[1]!);
+      setSlashIndex(0);
+    } else {
+      setSlashQuery(null);
+    }
+  }
+
+  // Selecting a command replaces the typed "/<partial>" prefix with "/name "
+  // (the trailing space closes the list) and keeps the caret right after it,
+  // focus staying in the composer for the arguments.
+  function selectSlashCommand(command: SlashCommandDef): void {
+    const ta = textarea;
+    if (!ta) return;
+    const caret = ta.selectionStart ?? input().length;
+    const inserted = `/${command.name} `;
+    setInput(inserted + input().slice(caret));
+    setSlashQuery(null);
+    queueMicrotask(() => {
+      ta.focus();
+      ta.setSelectionRange(inserted.length, inserted.length);
+    });
   }
 
   // ── @-mention autocomplete ─────────────────────────────────────────────
@@ -160,6 +281,32 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   }
 
   function onKeyDown(e: KeyboardEvent): void {
+    // While the slash-command list is open, the arrows/Enter/Escape drive it
+    // (same contract as the @-mention list below — the two never coexist:
+    // mentions need an "@" token, slash needs a leading "/").
+    if (slashQuery() !== null && slashMatches().length) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashIndex((i) => Math.min(i + 1, slashMatches().length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const command = slashMatches()[slashIndex()];
+        if (command) selectSlashCommand(command);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashQuery(null);
+        return;
+      }
+    }
     // While the @-mention list is open, the arrows/Enter/Escape drive it.
     if (mentionQuery() !== null && mentionMatches().length) {
       if (e.key === "ArrowDown") {
@@ -188,7 +335,8 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       e.preventDefault();
       submit();
     } else if (e.key === "Escape") {
-      setInput("");
+      // Escape also abandons an in-progress edit (composer back to empty).
+      cancelEditing();
     }
   }
 
@@ -196,6 +344,10 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
 
   const hasConversation = (): boolean =>
     props.store.messages().length > 0 || props.store.streaming();
+
+  /** Display-only transform of a message's text — the store text is never
+   *  touched (edit-and-resend keeps loading the original). */
+  const displayed = (text: string): string => props.displayText?.(text) ?? text;
 
   const hasContext = (): boolean =>
     !!props.activeFileContext || (props.contextItems?.length ?? 0) > 0;
@@ -235,9 +387,20 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           <For each={props.store.messages()}>
             {(msg, i) => (
               <AiMessage
-                content={msg.content}
+                content={displayed(msg.content)}
                 role={msg.role}
                 tools={msg.tools}
+                usage={msg.usage}
+                // Any user turn can be edited-and-resent: the click loads its
+                // content into the composer (the store guards re-runs while a
+                // turn streams).
+                onEdit={
+                  // Gated on idle like onRetry — editAndResend no-ops while a
+                  // turn streams, so offering the pencil then would mislead.
+                  msg.role === "user" && !props.store.streaming()
+                    ? () => startEditing(i(), msg.content)
+                    : undefined
+                }
                 // Retry only makes sense on the LAST assistant reply, and never
                 // while a fresh turn is already streaming.
                 onRetry={
@@ -253,7 +416,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           <Show when={props.store.streaming()}>
             <AiMessage
               role="assistant"
-              content={props.store.streamingText()}
+              content={displayed(props.store.streamingText())}
               tools={props.store.toolActivity()}
               streaming
             />
@@ -267,6 +430,14 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           )}
         </Show>
       </ScrollArea>
+
+      <Show when={(props.planItems?.length ?? 0) > 0}>
+        <AiPlan
+          items={props.planItems!}
+          onClear={() => props.onClearPlan?.()}
+          onToggleItem={(index) => props.onTogglePlanItem?.(index)}
+        />
+      </Show>
 
       <div
         class="ai-composer"
@@ -282,6 +453,19 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           props.onContextDrop?.(e);
         }}
       >
+        <Show when={editing()}>
+          <div class="ai-editing-bar">
+            <span class="ai-editing-label">{(useLocale(), m.ai_message_edit())}</span>
+            <button
+              aria-label={(useLocale(), m.ai_context_remove())}
+              class="ai-context-chip-x"
+              type="button"
+              onClick={cancelEditing}
+            >
+              <IconX width={11} height={11} />
+            </button>
+          </div>
+        </Show>
         <Show when={props.store.queued()}>
           {(queuedText) => (
             <div class="ai-queued-bar">
@@ -369,6 +553,29 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
             </For>
           </div>
         </Show>
+        <Show when={slashQuery() !== null && slashMatches().length > 0}>
+          <div class="ai-mention-list ai-slash-list">
+            <For each={slashMatches()}>
+              {(command, i) => (
+                <button
+                  class="ai-mention-item ai-slash-item"
+                  classList={{ "ai-mention-item-active": i() === slashIndex() }}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectSlashCommand(command);
+                  }}
+                  onMouseEnter={() => setSlashIndex(i())}
+                >
+                  <span class="ai-mention-name ai-slash-name">/{command.name}</span>
+                  <Show when={command.description}>
+                    <span class="ai-mention-path">{command.description}</span>
+                  </Show>
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
         <textarea
           ref={(el) => (textarea = el)}
           class="ai-composer-input"
@@ -378,6 +585,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           onInput={(e) => {
             setInput(e.currentTarget.value);
             syncMention(e.currentTarget);
+            syncSlash(e.currentTarget);
           }}
           onKeyDown={onKeyDown}
         />

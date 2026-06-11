@@ -3,8 +3,9 @@ import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
 import IconCheck from "~icons/lucide/check";
 import IconCopy from "~icons/lucide/copy";
+import IconPencil from "~icons/lucide/pencil";
 import IconRefreshCw from "~icons/lucide/refresh-cw";
-import type { ToolActivity } from "../composables/create-ai-chat-store.ts";
+import type { ToolActivity, TurnUsage } from "../composables/create-ai-chat-store.ts";
 import { renderChatMarkdown } from "../lib/chat-markdown.ts";
 
 export interface AiMessageProps {
@@ -14,6 +15,12 @@ export interface AiMessageProps {
   streaming?: boolean;
   /** Tool activity to surface as compact chips with this turn. */
   tools?: ToolActivity[];
+  /** Per-run token stats — rendered as a subtle span in the hover action bar
+   *  (assistant turns, when the provider reported usage). */
+  usage?: TurnUsage;
+  /** Edit-and-resend this USER turn: the host loads its content into the
+   *  composer for editing. The action renders only when this is provided. */
+  onEdit?: () => void;
   /** Regenerate this reply. Only the host knows which turn is retryable (the
    *  last assistant one), so the action renders only when this is provided. */
   onRetry?: () => void;
@@ -24,6 +31,11 @@ export interface AiMessageProps {
 function toolDisplayName(name: string): string {
   const idx = name.indexOf("__");
   return idx >= 0 ? name.slice(idx + 2) : name;
+}
+
+/** Compact count for the usage stats span: 1234 → "1.2k", 980 → "980". */
+function formatTokenCount(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n);
 }
 
 /** Terminal-friendly text for an expanded tool call: strings verbatim,
@@ -123,6 +135,26 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
   const copyLabel = (): string =>
     copied() ? (useLocale(), m.ai_message_copied()) : (useLocale(), m.ai_message_copy());
 
+  // Per-run stats for the hover bar — arrows + compact numbers only (no i18n),
+  // with the raw token counts in the title. Hidden unless a token count exists.
+  const usageStats = (): { text: string; title: string } | undefined => {
+    const usage = props.usage;
+    if (!usage || (usage.inputTokens === undefined && usage.outputTokens === undefined)) {
+      return undefined;
+    }
+    const compact: string[] = [];
+    const raw: string[] = [];
+    if (usage.inputTokens !== undefined) {
+      compact.push(`↑${formatTokenCount(usage.inputTokens)}`);
+      raw.push(`↑ ${usage.inputTokens}`);
+    }
+    if (usage.outputTokens !== undefined) {
+      compact.push(`↓${formatTokenCount(usage.outputTokens)}`);
+      raw.push(`↓ ${usage.outputTokens}`);
+    }
+    return { text: compact.join(" "), title: raw.join(" · ") };
+  };
+
   return (
     <div
       class="ai-message"
@@ -151,6 +183,13 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
       </div>
       {/* Hover action bar (revealed by CSS on .ai-message:hover). */}
       <div class="ai-msg-actions">
+        <Show when={usageStats()}>
+          {(stats) => (
+            <span class="ai-msg-usage" title={stats().title}>
+              {stats().text}
+            </span>
+          )}
+        </Show>
         <button
           aria-label={copyLabel()}
           class="ai-msg-action-btn"
@@ -162,6 +201,17 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
             <IconCheck width={13} height={13} />
           </Show>
         </button>
+        <Show when={props.onEdit}>
+          <button
+            aria-label={(useLocale(), m.ai_message_edit())}
+            class="ai-msg-action-btn"
+            title={(useLocale(), m.ai_message_edit())}
+            type="button"
+            onClick={() => props.onEdit?.()}
+          >
+            <IconPencil width={13} height={13} />
+          </button>
+        </Show>
         <Show when={props.onRetry}>
           <button
             aria-label={(useLocale(), m.ai_message_regenerate())}

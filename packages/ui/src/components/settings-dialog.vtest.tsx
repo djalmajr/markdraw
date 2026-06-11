@@ -234,6 +234,32 @@ describe("SettingsDialog", () => {
     );
   });
 
+  it("AI section: the reasoning effort select renders raw options and fires onAiReasoningChange", async () => {
+    const onAiReasoningChange = vi.fn();
+    const { baseElement } = setup({ aiReasoning: "off", onAiReasoningChange });
+    // The Manage models view carries exactly one listbox trigger — the
+    // reasoning effort Select, labelled with the existing i18n key.
+    const trigger = baseElement.querySelector(
+      '[aria-haspopup="listbox"][aria-label="Reasoning effort"]',
+    ) as HTMLElement;
+    expect(trigger).not.toBeNull();
+    expect(trigger.textContent).toContain("off");
+    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 });
+    const highOption = await waitFor(() => {
+      const found = [...baseElement.querySelectorAll('[role="option"]')].find(
+        (o) => (o.textContent ?? "").trim() === "high",
+      );
+      expect(found).toBeTruthy();
+      return found as HTMLElement;
+    });
+    fireEvent.pointerDown(highOption, { pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(highOption, { pointerType: "mouse", button: 0 });
+    fireEvent.click(highOption);
+    await waitFor(() => {
+      expect(onAiReasoningChange).toHaveBeenCalledWith("high");
+    });
+  });
+
   it("selecting a tier calls onTierChange", () => {
     const { baseElement, onTierChange } = setup();
     const indexingTab = [...baseElement.querySelectorAll('[role="tab"]')].find((t) =>

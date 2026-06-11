@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AIProvider, AIStreamPart } from "@asciimark/ai/types.ts";
 import { createAiInlineStore } from "./create-ai-inline-store.ts";
+
+// The store lazy-imports mermaid only to validate generated DSL — mock it like
+// other heavy deps (pdfjs in media-viewer.vtest) so the suite stays light.
+const mermaidParse = vi.hoisted(() => vi.fn());
+vi.mock("mermaid", () => ({ default: { parse: mermaidParse } }));
 
 function stubProvider(parts: AIStreamPart[]): AIProvider {
   return {
@@ -95,5 +100,61 @@ describe("createAiInlineStore", () => {
     expect(store.open()).toBe(false);
     expect(store.result()).toBe("");
     expect(store.selection()).toBeNull();
+  });
+});
+
+describe("createAiInlineStore diagram validation", () => {
+  const TARGET = { contentFrom: 4, contentTo: 4, isEmpty: true, existingSource: "" };
+
+  beforeEach(() => {
+    mermaidParse.mockReset();
+  });
+
+  it("valid DSL passes mermaid.parse and accept() inserts it", async () => {
+    mermaidParse.mockResolvedValue({ diagramType: "flowchart" });
+    const replace = vi.fn();
+    const store = createAiInlineStore({
+      getProvider: () =>
+        stubProvider([
+          { type: "text-delta", text: "```mermaid\nflowchart TD\n  A-->B\n```" },
+          { type: "done" },
+        ]),
+    });
+    store.openForDiagram(TARGET, null, replace);
+    await store.runDiagram("two boxes");
+    expect(store.status()).toBe("done");
+    expect(mermaidParse).toHaveBeenCalledWith("flowchart TD\n  A-->B");
+    store.accept();
+    expect(replace).toHaveBeenCalledWith(4, 4, "flowchart TD\n  A-->B\n");
+    expect(store.open()).toBe(false);
+  });
+
+  it("invalid DSL is never inserted and surfaces the generic error", async () => {
+    mermaidParse.mockRejectedValue(new Error("Parse error on line 2"));
+    const replace = vi.fn();
+    const store = createAiInlineStore({
+      getProvider: () =>
+        stubProvider([{ type: "text-delta", text: "flowchart TD\n  A--" }, { type: "done" }]),
+    });
+    store.openForDiagram(TARGET, null, replace);
+    await store.runDiagram("two boxes");
+    expect(store.status()).toBe("error");
+    expect(store.error()).toContain("Something went wrong");
+    store.accept();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("a response with no extractable diagram is treated as invalid", async () => {
+    const replace = vi.fn();
+    const store = createAiInlineStore({
+      getProvider: () =>
+        stubProvider([{ type: "text-delta", text: "Sorry, I cannot help." }, { type: "done" }]),
+    });
+    store.openForDiagram(TARGET, null, replace);
+    await store.runDiagram("two boxes");
+    expect(store.status()).toBe("error");
+    expect(mermaidParse).not.toHaveBeenCalled();
+    store.accept();
+    expect(replace).not.toHaveBeenCalled();
   });
 });
