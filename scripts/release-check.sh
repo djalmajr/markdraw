@@ -15,14 +15,21 @@ bun run typecheck
 step "2/9 bun test"
 bun test
 
+# Windows: test executables need the common-controls manifest embedded or they
+# die at startup (STATUS_ENTRYPOINT_NOT_FOUND). The env var is scoped to the
+# cargo test/coverage invocations ONLY — exported globally it would leak into
+# the e2e gate's app build, where tauri-build already embeds a manifest and the
+# duplicate fails the link (CVT1100 → LNK1123).
 step "3/9 cargo test (incl. perf stress)"
-(cd apps/desktop/src-tauri && cargo test --lib && cargo test --lib -- --ignored)
+(cd apps/desktop/src-tauri \
+  && ASCIIMARK_EMBED_TEST_MANIFEST=1 cargo test --lib \
+  && ASCIIMARK_EMBED_TEST_MANIFEST=1 cargo test --lib -- --ignored)
 
 step "4/9 vitest (UI components)"
 (cd packages/ui && bun run test:vitest)
 
 step "5/9 cargo coverage (Rust)"
-(cd apps/desktop/src-tauri && cargo llvm-cov --lib --summary-only)
+(cd apps/desktop/src-tauri && ASCIIMARK_EMBED_TEST_MANIFEST=1 cargo llvm-cov --lib --summary-only)
 
 step "6/9 conversion benchmarks (smoke)"
 bun run packages/core/src/__bench__/conversion.bench.ts
