@@ -1652,6 +1652,29 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
+/* Insertion-line preview while dragging: a bright bar on the EXACT edge the
+   dragged tab will land at (rpDropIndicator mirrors the reorder semantics,
+   including the pinned-boundary clamp). ::before is free — the active-tab
+   accent owns ::after. */
+.rp-tab-drop-before::before,
+.rp-tab-drop-after::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: hsl(var(--primary));
+  box-shadow: 0 0 6px hsl(var(--primary) / 0.7);
+  z-index: 5;
+  pointer-events: none;
+}
+.rp-tab-drop-before::before {
+  left: -2px;
+}
+.rp-tab-drop-after::before {
+  right: -2px;
+}
 .rp-tab-pinned {
   max-width: 130px;
 }

@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import {
   RightPanelTabs,
   fromRpTabDndId,
+  rpDropIndicator,
   toRpTabDndId,
   type RightPanelTab,
   type RightPanelTabsProps,
@@ -141,6 +142,42 @@ describe("RightPanelTabs — drag-and-drop wiring", () => {
     expect(baseElement.querySelectorAll(".rp-tab")).toHaveLength(1);
     fireEvent.click(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
     expect(onSelect).toHaveBeenCalledWith("chat:s1");
+  });
+});
+
+describe("rpDropIndicator — insertion-line preview semantics", () => {
+  const STRIP: RightPanelTab[] = [
+    { id: "p1", kind: "chat", title: "P1", pinned: true },
+    { id: "p2", kind: "chat", title: "P2", pinned: true },
+    { id: "toc", kind: "toc", title: "" },
+    { id: "s1", kind: "chat", title: "S1" },
+    { id: "s2", kind: "chat", title: "S2" },
+  ];
+
+  it("same group: line lands before the hovered tab when moving left, after when moving right", () => {
+    expect(rpDropIndicator(STRIP, "chat:s2", "toc")).toEqual({ encoded: "toc", side: "before" });
+    expect(rpDropIndicator(STRIP, "toc", "chat:s2")).toEqual({ encoded: "chat:s2", side: "after" });
+  });
+
+  it("cross group clamps to the pinned boundary, mirroring the reorder semantics", () => {
+    // Pinned dragged over the unpinned region → after the LAST pinned tab.
+    expect(rpDropIndicator(STRIP, "chat:p1", "chat:s1")).toEqual({
+      encoded: "chat:p2",
+      side: "after",
+    });
+    // Unpinned dragged over the pinned region → before the FIRST unpinned tab.
+    expect(rpDropIndicator(STRIP, "chat:s2", "chat:p1")).toEqual({
+      encoded: "toc",
+      side: "before",
+    });
+  });
+
+  it("yields null with no drag, a self-hover, or unknown ids", () => {
+    expect(rpDropIndicator(STRIP, null, "toc")).toBeNull();
+    expect(rpDropIndicator(STRIP, "toc", null)).toBeNull();
+    expect(rpDropIndicator(STRIP, "toc", "toc")).toBeNull();
+    expect(rpDropIndicator(STRIP, "chat:ghost", "toc")).toBeNull();
+    expect(rpDropIndicator(STRIP, "toc", "chat:ghost")).toBeNull();
   });
 });
 

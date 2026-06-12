@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, type JSX } from "solid-js";
 import { useDraggable, useDroppable } from "@dnd-kit/solid";
 import IconListTree from "~icons/lucide/list-tree";
 import IconLink from "~icons/lucide/link";
@@ -76,6 +76,39 @@ export interface RightPanelTabsProps {
 }
 
 const encode = (tab: RightPanelTab): string => (tab.kind === "chat" ? `chat:${tab.id}` : tab.id);
+
+/** Where the insertion line renders during a strip drag, mirroring
+ *  reorderRightPanelTab's REAL semantics so the preview never lies:
+ *  same group → before the hovered tab when moving left, after it when
+ *  moving right; CROSS-group hovers clamp to the pinned/unpinned boundary
+ *  (a drag never changes pin status), so the line moves to the boundary
+ *  tab instead of the hovered one. Returns null when nothing would move. */
+export function rpDropIndicator(
+  tabs: readonly RightPanelTab[],
+  sourceEncoded: string | null,
+  hoverEncoded: string | null,
+): { encoded: string; side: "after" | "before" } | null {
+  if (!sourceEncoded || !hoverEncoded || sourceEncoded === hoverEncoded) return null;
+  const sourceIdx = tabs.findIndex((t) => encode(t) === sourceEncoded);
+  const hoverIdx = tabs.findIndex((t) => encode(t) === hoverEncoded);
+  if (sourceIdx === -1 || hoverIdx === -1) return null;
+  const source = tabs[sourceIdx];
+  const hover = tabs[hoverIdx];
+  if (!source || !hover) return null;
+  if (!!source.pinned === !!hover.pinned) {
+    return { encoded: hoverEncoded, side: sourceIdx > hoverIdx ? "before" : "after" };
+  }
+  if (source.pinned) {
+    // Pinned dragged over the unpinned region → lands at the END of the
+    // pinned group: line after the last pinned tab.
+    const lastPinned = [...tabs].reverse().find((t) => t.pinned);
+    return lastPinned ? { encoded: encode(lastPinned), side: "after" } : null;
+  }
+  // Unpinned dragged over the pinned region → lands at the START of the
+  // unpinned group: line before the first unpinned tab.
+  const firstUnpinned = tabs.find((t) => !t.pinned);
+  return firstUnpinned ? { encoded: encode(firstUnpinned), side: "before" } : null;
+}
 
 // Namespaced dnd ids so right-panel tab drags never collide with the editor
 // tab ("tab::"), pane drop-zone ("pane::") or workspace-root ("root::")
@@ -159,6 +192,14 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
   // (+ / history / …) live outside the draggable refs and are never targets.
   const canDragTabs = (): boolean => props.tabs.length > 1;
 
+  // Live drag state published by the StripTabs (dnd-kit only exposes
+  // per-element isDragging/isDropTarget): the insertion-line preview is
+  // derived centrally so a cross-group hover can light up the BOUNDARY tab
+  // instead of the hovered one.
+  const [draggingTab, setDraggingTab] = createSignal<string | null>(null);
+  const [hoveredTab, setHoveredTab] = createSignal<string | null>(null);
+  const dropIndicator = createMemo(() => rpDropIndicator(props.tabs, draggingTab(), hoveredTab()));
+
   function StripTab(tabProps: { tab: RightPanelTab }): JSX.Element {
     // The strip model emits fresh tab objects on every change, so <For>
     // re-creates this row whenever its tab changes — reading the prop once
@@ -178,6 +219,25 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
       },
     });
 
+    // Publish this tab's drag/hover state to the strip-level signals feeding
+    // the insertion-line preview (cleared when the gesture leaves this tab).
+    createEffect(
+      on(draggable.isDragging, (dragging) => {
+        if (dragging) setDraggingTab(encode(tab));
+        else setDraggingTab((cur) => (cur === encode(tab) ? null : cur));
+      }),
+    );
+    createEffect(
+      on(droppable.isDropTarget, (over) => {
+        if (over) setHoveredTab(encode(tab));
+        else setHoveredTab((cur) => (cur === encode(tab) ? null : cur));
+      }),
+    );
+    const indicatorSide = (): "after" | "before" | null => {
+      const ind = dropIndicator();
+      return ind && ind.encoded === encode(tab) ? ind.side : null;
+    };
+
     return (
       <ContextMenu>
         <ContextMenuTrigger
@@ -186,6 +246,8 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
           classList={{
             "rp-tab-active": isActive(tab),
             "rp-tab-dragging": draggable.isDragging(),
+            "rp-tab-drop-after": indicatorSide() === "after",
+            "rp-tab-drop-before": indicatorSide() === "before",
             "rp-tab-pinned": !!tab.pinned,
           }}
           data-rp-tab={encode(tab)}
