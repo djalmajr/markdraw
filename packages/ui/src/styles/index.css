@@ -1641,6 +1641,17 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   height: 2px;
   background: hsl(var(--primary));
 }
+/* Drag-and-drop reorder visuals — same recipe as the editor tab bar
+   (.tab-bar-item-dragging / .tab-bar-drag-overlay): the source dims in
+   place and a floating chip follows the pointer. */
+.rp-tab-dragging {
+  opacity: 0.4;
+}
+.rp-tab-drag-overlay {
+  opacity: 0.8;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
 .rp-tab-pinned {
   max-width: 130px;
 }

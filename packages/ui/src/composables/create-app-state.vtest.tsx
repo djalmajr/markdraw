@@ -722,6 +722,102 @@ describe("AppState — right-panel tab model (specials + pin)", () => {
   });
 });
 
+describe("AppState — right-panel manual reorder (drag-and-drop)", () => {
+  const stubProvider = {
+    async *chat() {
+      yield { type: "done" as const };
+    },
+    async complete() {
+      return "";
+    },
+    async embed() {
+      return [];
+    },
+  };
+  const aiConfig = { createAIProvider: () => stubProvider };
+  const RP_KEY = "asciimark-right-panel-tabs";
+
+  function persistedOrder(): string[] | undefined {
+    const raw = localStorage.getItem(RP_KEY);
+    return raw ? (JSON.parse(raw) as { order?: string[] }).order : undefined;
+  }
+
+  // All suites assert OUTSIDE the createRoot body so the persistence effect
+  // (rpOrder → localStorage) has flushed before reading storage back.
+
+  it("moving left inserts BEFORE the target; the new order is reflected and persisted", () => {
+    const state = withState((s) => s, aiConfig);
+    const boot = state.aiSessions.sessions()[0]!.id;
+    const b = state.newChat();
+    const c = state.newChat();
+    expect(state.rightPanelTabs().map((t) => t.id)).toEqual([boot, b, c]);
+    state.reorderRightPanelTab(`chat:${c}`, `chat:${boot}`);
+    expect(state.rightPanelTabs().map((t) => t.id)).toEqual([c, boot, b]);
+    expect(persistedOrder()).toEqual([`chat:${c}`, `chat:${boot}`, `chat:${b}`]);
+  });
+
+  it("moving right inserts AFTER the target (dragged lands where the target sat)", () => {
+    const state = withState((s) => s, aiConfig);
+    const boot = state.aiSessions.sessions()[0]!.id;
+    const b = state.newChat();
+    const c = state.newChat();
+    state.reorderRightPanelTab(`chat:${boot}`, `chat:${b}`);
+    expect(state.rightPanelTabs().map((t) => t.id)).toEqual([b, boot, c]);
+  });
+
+  it("cross-group clamp: a pinned tab dragged onto an unpinned target lands at the END of the pinned group, still pinned", () => {
+    const state = withState((s) => s, aiConfig);
+    const boot = state.aiSessions.sessions()[0]!.id;
+    const b = state.newChat();
+    const c = state.newChat();
+    state.togglePinRightPanelTab(`chat:${boot}`);
+    state.togglePinRightPanelTab(`chat:${b}`);
+    expect(state.rightPanelTabs().map((t) => t.id)).toEqual([boot, b, c]);
+    state.reorderRightPanelTab(`chat:${boot}`, `chat:${c}`);
+    expect(state.rightPanelTabs().map((t) => t.id)).toEqual([b, boot, c]);
+    // Pinned status NEVER changes from a drag.
+    expect(state.rightPanelTabs().map((t) => t.pinned)).toEqual([true, true, false]);
+  });
+
+  it("cross-group clamp: an unpinned tab dragged onto a pinned target lands at the START of the unpinned group, still unpinned", () => {
+    const state = withState((s) => s, aiConfig);
+    const boot = state.aiSessions.sessions()[0]!.id;
+    const b = state.newChat();
+    const c = state.newChat();
+    state.togglePinRightPanelTab(`chat:${boot}`);
+    expect(state.rightPanelTabs().map((t) => t.id)).toEqual([boot, b, c]);
+    state.reorderRightPanelTab(`chat:${c}`, `chat:${boot}`);
+    expect(state.rightPanelTabs().map((t) => t.id)).toEqual([boot, c, b]);
+    expect(state.rightPanelTabs().map((t) => t.pinned)).toEqual([true, false, false]);
+  });
+
+  it("a newly-opened tab lands AFTER the manually-ordered ones of its group", () => {
+    const state = withState((s) => s, aiConfig);
+    const boot = state.aiSessions.sessions()[0]!.id;
+    const b = state.newChat();
+    state.reorderRightPanelTab(`chat:${b}`, `chat:${boot}`);
+    expect(state.rightPanelTabs().map((t) => t.id)).toEqual([b, boot]);
+    const c = state.newChat();
+    expect(state.rightPanelTabs().map((t) => t.id)).toEqual([b, boot, c]);
+  });
+
+  it("stale ids in the persisted order are ignored (no eager cleanup needed)", () => {
+    localStorage.setItem(
+      RP_KEY,
+      JSON.stringify({
+        toc: { open: true, pinned: false, openedAt: 1 },
+        backlinks: { open: true, pinned: false, openedAt: 2 },
+        activeTab: "toc",
+        order: ["chat:ghost", "backlinks", "toc"],
+      }),
+    );
+    const state = withState((s) => s, aiConfig);
+    // The ghost chat id is skipped; the remembered specials order still wins
+    // over the openedAt sort (toc opened first but ranks after backlinks).
+    expect(state.rightPanelTabs().map((t) => t.id)).toEqual(["backlinks", "toc"]);
+  });
+});
+
 describe("AppState — AI live plan (omp#3)", () => {
   it("starts with no plan (per-app-session, nothing restored from storage)", () => {
     withState((state) => {

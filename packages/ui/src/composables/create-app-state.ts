@@ -786,6 +786,11 @@ export function createAppState(config: AppStateConfig) {
         },
   );
 
+  // Manual drag-and-drop order of ENCODED tab ids. Mirrors the persisted
+  // state like the specials do; tabs absent from this list (newly opened)
+  // fall back to the orderKey sort, AFTER the manually-ordered ones.
+  const [rpOrder, setRpOrder] = createSignal<string[]>(persistedRp?.order ?? []);
+
   const restoredActive = aiSessions.activeId();
   const [aiActiveTab, setActiveTabSig] = createSignal<string>(
     (() => {
@@ -813,7 +818,12 @@ export function createAppState(config: AppStateConfig) {
   // the sessions manager). Direct write — low frequency, localStorage is cheap.
   createEffect(() => {
     const specials = rpSpecials();
-    setRightPanelTabsState({ toc: specials.toc, backlinks: specials.backlinks, activeTab: aiActiveTab() });
+    setRightPanelTabsState({
+      toc: specials.toc,
+      backlinks: specials.backlinks,
+      activeTab: aiActiveTab(),
+      order: rpOrder(),
+    });
   });
 
   function patchSpecial(kind: SpecialKind, patch: Partial<SpecialTabState>): void {
@@ -823,7 +833,11 @@ export function createAppState(config: AppStateConfig) {
   const encodeTab = (t: { kind: string; id: string }): string =>
     t.kind === "chat" ? `chat:${t.id}` : t.id;
 
-  /** The ordered strip model: open specials + open chats, pinned-first. */
+  /** The ordered strip model: open specials + open chats, pinned-first.
+   *  Within each group (pinned / unpinned), tabs present in the manual
+   *  drag-and-drop order sort by it; the rest (newly opened) keep the
+   *  orderKey sort and land AFTER the manually-ordered ones. Stale ids in
+   *  the manual list are ignored (no eager cleanup). */
   const rightPanelTabs = createMemo<RightPanelTabModel[]>(() => {
     const specials = rpSpecials();
     const out: RightPanelTabModel[] = [];
@@ -841,7 +855,17 @@ export function createAppState(config: AppStateConfig) {
         orderKey: s.createdAt,
       });
     }
-    return out.sort((a, b) => (a.pinned === b.pinned ? a.orderKey - b.orderKey : a.pinned ? -1 : 1));
+    const rank = new Map(rpOrder().map((id, index) => [id, index]));
+    const sortGroup = (group: RightPanelTabModel[]): RightPanelTabModel[] => {
+      const ranked = group
+        .filter((t) => rank.has(encodeTab(t)))
+        .sort((a, b) => (rank.get(encodeTab(a)) ?? 0) - (rank.get(encodeTab(b)) ?? 0));
+      const rest = group
+        .filter((t) => !rank.has(encodeTab(t)))
+        .sort((a, b) => a.orderKey - b.orderKey);
+      return [...ranked, ...rest];
+    };
+    return [...sortGroup(out.filter((t) => t.pinned)), ...sortGroup(out.filter((t) => !t.pinned))];
   });
 
   /** Activate a chat session and front its tab together. */
@@ -973,6 +997,36 @@ export function createAppState(config: AppStateConfig) {
     } else if (encoded === "toc" || encoded === "backlinks") {
       patchSpecial(encoded, { pinned: !rpSpecials()[encoded].pinned });
     }
+  }
+
+  /** Drag-and-drop reorder: reposition `dragged` so it lands where `target`
+   *  currently sits (insert-before when moving left, insert-after when moving
+   *  right). Cross-group drops clamp to the group boundary — a pinned tab
+   *  dragged onto an unpinned target lands at the END of the pinned group and
+   *  vice-versa at the START of the unpinned group; pinned status NEVER
+   *  changes from a drag. The full resulting sequence (encoded ids) replaces
+   *  the manual order and persists. */
+  function reorderRightPanelTab(draggedEncodedId: string, targetEncodedId: string): void {
+    if (draggedEncodedId === targetEncodedId) return;
+    const tabs = rightPanelTabs();
+    const ids = tabs.map(encodeTab);
+    const from = ids.indexOf(draggedEncodedId);
+    const to = ids.indexOf(targetEncodedId);
+    if (from < 0 || to < 0) return;
+    const draggedPinned = tabs[from]?.pinned ?? false;
+    const targetPinned = tabs[to]?.pinned ?? false;
+    const next = ids.filter((id) => id !== draggedEncodedId);
+    let insertAt: number;
+    if (draggedPinned !== targetPinned) {
+      // After removing the dragged id, the end of the pinned group and the
+      // start of the unpinned group are the same boundary index.
+      insertAt = tabs.filter((t) => t.pinned).length - (draggedPinned ? 1 : 0);
+    } else {
+      const targetIdx = next.indexOf(targetEncodedId);
+      insertAt = from < to ? targetIdx + 1 : targetIdx;
+    }
+    next.splice(insertAt, 0, draggedEncodedId);
+    setRpOrder(next);
   }
 
   /** Export a chat transcript (the host shows a Save dialog + writes the file).
@@ -1465,6 +1519,7 @@ export function createAppState(config: AppStateConfig) {
     closeRightPanelTabsToRight,
     closeAllRightPanelTabs,
     togglePinRightPanelTab,
+    reorderRightPanelTab,
     // AI context chips
     aiContextItems,
     activeFileContext,

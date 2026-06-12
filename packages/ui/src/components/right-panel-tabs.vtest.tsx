@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { RightPanelTabs, type RightPanelTab, type RightPanelTabsProps } from "./right-panel-tabs.tsx";
+import {
+  RightPanelTabs,
+  fromRpTabDndId,
+  toRpTabDndId,
+  type RightPanelTab,
+  type RightPanelTabsProps,
+} from "./right-panel-tabs.tsx";
+import { fromTabDndId, toTabDndId } from "./tab-bar.tsx";
 
 afterEach(cleanup);
 
@@ -88,6 +95,52 @@ describe("RightPanelTabs — tabs", () => {
     unmount();
     const { baseElement: b2 } = render(() => <RightPanelTabs {...baseProps({ activeId: "chat:s2" })} />);
     expect(b2.querySelector('[data-rp-tab="chat:s2"] .rp-tab-dot')).toBeNull();
+  });
+});
+
+describe("RightPanelTabs — drag-and-drop wiring", () => {
+  // jsdom/happy-dom can't run real pointer drags; like the tab-bar tests we
+  // assert at presence/parser depth: the draggable-wired tabs still render
+  // and behave, and the id namespace stays mutually exclusive.
+
+  it("round-trips encoded ids through the rp dnd namespace", () => {
+    expect(fromRpTabDndId(toRpTabDndId("toc"))).toBe("toc");
+    expect(fromRpTabDndId(toRpTabDndId("backlinks"))).toBe("backlinks");
+    expect(fromRpTabDndId(toRpTabDndId("chat:s1"))).toBe("chat:s1");
+  });
+
+  it("fromRpTabDndId rejects editor-tab, pane, root and non-string dnd ids", () => {
+    expect(fromRpTabDndId(toTabDndId(0, "a.md"))).toBeNull();
+    expect(fromRpTabDndId("pane::1")).toBeNull();
+    expect(fromRpTabDndId("root::r1")).toBeNull();
+    expect(fromRpTabDndId(null)).toBeNull();
+    expect(fromRpTabDndId(undefined)).toBeNull();
+    expect(fromRpTabDndId(42)).toBeNull();
+  });
+
+  it("the editor-tab parser rejects rp-tab dnd ids (namespaces never collide)", () => {
+    expect(fromTabDndId(toRpTabDndId("chat:s1"))).toBeNull();
+    expect(fromTabDndId(toRpTabDndId("toc"))).toBeNull();
+  });
+
+  it("tabs render and stay clickable with the draggable wiring (multi-tab strip)", () => {
+    const onSelect = vi.fn();
+    const { baseElement } = render(() => <RightPanelTabs {...baseProps({ onSelect })} />);
+    expect(baseElement.querySelectorAll(".rp-tab")).toHaveLength(3);
+    fireEvent.click(baseElement.querySelector('[data-rp-tab="chat:s2"]')!);
+    expect(onSelect).toHaveBeenCalledWith("chat:s2");
+  });
+
+  it("a single-tab strip (drag disabled) still renders and selects", () => {
+    const onSelect = vi.fn();
+    const { baseElement } = render(() => (
+      <RightPanelTabs
+        {...baseProps({ onSelect, tabs: [{ id: "s1", kind: "chat", title: "Only" }] })}
+      />
+    ));
+    expect(baseElement.querySelectorAll(".rp-tab")).toHaveLength(1);
+    fireEvent.click(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
+    expect(onSelect).toHaveBeenCalledWith("chat:s1");
   });
 });
 

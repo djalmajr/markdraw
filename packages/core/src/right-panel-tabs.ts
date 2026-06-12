@@ -27,6 +27,10 @@ const RightPanelTabsStateSchema = v.object({
   backlinks: v.optional(SpecialTabStateSchema, { open: false, pinned: false, openedAt: 0 }),
   /** Encoded active tab: "toc" | "backlinks" | "chat:<id>" | "" (none). */
   activeTab: v.optional(v.string(), ""),
+  /** Manual drag-and-drop order of ENCODED tab ids ("toc" | "backlinks" |
+   *  "chat:<id>"). Absent on legacy payloads (pre-reorder) — readers fall
+   *  back to the openedAt/createdAt sort. Stale ids are tolerated. */
+  order: v.optional(v.array(v.string())),
 });
 
 type SpecialTabState = v.InferOutput<typeof SpecialTabStateSchema>;

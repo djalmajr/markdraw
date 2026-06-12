@@ -20,6 +20,7 @@ import { PaneView, fromPaneDropDndId } from "./pane-view.tsx";
 import { PaneSplitter } from "./pane-splitter.tsx";
 import { fromTabDndId } from "./tab-bar.tsx";
 import { TocPanel } from "./toc-panel.tsx";
+import { fromRpTabDndId } from "./right-panel-tabs.tsx";
 import { BacklinksList, type BacklinkEntry } from "./backlinks-list.tsx";
 import type { SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
 import { AiPanel, type AiMentionEntry } from "./ai-panel.tsx";
@@ -388,6 +389,16 @@ export function AppShell(props: AppShellProps) {
     if (event?.canceled) return;
     const sourceId = event?.operation?.source?.id;
     const targetId = event?.operation?.target?.id;
+
+    // Right-panel strip reorder. The "rp-tab::" namespace never overlaps the
+    // editor-tab / pane / root namespaces, so this branch is a clean gate:
+    // any rp-tab source either reorders onto an rp-tab sibling or no-ops.
+    const rpSource = fromRpTabDndId(sourceId);
+    if (rpSource !== null) {
+      const rpTarget = fromRpTabDndId(targetId);
+      if (rpTarget !== null && rpTarget !== rpSource) s.reorderRightPanelTab(rpSource, rpTarget);
+      return;
+    }
 
     const source = fromTabDndId(sourceId);
     if (!source) return;
@@ -882,93 +893,119 @@ export function AppShell(props: AppShellProps) {
               onMouseDown={(e) => s.onTocResizeStart(e, appRef)}
             />
           </Show>
-          <TocPanel
-            tocVisible={s.tocVisible()}
-            hasRoot={!!props.hasRoot}
-            width={s.tocWidth()}
-            hasToc={s.hasToc()}
-            tocLevels={s.tocLevels()}
-            setTocLevels={s.setTocLevels}
-            setTocExpanded={setTocExpanded}
-            contentRef={(el) => { tocContainerRef = el; }}
-            panelRef={(el) => { tocPanelRef = el; }}
-            backlinksCount={s.activeBacklinks().length}
-            activeTab={s.aiActiveTab()}
-            onActiveTabChange={s.setAiActiveTab}
-            tabs={s.rightPanelTabs()}
-            onNewChat={s.newChat}
-            onClose={s.closeRightPanelTab}
-            onCloseOthers={s.closeOtherRightPanelTabs}
-            onCloseToRight={s.closeRightPanelTabsToRight}
-            onCloseAll={s.closeAllRightPanelTabs}
-            onTogglePin={s.togglePinRightPanelTab}
-            onRenameChat={s.renameChat}
-            onExportChat={s.exportChat}
-            onArchiveChat={s.archiveChat}
-            onDeleteChat={s.deleteChat}
-            onOpenSpecial={s.openSpecial}
-            historySlot={
-              <ChatHistoryMenu
-                items={s.aiSessions.allSessions()}
-                activeId={s.aiSessions.activeId()}
-                defaultTitle={(useLocale(), m.ai_chat_default_title())}
-                onActivate={s.openChatFromHistory}
-                onArchive={s.archiveChat}
-                onRestore={s.openChatFromHistory}
-                onDelete={s.deleteChat}
-                onForkSession={s.forkChat}
-              />
-            }
-            aiSlot={
-              <AiPanel
-                store={s.aiSessions.activeStore()}
-                focusTrigger={s.aiComposerFocusTrigger()}
-                inlineReference={s.aiInlineReference()}
-                providerLabel={props.aiProviderLabel}
-                modelGroups={props.aiModelGroups}
-                currentModel={props.aiCurrentModel}
-                contextLimit={props.aiContextLimit}
-                displayText={props.aiDisplayText}
-                onSelectModel={props.onSelectAiModel}
-                onManageModels={props.onOpenSettings}
-                contextItems={s.aiContextItems()}
-                activeFileContext={s.activeFileContext()}
-                onRemoveContext={s.removeAiContext}
-                onReorderContext={s.reorderAiContext}
-                onDismissActiveFile={s.dismissActiveFileContext}
-                mentionFiles={mentionFiles()}
-                slashCommands={props.aiSlashCommands}
-                onMention={(f) => props.onAddFileMention?.(f)}
-                onOpenExternal={props.onOpenExternal}
-                onOpenSettings={props.onOpenSettings}
-                onSlashMenuOpen={props.onAiSlashMenuOpen}
-                mode={s.aiMode()}
-                planItems={s.aiPlan()?.items}
-                onClearPlan={s.clearAiPlan}
-                onInlineReferenceHandled={s.clearAiInlineReference}
-                onModeChange={s.setAiMode}
-                onTogglePlanItem={s.toggleAiPlanItem}
-              />
-            }
-            backlinksSlot={
-              <BacklinksList
-                entries={s.activeBacklinks().map<BacklinkEntry>((path) => ({
-                  path,
-                  label: path.includes("/")
-                    ? path.slice(path.lastIndexOf("/") + 1)
-                    : path,
-                  rootId: s.selectedRootId() ?? undefined,
-                }))}
-                onSelect={(entry) => {
-                  if (!entry.rootId) return;
-                  props.onLoadFile?.(
-                    { kind: "file", name: entry.label, path: entry.path },
-                    entry.rootId,
-                  );
-                }}
-              />
-            }
-          />
+          {/* The rp strip's tab DnD rides a SEPARATE provider (same handler):
+              rp-tab drags stay out of the editor-tab/pane context entirely,
+              so cross-surface drops are impossible by construction. */}
+          <DragDropProvider onDragEnd={handleTabDragEnd}>
+            <TocPanel
+              tocVisible={s.tocVisible()}
+              hasRoot={!!props.hasRoot}
+              width={s.tocWidth()}
+              hasToc={s.hasToc()}
+              tocLevels={s.tocLevels()}
+              setTocLevels={s.setTocLevels}
+              setTocExpanded={setTocExpanded}
+              contentRef={(el) => { tocContainerRef = el; }}
+              panelRef={(el) => { tocPanelRef = el; }}
+              backlinksCount={s.activeBacklinks().length}
+              activeTab={s.aiActiveTab()}
+              onActiveTabChange={s.setAiActiveTab}
+              tabs={s.rightPanelTabs()}
+              onNewChat={s.newChat}
+              onClose={s.closeRightPanelTab}
+              onCloseOthers={s.closeOtherRightPanelTabs}
+              onCloseToRight={s.closeRightPanelTabsToRight}
+              onCloseAll={s.closeAllRightPanelTabs}
+              onTogglePin={s.togglePinRightPanelTab}
+              onRenameChat={s.renameChat}
+              onExportChat={s.exportChat}
+              onArchiveChat={s.archiveChat}
+              onDeleteChat={s.deleteChat}
+              onOpenSpecial={s.openSpecial}
+              historySlot={
+                <ChatHistoryMenu
+                  items={s.aiSessions.allSessions()}
+                  activeId={s.aiSessions.activeId()}
+                  defaultTitle={(useLocale(), m.ai_chat_default_title())}
+                  onActivate={s.openChatFromHistory}
+                  onArchive={s.archiveChat}
+                  onRestore={s.openChatFromHistory}
+                  onDelete={s.deleteChat}
+                  onForkSession={s.forkChat}
+                />
+              }
+              aiSlot={
+                <AiPanel
+                  store={s.aiSessions.activeStore()}
+                  focusTrigger={s.aiComposerFocusTrigger()}
+                  inlineReference={s.aiInlineReference()}
+                  providerLabel={props.aiProviderLabel}
+                  modelGroups={props.aiModelGroups}
+                  currentModel={props.aiCurrentModel}
+                  contextLimit={props.aiContextLimit}
+                  displayText={props.aiDisplayText}
+                  onSelectModel={props.onSelectAiModel}
+                  onManageModels={props.onOpenSettings}
+                  contextItems={s.aiContextItems()}
+                  activeFileContext={s.activeFileContext()}
+                  onRemoveContext={s.removeAiContext}
+                  onReorderContext={s.reorderAiContext}
+                  onDismissActiveFile={s.dismissActiveFileContext}
+                  mentionFiles={mentionFiles()}
+                  slashCommands={props.aiSlashCommands}
+                  onMention={(f) => props.onAddFileMention?.(f)}
+                  onOpenExternal={props.onOpenExternal}
+                  onOpenSettings={props.onOpenSettings}
+                  onSlashMenuOpen={props.onAiSlashMenuOpen}
+                  mode={s.aiMode()}
+                  planItems={s.aiPlan()?.items}
+                  onClearPlan={s.clearAiPlan}
+                  onInlineReferenceHandled={s.clearAiInlineReference}
+                  onModeChange={s.setAiMode}
+                  onTogglePlanItem={s.toggleAiPlanItem}
+                />
+              }
+              backlinksSlot={
+                <BacklinksList
+                  entries={s.activeBacklinks().map<BacklinkEntry>((path) => ({
+                    path,
+                    label: path.includes("/")
+                      ? path.slice(path.lastIndexOf("/") + 1)
+                      : path,
+                    rootId: s.selectedRootId() ?? undefined,
+                  }))}
+                  onSelect={(entry) => {
+                    if (!entry.rootId) return;
+                    props.onLoadFile?.(
+                      { kind: "file", name: entry.label, path: entry.path },
+                      entry.rootId,
+                    );
+                  }}
+                />
+              }
+            />
+            <DragOverlay>
+              {(draggable) => {
+                const encoded = draggable ? fromRpTabDndId(draggable.id) : null;
+                if (encoded === null) return null;
+                const tab = s
+                  .rightPanelTabs()
+                  .find((t) => (t.kind === "chat" ? `chat:${t.id}` : t.id) === encoded);
+                if (!tab) return null;
+                const label =
+                  tab.kind === "toc"
+                    ? (useLocale(), m.toc_tab_outline())
+                    : tab.kind === "backlinks"
+                      ? (useLocale(), m.toc_tab_references())
+                      : tab.title || (useLocale(), m.ai_chat_default_title());
+                return (
+                  <div class="rp-tab rp-tab-active rp-tab-drag-overlay">
+                    <span class="rp-tab-name">{label}</span>
+                  </div>
+                );
+              }}
+            </DragOverlay>
+          </DragDropProvider>
         </div>
         <Show when={props.showToolbar && (props.toolbarRootName || props.toolbarFilePath)}>
           <footer class="status-bar no-print">

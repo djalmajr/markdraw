@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
+import { useDraggable, useDroppable } from "@dnd-kit/solid";
 import IconListTree from "~icons/lucide/list-tree";
 import IconLink from "~icons/lucide/link";
 import IconPin from "~icons/lucide/pin";
@@ -76,6 +77,26 @@ export interface RightPanelTabsProps {
 
 const encode = (tab: RightPanelTab): string => (tab.kind === "chat" ? `chat:${tab.id}` : tab.id);
 
+// Namespaced dnd ids so right-panel tab drags never collide with the editor
+// tab ("tab::"), pane drop-zone ("pane::") or workspace-root ("root::")
+// namespaces — the from* parsers are mutually exclusive by prefix.
+const RP_TAB_DND_PREFIX = "rp-tab::";
+
+/** Build the dnd id for a strip tab from its ENCODED id
+ *  ("toc" | "backlinks" | "chat:<id>"). */
+export function toRpTabDndId(encodedId: string): string {
+  return `${RP_TAB_DND_PREFIX}${encodedId}`;
+}
+
+/** Parse a right-panel-tab dnd id back into the encoded tab id. Returns null
+ *  for any other namespace (editor tabs, pane drop zones, workspace roots),
+ *  so the AppShell-level DragDropProvider can route rp-tab drops safely. */
+export function fromRpTabDndId(dndId: unknown): string | null {
+  if (typeof dndId !== "string") return null;
+  if (!dndId.startsWith(RP_TAB_DND_PREFIX)) return null;
+  return dndId.slice(RP_TAB_DND_PREFIX.length);
+}
+
 /**
  * The unified right-panel tab strip. All tabs (the openable Outline / References
  * specials and N chat tabs) render uniformly: pinned-first, each with a
@@ -134,6 +155,152 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
     setEditingId(null);
   }
 
+  // Reorder drag is only meaningful with 2+ tabs; the strip's action buttons
+  // (+ / history / …) live outside the draggable refs and are never targets.
+  const canDragTabs = (): boolean => props.tabs.length > 1;
+
+  function StripTab(tabProps: { tab: RightPanelTab }): JSX.Element {
+    // The strip model emits fresh tab objects on every change, so <For>
+    // re-creates this row whenever its tab changes — reading the prop once
+    // matches the previous For-callback semantics.
+    const tab = tabProps.tab;
+    const dndId = toRpTabDndId(encode(tab));
+    const draggable = useDraggable({
+      id: dndId,
+      get disabled() {
+        return !canDragTabs();
+      },
+    });
+    const droppable = useDroppable({
+      id: dndId,
+      get disabled() {
+        return !canDragTabs();
+      },
+    });
+
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger
+          as="div"
+          class="rp-tab"
+          classList={{
+            "rp-tab-active": isActive(tab),
+            "rp-tab-dragging": draggable.isDragging(),
+            "rp-tab-pinned": !!tab.pinned,
+          }}
+          data-rp-tab={encode(tab)}
+          title={labelOf(tab)}
+          role="tab"
+          aria-selected={isActive(tab)}
+          ref={(el: HTMLElement) => {
+            draggable.ref(el);
+            droppable.ref(el);
+          }}
+          onClick={() => {
+            if (editingId() !== tab.id) props.onSelect(encode(tab));
+          }}
+          onDblClick={() => startRename(tab)}
+          onMouseDown={(e: MouseEvent) => {
+            if (e.button === 1) {
+              e.preventDefault();
+              props.onClose(encode(tab));
+            }
+          }}
+        >
+          <Show when={tab.pinned}>
+            <IconPin width={11} height={11} class="rp-tab-pin" />
+          </Show>
+          <Show when={tab.kind === "toc"}>
+            <IconListTree width={13} height={13} class="rp-tab-icon" />
+          </Show>
+          <Show when={tab.kind === "backlinks"}>
+            <IconLink width={12} height={12} class="rp-tab-icon" />
+          </Show>
+          <Show when={tab.kind === "chat" && tab.streaming && !isActive(tab)}>
+            <span class="rp-tab-dot" aria-hidden="true" />
+          </Show>
+          <Show
+            when={editingId() === tab.id}
+            fallback={<span class="rp-tab-name">{labelOf(tab)}</span>}
+          >
+            <input
+              class="rp-tab-rename"
+              value={draft()}
+              autofocus
+              aria-label={(useLocale(), `${m.ai_tab_rename()}: ${labelOf(tab)}`)}
+              onClick={(e) => e.stopPropagation()}
+              onInput={(e) => setDraft(e.currentTarget.value)}
+              onBlur={(e) => {
+                // Don't commit if focus is moving into a menu/popover (e.g.
+                // right-clicking the tab while editing) — that isn't "done".
+                const next = e.relatedTarget;
+                if (next instanceof HTMLElement && next.closest('[role="menu"]')) return;
+                commitRename();
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") commitRename();
+                else if (e.key === "Escape") setEditingId(null);
+              }}
+            />
+          </Show>
+          {/* Hide close while renaming so a stray Tab/click can't drop the
+              tab mid-edit. */}
+          <Show when={editingId() !== tab.id}>
+            <button
+              type="button"
+              class="rp-tab-close"
+              aria-label={(useLocale(), m.tab_close())}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onClose(encode(tab));
+              }}
+            >
+              <IconX width={12} height={12} />
+            </button>
+          </Show>
+        </ContextMenuTrigger>
+
+        <ContextMenuContent class="rp-tab-menu">
+          <ContextMenuItem onSelect={() => props.onTogglePin(encode(tab))}>
+            {tab.pinned ? (useLocale(), m.ai_tab_unpin()) : (useLocale(), m.ai_tab_pin())}
+          </ContextMenuItem>
+          <Show when={tab.kind === "chat"}>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => startRename(tab)}>
+              {(useLocale(), m.ai_tab_rename())}
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => props.onExportChat?.(tab.id)}>
+              {(useLocale(), m.ai_tab_export())}
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => props.onArchiveChat?.(tab.id)}>
+              {(useLocale(), m.ai_chat_archive())}
+            </ContextMenuItem>
+          </Show>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => props.onClose(encode(tab))}>
+            {(useLocale(), m.tab_close())}
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => props.onCloseOthers(encode(tab))}>
+            {(useLocale(), m.tab_close_others())}
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => props.onCloseToRight(encode(tab))}>
+            {(useLocale(), m.tab_close_to_right())}
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => props.onCloseAll()}>
+            {(useLocale(), m.tab_close_all())}
+          </ContextMenuItem>
+          <Show when={tab.kind === "chat"}>
+            <ContextMenuSeparator />
+            <ContextMenuItem class="rp-tab-menu-danger" onSelect={() => props.onDeleteChat?.(tab.id)}>
+              {(useLocale(), m.ai_chat_delete())}
+            </ContextMenuItem>
+          </Show>
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  }
+
   return (
     <div class="rp-strip">
       <Show when={hasOverflow()}>
@@ -148,121 +315,7 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
       </Show>
 
       <div class="rp-strip-tabs" ref={listRef} onScroll={updateScrollState} role="tablist">
-        <For each={props.tabs}>
-          {(tab) => (
-            <ContextMenu>
-              <ContextMenuTrigger
-                as="div"
-                class="rp-tab"
-                classList={{ "rp-tab-active": isActive(tab), "rp-tab-pinned": !!tab.pinned }}
-                data-rp-tab={encode(tab)}
-                title={labelOf(tab)}
-                role="tab"
-                aria-selected={isActive(tab)}
-                onClick={() => {
-                  if (editingId() !== tab.id) props.onSelect(encode(tab));
-                }}
-                onDblClick={() => startRename(tab)}
-                onMouseDown={(e: MouseEvent) => {
-                  if (e.button === 1) {
-                    e.preventDefault();
-                    props.onClose(encode(tab));
-                  }
-                }}
-              >
-                <Show when={tab.pinned}>
-                  <IconPin width={11} height={11} class="rp-tab-pin" />
-                </Show>
-                <Show when={tab.kind === "toc"}>
-                  <IconListTree width={13} height={13} class="rp-tab-icon" />
-                </Show>
-                <Show when={tab.kind === "backlinks"}>
-                  <IconLink width={12} height={12} class="rp-tab-icon" />
-                </Show>
-                <Show when={tab.kind === "chat" && tab.streaming && !isActive(tab)}>
-                  <span class="rp-tab-dot" aria-hidden="true" />
-                </Show>
-                <Show
-                  when={editingId() === tab.id}
-                  fallback={<span class="rp-tab-name">{labelOf(tab)}</span>}
-                >
-                  <input
-                    class="rp-tab-rename"
-                    value={draft()}
-                    autofocus
-                    aria-label={(useLocale(), `${m.ai_tab_rename()}: ${labelOf(tab)}`)}
-                    onClick={(e) => e.stopPropagation()}
-                    onInput={(e) => setDraft(e.currentTarget.value)}
-                    onBlur={(e) => {
-                      // Don't commit if focus is moving into a menu/popover (e.g.
-                      // right-clicking the tab while editing) — that isn't "done".
-                      const next = e.relatedTarget;
-                      if (next instanceof HTMLElement && next.closest('[role="menu"]')) return;
-                      commitRename();
-                    }}
-                    onKeyDown={(e) => {
-                      e.stopPropagation();
-                      if (e.key === "Enter") commitRename();
-                      else if (e.key === "Escape") setEditingId(null);
-                    }}
-                  />
-                </Show>
-                {/* Hide close while renaming so a stray Tab/click can't drop the
-                    tab mid-edit. */}
-                <Show when={editingId() !== tab.id}>
-                  <button
-                    type="button"
-                    class="rp-tab-close"
-                    aria-label={(useLocale(), m.tab_close())}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      props.onClose(encode(tab));
-                    }}
-                  >
-                    <IconX width={12} height={12} />
-                  </button>
-                </Show>
-              </ContextMenuTrigger>
-
-              <ContextMenuContent class="rp-tab-menu">
-                <ContextMenuItem onSelect={() => props.onTogglePin(encode(tab))}>
-                  {tab.pinned ? (useLocale(), m.ai_tab_unpin()) : (useLocale(), m.ai_tab_pin())}
-                </ContextMenuItem>
-                <Show when={tab.kind === "chat"}>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem onSelect={() => startRename(tab)}>
-                    {(useLocale(), m.ai_tab_rename())}
-                  </ContextMenuItem>
-                  <ContextMenuItem onSelect={() => props.onExportChat?.(tab.id)}>
-                    {(useLocale(), m.ai_tab_export())}
-                  </ContextMenuItem>
-                  <ContextMenuItem onSelect={() => props.onArchiveChat?.(tab.id)}>
-                    {(useLocale(), m.ai_chat_archive())}
-                  </ContextMenuItem>
-                </Show>
-                <ContextMenuSeparator />
-                <ContextMenuItem onSelect={() => props.onClose(encode(tab))}>
-                  {(useLocale(), m.tab_close())}
-                </ContextMenuItem>
-                <ContextMenuItem onSelect={() => props.onCloseOthers(encode(tab))}>
-                  {(useLocale(), m.tab_close_others())}
-                </ContextMenuItem>
-                <ContextMenuItem onSelect={() => props.onCloseToRight(encode(tab))}>
-                  {(useLocale(), m.tab_close_to_right())}
-                </ContextMenuItem>
-                <ContextMenuItem onSelect={() => props.onCloseAll()}>
-                  {(useLocale(), m.tab_close_all())}
-                </ContextMenuItem>
-                <Show when={tab.kind === "chat"}>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem class="rp-tab-menu-danger" onSelect={() => props.onDeleteChat?.(tab.id)}>
-                    {(useLocale(), m.ai_chat_delete())}
-                  </ContextMenuItem>
-                </Show>
-              </ContextMenuContent>
-            </ContextMenu>
-          )}
-        </For>
+        <For each={props.tabs}>{(tab) => <StripTab tab={tab} />}</For>
       </div>
 
       <Show when={hasOverflow()}>

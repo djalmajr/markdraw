@@ -26,6 +26,28 @@ describe("right-panel-tabs persistence", () => {
     expect(getRightPanelTabsState()).toEqual(state);
   });
 
+  it("round-trips the manual tab order (encoded ids)", () => {
+    const state = {
+      toc: { open: true, pinned: false, openedAt: 1000 },
+      backlinks: { open: true, pinned: false, openedAt: 2000 },
+      activeTab: "chat:abc",
+      order: ["backlinks", "chat:abc", "toc"],
+    };
+    setRightPanelTabsState(state);
+    expect(getRightPanelTabsState()).toEqual(state);
+  });
+
+  it("tolerates a legacy blob without order (field stays undefined)", () => {
+    localStorage.setItem(
+      RIGHT_PANEL_TABS_KEY,
+      JSON.stringify({ toc: { open: true, pinned: true, openedAt: 5 }, activeTab: "toc" }),
+    );
+    const got = getRightPanelTabsState();
+    expect(got).not.toBeNull();
+    expect(got?.order).toBeUndefined();
+    expect(got?.toc).toEqual({ open: true, pinned: true, openedAt: 5 });
+  });
+
   it("fills defaults for a partial/old blob (lenient read)", () => {
     localStorage.setItem(RIGHT_PANEL_TABS_KEY, JSON.stringify({ toc: { open: true } }));
     const got = getRightPanelTabsState();
