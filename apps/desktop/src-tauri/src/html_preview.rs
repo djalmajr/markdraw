@@ -113,25 +113,71 @@ fn token_from_path(cleaned: &str) -> (String, String) {
     }
 }
 
-/// Serve one preview request. Two URL shapes reach this handler:
-/// macOS/Linux navigate the bare scheme (`asciimark-preview://<token>/<path>`,
-/// token = host), while Windows folds the scheme into a fixed host and moves
-/// the token into the path. Rather than sniffing host suffixes, the host is
-/// treated as the token ONLY when it is actually registered — anything else
-/// falls back to the path-first form. Registered on the Tauri builder; runs
-/// on Tauri's protocol thread (blocking file IO is fine — preview assets are
-/// small and local).
+/// Resolve which registered token a request belongs to, plus the file path
+/// under it. Shapes, in resolution order:
+///
+/// 1. macOS/Linux navigate the bare scheme — the token IS the host.
+/// 2. Windows folds the scheme into a fixed host and the token leads the
+///    path (`/r0/index.html`).
+/// 3. Windows + a page URL that is ROOT-ABSOLUTE (`/index.css`): the token
+///    never makes it into the request path, so it is recovered from the
+///    Referer (same-origin subresource requests always carry the full
+///    referring URL) and the WHOLE path is the file path.
+fn resolve_request(
+    is_registered: &dyn Fn(&str) -> bool,
+    host: &str,
+    cleaned: &str,
+    referer_candidates: &[String],
+) -> (String, String) {
+    if is_registered(host) {
+        return (host.to_string(), cleaned.to_string());
+    }
+    let (head, rest) = token_from_path(cleaned);
+    if is_registered(&head) {
+        return (head, rest);
+    }
+    for candidate in referer_candidates {
+        if is_registered(candidate) {
+            return (candidate.clone(), cleaned.to_string());
+        }
+    }
+    (head, rest)
+}
+
+/// Candidate tokens from a Referer URL: its host (macOS shape) and its first
+/// path segment (Windows shape). The caller validates against the registry.
+fn referer_token_candidates(headers: &tauri::http::HeaderMap) -> Vec<String> {
+    let Some(raw) = headers.get("referer").and_then(|v| v.to_str().ok()) else {
+        return Vec::new();
+    };
+    let Ok(uri) = raw.parse::<tauri::http::Uri>() else {
+        return Vec::new();
+    };
+    let decoded = percent_decode_str(uri.path()).decode_utf8_lossy();
+    let (head, _) = token_from_path(&clean_rel(&decoded));
+    let mut out: Vec<String> = Vec::new();
+    if let Some(h) = uri.host() {
+        out.push(h.to_string());
+    }
+    out.push(head);
+    out
+}
+
+/// Serve one preview request (see `resolve_request` for the URL shapes).
+/// Registered on the Tauri builder; runs on Tauri's protocol thread (blocking
+/// file IO is fine — preview assets are small and local).
 pub fn serve<R: Runtime>(app: &AppHandle<R>, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     let state = app.state::<HtmlPreviewState>();
     let uri = request.uri();
     // Path arrives percent-encoded; decode, then lexically strip `..`/`.`/root.
     let decoded = percent_decode_str(uri.path()).decode_utf8_lossy();
-    let host = uri.host().unwrap_or("");
+    let host = uri.host().unwrap_or("").to_string();
     let cleaned = clean_rel(&decoded);
-    let (token, mut rel) = if state.inner.lock().unwrap().by_token.contains_key(host) {
-        (host.to_string(), cleaned)
-    } else {
-        token_from_path(&cleaned)
+    let referer_candidates = referer_token_candidates(request.headers());
+    let (token, mut rel) = {
+        let inner = state.inner.lock().unwrap();
+        let is_registered = |t: &str| inner.by_token.contains_key(t);
+        resolve_request(&is_registered, &host, &cleaned, &referer_candidates)
     };
     if rel.is_empty() {
         rel = "index.html".to_string();
@@ -339,6 +385,37 @@ fn not_found() -> Response<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_request_handles_all_three_shapes() {
+        let is_reg = |t: &str| t == "r0" || t == "r1";
+        // macOS: token = host.
+        assert_eq!(
+            resolve_request(&is_reg, "r0", "index.html", &[]),
+            ("r0".to_string(), "index.html".to_string())
+        );
+        // Windows: token leads the path.
+        assert_eq!(
+            resolve_request(&is_reg, "asciimark-preview.localhost", "r0/assets/app.js", &[]),
+            ("r0".to_string(), "assets/app.js".to_string())
+        );
+        // Windows + ROOT-ABSOLUTE page URL (/index.css): no token in the
+        // request — recovered from the Referer; the whole path is the file.
+        assert_eq!(
+            resolve_request(
+                &is_reg,
+                "asciimark-preview.localhost",
+                "index.css",
+                &["asciimark-preview.localhost".to_string(), "r1".to_string()],
+            ),
+            ("r1".to_string(), "index.css".to_string())
+        );
+        // No referer match → falls through (and 404s at the registry lookup).
+        assert_eq!(
+            resolve_request(&is_reg, "localhost", "nope.css", &["zz".to_string()]),
+            ("nope.css".to_string(), String::new())
+        );
+    }
 
     #[test]
     fn token_from_path_splits_first_segment() {
