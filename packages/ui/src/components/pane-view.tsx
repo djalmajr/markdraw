@@ -73,9 +73,10 @@ export interface PaneViewProps {
    *  preview renders real SPAs (root-absolute paths, ES modules, importmaps).
    *  Undefined (web/extension) → the srcdoc fallback (relative paths only). */
   htmlPreviewHost?: {
-    /** Platform-correct iframe origin for a preview token (WebView2 serves
-     *  custom schemes as http://<scheme>.localhost — see HtmlPreviewFolderRoot). */
-    baseOrigin: (token: string) => string;
+    /** Platform-correct origin the entry document is served from (WebView2
+     *  serves custom schemes as http://<scheme>.localhost — see
+     *  HtmlPreviewFolderRoot). */
+    docOrigin: (token: string) => string;
     register: (rootId: string, fileRelPath: string) => Promise<{ token: string; entryRel: string } | null>;
     setOverlay: (token: string, relPath: string, content: string) => void | Promise<void>;
     clearOverlay: (token: string) => void | Promise<void>;
@@ -184,7 +185,7 @@ export function PaneView(props: PaneViewProps) {
     const rootId = pane().selectedRootId();
     if (!host || !f || !rootId) return undefined;
     return {
-      baseOrigin: host.baseOrigin,
+      docOrigin: host.docOrigin,
       register: () => host.register(rootId, f.path),
       setOverlay: host.setOverlay,
       clearOverlay: host.clearOverlay,

@@ -209,7 +209,7 @@ interface AppShellProps {
   /** Desktop-only: folder-rooted HTML preview host (SPA support). Passed
    *  straight through to each PaneView. */
   htmlPreviewHost?: {
-    baseOrigin: (token: string) => string;
+    docOrigin: (token: string) => string;
     register: (rootId: string, fileRelPath: string) => Promise<{ token: string; entryRel: string } | null>;
     setOverlay: (token: string, relPath: string, content: string) => void | Promise<void>;
     clearOverlay: (token: string) => void | Promise<void>;

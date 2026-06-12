@@ -127,21 +127,32 @@ fn token_from_path(cleaned: &str) -> (String, String) {
 /// under it. Shapes, in resolution order:
 ///
 /// 1. macOS/Linux navigate the bare scheme — the token IS the host.
-/// 2. Windows folds the scheme into a fixed host and the token leads the
+/// 2. The entry DOCUMENT is loaded at the origin ROOT with the token in the
+///    query (`/?am-token=r0&am-entry=index.html`), so SPAs whose router
+///    matches `location.pathname` see `/` — a token-leading path would never
+///    match their routes.
+/// 3. Windows folds the scheme into a fixed host and the token leads the
 ///    path (`/r0/index.html`).
-/// 3. Windows + a page URL that is ROOT-ABSOLUTE (`/index.css`): the token
+/// 4. Windows + a page URL that is ROOT-ABSOLUTE (`/index.css`): the token
 ///    never makes it into the request path, so it is recovered from the
 ///    Referer (same-origin subresource requests always carry the full
-///    referring URL) and the WHOLE path is the file path.
+///    referring URL — including the doc's `am-token` query) and the WHOLE
+///    path is the file path.
 fn resolve_request(
     is_registered: &dyn Fn(&str) -> bool,
     host: &str,
     cleaned: &str,
+    query_token: Option<&str>,
     referer_candidates: &[String],
     active_token: Option<&str>,
 ) -> (String, String) {
     if is_registered(host) {
         return (host.to_string(), cleaned.to_string());
+    }
+    if let Some(qt) = query_token {
+        if is_registered(qt) {
+            return (qt.to_string(), cleaned.to_string());
+        }
     }
     let (head, rest) = token_from_path(cleaned);
     if is_registered(&head) {
@@ -161,8 +172,9 @@ fn resolve_request(
     (head, rest)
 }
 
-/// Candidate tokens from a Referer URL: its host (macOS shape) and its first
-/// path segment (Windows shape). The caller validates against the registry.
+/// Candidate tokens from a Referer URL: its `am-token` query param (the
+/// root-served document shape), its host (macOS shape) and its first path
+/// segment (Windows path shape). The caller validates against the registry.
 fn referer_token_candidates(headers: &tauri::http::HeaderMap) -> Vec<String> {
     let Some(raw) = headers.get("referer").and_then(|v| v.to_str().ok()) else {
         return Vec::new();
@@ -173,11 +185,35 @@ fn referer_token_candidates(headers: &tauri::http::HeaderMap) -> Vec<String> {
     let decoded = percent_decode_str(uri.path()).decode_utf8_lossy();
     let (head, _) = token_from_path(&clean_rel(&decoded));
     let mut out: Vec<String> = Vec::new();
+    if let Some(t) = uri.query().and_then(|q| query_param(q, "am-token")) {
+        out.push(t);
+    }
     if let Some(h) = uri.host() {
         out.push(h.to_string());
     }
     out.push(head);
     out
+}
+
+/// Extract a query parameter's percent-decoded value from a raw query string.
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+        (k == key).then(|| percent_decode_str(v).decode_utf8_lossy().into_owned())
+    })
+}
+
+/// The file to serve once the token is known: the request path when it has
+/// one, else the `am-entry` query param (the root-served document shape),
+/// else the conventional `index.html`.
+fn effective_rel(rel: String, query: &str) -> String {
+    if !rel.is_empty() {
+        return rel;
+    }
+    query_param(query, "am-entry")
+        .map(|e| clean_rel(&e))
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| "index.html".to_string())
 }
 
 /// Serve one preview request (see `resolve_request` for the URL shapes).
@@ -190,25 +226,26 @@ pub fn serve<R: Runtime>(app: &AppHandle<R>, request: Request<Vec<u8>>) -> Respo
     let decoded = percent_decode_str(uri.path()).decode_utf8_lossy();
     let host = uri.host().unwrap_or("").to_string();
     let cleaned = clean_rel(&decoded);
+    let query = uri.query().unwrap_or("");
+    let query_token = query_param(query, "am-token");
     let referer_candidates = referer_token_candidates(request.headers());
-    let (token, mut rel) = {
+    let (token, rel) = {
         let inner = state.inner.lock().unwrap();
         let is_registered = |t: &str| inner.by_token.contains_key(t);
         resolve_request(
             &is_registered,
             &host,
             &cleaned,
+            query_token.as_deref(),
             &referer_candidates,
             inner.active_token.as_deref(),
         )
     };
-    if rel.is_empty() {
-        rel = "index.html".to_string();
-    }
+    let rel = effective_rel(rel, query);
 
     // A rewritten CSS-module import (see rewrite_css_module_imports) asks for
     // the `.css` as a JS module exporting a constructable stylesheet.
-    let as_css_module = uri.query().is_some_and(|q| q.contains(CSS_MODULE_MARKER));
+    let as_css_module = query.contains(CSS_MODULE_MARKER);
 
     let inner = state.inner.lock().unwrap();
     let Some(root) = inner.by_token.get(&token).cloned() else {
@@ -410,16 +447,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_request_handles_all_three_shapes() {
+    fn resolve_request_handles_all_url_shapes() {
         let is_reg = |t: &str| t == "r0" || t == "r1";
         // macOS: token = host.
         assert_eq!(
-            resolve_request(&is_reg, "r0", "index.html", &[], None),
+            resolve_request(&is_reg, "r0", "index.html", None, &[], None),
             ("r0".to_string(), "index.html".to_string())
+        );
+        // Root-served document: empty path, token in the query. The path stays
+        // `/` so SPA path routers match their root route.
+        assert_eq!(
+            resolve_request(&is_reg, "asciimark-preview.localhost", "", Some("r0"), &[], None),
+            ("r0".to_string(), String::new())
+        );
+        // An UNREGISTERED query token must not hijack resolution.
+        assert_eq!(
+            resolve_request(&is_reg, "r1", "a.js", Some("zz"), &[], None),
+            ("r1".to_string(), "a.js".to_string())
         );
         // Windows: token leads the path.
         assert_eq!(
-            resolve_request(&is_reg, "asciimark-preview.localhost", "r0/assets/app.js", &[], None),
+            resolve_request(
+                &is_reg,
+                "asciimark-preview.localhost",
+                "r0/assets/app.js",
+                None,
+                &[],
+                None,
+            ),
             ("r0".to_string(), "assets/app.js".to_string())
         );
         // Windows + ROOT-ABSOLUTE page URL (/index.css): no token in the
@@ -429,6 +484,7 @@ mod tests {
                 &is_reg,
                 "asciimark-preview.localhost",
                 "index.css",
+                None,
                 &["asciimark-preview.localhost".to_string(), "r1".to_string()],
                 None,
             ),
@@ -436,7 +492,7 @@ mod tests {
         );
         // No referer match → falls through (and 404s at the registry lookup).
         assert_eq!(
-            resolve_request(&is_reg, "localhost", "nope.css", &["zz".to_string()], None),
+            resolve_request(&is_reg, "localhost", "nope.css", None, &["zz".to_string()], None),
             ("nope.css".to_string(), String::new())
         );
         // Import CASCADE: a module loaded via referer recovery refers its own
@@ -447,11 +503,64 @@ mod tests {
                 &is_reg,
                 "asciimark-preview.localhost",
                 "pages/user-edit.js",
+                None,
                 &["asciimark-preview.localhost".to_string(), "index.js".to_string()],
                 Some("r1"),
             ),
             ("r1".to_string(), "pages/user-edit.js".to_string())
         );
+    }
+
+    #[test]
+    fn query_param_extracts_and_decodes() {
+        assert_eq!(
+            query_param("am-token=r0&am-entry=index.html&v=3", "am-token"),
+            Some("r0".to_string())
+        );
+        assert_eq!(
+            query_param("am-entry=sub%2Fpage.html", "am-entry"),
+            Some("sub/page.html".to_string())
+        );
+        // Mutation: matching by `contains` instead of exact key would let
+        // `am-token` answer for `token` (or vice versa).
+        assert_eq!(query_param("am-token=r0", "token"), None);
+        assert_eq!(query_param("v=1", "am-token"), None);
+    }
+
+    #[test]
+    fn effective_rel_prefers_path_then_entry_then_index() {
+        // A real path wins even when an am-entry is present.
+        assert_eq!(
+            effective_rel("assets/app.js".to_string(), "am-entry=index.html"),
+            "assets/app.js"
+        );
+        // Root-served document: `/` + am-entry → the registered entry file.
+        assert_eq!(
+            effective_rel(String::new(), "am-token=r0&am-entry=demo.html&v=0"),
+            "demo.html"
+        );
+        // am-entry is traversal-guarded like any other path.
+        assert_eq!(
+            effective_rel(String::new(), "am-entry=..%2F..%2Fetc%2Fpasswd"),
+            "etc/passwd"
+        );
+        assert_eq!(effective_rel(String::new(), "v=0"), "index.html");
+    }
+
+    #[test]
+    fn referer_candidates_lead_with_the_query_token() {
+        let mut headers = tauri::http::HeaderMap::new();
+        headers.insert(
+            "referer",
+            "http://asciimark-preview.localhost/?am-token=r7&am-entry=index.html&v=2"
+                .parse()
+                .unwrap(),
+        );
+        let candidates = referer_token_candidates(&headers);
+        // The explicit am-token is the most precise source — it must come
+        // before the host/path-head guesses.
+        assert_eq!(candidates.first().map(String::as_str), Some("r7"));
+        assert!(candidates.contains(&"asciimark-preview.localhost".to_string()));
     }
 
     #[test]

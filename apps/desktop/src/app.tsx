@@ -1221,11 +1221,13 @@ export function App() {
   // src-tauri/src/html_preview.rs for the isolation model.
   const htmlPreviewHost = {
     // WebView2 can't navigate bare custom schemes — on Windows Tauri serves
-    // them as http://<scheme>.localhost and the token moves into the path
-    // (the Rust handler accepts both shapes).
-    baseOrigin: (token: string) =>
+    // them as http://<scheme>.localhost, a FIXED host that can't carry the
+    // token (it rides the `am-token` query instead). On macOS/Linux the
+    // token IS the host. Either way the doc loads at path `/` so SPA path
+    // routers match their root route.
+    docOrigin: (token: string) =>
       navigator.platform.startsWith("Win")
-        ? `http://asciimark-preview.localhost/${token}`
+        ? "http://asciimark-preview.localhost"
         : `asciimark-preview://${token}`,
     async register(rootId: string, fileRelPath: string) {
       const rootPath = rootPaths().get(rootId);

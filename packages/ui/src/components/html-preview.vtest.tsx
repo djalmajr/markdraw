@@ -75,7 +75,7 @@ describe("HtmlPreview", () => {
   describe("folderRoot (SPA) mode", () => {
     function makeHost(over: Partial<HtmlPreviewFolderRoot> = {}): HtmlPreviewFolderRoot {
       return {
-        baseOrigin: (token: string) => `asciimark-preview://${token}`,
+        docOrigin: (token: string) => `asciimark-preview://${token}`,
         register: vi.fn(async () => ({ token: "r0", entryRel: "index.html" })),
         setOverlay: vi.fn(),
         clearOverlay: vi.fn(),
@@ -95,8 +95,11 @@ describe("HtmlPreview", () => {
       const sandbox = iframe.getAttribute("sandbox") ?? "";
       expect(sandbox).toContain("allow-scripts");
       expect(sandbox).toContain("allow-same-origin");
-      // src points at the registered origin; no srcdoc in this mode.
-      expect(iframe.getAttribute("src")).toBe("asciimark-preview://r0/index.html?v=0");
+      // src points at the registered origin's ROOT — path `/` so SPA path
+      // routers match; the entry + token travel in the query. No srcdoc.
+      expect(iframe.getAttribute("src")).toBe(
+        "asciimark-preview://r0/?am-token=r0&am-entry=index.html&v=0",
+      );
       expect(iframe.getAttribute("srcdoc")).toBeNull();
     });
 
@@ -114,12 +117,16 @@ describe("HtmlPreview", () => {
         <HtmlPreview content={content()} folderRoot={host} />
       ));
       await tick();
-      expect(frame(container).getAttribute("src")).toBe("asciimark-preview://r0/index.html?v=0");
+      expect(frame(container).getAttribute("src")).toBe(
+        "asciimark-preview://r0/?am-token=r0&am-entry=index.html&v=0",
+      );
 
       setContent("<p>v2</p>");
       await tick(450);
       expect(host.setOverlay).toHaveBeenLastCalledWith("r0", "index.html", "<p>v2</p>");
-      expect(frame(container).getAttribute("src")).toBe("asciimark-preview://r0/index.html?v=1");
+      expect(frame(container).getAttribute("src")).toBe(
+        "asciimark-preview://r0/?am-token=r0&am-entry=index.html&v=1",
+      );
     });
 
     it("clears the overlay on unmount so requests fall back to disk", async () => {
