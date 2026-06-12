@@ -1,5 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal, on, type JSX } from "solid-js";
-import { useDraggable, useDroppable } from "@dnd-kit/solid";
+import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { useDragOperation, useDraggable, useDroppable } from "@dnd-kit/solid";
 import IconListTree from "~icons/lucide/list-tree";
 import IconLink from "~icons/lucide/link";
 import IconPin from "~icons/lucide/pin";
@@ -192,13 +192,20 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
   // (+ / history / …) live outside the draggable refs and are never targets.
   const canDragTabs = (): boolean => props.tabs.length > 1;
 
-  // Live drag state published by the StripTabs (dnd-kit only exposes
-  // per-element isDragging/isDropTarget): the insertion-line preview is
-  // derived centrally so a cross-group hover can light up the BOUNDARY tab
-  // instead of the hovered one.
-  const [draggingTab, setDraggingTab] = createSignal<string | null>(null);
-  const [hoveredTab, setHoveredTab] = createSignal<string | null>(null);
-  const dropIndicator = createMemo(() => rpDropIndicator(props.tabs, draggingTab(), hoveredTab()));
+  // Insertion-line preview, derived centrally from the LIVE drag operation
+  // (the same source/target the drop handler reads on dragend, so the
+  // preview can't disagree with the drop) — per-element isDropTarget proved
+  // unreliable mid-drag. Centralized so a cross-group hover lights up the
+  // BOUNDARY tab instead of the hovered one. Outside a DragDropProvider the
+  // hook yields no operation and the preview stays off.
+  const dragOperation = useDragOperation();
+  const dropIndicator = createMemo(() =>
+    rpDropIndicator(
+      props.tabs,
+      fromRpTabDndId(dragOperation.source()?.id),
+      fromRpTabDndId(dragOperation.target()?.id),
+    ),
+  );
 
   function StripTab(tabProps: { tab: RightPanelTab }): JSX.Element {
     // The strip model emits fresh tab objects on every change, so <For>
@@ -219,20 +226,6 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
       },
     });
 
-    // Publish this tab's drag/hover state to the strip-level signals feeding
-    // the insertion-line preview (cleared when the gesture leaves this tab).
-    createEffect(
-      on(draggable.isDragging, (dragging) => {
-        if (dragging) setDraggingTab(encode(tab));
-        else setDraggingTab((cur) => (cur === encode(tab) ? null : cur));
-      }),
-    );
-    createEffect(
-      on(droppable.isDropTarget, (over) => {
-        if (over) setHoveredTab(encode(tab));
-        else setHoveredTab((cur) => (cur === encode(tab) ? null : cur));
-      }),
-    );
     const indicatorSide = (): "after" | "before" | null => {
       const ind = dropIndicator();
       return ind && ind.encoded === encode(tab) ? ind.side : null;

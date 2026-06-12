@@ -179,6 +179,11 @@ describe("rpDropIndicator — insertion-line preview semantics", () => {
     expect(rpDropIndicator(STRIP, "chat:ghost", "toc")).toBeNull();
     expect(rpDropIndicator(STRIP, "toc", "chat:ghost")).toBeNull();
   });
+
+  it("no drag operation → no insertion line", () => {
+    const { container } = render(() => <RightPanelTabs {...baseProps()} />);
+    expect(container.querySelector(".rp-tab-drop-before, .rp-tab-drop-after")).toBeNull();
+  });
 });
 
 describe("RightPanelTabs — context menu", () => {
