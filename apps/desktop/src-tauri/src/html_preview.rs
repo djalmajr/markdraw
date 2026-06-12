@@ -55,6 +55,13 @@ struct Inner {
     by_dir: HashMap<PathBuf, String>,
     /// token → (normalized rel path, live content) for the open file.
     overlay: HashMap<String, (String, String)>,
+    /// Most recently registered/refreshed preview — the LAST fallback for
+    /// Windows requests that carry no token anywhere. A module loaded via
+    /// referer recovery (`/index.js`) refers its own imports without a token
+    /// (`/pages/a.js` ← referer `/index.js`), so import CASCADES need an
+    /// origin-wide default. One preview is active at a time in practice;
+    /// the referer path still wins for the page's direct assets.
+    active_token: Option<String>,
 }
 
 /// Register `dir` for previewing and return its (stable, per-session) token.
@@ -70,13 +77,15 @@ pub fn html_preview_register(
         return Err("html_preview_register: not a directory".into());
     }
     let mut inner = state.inner.lock().unwrap();
-    if let Some(token) = inner.by_dir.get(&canon) {
-        return Ok(token.clone());
+    if let Some(token) = inner.by_dir.get(&canon).cloned() {
+        inner.active_token = Some(token.clone());
+        return Ok(token);
     }
     let token = format!("r{}", inner.next_id);
     inner.next_id += 1;
     inner.by_token.insert(token.clone(), canon.clone());
     inner.by_dir.insert(canon, token.clone());
+    inner.active_token = Some(token.clone());
     Ok(token)
 }
 
@@ -91,6 +100,7 @@ pub fn html_preview_set_overlay(
 ) {
     let mut inner = state.inner.lock().unwrap();
     if inner.by_token.contains_key(&token) {
+        inner.active_token = Some(token.clone());
         inner.overlay.insert(token, (clean_rel(&rel_path), content));
     }
 }
@@ -128,6 +138,7 @@ fn resolve_request(
     host: &str,
     cleaned: &str,
     referer_candidates: &[String],
+    active_token: Option<&str>,
 ) -> (String, String) {
     if is_registered(host) {
         return (host.to_string(), cleaned.to_string());
@@ -140,6 +151,12 @@ fn resolve_request(
         if is_registered(candidate) {
             return (candidate.clone(), cleaned.to_string());
         }
+    }
+    // Import CASCADES on Windows: a module recovered via referer
+    // (`/index.js`) refers ITS imports without a token either, so the last
+    // resort is the most recently active preview.
+    if let Some(active) = active_token {
+        return (active.to_string(), cleaned.to_string());
     }
     (head, rest)
 }
@@ -177,7 +194,13 @@ pub fn serve<R: Runtime>(app: &AppHandle<R>, request: Request<Vec<u8>>) -> Respo
     let (token, mut rel) = {
         let inner = state.inner.lock().unwrap();
         let is_registered = |t: &str| inner.by_token.contains_key(t);
-        resolve_request(&is_registered, &host, &cleaned, &referer_candidates)
+        resolve_request(
+            &is_registered,
+            &host,
+            &cleaned,
+            &referer_candidates,
+            inner.active_token.as_deref(),
+        )
     };
     if rel.is_empty() {
         rel = "index.html".to_string();
@@ -391,12 +414,12 @@ mod tests {
         let is_reg = |t: &str| t == "r0" || t == "r1";
         // macOS: token = host.
         assert_eq!(
-            resolve_request(&is_reg, "r0", "index.html", &[]),
+            resolve_request(&is_reg, "r0", "index.html", &[], None),
             ("r0".to_string(), "index.html".to_string())
         );
         // Windows: token leads the path.
         assert_eq!(
-            resolve_request(&is_reg, "asciimark-preview.localhost", "r0/assets/app.js", &[]),
+            resolve_request(&is_reg, "asciimark-preview.localhost", "r0/assets/app.js", &[], None),
             ("r0".to_string(), "assets/app.js".to_string())
         );
         // Windows + ROOT-ABSOLUTE page URL (/index.css): no token in the
@@ -407,13 +430,27 @@ mod tests {
                 "asciimark-preview.localhost",
                 "index.css",
                 &["asciimark-preview.localhost".to_string(), "r1".to_string()],
+                None,
             ),
             ("r1".to_string(), "index.css".to_string())
         );
         // No referer match → falls through (and 404s at the registry lookup).
         assert_eq!(
-            resolve_request(&is_reg, "localhost", "nope.css", &["zz".to_string()]),
+            resolve_request(&is_reg, "localhost", "nope.css", &["zz".to_string()], None),
             ("nope.css".to_string(), String::new())
+        );
+        // Import CASCADE: a module loaded via referer recovery refers its own
+        // imports tokenlessly (referer "/index.js") — the ACTIVE preview
+        // catches them.
+        assert_eq!(
+            resolve_request(
+                &is_reg,
+                "asciimark-preview.localhost",
+                "pages/user-edit.js",
+                &["asciimark-preview.localhost".to_string(), "index.js".to_string()],
+                Some("r1"),
+            ),
+            ("r1".to_string(), "pages/user-edit.js".to_string())
         );
     }
 
