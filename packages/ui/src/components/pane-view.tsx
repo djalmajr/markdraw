@@ -408,6 +408,7 @@ export function PaneView(props: PaneViewProps) {
             <Editor
               content={pane().savedContent()}
               darkMode={s.darkMode()}
+              fileName={pane().selectedFile()?.name}
               findTrigger={s.editorFindTrigger()}
               indentMode={s.indentMode()}
               indentSize={s.indentSize()}

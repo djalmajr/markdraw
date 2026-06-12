@@ -1,5 +1,5 @@
-import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { Annotation, Compartment, EditorState } from "@codemirror/state";
+import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
+import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -14,8 +14,22 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, redo, redoDepth, undo, undoDepth } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { languages as fenceLanguages } from "@codemirror/language-data";
-import { bracketMatching, defaultHighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { languages as knownLanguages } from "@codemirror/language-data";
+import {
+  LanguageDescription,
+  bracketMatching,
+  defaultHighlightStyle,
+  indentUnit,
+  syntaxHighlighting,
+} from "@codemirror/language";
+import { isSupportedFile } from "@asciimark/core/utils.ts";
+
+/** The markdown language config used for .md/.adoc buffers (and as the
+ *  fallback for unknown extensions): fence info strings resolve against the
+ *  community registry — ~150 languages by name/alias, parser lazy-loaded. */
+function markdownLanguage() {
+  return markdown({ codeLanguages: knownLanguages });
+}
 import { findTextMatches, SearchOverlay, type SearchOptions } from "./search-overlay.tsx";
 import {
   aiDiffCount,
@@ -50,6 +64,11 @@ interface SearchMatch {
 interface EditorProps {
   content: string;
   darkMode: boolean;
+  /** Name of the open file — picks the syntax highlighting language by
+   *  extension (md/adoc → markdown with fence languages; anything else is
+   *  resolved against the language-data registry, parser lazy-loaded).
+   *  Omitted/unknown → markdown, the historical default. */
+  fileName?: string;
   findTrigger: number;
   indentMode: IndentMode;
   indentSize: number;
@@ -171,7 +190,43 @@ export function Editor(props: EditorProps) {
   let suppressScrollCallback = false;
 
   const themeCompartment = new Compartment();
+  const languageCompartment = new Compartment();
   const lineNumbersCompartment = new Compartment();
+
+  // Highlighting language resolved from the file's extension. md/adoc keep
+  // the markdown config; other files resolve against the language-data
+  // registry (parser lazy-loaded — the generation guard drops a load that
+  // lands after the user already switched files); no match → plain text
+  // (markdown headings/emphasis would be false positives in a .txt/.log).
+  let languageGeneration = 0;
+  function syncLanguage(name: string | undefined): void {
+    const generation = ++languageGeneration;
+    const apply = (extension: Extension): void => {
+      if (generation !== languageGeneration || !view) return;
+      view.dispatch({ effects: languageCompartment.reconfigure(extension) });
+    };
+    if (!name || isSupportedFile(name.toLowerCase())) {
+      apply(markdownLanguage());
+      return;
+    }
+    const desc = LanguageDescription.matchFilename(knownLanguages, name);
+    if (!desc) {
+      apply([]);
+      return;
+    }
+    void desc.load().then(
+      (support) => apply(support),
+      () => apply([]),
+    );
+  }
+
+  createEffect(
+    on(
+      () => props.fileName,
+      (name) => syncLanguage(name),
+      { defer: true },
+    ),
+  );
   const invisiblesCompartment = new Compartment();
   const indentCompartment = new Compartment();
   const wrapCompartment = new Compartment();
@@ -357,10 +412,7 @@ export function Editor(props: EditorProps) {
         bracketMatching(),
         highlightActiveLine(),
         syntaxHighlighting(defaultHighlightStyle),
-        // codeLanguages: ~150 fence languages resolved by name/alias from the
-        // community registry — each parser lazy-loads on first use, so the
-        // editor bundle only pays for the metadata table.
-        markdown({ codeLanguages: fenceLanguages }),
+        languageCompartment.of(markdownLanguage()),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         invisiblesCompartment.of(props.showInvisibles ? visibleWhitespace : []),
         indentCompartment.of([
@@ -406,6 +458,9 @@ export function Editor(props: EditorProps) {
 
     view = new EditorView({ state, parent: containerRef });
     emitHistoryState(state);
+    // The compartment's initial value is markdown; a non-document file opened
+    // directly (the fileName effect is deferred) still needs its language.
+    syncLanguage(props.fileName);
 
     props.onReady?.({
       getSelection: () => {
