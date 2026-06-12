@@ -5016,3 +5016,25 @@ button.settings-models-group-name:hover {
   color: hsl(var(--muted-foreground));
   text-decoration: line-through;
 }
+
+/* ── Indeterminate progress (Kobalte Progress) ──────────────────────────── */
+/* With no fill-width var, the bare Kobalte fill renders FULL — the updater's
+   redirect hop (no content-length yet) showed a 100% bar that then DROPPED to
+   the real percentage once the download proper started: the user-visible
+   "bar going back and forth", most noticeable on slow connections where the
+   hop window lasts whole seconds. Indeterminate now sweeps one way, looping. */
+.progress-fill[data-indeterminate] {
+  width: 35%;
+  animation: progress-indeterminate-sweep 1.2s linear infinite;
+  transition: none;
+}
+
+@keyframes progress-indeterminate-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    /* Cross the whole track: the fill is 35% wide, so +100%/0.35 of itself. */
+    transform: translateX(286%);
+  }
+}
