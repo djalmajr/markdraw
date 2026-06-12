@@ -14,6 +14,7 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, redo, redoDepth, undo, undoDepth } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
+import { languages as fenceLanguages } from "@codemirror/language-data";
 import { bracketMatching, defaultHighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { findTextMatches, SearchOverlay, type SearchOptions } from "./search-overlay.tsx";
 import {
@@ -356,7 +357,10 @@ export function Editor(props: EditorProps) {
         bracketMatching(),
         highlightActiveLine(),
         syntaxHighlighting(defaultHighlightStyle),
-        markdown(),
+        // codeLanguages: ~150 fence languages resolved by name/alias from the
+        // community registry — each parser lazy-loads on first use, so the
+        // editor bundle only pays for the metadata table.
+        markdown({ codeLanguages: fenceLanguages }),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         invisiblesCompartment.of(props.showInvisibles ? visibleWhitespace : []),
         indentCompartment.of([
