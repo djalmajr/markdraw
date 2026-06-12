@@ -1253,6 +1253,25 @@ export function App() {
   // (so ⌘I / the AI write tool act on the ACTIVE pane's diagram even with split
   // panes). Registered/cleared by each <ExcalidrawFrame> via onFrameApi.
   const excalidrawFrames = new Map<string, ExcalidrawFrameApi>();
+  const [suppressedExcalidrawSaves, setSuppressedExcalidrawSaves] = createSignal<Set<string>>(new Set());
+
+  function absoluteWorkspacePath(rootId: string, filePath: string): string | null {
+    const root = rootPaths().get(rootId);
+    return root ? `${root}/${filePath}` : null;
+  }
+
+  function setExcalidrawSavesSuppressed(paths: readonly string[], suppressed: boolean): void {
+    if (paths.length === 0) return;
+    setSuppressedExcalidrawSaves((previous) => {
+      const next = new Set(previous);
+      for (const path of paths) {
+        if (suppressed) next.add(path);
+        else next.delete(path);
+      }
+      return next;
+    });
+  }
+
   function registerExcalidrawFrame(filePath: string, api: ExcalidrawFrameApi | null): void {
     if (api) excalidrawFrames.set(filePath, api);
     else excalidrawFrames.delete(filePath);
@@ -1265,7 +1284,7 @@ export function App() {
     const file = pane.selectedFile();
     const rootId = pane.selectedRootId();
     if (!file || fileKind(file.name) !== "excalidraw" || !rootId) return null;
-    return `${rootPaths().get(rootId) ?? ""}/${file.path}`;
+    return absoluteWorkspacePath(rootId, file.path);
   }
 
   /** The host handle for the Excalidraw shown in the ACTIVE pane, or null when
@@ -2553,7 +2572,6 @@ export function App() {
           confirmLabel: "Move to Trash",
         });
         if (confirmed) {
-          await folder.handleDelete(entry, rootId);
           // Close ALL tabs for deleted files (including duplicates)
           const tabsToClose = tabStore().tabs().filter((t) =>
             t.rootId === rootId && (
@@ -2561,8 +2579,21 @@ export function App() {
               (entry.kind === "directory" && t.filePath.startsWith(entry.path + "/"))
             ),
           );
-          for (const tab of tabsToClose) {
-            tabStore().closeTab(tab.id);
+          const excalidrawPathsToSuppress = Array.from(new Set(
+            tabsToClose
+              .filter((tab) => fileKind(tab.filePath) === "excalidraw")
+              .map((tab) => absoluteWorkspacePath(tab.rootId, tab.filePath))
+              .filter((path): path is string => !!path),
+          ));
+
+          setExcalidrawSavesSuppressed(excalidrawPathsToSuppress, true);
+          try {
+            await folder.handleDelete(entry, rootId);
+            for (const tab of tabsToClose) {
+              tabStore().closeTab(tab.id);
+            }
+          } finally {
+            setExcalidrawSavesSuppressed(excalidrawPathsToSuppress, false);
           }
         }
       }}
@@ -2570,9 +2601,13 @@ export function App() {
       resolveFileSrc={resolveFileSrc}
       htmlPreviewHost={htmlPreviewHost}
       renderExcalidraw={(file, rootId) => {
-        const root = rootPaths().get(rootId);
-        return root ? (
-          <ExcalidrawFrame filePath={`${root}/${file.path}`} onFrameApi={registerExcalidrawFrame} />
+        const filePath = absoluteWorkspacePath(rootId, file.path);
+        return filePath ? (
+          <ExcalidrawFrame
+            filePath={filePath}
+            suppressSave={suppressedExcalidrawSaves().has(filePath)}
+            onFrameApi={registerExcalidrawFrame}
+          />
         ) : null;
       }}
       onToggleShowHiddenEntries={() => folder.refreshAllRoots()}

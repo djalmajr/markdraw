@@ -46,6 +46,9 @@ export interface ExcalidrawFrameApi {
 interface ExcalidrawFrameProps {
   /** Absolute path of the `.excalidraw` file on disk. */
   filePath: string;
+  /** Temporarily disables host-side persistence while the backing file is
+   *  being deleted/moved away by the shell. */
+  suppressSave?: boolean;
   /** Register/unregister the host handle for THIS file (read scene + write
    *  diagram). Called with the API while mounted and `null` on cleanup; re-keyed
    *  if `filePath` changes on a reused instance. */
@@ -145,8 +148,15 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
   let writeTimer: ReturnType<typeof setTimeout> | undefined;
 
   const writeNow = (path: string, s: Scene) => {
+    if (props.suppressSave) return;
     void invoke("write_file", { path, content: sceneToFile(s) });
   };
+
+  createEffect(() => {
+    if (!props.suppressSave) return;
+    clearTimeout(writeTimer);
+    writeTimer = undefined;
+  });
 
   // (Re)load when the target file changes; flush the previous file's latest edit
   // before switching (and on unmount) via the effect's onCleanup.
@@ -177,6 +187,7 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
   // Called by the guest (RPC) on every coalesced change. Keep the latest scene
   // and debounce the disk write; onCleanup flushes whatever is pending.
   const save = async (s: Scene) => {
+    if (props.suppressSave) return { ok: true };
     latest = s;
     const path = props.filePath;
     clearTimeout(writeTimer);
