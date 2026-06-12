@@ -1662,10 +1662,9 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   position: absolute;
   top: 4px;
   bottom: 4px;
-  width: 3px;
-  border-radius: 2px;
+  width: 2px;
+  border-radius: 1px;
   background: hsl(var(--primary));
-  box-shadow: 0 0 6px hsl(var(--primary) / 0.7);
   z-index: 5;
   pointer-events: none;
 }
