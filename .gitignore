@@ -82,7 +82,7 @@ tools/*/Cargo.lock
 
 # .mcp.json IS versioned, but ONLY with non-private servers (the tauri dev
 # bridge). NEVER add private endpoints here (ai-memory, tokens) — register those
-# per-operator in ~/.claude.json, which is never committed.
+# per-operator in global agent configs, which are never committed.
 
 # Local tooling caches / scratch (browser-MCP output, MCP tool-schema cache).
 .playwright-mcp/

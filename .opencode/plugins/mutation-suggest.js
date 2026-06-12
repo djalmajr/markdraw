@@ -4,8 +4,6 @@
 // Decision rationale & benchmark: Linear DJA-36.
 // Pre-requisite cleanup: Linear DJA-43.
 //
-// This plugin is intentionally separate from wiki-guardrails.js (which is
-// managed by wiki-init and gets overwritten by `update-hooks --write`).
 // Keeping mutation-suggest as its own file means it survives template refreshes.
 
 import { existsSync } from "node:fs";
