@@ -6,11 +6,14 @@
 // The single difference from `editor-prefs.getStoredBoolean` is that
 // invalid stored values fall back to the configured default instead
 // of always to `false`. The editor-prefs convention works for prefs
-// whose default is `false`; here the default is `true` (most
-// workspaces benefit from gitignore filtering) so we need the
-// stricter parse to keep "corrupt input → default" honest.
+// whose default is `false`; here all four tree-visibility prefs
+// default to `true`, so we need the stricter parse to keep
+// "corrupt input → default" honest.
 
 const RESPECT_GITIGNORE_KEY = "asciimark-file-tree-respect-gitignore";
+const SHOW_ALL_DIRS_KEY = "asciimark-file-tree-show-all-dirs";
+const SHOW_ALL_FILES_KEY = "asciimark-file-tree-show-all-files";
+const SHOW_HIDDEN_KEY = "asciimark-file-tree-show-hidden";
 
 function getStoredStrictBoolean(key: string, defaultValue: boolean): boolean {
   const stored = localStorage.getItem(key);
@@ -27,4 +30,37 @@ function setStoredRespectGitignore(enabled: boolean): void {
   localStorage.setItem(RESPECT_GITIGNORE_KEY, String(enabled));
 }
 
-export { getStoredRespectGitignore, setStoredRespectGitignore };
+function getStoredShowAllDirs(): boolean {
+  return getStoredStrictBoolean(SHOW_ALL_DIRS_KEY, true);
+}
+
+function setStoredShowAllDirs(enabled: boolean): void {
+  localStorage.setItem(SHOW_ALL_DIRS_KEY, String(enabled));
+}
+
+function getStoredShowAllFiles(): boolean {
+  return getStoredStrictBoolean(SHOW_ALL_FILES_KEY, true);
+}
+
+function setStoredShowAllFiles(enabled: boolean): void {
+  localStorage.setItem(SHOW_ALL_FILES_KEY, String(enabled));
+}
+
+function getStoredShowHiddenEntries(): boolean {
+  return getStoredStrictBoolean(SHOW_HIDDEN_KEY, true);
+}
+
+function setStoredShowHiddenEntries(enabled: boolean): void {
+  localStorage.setItem(SHOW_HIDDEN_KEY, String(enabled));
+}
+
+export {
+  getStoredRespectGitignore,
+  getStoredShowAllDirs,
+  getStoredShowAllFiles,
+  getStoredShowHiddenEntries,
+  setStoredRespectGitignore,
+  setStoredShowAllDirs,
+  setStoredShowAllFiles,
+  setStoredShowHiddenEntries,
+};

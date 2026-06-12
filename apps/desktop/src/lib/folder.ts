@@ -59,8 +59,6 @@ export function createFolder(deps: FolderDeps) {
 
       state.setSelectedRootId(path);
       state.setSidebarVisible(true);
-      state.setShowAllDirs(false);
-      state.setShowAllFiles(false);
       state.pushRecentFolder(path);
       return true;
     } catch (e) {

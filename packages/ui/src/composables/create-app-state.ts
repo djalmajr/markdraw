@@ -84,7 +84,13 @@ import {
 } from "@asciimark/core/editor-prefs.ts";
 import {
   getStoredRespectGitignore,
+  getStoredShowAllDirs,
+  getStoredShowAllFiles,
+  getStoredShowHiddenEntries,
   setStoredRespectGitignore,
+  setStoredShowAllDirs,
+  setStoredShowAllFiles,
+  setStoredShowHiddenEntries,
 } from "@asciimark/core/file-tree-prefs.ts";
 import {
   type CloseBehavior,
@@ -295,9 +301,15 @@ export function createAppState(config: AppStateConfig) {
   const DEFAULT_TOC_WIDTH = 340;
   const [tocWidth, setTocWidth] = createSignal(DEFAULT_TOC_WIDTH);
   const [sidebarVisible, setSidebarVisible] = createSignal(true);
-  const [showAllDirs, setShowAllDirs] = createSignal(false);
-  const [showAllFiles, setShowAllFiles] = createSignal(false);
-  const [showHiddenEntries, setShowHiddenEntries] = createSignal(false);
+  const [showAllDirs, setShowAllDirs] = createSignal(getStoredShowAllDirs());
+  const [showAllFiles, setShowAllFiles] = createSignal(getStoredShowAllFiles());
+  const [showHiddenEntries, setShowHiddenEntries] = createSignal(getStoredShowHiddenEntries());
+  // Persist via effects rather than in a handler: these setters are
+  // toggled from several call sites (app-shell menu, command palette,
+  // __DEV__ helpers), and an effect catches every one of them.
+  createEffect(() => setStoredShowAllDirs(showAllDirs()));
+  createEffect(() => setStoredShowAllFiles(showAllFiles()));
+  createEffect(() => setStoredShowHiddenEntries(showHiddenEntries()));
   const [respectGitignore, setRespectGitignore] = createSignal(getStoredRespectGitignore());
   const [closeBehavior, setCloseBehavior] = createSignal<CloseBehavior>(getStoredCloseBehavior());
 
