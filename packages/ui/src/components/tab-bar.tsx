@@ -150,7 +150,11 @@ function DraggableTab(props: {
           <ContextMenuItem onSelect={props.onCloseAll}>{(useLocale(), m.tab_close_all())}</ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
-      <TooltipContent>{props.tab.rootId}/{props.tab.filePath}</TooltipContent>
+      <TooltipContent>
+        {props.tab.filePath.startsWith("scratch://")
+          ? `${props.tab.fileName} (${(useLocale(), m.tab_unsaved_scratch())})`
+          : `${props.tab.rootId}/${props.tab.filePath}`}
+      </TooltipContent>
     </Tooltip>
   );
 }

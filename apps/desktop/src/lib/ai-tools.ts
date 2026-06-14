@@ -66,6 +66,31 @@ export interface ExcalidrawMermaidOutcome extends ExcalidrawWriteResult {
   file?: ExcalidrawTargetFileOutcome;
 }
 
+/** Where a spec-generated diagram lands relative to existing file content. */
+export type ExcalidrawGenerateMode = "replace-all" | "append";
+
+/** Input of the generateExcalidrawDiagram dep: a declarative DiagramSpec (the
+ *  @asciimark/diagram format, validated host-side), a placement mode, and the
+ *  resolved target file the diagram is written into. */
+export interface ExcalidrawGenerateRequest {
+  /** A DiagramSpec object — shape-validated and laid out by @asciimark/diagram. */
+  spec: unknown;
+  mode: ExcalidrawGenerateMode;
+  target: ExcalidrawWriteTarget;
+}
+
+/** Result of the generateExcalidrawDiagram dep. Never thrown — problems come
+ *  back as `error` (host/IO) or `issues` (the validation gate). */
+export interface ExcalidrawGenerateOutcome {
+  ok: boolean;
+  error?: string;
+  /** Validation-gate or spec-parse issues that blocked the write. */
+  issues?: string[];
+  /** Elements written to the file (on success). */
+  elements?: number;
+  file?: ExcalidrawTargetFileOutcome;
+}
+
 export interface InProcessToolDeps {
   /** Filesystem bridge enabling app__read_file / app__create_file /
    *  app__create_folder. Omitted -> those tools are not offered. */
@@ -102,9 +127,15 @@ export interface InProcessToolDeps {
    *  host opens that file (creating it first when missing) and renders there.
    *  Returns a failure result (not a throw) when the canvas isn't available. */
   applyExcalidrawMermaid: (input: ExcalidrawMermaidRequest) => Promise<ExcalidrawMermaidOutcome>;
+  /** Generate a diagram from a declarative DiagramSpec (richer than Mermaid:
+   *  lanes, groups, auto-routed + bound arrows, a validation gate) and write it
+   *  into the target `.excalidraw` file, creating/opening it. Omitted → the tool
+   *  isn't offered (hosts without a real filesystem). */
+  generateExcalidrawDiagram?: (input: ExcalidrawGenerateRequest) => Promise<ExcalidrawGenerateOutcome>;
 }
 
 const APPLY_MODES: readonly ExcalidrawApplyMode[] = ["replace-selection", "append", "replace-all"];
+const GENERATE_MODES: readonly ExcalidrawGenerateMode[] = ["replace-all", "append"];
 
 /** Mirror of the Rust `FileMatch` (find_in_files). The struct has no serde
  *  rename_all, so fields arrive snake_case — same shape lib/fs.ts documents. */
@@ -268,11 +299,13 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
       "Mermaid diagram types as editable shapes: flowchart, sequenceDiagram, classDiagram, " +
       "and erDiagram — prefer them. Other types (pie, gantt, state, mindmap, …) come in as " +
       "a single flat image, so avoid them. `mode` controls placement: " +
-      "'replace-selection' swaps the user's current diagram selection for the new one (use " +
-      "when they asked to change/fix the selected part; falls back to append if nothing is " +
-      "selected); 'append' adds the diagram below existing content (the default — use to add " +
-      "to the canvas); 'replace-all' clears the canvas first (only when explicitly asked to " +
-      "start over)." +
+      "'replace-selection' swaps the user's current diagram selection for the new one AND " +
+      "re-wires the arrows that connected to the replaced part onto the new diagram, so it " +
+      "stays stitched into the surrounding flow (use this when they ask to expand, change, or " +
+      "fix the SELECTED block — generate just the replacement for that block, not the whole " +
+      "diagram; falls back to append if nothing is selected); 'append' adds the diagram below " +
+      "existing content (the default — use to add to the canvas); 'replace-all' clears the " +
+      "canvas first (only when explicitly asked to start over)." +
       MULTI_ROOT_PATHS_NOTE,
     inputSchema: {
       type: "object",
@@ -327,6 +360,135 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
   };
 
   const tools = [readActiveDoc, searchWorkspace, listFiles, proposeEdit, writeExcalidraw];
+
+  // ── Spec-based diagram generation (gated on the dep) ─────────────────────
+  // Richer than the Mermaid path: a declarative DiagramSpec with lanes, groups,
+  // and edges that the engine auto-sizes, auto-routes, and BINDS (arrows follow
+  // nodes), behind a geometric validation gate. Always writes into a file.
+  const generateDiagram = deps.generateExcalidrawDiagram;
+  if (generateDiagram) {
+    const generateExcalidraw: AITool = {
+      name: "app__excalidraw_generate",
+      source: APP,
+      description:
+        "Generate a diagram into a workspace .excalidraw file from a declarative `spec` " +
+        "(AsciiMark's own format — more powerful than Mermaid for architecture diagrams). " +
+        "The engine assigns positions, auto-sizes boxes from their text, routes arrows " +
+        "through the gutters, and BINDS arrows to their nodes (so they follow when moved); " +
+        "a validation gate rejects overlaps and arrows crossing unrelated boxes. The spec: " +
+        "`nodes` are cards each in a `lane` (lanes are columns laid out left→right, in the " +
+        "order they first appear or as listed in `lanes`); within a lane, nodes stack top→" +
+        "down in array order. `edges` connect node ids ({from,to}); `kind` " +
+        "(request/auth/control/data) colors them. `groups` draw a dashed frame around member " +
+        "node ids. Keep edges between adjacent lanes or vertically adjacent nodes so the " +
+        "gate stays clean. `path` (workspace-relative, ending '.excalidraw') is created and " +
+        "opened automatically. `mode`: 'replace-all' (default) writes the whole file; " +
+        "'append' adds the new diagram below existing content." +
+        MULTI_ROOT_PATHS_NOTE,
+      inputSchema: {
+        type: "object",
+        properties: {
+          spec: {
+            type: "object",
+            description: "The DiagramSpec.",
+            properties: {
+              title: {
+                type: "object",
+                properties: { text: { type: "string" }, subtitle: { type: "string" } },
+                required: ["text"],
+              },
+              lanes: {
+                type: "array",
+                description: "Optional explicit column order/widths. Omit to derive lanes from nodes.",
+                items: {
+                  type: "object",
+                  properties: { id: { type: "string" }, title: { type: "string" }, width: { type: "number" } },
+                  required: ["id"],
+                },
+              },
+              groups: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    title: { type: "string" },
+                    nodes: { type: "array", items: { type: "string" } },
+                    color: { type: "string" },
+                  },
+                  required: ["id"],
+                },
+              },
+              nodes: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    lane: { type: "string" },
+                    title: { type: "string" },
+                    body: { type: "string" },
+                    shape: { type: "string", enum: ["box", "rect"] },
+                    group: { type: "string" },
+                  },
+                  required: ["id", "lane", "title"],
+                },
+              },
+              edges: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    from: { type: "string" },
+                    to: { type: "string" },
+                    kind: { type: "string", enum: ["request", "auth", "control", "data", "default"] },
+                    label: { type: "string" },
+                    color: { type: "string" },
+                    dash: { type: "boolean" },
+                  },
+                  required: ["from", "to"],
+                },
+              },
+            },
+            required: ["nodes", "edges"],
+          },
+          path: {
+            type: "string",
+            description: "Workspace-relative path of the .excalidraw file (created and opened automatically).",
+          },
+          mode: {
+            type: "string",
+            enum: ["replace-all", "append"],
+            description: "Where to place the diagram. Defaults to 'replace-all'.",
+          },
+        },
+        required: ["spec", "path"],
+        additionalProperties: false,
+      },
+      execute: async (args) => {
+        const a = isRecord(args) ? args : {};
+        if (!isRecord(a.spec)) return { ok: false, error: "`spec` (a DiagramSpec object) is required." };
+        const path = typeof a.path === "string" ? a.path.trim() : "";
+        if (!path) return { ok: false, error: "`path` is required." };
+        if (!path.toLowerCase().endsWith(".excalidraw")) {
+          return { ok: false, error: `\`path\` must point at a .excalidraw file (got '${path}').` };
+        }
+        const mode: ExcalidrawGenerateMode = GENERATE_MODES.includes(a.mode as ExcalidrawGenerateMode)
+          ? (a.mode as ExcalidrawGenerateMode)
+          : "replace-all";
+        const resolved = resolveWorkspacePath(deps.getWorkspaceRoots(), path);
+        if ("error" in resolved) return { ok: false, error: resolved.error };
+        const target: ExcalidrawWriteTarget = {
+          absPath: `${resolved.root.path}/${resolved.rel}`,
+          rel: resolved.rel,
+          root: resolved.root.path,
+        };
+        const result = await generateDiagram({ spec: a.spec, mode, target });
+        return { ...result, path };
+      },
+    };
+    tools.push(generateExcalidraw);
+  }
 
   // ── Live plan tool (gated on the updatePlan dep) ─────────────────────────
   // Runs WITHOUT approval (source "app" defaults to the auto tier): it only

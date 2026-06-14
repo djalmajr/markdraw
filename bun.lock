@@ -11,10 +11,11 @@
     },
     "apps/desktop": {
       "name": "@asciimark/desktop",
-      "version": "0.18.0",
+      "version": "0.18.1",
       "dependencies": {
         "@asciimark/ai": "workspace:*",
         "@asciimark/core": "workspace:*",
+        "@asciimark/diagram": "workspace:*",
         "@asciimark/i18n": "workspace:*",
         "@asciimark/ui": "workspace:*",
         "@tauri-apps/api": "^2",
@@ -138,6 +139,17 @@
         "typescript": "^5.9.3",
       },
     },
+    "packages/diagram": {
+      "name": "@asciimark/diagram",
+      "version": "1.0.0",
+      "dependencies": {
+        "valibot": "^1.1.0",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.9.3",
+      },
+    },
     "packages/i18n": {
       "name": "@asciimark/i18n",
       "version": "0.1.0",
@@ -224,6 +236,8 @@
     "@asciimark/core": ["@asciimark/core@workspace:packages/core"],
 
     "@asciimark/desktop": ["@asciimark/desktop@workspace:apps/desktop"],
+
+    "@asciimark/diagram": ["@asciimark/diagram@workspace:packages/diagram"],
 
     "@asciimark/extension": ["@asciimark/extension@workspace:apps/extension"],
 

@@ -9,10 +9,21 @@
 use tauri::{AppHandle, Manager};
 
 /// Keychain service name; the account is the provider id (e.g. "anthropic").
-const SERVICE: &str = "com.asciimark.ai";
+/// Uses the app's own reverse-DNS identifier — a namespace we actually control
+/// (`dev.djalmajr.asciimark`) — instead of `com.asciimark` (we don't own
+/// asciimark.com).
+const SERVICE: &str = "dev.djalmajr.asciimark";
+
+/// Pre-rename service name. Read once for a lazy migration so users who stored
+/// keys under the old service don't have to re-enter them (see ai_get_api_key).
+const LEGACY_SERVICE: &str = "com.asciimark.ai";
 
 fn entry(provider_id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(SERVICE, provider_id).map_err(|e| e.to_string())
+}
+
+fn legacy_entry(provider_id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(LEGACY_SERVICE, provider_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -26,19 +37,33 @@ pub async fn ai_set_api_key(provider_id: String, key: String) -> Result<(), Stri
 pub async fn ai_get_api_key(provider_id: String) -> Result<Option<String>, String> {
     match entry(&provider_id)?.get_password() {
         Ok(password) => Ok(Some(password)),
-        Err(keyring::Error::NoEntry) => Ok(None),
+        // Not under the current service — try the pre-rename one and migrate the
+        // key forward, so the old `com.asciimark.ai` item is read at most once.
+        Err(keyring::Error::NoEntry) => match legacy_entry(&provider_id)?.get_password() {
+            Ok(password) => {
+                // Best-effort migration: copy into the new service, drop the old.
+                let _ = entry(&provider_id)?.set_password(&password);
+                let _ = legacy_entry(&provider_id)?.delete_credential();
+                Ok(Some(password))
+            }
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        },
         Err(e) => Err(e.to_string()),
     }
 }
 
 #[tauri::command]
 pub async fn ai_delete_api_key(provider_id: String) -> Result<(), String> {
-    match entry(&provider_id)?.delete_credential() {
-        Ok(()) => Ok(()),
-        // Deleting a key that isn't there is a no-op, not an error.
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
+    // Deleting a key that isn't there is a no-op, not an error. Clear both the
+    // current and legacy services so a migrated-but-not-yet-read key can't linger.
+    let del = |e: keyring::Entry| match e.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(err) => Err(err.to_string()),
+    };
+    del(entry(&provider_id)?)?;
+    del(legacy_entry(&provider_id)?)?;
+    Ok(())
 }
 
 /// `<app_config_dir>/ai.json` — the provider catalog (never the keys).

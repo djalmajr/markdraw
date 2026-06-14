@@ -8,7 +8,7 @@
 import type { Platform } from "./keyboard-shortcuts.ts";
 import { RecentCommandIdsSchema, safeJsonParse } from "./schemas.ts";
 
-export type CommandGroup = "File" | "View" | "Theme" | "Workspace" | "Help" | "Language";
+export type CommandGroup = "File" | "View" | "AI" | "Theme" | "Workspace" | "Help" | "Language";
 
 export interface Command {
   /** Stable identifier — used by tests and to dedup the catalog. */
@@ -30,10 +30,11 @@ export interface Command {
 const GROUP_RANK: Record<CommandGroup, number> = {
   File: 0,
   View: 1,
-  Theme: 2,
-  Workspace: 3,
-  Language: 4,
-  Help: 5,
+  AI: 2,
+  Theme: 3,
+  Workspace: 4,
+  Language: 5,
+  Help: 6,
 };
 
 /** Maximum number of recently-used command ids retained in storage. */

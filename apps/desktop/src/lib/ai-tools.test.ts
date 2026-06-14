@@ -4,6 +4,7 @@ import {
   buildInProcessTools,
   resolveWorkspacePath,
   rootNamesFor,
+  type ExcalidrawGenerateRequest,
   type ExcalidrawMermaidRequest,
   type InProcessToolDeps,
   type PlanToolItem,
@@ -1146,5 +1147,91 @@ describe("app__list_files / app__search_workspace across roots", () => {
       ],
       truncated: true,
     });
+  });
+});
+
+/** Deps stub that records spec-generation calls and returns a canned ok result,
+ *  with a single workspace root so paths resolve literally. */
+function depsWithGenerateSpy() {
+  const calls: ExcalidrawGenerateRequest[] = [];
+  const deps: InProcessToolDeps = {
+    getActiveDoc: () => "",
+    getActiveDocPath: () => null,
+    getWorkspaceRoots: () => ["/ws"],
+    proposeEdit: async () => "noop",
+    applyExcalidrawMermaid: async (input) => ({ ok: true, mode: input.mode, added: 0, removed: 0 }),
+    generateExcalidrawDiagram: async (input) => {
+      calls.push(input);
+      return { ok: true, elements: 3, file: { created: true, opened: true, path: input.target.absPath } };
+    },
+  };
+  return { deps, calls };
+}
+
+const genTool = (deps: InProcessToolDeps) =>
+  buildInProcessTools(deps).find((t) => t.name === "app__excalidraw_generate");
+
+const sampleSpec = {
+  nodes: [
+    { id: "a", lane: "l", title: "A" },
+    { id: "b", lane: "r", title: "B" },
+  ],
+  edges: [{ from: "a", to: "b" }],
+};
+
+describe("app__excalidraw_generate tool", () => {
+  it("is offered only when the generate dep is provided", () => {
+    const { deps } = depsWithGenerateSpy();
+    expect(genTool(deps)).toBeDefined();
+    const without: InProcessToolDeps = {
+      getActiveDoc: () => "",
+      getActiveDocPath: () => null,
+      getWorkspaceRoots: () => [],
+      proposeEdit: async () => "noop",
+      applyExcalidrawMermaid: async (i) => ({ ok: true, mode: i.mode, added: 0, removed: 0 }),
+    };
+    expect(genTool(without)).toBeUndefined();
+  });
+
+  it("requires a spec object without touching the dep", async () => {
+    const { deps, calls } = depsWithGenerateSpy();
+    const res = (await genTool(deps)!.execute({ path: "d/x.excalidraw" })) as { ok: boolean };
+    expect(res.ok).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects a path that is not a .excalidraw file", async () => {
+    const { deps, calls } = depsWithGenerateSpy();
+    const res = (await genTool(deps)!.execute({ spec: sampleSpec, path: "notes.md" })) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain(".excalidraw");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("resolves the target, defaults mode to replace-all, and forwards the spec", async () => {
+    const { deps, calls } = depsWithGenerateSpy();
+    const res = (await genTool(deps)!.execute({ spec: sampleSpec, path: "diagrams/arch.excalidraw" })) as {
+      ok: boolean;
+      path?: string;
+    };
+    expect(res.ok).toBe(true);
+    expect(res.path).toBe("diagrams/arch.excalidraw");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].mode).toBe("replace-all");
+    expect(calls[0].target).toEqual({
+      absPath: "/ws/diagrams/arch.excalidraw",
+      rel: "diagrams/arch.excalidraw",
+      root: "/ws",
+    });
+    expect(calls[0].spec).toEqual(sampleSpec);
+  });
+
+  it("honors an explicit append mode", async () => {
+    const { deps, calls } = depsWithGenerateSpy();
+    await genTool(deps)!.execute({ spec: sampleSpec, path: "x.excalidraw", mode: "append" });
+    expect(calls[0].mode).toBe("append");
   });
 });

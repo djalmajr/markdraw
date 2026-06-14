@@ -4,7 +4,7 @@ import ConvertWorker from "@asciimark/core/convert-worker.ts?worker";
 import type { IndexedFile } from "@asciimark/core/file-index.ts";
 import type { Command } from "@asciimark/core/command-palette.ts";
 import { getRecentFiles, type RecentFile } from "@asciimark/core/recent-files.ts";
-import { makeTabId } from "@asciimark/core/tabs.ts";
+import { makeTabId, type TabState } from "@asciimark/core/tabs.ts";
 import { getVersion } from "@tauri-apps/api/app";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "./lib/chaos-invoke.ts";
@@ -53,10 +53,17 @@ import {
 } from "./lib/ai-mcp.ts";
 import {
   buildInProcessTools,
+  type ExcalidrawGenerateOutcome,
+  type ExcalidrawGenerateRequest,
   type ExcalidrawMermaidOutcome,
   type ExcalidrawMermaidRequest,
   type ExcalidrawTargetFileOutcome,
 } from "./lib/ai-tools.ts";
+// Spec-based diagram generation (host-side, DOM-free): build + validate + merge
+// into the open project's .excalidraw files.
+import { composeBelow } from "@asciimark/diagram/compose.ts";
+import { generate } from "@asciimark/diagram/generate.ts";
+import { sceneToFile } from "@asciimark/diagram/scene.ts";
 import { loadCustomInstructions, loadSlashCommands } from "./lib/ai-commands.ts";
 import { createGenerationGuard } from "./lib/generation-guard.ts";
 import type { CustomInstructions, SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
@@ -79,6 +86,7 @@ import {
   ExcalidrawFrame,
   type ExcalidrawFrameApi,
   type ExcalidrawWriteInput,
+  type Scene as ExcalidrawSceneData,
 } from "./components/excalidraw-frame.tsx";
 import { fileKind, isSupportedFile } from "@asciimark/core/utils.ts";
 import { dedupeTokenLabel, excalidrawSceneToOutline, excalidrawSelectionToContext } from "@asciimark/ui/composables/ai-context.ts";
@@ -90,7 +98,8 @@ import {
   buildWorkspaceSymbols,
   type WorkspaceSymbol,
 } from "@asciimark/core/workspace-symbols.ts";
-import { confirm } from "@asciimark/ui/components/confirm-dialog.tsx";
+import { confirm, confirmThree } from "@asciimark/ui/components/confirm-dialog.tsx";
+import { SCRATCH_ROOT_ID, isScratchPath, makeScratchEntry, type ScratchKind } from "./lib/scratch.ts";
 import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
 import { setupTray } from "./lib/tray.ts";
@@ -530,6 +539,7 @@ export function App() {
       // clears the card. UI-state only — the tool runs without approval.
       updatePlan: (items) => (items === null ? state.clearAiPlan() : state.setAiPlanItems(items)),
       applyExcalidrawMermaid,
+      generateExcalidrawDiagram,
     });
     let mcp: AITool[] = [];
     try {
@@ -1034,6 +1044,20 @@ export function App() {
         return;
       }
       if (action === "exit") {
+        // Guard unsaved in-memory scratch docs: quitting would drop them.
+        if (hasUnsavedScratch()) {
+          const goAhead = await confirm({
+            title: "Rascunhos não salvos",
+            description: "Há rascunhos não salvos que serão perdidos ao sair. Sair mesmo assim?",
+            confirmLabel: "Sair",
+            cancelLabel: "Cancelar",
+            variant: "destructive",
+          });
+          if (!goAhead) {
+            event.preventDefault();
+            return;
+          }
+        }
         // User picked "Quit app". Tauri's default close-window
         // flow on macOS only destroys the WINDOW — the process
         // keeps running with no UI. Call exit explicitly so the
@@ -1254,6 +1278,17 @@ export function App() {
   // panes). Registered/cleared by each <ExcalidrawFrame> via onFrameApi.
   const excalidrawFrames = new Map<string, ExcalidrawFrameApi>();
   const [suppressedExcalidrawSaves, setSuppressedExcalidrawSaves] = createSignal<Set<string>>(new Set());
+  // Per-file reload nonces: bumping one forces its open <ExcalidrawFrame> to
+  // re-read from disk (after the host rewrites the backing file).
+  const [excalidrawReloadTokens, setExcalidrawReloadTokens] = createSignal<Map<string, number>>(new Map());
+
+  function bumpExcalidrawReload(absPath: string): void {
+    setExcalidrawReloadTokens((previous) => {
+      const next = new Map(previous);
+      next.set(absPath, (next.get(absPath) ?? 0) + 1);
+      return next;
+    });
+  }
 
   function absoluteWorkspacePath(rootId: string, filePath: string): string | null {
     const root = rootPaths().get(rootId);
@@ -1415,6 +1450,92 @@ export function App() {
     // exactly today's payload.
     if (!created && !opened) return result;
     return { ...result, file: { created, opened, path: target.absPath } };
+  }
+
+  /** Build a diagram from a declarative spec (the @asciimark/diagram format) and
+   *  write it into a workspace `.excalidraw` file. Generation is DOM-free and
+   *  runs here on the host; the file on disk is the source of truth, so we never
+   *  touch the guest's converter. The validation gate blocks broken diagrams
+   *  (overlaps, arrows through boxes) before anything reaches disk. The file is
+   *  created if missing, then opened (fresh frame loads from disk) or, when it
+   *  is already open, reloaded in place — with saves suppressed across the
+   *  rewrite so the reload can't flush stale edits over the new content. */
+  async function generateExcalidrawDiagram(
+    input: ExcalidrawGenerateRequest,
+  ): Promise<ExcalidrawGenerateOutcome> {
+    const { spec, mode, target } = input;
+    const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+    // Build + gate. Spec-shape errors come back as `issues`; geometric/semantic
+    // errors come back as the validation report's errors.
+    const built = generate(spec);
+    if (!built.ok) return { ok: false, error: "Invalid diagram spec.", issues: built.issues };
+    if (!built.report.ok) {
+      return {
+        ok: false,
+        error: "Diagram failed validation — fix the layout and retry.",
+        issues: built.report.errors.map((e) => `[${e.code}] ${e.message}`),
+      };
+    }
+
+    const existing = await readFileByPath(target.root, target.rel);
+    const exists = existing !== null;
+
+    // Compose the final element list. `append` stacks the new diagram below the
+    // file's current on-disk content; otherwise the new scene replaces it.
+    let elements: unknown[] = built.elements;
+    if (mode === "append" && existing) {
+      try {
+        const prior = (JSON.parse(existing) as { elements?: unknown[] }).elements ?? [];
+        elements = composeBelow(prior as never, built.elements);
+      } catch {
+        // Unparseable existing file → fall back to replacing it.
+      }
+    }
+    const content = sceneToFile({ elements, appState: built.scene.appState });
+
+    // Suppress saves on the (possibly open) target across the write + reload so
+    // a pending guest edit can't clobber the freshly generated content.
+    setExcalidrawSavesSuppressed([target.absPath], true);
+    let created = false;
+    let opened = false;
+    try {
+      if (!exists) {
+        await createFile(target.root, target.rel);
+        created = true;
+      }
+      await writeFile(target.absPath, content);
+    } catch (e) {
+      setExcalidrawSavesSuppressed([target.absPath], false);
+      return { ok: false, error: `Could not write ${target.rel}: ${msg(e)}` };
+    }
+
+    // Make the result visible: open the file if it isn't the active diagram,
+    // then force a disk reload so an already-mounted frame picks up the rewrite.
+    if (activeExcalidrawAbsPath() !== target.absPath) {
+      let entry = state.findEntryByPath(target.rel, target.root);
+      if (!entry) {
+        await folder.refreshRoot(target.root);
+        entry = state.findEntryByPath(target.rel, target.root);
+      }
+      if (!entry || entry.kind !== "file") {
+        setExcalidrawSavesSuppressed([target.absPath], false);
+        return {
+          ok: false,
+          error: `Wrote ${target.rel}, but it is not visible in the workspace tree.`,
+          file: { created, opened, path: target.absPath },
+        };
+      }
+      await handleLoadFileWithTab(entry, target.root);
+      opened = true;
+    }
+    bumpExcalidrawReload(target.absPath);
+
+    // Let the canvas settle, then re-enable persistence.
+    await waitForExcalidrawFrame(target.absPath);
+    setExcalidrawSavesSuppressed([target.absPath], false);
+
+    return { ok: true, elements: elements.length, file: { created, opened, path: target.absPath } };
   }
 
   async function handleOpenRecentFile(recentFile: RecentFile) {
@@ -2045,6 +2166,65 @@ export function App() {
         },
       },
       {
+        id: "file.save",
+        group: "File",
+        title: (useLocale(), m.command_save()),
+        shortcut: { mac: ["⌘", "S"], other: ["Ctrl", "S"] },
+        run: () => saveActiveDocument(),
+      },
+      {
+        id: "file.newScratchMarkdown",
+        group: "File",
+        title: (useLocale(), m.command_new_scratch_markdown()),
+        run: () => {
+          handleNewScratch("markdown");
+        },
+      },
+      {
+        id: "file.newScratchAsciidoc",
+        group: "File",
+        title: (useLocale(), m.command_new_scratch_asciidoc()),
+        run: () => {
+          handleNewScratch("asciidoc");
+        },
+      },
+      {
+        id: "file.newScratchExcalidraw",
+        group: "File",
+        title: (useLocale(), m.command_new_scratch_excalidraw()),
+        run: () => {
+          handleNewScratch("excalidraw");
+        },
+      },
+      {
+        id: "tab.close",
+        group: "File",
+        title: (useLocale(), m.command_close_tab()),
+        shortcut: { mac: ["⌘", "W"], other: ["Ctrl", "W"] },
+        run: () => {
+          const activeTab = tabStore().activeTabId();
+          if (activeTab) void handleCloseTab(activeTab);
+        },
+      },
+      {
+        id: "ai.openChat",
+        group: "AI",
+        title: (useLocale(), m.command_focus_ai_chat()),
+        run: () => state.focusAiComposer(),
+      },
+      {
+        id: "ai.inlineAction",
+        group: "AI",
+        title: (useLocale(), m.command_add_selection_to_chat()),
+        run: () => {
+          void addExcalidrawSelectionToChat().then((attached) => {
+            if (attached || addSelectionToChat() || addPreviewSelectionToChat()) {
+              state.focusAiComposer();
+            }
+          });
+        },
+      },
+      {
         id: "help.shortcuts",
         group: "Help",
         title: m.command_show_keyboard_shortcuts(),
@@ -2114,6 +2294,97 @@ export function App() {
     ];
   });
 
+  // ── Ephemeral scratch documents ──────────────────────────────────────────
+  // A scratch is an IN-MEMORY buffer — no file on disk, no sidebar folder. It's a
+  // tab on the SCRATCH_ROOT_ID sentinel (never in rootPaths), so the loader,
+  // autosave, and watcher all naturally no-op for it. Markdown/AsciiDoc content
+  // lives in the tab's editor buffer (persisted across tab switches by the tab
+  // store); an Excalidraw scene lives here in `scratchScenes`, fed by the frame's
+  // ephemeral mode. Disk is touched only on an explicit save-as (close/quit).
+  const scratchScenes = new Map<string, ExcalidrawSceneData>();
+
+  /** Does a scratch tab hold real content worth offering to save? */
+  function scratchTabHasContent(tab: TabState): boolean {
+    if (fileKind(tab.fileName) === "excalidraw") {
+      return (scratchScenes.get(tab.filePath)?.elements?.length ?? 0) > 0;
+    }
+    const content = tab.id === tabStore().activeTabId() ? state.editorContent() : tab.editorContent;
+    return content.trim() !== "";
+  }
+
+  function handleNewScratch(kind: ScratchKind): void {
+    const entry = makeScratchEntry(kind);
+    // Mirror handleNewTab: snapshot the active tab, open the new one, then drive
+    // the pane state directly (the sentinel root has no loader to do it for us).
+    tabStore().snapshotActiveTab();
+    tabStore().openTab(entry, SCRATCH_ROOT_ID);
+    state.setSelectedFile(entry);
+    state.setSelectedRootId(SCRATCH_ROOT_ID);
+    state.setHtml("");
+    state.setFrontmatter(null);
+    state.setEditorContent("");
+    state.setSavedContent("");
+    if (kind === "excalidraw") {
+      scratchScenes.set(entry.path, { appState: { gridSize: null, viewBackgroundColor: "#ffffff" }, elements: [], files: {} });
+    } else {
+      state.setEditorMode("edit");
+    }
+  }
+
+  /** Persist a scratch's content to a user-chosen path. Returns true when saved,
+   *  false when the user cancels the dialog (caller then keeps the tab). On
+   *  success the saved file is opened so editing continues on the real file. */
+  async function saveScratchAs(content: string, defaultName: string): Promise<boolean> {
+    const dest = await invoke<string | null>("save_file_dialog", { defaultDir: null, defaultName });
+    if (!dest) return false;
+    try {
+      await writeFile(dest, content);
+      // Open the real file so editing continues there (becomes the active tab).
+      await openFileByAbsolutePath(dest);
+      return true;
+    } catch (e) {
+      console.error("save scratch failed:", e);
+      return false;
+    }
+  }
+
+  /** Serialize a scratch tab's current content for save-as. */
+  function scratchContent(tab: TabState): string {
+    if (fileKind(tab.fileName) === "excalidraw") {
+      const scene = scratchScenes.get(tab.filePath);
+      return scene
+        ? sceneToFile({ elements: scene.elements ?? [], appState: scene.appState, files: scene.files })
+        : EMPTY_EXCALIDRAW_SCENE;
+    }
+    return tab.id === tabStore().activeTabId() ? state.editorContent() : tab.editorContent;
+  }
+
+  /** Save the active document. Scratch docs (no path) trigger a save-as (pick a
+   *  location); on success the real file opens and the scratch tab is dropped.
+   *  Normal files go through the usual save path (autosave also covers them).
+   *  Shared by ⌘S and the command palette's Save command. */
+  function saveActiveDocument(): void {
+    const tab = tabStore().getActiveTab();
+    if (tab && (tab.rootId === SCRATCH_ROOT_ID || isScratchPath(tab.filePath))) {
+      void (async () => {
+        const saved = await saveScratchAs(scratchContent(tab), tab.fileName);
+        if (saved) {
+          scratchScenes.delete(tab.filePath);
+          tabStore().closeTab(tab.id); // raw close — content is already saved, no prompt
+        }
+      })();
+      return;
+    }
+    void folder.handleEditorSave();
+  }
+
+  /** Any in-memory scratch with real content? Used to guard app-quit. */
+  function hasUnsavedScratch(): boolean {
+    return tabStore()
+      .tabs()
+      .some((t) => t.rootId === SCRATCH_ROOT_ID && scratchTabHasContent(t));
+  }
+
   /** "+" button: create an empty tab (shows empty state). */
   function handleNewTab() {
     // Snapshot current tab, then clear state for the empty tab
@@ -2144,6 +2415,20 @@ export function App() {
     clearTimeout(autoSaveTimer);
 
     tabStore().activateTab(tabId);
+
+    // Scratch tab: it has no entry in any workspace tree, so reconstruct the
+    // sentinel selectedFile directly. activateTab already restored the buffer
+    // (md/adoc content from the tab; an Excalidraw scene re-seeds from
+    // scratchScenes when its frame remounts). No disk load, no watcher.
+    if (tab.rootId === SCRATCH_ROOT_ID) {
+      state.setSelectedFile({ name: tab.fileName, kind: "file", path: tab.filePath });
+      state.setSelectedRootId(SCRATCH_ROOT_ID);
+      void watcher.stop();
+      queueMicrotask(() => {
+        isTabSwitching = false;
+      });
+      return;
+    }
 
     // Set the selected file/root from the tab
     const entry = state.findEntryByPath(tab.filePath, tab.rootId);
@@ -2183,18 +2468,40 @@ export function App() {
     const tab = tabStore().getTab(tabId);
     if (!tab) return;
 
-    // For the active tab, check live dirty state; for others, check cached
-    const isDirty = tabId === tabStore().activeTabId()
-      ? state.isDirty()
-      : tab.editorContent !== tab.savedContent;
+    const isScratch = tab.rootId === SCRATCH_ROOT_ID || isScratchPath(tab.filePath);
 
-    if (isDirty) {
-      const discard = await confirm({
-        title: "Close Tab",
-        description: `"${tab.fileName}" has unsaved changes. Discard them?`,
-        confirmLabel: "Discard",
-      });
-      if (!discard) return;
+    if (isScratch) {
+      // In-memory scratch: offer to save (save-as) before dropping it.
+      if (scratchTabHasContent(tab)) {
+        const choice = await confirmThree({
+          title: "Salvar rascunho?",
+          description: `"${tab.fileName}" é um rascunho não salvo. Salvar antes de fechar?`,
+          confirmLabel: "Salvar",
+          denyLabel: "Descartar",
+          cancelLabel: "Cancelar",
+        });
+        if (choice === "cancel") return; // keep the tab open
+        if (choice === "confirm") {
+          const saved = await saveScratchAs(scratchContent(tab), tab.fileName);
+          if (!saved) return; // user cancelled the file dialog → keep open
+        }
+        // "deny" (discard) falls through to close
+      }
+      scratchScenes.delete(tab.filePath);
+    } else {
+      // For the active tab, check live dirty state; for others, check cached
+      const isDirty = tabId === tabStore().activeTabId()
+        ? state.isDirty()
+        : tab.editorContent !== tab.savedContent;
+
+      if (isDirty) {
+        const discard = await confirm({
+          title: "Close Tab",
+          description: `"${tab.fileName}" has unsaved changes. Discard them?`,
+          confirmLabel: "Discard",
+        });
+        if (!discard) return;
+      }
     }
 
     tabStore().closeTab(tabId);
@@ -2413,6 +2720,10 @@ export function App() {
           ev.preventDefault();
           setSettingsOpen(true);
         },
+        "file.save": (ev) => {
+          ev.preventDefault();
+          saveActiveDocument();
+        },
       };
 
       // Single configurable dispatch: first catalog shortcut whose effective
@@ -2502,13 +2813,17 @@ export function App() {
       onRemoveMcpServer={removeMcpServer}
       onToggleMcpServer={toggleMcpServer}
       showRecentHistory={true}
-      showEditorTabs={rootPaths().size > 0}
-      showNavButtons={rootPaths().size > 0}
-      showToolbar={rootPaths().size > 0}
+      showEditorTabs={rootPaths().size > 0 || tabStore().tabs().length > 0}
+      showNavButtons={rootPaths().size > 0 || tabStore().tabs().length > 0}
+      showToolbar={rootPaths().size > 0 || tabStore().tabs().length > 0}
       showSidebar={state.sidebarVisible() && rootPaths().size > 0}
       showWindowControls={navigator.platform.startsWith("Win")}
       showCloseBehaviorToggle={true}
-      toolbarFilePath={state.selectedFile()?.path ?? null}
+      toolbarFilePath={
+        isScratchPath(state.selectedFile()?.path)
+          ? (state.selectedFile()?.name ?? null)
+          : (state.selectedFile()?.path ?? null)
+      }
       toolbarRootName={state.rootName()}
       windowFrameToolbar={true}
       onWindowDragStart={handleWindowDragStart}
@@ -2601,11 +2916,26 @@ export function App() {
       resolveFileSrc={resolveFileSrc}
       htmlPreviewHost={htmlPreviewHost}
       renderExcalidraw={(file, rootId) => {
+        // Scratch (in-memory): no disk file. The frame runs in ephemeral mode —
+        // seeded from and reporting back to the host-held scene. `file.path` (the
+        // scratch:// sentinel) is the scene's key.
+        if (rootId === SCRATCH_ROOT_ID || isScratchPath(file.path)) {
+          return (
+            <ExcalidrawFrame
+              filePath={file.path}
+              ephemeral
+              initialScene={scratchScenes.get(file.path)}
+              onScene={(scene) => scratchScenes.set(file.path, scene)}
+              onFrameApi={registerExcalidrawFrame}
+            />
+          );
+        }
         const filePath = absoluteWorkspacePath(rootId, file.path);
         return filePath ? (
           <ExcalidrawFrame
             filePath={filePath}
             suppressSave={suppressedExcalidrawSaves().has(filePath)}
+            reloadToken={excalidrawReloadTokens().get(filePath) ?? 0}
             onFrameApi={registerExcalidrawFrame}
           />
         ) : null;

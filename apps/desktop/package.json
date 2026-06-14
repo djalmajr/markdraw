@@ -4,7 +4,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "dev": "bash scripts/dev.sh",
+    "macos:dev-signing": "bash scripts/macos-dev-signing-setup.sh",
     "dev:frontend": "bun run prepare:excalidraw && vite",
     "build": "tauri build",
     "build:frontend": "bun run prepare:excalidraw && vite build",
@@ -17,6 +18,7 @@
   "dependencies": {
     "@asciimark/ai": "workspace:*",
     "@asciimark/core": "workspace:*",
+    "@asciimark/diagram": "workspace:*",
     "@asciimark/i18n": "workspace:*",
     "@asciimark/ui": "workspace:*",
     "@tauri-apps/api": "^2",

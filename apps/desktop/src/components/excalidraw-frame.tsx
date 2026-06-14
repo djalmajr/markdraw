@@ -1,12 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, untrack } from "solid-js";
 // Registers the <z-frame> custom element (from the published @zomme/frame core).
 import "@zomme/frame";
 import { SHORTCUTS, detectPlatform } from "@asciimark/core/keyboard-shortcuts.ts";
 import { effectiveKeys, matchBinding } from "@asciimark/core/keybindings.ts";
+// Canonical `.excalidraw` serializer — shared with the headless generator so the
+// on-disk envelope has a single source of truth (see packages/diagram).
+import { sceneToFile } from "@asciimark/diagram/scene.ts";
 import type { ExcalidrawScene } from "@asciimark/ui/composables/ai-context.ts";
 
-interface Scene {
+export interface Scene {
   appState?: Record<string, unknown>;
   elements?: unknown[];
   /** Binary blobs backing image elements (Excalidraw's top-level `files` map).
@@ -49,6 +52,18 @@ interface ExcalidrawFrameProps {
   /** Temporarily disables host-side persistence while the backing file is
    *  being deleted/moved away by the shell. */
   suppressSave?: boolean;
+  /** Bump to force a reload of the file from disk without changing `filePath` —
+   *  used when the host rewrites the backing file (e.g. AI spec generation) and
+   *  needs the open canvas to pick up the new content. Pair with `suppressSave`
+   *  around the rewrite so the reload doesn't flush stale edits over it. */
+  reloadToken?: number;
+  /** Ephemeral (scratch) mode: never read or write the backing file. The canvas
+   *  starts from `initialScene` (held in host memory across tab switches) and
+   *  every change is reported via `onScene` instead of persisting to disk. Disk
+   *  is touched only when the host later saves the scene elsewhere. */
+  ephemeral?: boolean;
+  initialScene?: Scene;
+  onScene?: (scene: Scene) => void;
   /** Register/unregister the host handle for THIS file (read scene + write
    *  diagram). Called with the API while mounted and `null` on cleanup; re-keyed
    *  if `filePath` changes on a reused instance. */
@@ -118,17 +133,6 @@ function Frame(props: Record<string, unknown> & { name: string; src: string }): 
   return el;
 }
 
-function sceneToFile(scene: Scene): string {
-  return JSON.stringify({
-    type: "excalidraw",
-    version: 2,
-    source: "asciimark",
-    appState: scene.appState ?? {},
-    elements: scene.elements ?? [],
-    files: scene.files ?? {},
-  });
-}
-
 /**
  * Embedded Excalidraw editor for a `.excalidraw` file, shown in the pane in
  * place of the markdown/asciidoc preview (caminho B). Desktop-only: the guest
@@ -162,6 +166,18 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
   // before switching (and on unmount) via the effect's onCleanup.
   createEffect(() => {
     const path = props.filePath;
+    // Track the reload nonce so a host-side rewrite re-runs this effect and
+    // re-reads the file even when `filePath` is unchanged.
+    void props.reloadToken;
+    // Ephemeral (scratch) mode: seed from the host-held scene and never touch
+    // disk. `untrack` so a later host scene update (on every edit) doesn't
+    // re-run this effect and reset the canvas — we only re-seed when `filePath`
+    // (a tracked dep) changes, i.e. on a real switch between scratch canvases.
+    if (props.ephemeral) {
+      setScene(untrack(() => props.initialScene) ?? { appState: {}, elements: [], files: {} });
+      latest = undefined;
+      return;
+    }
     setScene(undefined);
     latest = undefined;
     invoke<string>("read_file", { path })
@@ -188,6 +204,12 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
   // and debounce the disk write; onCleanup flushes whatever is pending.
   const save = async (s: Scene) => {
     if (props.suppressSave) return { ok: true };
+    // Ephemeral scratch: hand the scene to the host (kept in memory) instead of
+    // writing it to disk. Materialized only on an explicit save-as.
+    if (props.ephemeral) {
+      props.onScene?.(s);
+      return { ok: true };
+    }
     latest = s;
     const path = props.filePath;
     clearTimeout(writeTimer);
