@@ -2998,10 +2998,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   border: 1px solid hsl(var(--border));
   border-radius: 5px;
   overflow: hidden;
-  max-height: 320px;
-  overflow-y: auto;
-  /* Reserve the scrollbar gutter so toggling a row never shifts the layout. */
-  scrollbar-gutter: stable;
+  /* No inner scroll: the list grows with the modal (which caps at 90vh), and
+     the settings content area provides the single scroll once that cap hits. */
 }
 .settings-models-group {
   display: flex;

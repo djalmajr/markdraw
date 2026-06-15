@@ -223,7 +223,7 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
 
   return (
     <AlertDialog open={props.open} onOpenChange={(o) => !o && props.onClose()}>
-      <AlertDialogContent class="flex h-[80vh] max-h-[640px] w-full max-w-3xl flex-col gap-0 overflow-hidden p-0">
+      <AlertDialogContent class="flex max-h-[90vh] w-full max-w-3xl flex-col gap-0 overflow-hidden p-0">
         <button
           type="button"
           aria-label={(useLocale(), label("ai_inline_reject"))}
