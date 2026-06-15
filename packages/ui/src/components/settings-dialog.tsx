@@ -115,6 +115,9 @@ export interface SettingsAiProvider {
   kind?: string;
   /** CLI subscription providers probe the local binary instead of an API key. */
   connectMode?: SettingsAiConnectMode;
+  /** Connect-catalog grouping: providers sharing this render as one card (e.g.
+   *  the Anthropic API + Claude subscription, both "Claude"). */
+  connectGroup?: string;
 }
 
 export interface SettingsDialogProps {
@@ -437,20 +440,16 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
   const catalogProviders = createMemo<{ name: string; ids: string[] }[]>(() => {
     const byBase = new Map<string, { name: string; ids: string[] }>();
     for (const p of props.aiProviders) {
-      const base = p.name.replace(/\s*\([^)]*\)\s*$/, "").trim() || p.name;
+      // Explicit connectGroup wins (e.g. "Claude" = Anthropic API + Claude
+      // subscription); otherwise fall back to the name minus a "(chat)"-style
+      // parenthetical so e.g. OpenCode Go's two entries still merge.
+      const base = p.connectGroup ?? (p.name.replace(/\s*\([^)]*\)\s*$/, "").trim() || p.name);
       const existing = byBase.get(base);
       if (existing) existing.ids.push(p.id);
       else byBase.set(base, { name: base, ids: [p.id] });
     }
     return [...byBase.values()].sort((a, b) => a.name.localeCompare(b.name));
   });
-
-  const providerConnectMode = (ids: string[]): SettingsAiConnectMode => {
-    const modes = ids.map(
-      (id) => props.aiProviders.find((p) => p.id === id)?.connectMode ?? "api-key",
-    );
-    return modes.includes("cli-subscription") ? "cli-subscription" : "api-key";
-  };
 
   function enterProvider(
     group: { name: string; ids: string[] },
@@ -460,14 +459,13 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     setError(null);
     setView({ kind: "provider", from, ids: group.ids, name: group.name });
   }
-  async function continueConnect(): Promise<void> {
-    const v = view();
-    if (v.kind !== "provider") return;
+  async function connectIds(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
     setError(null);
     setLoading(true);
     try {
-      // One backend may have several entries (different `kind`); connect each.
-      for (const id of v.ids) await props.onConnectProvider?.({ providerId: id, apiKey: apiKey() });
+      // A mode may span several entries (e.g. OpenCode Go's two kinds); connect each.
+      for (const id of ids) await props.onConnectProvider?.({ providerId: id, apiKey: apiKey() });
       setApiKey("");
       setView({ kind: "manage" });
     } catch (e) {
@@ -476,6 +474,16 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
       setLoading(false);
     }
   }
+  /** Split the current connect group's ids by mode, so a group with both (the
+   *  "Claude" card = Anthropic API + Claude subscription) shows both options. */
+  const groupApiIds = (): string[] =>
+    (providerViewData()?.ids ?? []).filter(
+      (id) => (props.aiProviders.find((p) => p.id === id)?.connectMode ?? "api-key") !== "cli-subscription",
+    );
+  const groupCliIds = (): string[] =>
+    (providerViewData()?.ids ?? []).filter(
+      (id) => props.aiProviders.find((p) => p.id === id)?.connectMode === "cli-subscription",
+    );
   /** Destructive action on the provider sub-page: confirm, then disconnect
    *  every backing id and return to Manage models. Errors render in the same
    *  inline slot the connect flow uses. */
@@ -580,40 +588,52 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               {(useLocale(), label("settings_ai_connect"))} {providerViewData()?.name}
             </h3>
           </div>
-          <Switch>
-            <Match
-              when={
-                providerViewData() &&
-                providerConnectMode(providerViewData()!.ids) === "cli-subscription"
+          {/* API key — for any api-key provider in this group (e.g. Anthropic). */}
+          <Show when={groupApiIds().length > 0}>
+            <p class="settings-prose">{(useLocale(), label("settings_ai_connect_desc"))}</p>
+            <label class="settings-label">{(useLocale(), label("settings_ai_api_key"))}</label>
+            <input
+              type="password"
+              autocomplete="off"
+              class="settings-input ai-composer-input"
+              placeholder="sk-…"
+              value={apiKey()}
+              onInput={(e) => setApiKey(e.currentTarget.value)}
+            />
+            <div class="settings-row settings-row-end">
+              <Button
+                size="sm"
+                onClick={() => void connectIds(groupApiIds())}
+                disabled={loading() || !apiKey().trim()}
+              >
+                {(useLocale(), label("settings_ai_connect_continue"))}
+              </Button>
+            </div>
+          </Show>
+          {/* Subscription — for any cli-subscription provider, below the API
+              option so both can coexist (the "Claude" card offers each). */}
+          <Show when={groupCliIds().length > 0}>
+            <div
+              style={
+                groupApiIds().length > 0
+                  ? { "border-top": "1px solid hsl(var(--border))", "margin-top": "16px", "padding-top": "12px" }
+                  : {}
               }
             >
               <p class="settings-prose">{(useLocale(), label("settings_ai_connect_cli_desc"))}</p>
-            </Match>
-            <Match when={true}>
-              <p class="settings-prose">{(useLocale(), label("settings_ai_connect_desc"))}</p>
-              <label class="settings-label">{(useLocale(), label("settings_ai_api_key"))}</label>
-              <input
-                type="password"
-                autocomplete="off"
-                class="settings-input ai-composer-input"
-                placeholder="sk-…"
-                value={apiKey()}
-                onInput={(e) => setApiKey(e.currentTarget.value)}
-              />
-            </Match>
-          </Switch>
+              <div class="settings-row settings-row-end">
+                <Button size="sm" onClick={() => void connectIds(groupCliIds())} disabled={loading()}>
+                  {(useLocale(), label("settings_ai_use_subscription"))}
+                </Button>
+              </div>
+            </div>
+          </Show>
           <Show when={error()}>
             <div class="ai-error">{error()}</div>
           </Show>
-          <div class="settings-row settings-row-end">
-            <Button size="sm" onClick={() => void continueConnect()} disabled={loading()}>
-              {(useLocale(), label("settings_ai_connect_continue"))}
-            </Button>
-          </div>
           <Show
             when={
               props.onRemoveProvider &&
-              providerConnectMode(providerViewData()?.ids ?? []) !== "cli-subscription" &&
               providerViewData()?.ids.some((id) => connectedProviderIds().has(id))
             }
           >

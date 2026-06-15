@@ -58,6 +58,11 @@ const ProviderConfigSchema = v.object({
   /** Embedding models this provider exposes (for the "Full" workspace index).
    *  Absent/empty ⇒ the provider can't embed (see `providerCanEmbed`). */
   embeddingModels: v.optional(v.record(v.string(), EmbeddingModelConfigSchema)),
+  /** Settings "Connect" catalog grouping. Providers sharing a `connectGroup`
+   *  (e.g. the Anthropic API + the Claude subscription, both "Claude") render as
+   *  ONE connect card offering each id's mode. Catalog-only — the model picker
+   *  still groups by provider name, so the same model isn't listed twice. */
+  connectGroup: v.optional(v.string()),
 });
 
 /** What the user may write in ai.json for a provider — every field optional, so
@@ -70,6 +75,7 @@ const UserProviderConfigSchema = v.object({
   options: v.optional(ProviderOptionsSchema),
   models: v.optional(v.record(v.string(), ModelConfigSchema)),
   embeddingModels: v.optional(v.record(v.string(), EmbeddingModelConfigSchema)),
+  connectGroup: v.optional(v.string()),
 });
 
 /** Transport a configured MCP server speaks. stdio spawns a child process
@@ -223,6 +229,9 @@ function mergeConfigs(
         options: mergeOptions(base.options, up.options),
         models: { ...base.models, ...(up.models ?? {}) },
         ...mergeEmbeddingModels(base.embeddingModels, up.embeddingModels),
+        ...(up.connectGroup ?? base.connectGroup
+          ? { connectGroup: up.connectGroup ?? base.connectGroup }
+          : {}),
       };
     } else if (up.kind && up.name) {
       provider[id] = {
@@ -232,6 +241,7 @@ function mergeConfigs(
         options: up.options,
         models: up.models ?? {},
         ...mergeEmbeddingModels(undefined, up.embeddingModels),
+        ...(up.connectGroup ? { connectGroup: up.connectGroup } : {}),
       };
     }
     // else: incomplete custom provider — ignored

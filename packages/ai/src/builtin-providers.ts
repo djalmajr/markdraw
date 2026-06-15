@@ -11,6 +11,9 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
   anthropic: {
     kind: "anthropic",
     name: "Anthropic",
+    // Shares the "Claude" connect card with the claude-sub subscription so the
+    // user picks API key OR subscription in one place.
+    connectGroup: "Claude",
     models: {
       "claude-sonnet-4-6": {
         name: "Claude Sonnet 4.6",
@@ -102,6 +105,7 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
   "claude-sub": {
     kind: "claude-cli",
     name: "Claude (subscription)",
+    connectGroup: "Claude",
     models: {
       "claude-sonnet-4-6": {
         name: "Claude Sonnet 4.6",

@@ -354,6 +354,7 @@ export function App() {
       models: Object.keys(p.models),
       kind: p.kind,
       connectMode: isCliProviderKind(p.kind) ? ("cli-subscription" as const) : ("api-key" as const),
+      connectGroup: p.connectGroup,
     })),
   );
 
