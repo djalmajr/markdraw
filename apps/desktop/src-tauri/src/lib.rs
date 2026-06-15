@@ -28,6 +28,12 @@ use ai_mcp::{
 mod ai_http;
 use ai_http::{ai_http_stream, ai_http_stream_cancel, HttpStreamManager};
 
+// Claude Code / Codex subscription via local CLI binaries (JSONL over Channel).
+mod cli_agent;
+use cli_agent::{
+    cli_chat_cancel, cli_chat_stream, cli_detect_binary, cli_probe_subscription, CliStreamManager,
+};
+
 // `asciimark-preview://` custom scheme — serves an HTML file's directory as an
 // isolated web origin so multi-file pages / SPAs preview with full fidelity
 // (root-absolute paths, ES modules, importmaps, hash routing). Commands
@@ -1125,6 +1131,7 @@ pub fn run() {
         .manage(DirWatcherHolder(Mutex::new(None)))
         .manage(McpManager::default())
         .manage(HttpStreamManager::default())
+        .manage(CliStreamManager::default())
         .manage(html_preview::HtmlPreviewState::default())
         .invoke_handler(tauri::generate_handler![
             open_directory_dialog,
@@ -1163,6 +1170,10 @@ pub fn run() {
             ai_mcp_cancel_call,
             ai_http_stream,
             ai_http_stream_cancel,
+            cli_detect_binary,
+            cli_probe_subscription,
+            cli_chat_stream,
+            cli_chat_cancel,
             html_preview_register,
             html_preview_set_overlay,
             html_preview_clear_overlay,

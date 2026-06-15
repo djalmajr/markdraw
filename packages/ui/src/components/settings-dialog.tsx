@@ -104,11 +104,16 @@ export interface SaveMcpServerInput {
 
 export type IndexingTier = "off" | "lite" | "full";
 
+export type SettingsAiConnectMode = "api-key" | "cli-subscription";
+
 export interface SettingsAiProvider {
   id: string;
   name: string;
   /** Known model ids for the provider (may be empty until loaded). */
   models: string[];
+  kind?: string;
+  /** CLI subscription providers probe the local binary instead of an API key. */
+  connectMode?: SettingsAiConnectMode;
 }
 
 export interface SettingsDialogProps {
@@ -433,6 +438,13 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     return [...byBase.values()].sort((a, b) => a.name.localeCompare(b.name));
   });
 
+  const providerConnectMode = (ids: string[]): SettingsAiConnectMode => {
+    const modes = ids.map(
+      (id) => props.aiProviders.find((p) => p.id === id)?.connectMode ?? "api-key",
+    );
+    return modes.includes("cli-subscription") ? "cli-subscription" : "api-key";
+  };
+
   function enterProvider(
     group: { name: string; ids: string[] },
     from: "catalog" | "manage" = "catalog",
@@ -546,7 +558,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
           </div>
         </Match>
 
-        {/* ── Per-provider connect: just the API key ── */}
+        {/* ── Per-provider connect: API key or CLI subscription ── */}
         <Match when={view().kind === "provider"}>
           <div class="settings-subpage-header">
             <button
@@ -561,16 +573,28 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               {(useLocale(), label("settings_ai_connect"))} {providerViewData()?.name}
             </h3>
           </div>
-          <p class="settings-prose">{(useLocale(), label("settings_ai_connect_desc"))}</p>
-          <label class="settings-label">{(useLocale(), label("settings_ai_api_key"))}</label>
-          <input
-            type="password"
-            autocomplete="off"
-            class="settings-input ai-composer-input"
-            placeholder="sk-…"
-            value={apiKey()}
-            onInput={(e) => setApiKey(e.currentTarget.value)}
-          />
+          <Switch>
+            <Match
+              when={
+                providerViewData() &&
+                providerConnectMode(providerViewData()!.ids) === "cli-subscription"
+              }
+            >
+              <p class="settings-prose">{(useLocale(), label("settings_ai_connect_cli_desc"))}</p>
+            </Match>
+            <Match when={true}>
+              <p class="settings-prose">{(useLocale(), label("settings_ai_connect_desc"))}</p>
+              <label class="settings-label">{(useLocale(), label("settings_ai_api_key"))}</label>
+              <input
+                type="password"
+                autocomplete="off"
+                class="settings-input ai-composer-input"
+                placeholder="sk-…"
+                value={apiKey()}
+                onInput={(e) => setApiKey(e.currentTarget.value)}
+              />
+            </Match>
+          </Switch>
           <Show when={error()}>
             <div class="ai-error">{error()}</div>
           </Show>
@@ -582,6 +606,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
           <Show
             when={
               props.onRemoveProvider &&
+              providerConnectMode(providerViewData()?.ids ?? []) !== "cli-subscription" &&
               providerViewData()?.ids.some((id) => connectedProviderIds().has(id))
             }
           >

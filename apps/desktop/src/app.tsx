@@ -25,6 +25,8 @@ import {
   scrubSecrets,
 } from "@asciimark/ai/secret-scrub.ts";
 import { withBuiltins } from "@asciimark/ai/builtin-providers.ts";
+import { isCliProviderKind } from "@asciimark/ai/cli-providers.ts";
+import { createCliHost, probeCliSubscription } from "./lib/cli-agent.ts";
 import {
   getStoredAiEngine,
   getStoredAiModel,
@@ -132,6 +134,8 @@ const { convertAdoc, convertMarkdown } = createConverter(new ConvertWorker());
 // as "connected" without a keychain or config credential.
 const LOCAL_PROVIDER_IDS = new Set(["ollama", "lmstudio"]);
 
+const cliHost = createCliHost();
+
 // Skeleton written when app__excalidraw_write targets a file that doesn't
 // exist yet. The frame's loader would boot an empty scene from "" too (its
 // JSON.parse catch), but a 0-byte file isn't a valid .excalidraw — the
@@ -180,13 +184,19 @@ export function App() {
   /** Engine options read fresh per provider build: streaming picks the Rust
    *  SSE transport (tauri-plugin-http buffers whole bodies); reasoning "off"
    *  omits the option entirely (engines map low/medium/high only). */
-  function buildEngineOptions(): Parameters<typeof createAiProvider>[3] {
+  function buildEngineOptions(
+    kind?: string,
+  ): Parameters<typeof createAiProvider>[3] {
     const reasoning: AIReasoningEffort = getStoredAiReasoning();
-    return {
+    const base = {
       fetch: getStoredAiStreaming() ? streamingFetch : tauriFetch,
       streaming: getStoredAiStreaming(),
       ...(reasoning !== "off" ? { reasoningEffort: reasoning } : {}),
     };
+    if (kind && isCliProviderKind(kind as never)) {
+      return { ...base, cliHost };
+    }
+    return base;
   }
 
   // Build the active provider from ai-prefs + config + keychain. With no model
@@ -200,22 +210,25 @@ export function App() {
     // If the user put the key in ai.json (config), use it directly and skip the
     // keychain — avoids touching the OS keychain when it isn't the source.
     const hasConfigKey = !!resolved.provider.options?.apiKey;
+    const engineId = isCliProviderKind(resolved.provider.kind)
+      ? resolved.provider.kind
+      : getStoredAiEngine();
     return createAiProvider(
-      getStoredAiEngine(),
+      engineId,
       resolved,
       () =>
-        resolveCredential(
-          resolved.providerId,
-          resolved.provider,
-          hasConfigKey
-            ? {}
-            : { keychain: (id) => getApiKey(id).then((k) => k ?? undefined) },
-        ),
+        isCliProviderKind(resolved.provider.kind)
+          ? Promise.resolve(undefined)
+          : resolveCredential(
+              resolved.providerId,
+              resolved.provider,
+              hasConfigKey
+                ? {}
+                : { keychain: (id) => getApiKey(id).then((k) => k ?? undefined) },
+            ),
       // Route provider HTTP through Rust to avoid the webview CORS wall.
-      // Streaming ON swaps in the Rust SSE transport (ai_http.rs → Channel →
-      // streaming Response), which actually delivers deltas — tauri-plugin-http
-      // buffers whole bodies, so it stays the buffered default only.
-      buildEngineOptions(),
+      // CLI subscription providers use cli_agent.rs instead (cliHost).
+      buildEngineOptions(resolved.provider.kind),
     );
   }
 
@@ -282,6 +295,8 @@ export function App() {
       id,
       name: p.name,
       models: Object.keys(p.models),
+      kind: p.kind,
+      connectMode: isCliProviderKind(p.kind) ? ("cli-subscription" as const) : ("api-key" as const),
     })),
   );
 
@@ -294,8 +309,13 @@ export function App() {
   async function refreshConnectedProviders(): Promise<void> {
     const next: Record<string, boolean> = {};
     for (const [id, p] of Object.entries(aiConfig().provider)) {
-      next[id] =
-        LOCAL_PROVIDER_IDS.has(id) || !!p.options?.apiKey || (await hasApiKey(id));
+      if (isCliProviderKind(p.kind)) {
+        const probe = await probeCliSubscription(p.kind);
+        next[id] = probe.ok;
+      } else {
+        next[id] =
+          LOCAL_PROVIDER_IDS.has(id) || !!p.options?.apiKey || (await hasApiKey(id));
+      }
     }
     setConnectedProviders(next);
   }
@@ -446,8 +466,17 @@ export function App() {
    *  Manage models. Used by the per-provider connect sub-page. */
   async function connectProvider(input: { providerId: string; apiKey: string }): Promise<void> {
     const { providerId, apiKey } = input;
-    if (apiKey) await setApiKey(providerId, apiKey);
     const provider = aiConfig().provider[providerId];
+    if (provider && isCliProviderKind(provider.kind)) {
+      const probe = await probeCliSubscription(provider.kind);
+      if (!probe.ok) {
+        throw new Error(probe.error ?? "CLI subscription not available");
+      }
+      setAiConfig(await loadAIConfig());
+      await refreshConnectedProviders();
+      return;
+    }
+    if (apiKey) await setApiKey(providerId, apiKey);
     if (provider && Object.keys(provider.models).length === 0 && provider.options?.baseURL) {
       let ids: string[] = [];
       try {
