@@ -35,6 +35,14 @@ trash = "5"
 # the user toggles "Respect .gitignore" in the file tree.
 ignore = "0.4"
 
+# Per-root workspace index store (DJA-15): SQLite FTS5 (keyword/BM25) + packed
+# f32 vector embeddings. `bundled` vendors a SQLite compiled with FTS5 ENABLED
+# (SQLITE_ENABLE_FTS5), which is what makes `CREATE VIRTUAL TABLE … USING fts5`
+# work — the system SQLite (notably older macOS) may ship without it, so
+# `bundled` is mandatory, not an optimization. (The rusqlite `fts5` feature is
+# only the Rust-level custom-tokenizer API, which we don't use.)
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 # MCP (Model Context Protocol) client — connects to any number of MCP servers
 # over stdio (spawned child process) or Streamable HTTP. Lives in Rust because
 # the webview can't spawn processes and MCP-over-HTTP from the webview hits the

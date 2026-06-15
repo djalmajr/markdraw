@@ -34,6 +34,15 @@ use cli_agent::{
     cli_chat_cancel, cli_chat_stream, cli_detect_binary, cli_probe_subscription, CliStreamManager,
 };
 
+// Per-root workspace index (DJA-15): SQLite FTS5 keyword search + provider-
+// supplied embedding vectors fused with RRF. Commands imported by simple name
+// so the IPC-contract check (scripts/check-ipc-contract.sh) sees them.
+mod ai_index;
+use ai_index::{
+    ai_index_delete, ai_index_search, ai_index_staleness, ai_index_status, ai_index_sync,
+    IndexManager,
+};
+
 // `asciimark-preview://` custom scheme — serves an HTML file's directory as an
 // isolated web origin so multi-file pages / SPAs preview with full fidelity
 // (root-absolute paths, ES modules, importmaps, hash routing). Commands
@@ -1132,6 +1141,7 @@ pub fn run() {
         .manage(McpManager::default())
         .manage(HttpStreamManager::default())
         .manage(CliStreamManager::default())
+        .manage(IndexManager::default())
         .manage(html_preview::HtmlPreviewState::default())
         .invoke_handler(tauri::generate_handler![
             open_directory_dialog,
@@ -1174,6 +1184,11 @@ pub fn run() {
             cli_probe_subscription,
             cli_chat_stream,
             cli_chat_cancel,
+            ai_index_status,
+            ai_index_staleness,
+            ai_index_sync,
+            ai_index_search,
+            ai_index_delete,
             html_preview_register,
             html_preview_set_overlay,
             html_preview_clear_overlay,
