@@ -421,18 +421,32 @@ export function App() {
   // openai-compatible), two entries for the same backend — are MERGED into one
   // group; each model's `value` keeps its own provider id so routing/`kind`
   // stays correct.
-  // Alphabetical, locale + numeric aware (so "K2.6" < "K2.7" < "K2.10") sort,
-  // applied to every group list — chat picker, embedding picker, Manage models.
+  // Group names ascending; within a group, model NAMES ascending but VERSIONS
+  // descending (newest first) — "GLM-5.1" before "GLM-5", "Kimi K2.7" before
+  // "K2.6". Tokenise each label into text/number runs: text compared ascending,
+  // numbers descending.
+  const compareModelLabel = (a: string, b: string): number => {
+    const ta = a.match(/\d+(?:\.\d+)?|\D+/g) ?? [a];
+    const tb = b.match(/\d+(?:\.\d+)?|\D+/g) ?? [b];
+    const n = Math.min(ta.length, tb.length);
+    for (let i = 0; i < n; i += 1) {
+      const sa = ta[i]!;
+      const sb = tb[i]!;
+      if (/^\d/.test(sa) && /^\d/.test(sb)) {
+        const d = parseFloat(sb) - parseFloat(sa); // versions: newest first
+        if (d !== 0) return d;
+      } else {
+        const c = sa.localeCompare(sb, undefined, { sensitivity: "base" }); // names ascending
+        if (c !== 0) return c;
+      }
+    }
+    return ta.length - tb.length; // base before a longer variant (e.g. "…Pro")
+  };
   const sortModelGroups = (
     groups: { id: string; name: string; models: { value: string; label: string }[] }[],
   ): { id: string; name: string; models: { value: string; label: string }[] }[] =>
     groups
-      .map((g) => ({
-        ...g,
-        models: [...g.models].sort((a, b) =>
-          a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true }),
-        ),
-      }))
+      .map((g) => ({ ...g, models: [...g.models].sort((a, b) => compareModelLabel(a.label, b.label)) }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
 
   const aiModelGroupsAll = createMemo<{ id: string; name: string; models: { value: string; label: string }[] }[]>(
