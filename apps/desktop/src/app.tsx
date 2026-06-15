@@ -31,6 +31,8 @@ import {
   getStoredAiEngine,
   getStoredAiModel,
   setStoredAiModel,
+  getStoredAiEmbeddingModel,
+  setStoredAiEmbeddingModel,
   getStoredAiReasoning,
   setStoredAiReasoning,
   getStoredAiStreaming,
@@ -42,6 +44,15 @@ import {
   setStoredIndexingTier,
   type IndexingTier,
 } from "@asciimark/core/ai-prefs.ts";
+import { providerCanEmbed } from "@asciimark/ai/config-schema.ts";
+import { createWorkspaceIndexer } from "@asciimark/ui/composables/create-workspace-indexer.ts";
+import {
+  aiIndexDelete,
+  aiIndexSearch,
+  aiIndexStaleness,
+  aiIndexSync,
+  type EmbeddingMeta,
+} from "./lib/ai-index.ts";
 import { fetchModels } from "@asciimark/ai/model-catalog.ts";
 import { loadAIConfig, loadUserAIConfig, saveAIConfig } from "./lib/ai-config.ts";
 import { buildMcpTools } from "@asciimark/ai/mcp-tools.ts";
@@ -232,6 +243,43 @@ export function App() {
     );
   }
 
+  /** Build an embedder for the "Complete" index from the separately-selected
+   *  embedding model (independent of the chat model). Null when none is chosen
+   *  or the provider can't embed — the indexer then stays keyword-only. Always
+   *  the ai-sdk engine (the only one that implements embeddings). */
+  function buildEmbeddingProvider():
+    | { embed: (texts: string[]) => Promise<number[][]>; meta: EmbeddingMeta }
+    | null {
+    const modelId = getStoredAiEmbeddingModel();
+    const resolved = modelId ? resolveModel(aiConfig(), modelId) : null;
+    if (!resolved || !providerCanEmbed(resolved.provider)) return null;
+    const dim = resolved.provider.embeddingModels?.[resolved.modelId]?.dim ?? 0;
+    if (dim <= 0) return null;
+    const hasConfigKey = !!resolved.provider.options?.apiKey;
+    const provider = createAiProvider(
+      "ai-sdk",
+      resolved,
+      () =>
+        resolveCredential(
+          resolved.providerId,
+          resolved.provider,
+          hasConfigKey ? {} : { keychain: (id) => getApiKey(id).then((k) => k ?? undefined) },
+        ),
+      buildEngineOptions(resolved.provider.kind),
+    );
+    return {
+      meta: { provider: resolved.providerId, model: resolved.modelId, dim },
+      embed: (texts) => provider.embed(texts),
+    };
+  }
+
+  async function computeSha(content: string): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
   /** Provider chip label: real "Provider · model" when configured; the mock
    *  only ever shows in DEV — release renders the localized "no provider". */
   const aiProviderLabel = (): string | null => {
@@ -277,6 +325,13 @@ export function App() {
     // Independent of config-load success — the builtins-only fallback still
     // needs its keychain probe so connected providers surface in the pickers.
     await refreshConnectedProviders();
+    // A previously-saved "Complete" tier downgrades to "Fast" when no embedding
+    // provider is connected (the Full card is gated, but the stored choice may
+    // predate a disconnect).
+    if (indexingTier() === "full" && !embeddingCapable()) {
+      setIndexingTier("lite");
+      setStoredIndexingTier("lite");
+    }
   });
 
   // ── Settings modal (DJA-15) ────────────────────────────────────────────
@@ -354,6 +409,26 @@ export function App() {
       return [...groups.values()];
     },
   );
+  // Embedding-capable, connected providers grouped for the embedding-model
+  // picker (Complete tier). Only OpenAI / openai-compatible with declared
+  // embedding models qualify (see providerCanEmbed).
+  const embeddingModelGroups = createMemo<{ id: string; name: string; models: { value: string; label: string }[] }[]>(
+    () => {
+      const connected = connectedProviders();
+      const groups: { id: string; name: string; models: { value: string; label: string }[] }[] = [];
+      for (const [pid, p] of Object.entries(aiConfig().provider)) {
+        if (!connected[pid] || !providerCanEmbed(p)) continue;
+        const models = Object.entries(p.embeddingModels ?? {}).map(([mid, mdl]) => ({
+          value: `${pid}/${mid}`,
+          label: mdl.name ?? mid,
+        }));
+        if (models.length > 0) groups.push({ id: pid, name: p.name, models });
+      }
+      return groups;
+    },
+  );
+  /** Whether the "Complete" tier can run — at least one embedding provider connected. */
+  const embeddingCapable = createMemo(() => embeddingModelGroups().length > 0);
   // Models the user hid via "Manage models" — filtered out of the chat picker.
   const [hiddenModels, setHiddenModels] = createSignal<string[]>(getStoredHiddenModels());
   function toggleHiddenModel(ref: string): void {
@@ -569,6 +644,30 @@ export function App() {
       updatePlan: (items) => (items === null ? state.clearAiPlan() : state.setAiPlanItems(items)),
       applyExcalidrawMermaid,
       generateExcalidrawDiagram,
+      // Workspace-indexing search: Off → grep; Fast → keyword index; Complete →
+      // hybrid (embed the query, fuse with vectors). See app__search_workspace.
+      getIndexingTier: () => indexingTier(),
+      indexSearch: async (root, query, tier, queryVector) => {
+        const hits = await aiIndexSearch({
+          rootPath: root,
+          query,
+          tier,
+          queryVector,
+          embedding: buildEmbeddingProvider()?.meta ?? undefined,
+          limit: 20,
+        });
+        return hits.map((h) => ({ path: h.path, line: h.bestChunkLine, text: h.snippet }));
+      },
+      embedQuery: async (query) => {
+        const src = buildEmbeddingProvider();
+        if (!src) return null;
+        try {
+          const [v] = await src.embed([query]);
+          return v ?? null;
+        } catch {
+          return null;
+        }
+      },
     });
     let mcp: AITool[] = [];
     try {
@@ -1635,6 +1734,36 @@ export function App() {
       state.setBacklinkIndex(buildBacklinkIndex(filesForBacklinks));
       setWorkspaceSymbols(buildWorkspaceSymbols(filesForSymbols));
     })();
+  });
+
+  // ── Workspace index (Fast/Complete tiers, DJA-15) ─────────────────────────
+  // Enumerate → sha-diff → chunk → embed (Complete) → push to the per-root Rust
+  // index. Re-runs on workspace open, root changes, and tier switches; the
+  // staleness diff keeps re-runs cheap (only changed files re-embed).
+  const workspaceIndexer = createWorkspaceIndexer({
+    getRoots: () => Array.from(rootPaths().values()),
+    listSupportedFiles: async (rootAbs) => {
+      const entry = [...rootPaths().entries()].find(([, abs]) => abs === rootAbs);
+      if (!entry) return [];
+      const rootId = entry[0];
+      return flattenWorkspace(state.rootsList())
+        .filter((f) => f.rootId === rootId && isSupportedFile(f.path))
+        .map((f) => ({ path: f.path, mtime: 0 }));
+    },
+    readFile: (rootAbs, path) => readFileContent(`${rootAbs}/${path}`),
+    computeSha,
+    staleness: (root, entries) => aiIndexStaleness(root, entries),
+    sync: (input) => aiIndexSync(input),
+    remove: (root, paths) => aiIndexDelete(root, paths),
+    dropRoot: (root) => aiIndexDelete(root),
+    getTier: () => indexingTier(),
+    getEmbedding: () => buildEmbeddingProvider(),
+  });
+  createEffect(() => {
+    const tier = indexingTier();
+    rootPaths(); // re-index when the open roots change
+    if (tier === "off") return;
+    void workspaceIndexer.reindexAll();
   });
 
   // ── Tab session restore ──────────────────────────────────────────────────
@@ -2815,8 +2944,10 @@ export function App() {
       onToggleModel={toggleHiddenModel}
       indexingTier={indexingTier()}
       onIndexingTierChange={(t) => {
-        setIndexingTier(t);
-        setStoredIndexingTier(t);
+        // Gate "Complete" on an embedding provider being connected.
+        const next = t === "full" && !embeddingCapable() ? "lite" : t;
+        setIndexingTier(next);
+        setStoredIndexingTier(next);
       }}
       aiReasoning={aiReasoning()}
       onAiReasoningChange={(v) => {
