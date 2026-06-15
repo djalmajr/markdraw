@@ -64,6 +64,12 @@ const ProviderConfigSchema = v.object({
    *  ONE connect card offering each id's mode. Catalog-only — the model picker
    *  still groups by provider name, so the same model isn't listed twice. */
   connectGroup: v.optional(v.string()),
+  /** Treat `models` as a hand-maintained list even though the provider has a
+   *  baseURL: don't offer "Refresh models" / live `/models` fetch. For catalogs
+   *  the live endpoint can't reproduce correctly (e.g. OpenCode Go, whose single
+   *  /models can't say which API shape each model uses). CLI kinds are curated
+   *  implicitly; this flag is for API-shaped providers we still maintain by hand. */
+  curatedModels: v.optional(v.boolean()),
 });
 
 /** What the user may write in ai.json for a provider — every field optional, so
@@ -77,6 +83,7 @@ const UserProviderConfigSchema = v.object({
   models: v.optional(v.record(v.string(), ModelConfigSchema)),
   embeddingModels: v.optional(v.record(v.string(), EmbeddingModelConfigSchema)),
   connectGroup: v.optional(v.string()),
+  curatedModels: v.optional(v.boolean()),
 });
 
 /** Transport a configured MCP server speaks. stdio spawns a child process
@@ -233,6 +240,9 @@ function mergeConfigs(
         ...(up.connectGroup ?? base.connectGroup
           ? { connectGroup: up.connectGroup ?? base.connectGroup }
           : {}),
+        ...(up.curatedModels ?? base.curatedModels
+          ? { curatedModels: up.curatedModels ?? base.curatedModels }
+          : {}),
       };
     } else if (up.kind && up.name) {
       provider[id] = {
@@ -243,6 +253,7 @@ function mergeConfigs(
         models: up.models ?? {},
         ...mergeEmbeddingModels(undefined, up.embeddingModels),
         ...(up.connectGroup ? { connectGroup: up.connectGroup } : {}),
+        ...(up.curatedModels ? { curatedModels: up.curatedModels } : {}),
       };
     }
     // else: incomplete custom provider — ignored

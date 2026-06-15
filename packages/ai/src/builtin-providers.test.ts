@@ -38,6 +38,10 @@ describe("BUILTIN_PROVIDERS", () => {
     expect(goChat.options?.baseURL).toBe("https://opencode.ai/zen/go/v1");
     expect(go.models["minimax-m3"].name).toBe("MiniMax M3");
     expect(goChat.models["glm-5"].name).toBe("GLM-5");
+    // Hand-maintained split — opted out of live /models refresh (the endpoint
+    // can't say which API shape each model uses).
+    expect(go.curatedModels).toBe(true);
+    expect(goChat.curatedModels).toBe(true);
   });
 
   it("declares OpenAI embedding models with dims; chat-only providers have none", () => {

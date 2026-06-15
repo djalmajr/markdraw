@@ -74,6 +74,9 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     kind: "anthropic", // /messages
     name: "OpenCode Go",
     options: { baseURL: "https://opencode.ai/zen/go/v1" },
+    // Hand-maintained: the live /models can't say which API shape each model
+    // uses, so we keep the /messages-vs-/chat split curated (no live refresh).
+    curatedModels: true,
     models: {
       "minimax-m3": { name: "MiniMax M3" },
       "minimax-m2.7": { name: "MiniMax M2.7" },
@@ -87,6 +90,7 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     kind: "openai-compatible", // /chat/completions
     name: "OpenCode Go (chat)",
     options: { baseURL: "https://opencode.ai/zen/go/v1" },
+    curatedModels: true, // see opencode-go — hand-maintained split
     models: {
       "glm-5.1": { name: "GLM-5.1" },
       "glm-5": { name: "GLM-5" },

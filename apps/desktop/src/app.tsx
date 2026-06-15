@@ -357,7 +357,9 @@ export function App() {
       connectGroup: p.connectGroup,
       // Live model list can be re-fetched (openai-compatible endpoint with a
       // baseURL, e.g. OpenRouter / Ollama / OpenCode Zen) → show "Refresh models".
-      fetchable: !isCliProviderKind(p.kind) && !!p.options?.baseURL,
+      // `curatedModels` opts a baseURL provider OUT (OpenCode Go: hand-maintained
+      // split the live /models can't reproduce). CLI kinds are curated implicitly.
+      fetchable: !isCliProviderKind(p.kind) && !!p.options?.baseURL && !p.curatedModels,
     })),
   );
 
