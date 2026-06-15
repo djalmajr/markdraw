@@ -55,6 +55,16 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     options: { baseURL: "https://openrouter.ai/api/v1" },
     models: {}, // 200+ models — the user lists the ones they use
   },
+  // xAI / Grok — OpenAI-compatible API at api.x.ai. Shares the "Grok" connect
+  // card with the Grok CLI subscription (added under the same connectGroup).
+  // Models are fetched live from /v1/models on connect (always current).
+  xai: {
+    kind: "openai-compatible",
+    name: "xAI",
+    connectGroup: "Grok",
+    options: { baseURL: "https://api.x.ai/v1" },
+    models: {},
+  },
   // OpenCode Go (https://opencode.ai/zen/go/v1) — one service, one key, but its
   // catalog spans two API shapes, so it is two provider entries (the `kind`
   // decides both the SDK and the endpoint: anthropic → /messages, openai-compatible

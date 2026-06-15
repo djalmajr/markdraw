@@ -14,6 +14,7 @@ describe("BUILTIN_PROVIDERS", () => {
       "opencode-go-chat",
       "opencode-zen",
       "openrouter",
+      "xai",
     ]);
     expect(BUILTIN_PROVIDERS["claude-sub"].kind).toBe("claude-cli");
     expect(BUILTIN_PROVIDERS["codex-sub"].kind).toBe("codex-cli");
@@ -66,7 +67,7 @@ describe("withBuiltins", () => {
 
   it("returns the full catalog for an empty config", () => {
     const config = withBuiltins({});
-    expect(Object.keys(config.provider)).toHaveLength(10);
+    expect(Object.keys(config.provider)).toHaveLength(11);
     expect(config.provider["opencode-go"].options?.baseURL).toBe("https://opencode.ai/zen/go/v1");
     expect(config.provider["opencode-zen"].options?.baseURL).toBe("https://opencode.ai/zen/v1");
   });
