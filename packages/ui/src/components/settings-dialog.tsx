@@ -334,7 +334,9 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     props.aiProviders.find((p) => p.id === initialProvider)?.models ?? [],
   );
   const [modelId, setModelId] = createSignal(initialModel);
-  const [loading, setLoading] = createSignal(false);
+  // Which async action is in flight, so its spinner shows on ONLY the clicked
+  // button (the API "Continue" and CLI "Use subscription" share this sub-page).
+  const [loadingAction, setLoadingAction] = createSignal<"api" | "cli" | "models" | null>(null);
   const [saved, setSaved] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [modelQuery, setModelQuery] = createSignal("");
@@ -463,10 +465,10 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     setError(null);
     setView({ kind: "provider", from, ids: group.ids, name: group.name });
   }
-  async function connectIds(ids: string[]): Promise<void> {
+  async function connectIds(ids: string[], kind: "api" | "cli"): Promise<void> {
     if (ids.length === 0) return;
     setError(null);
-    setLoading(true);
+    setLoadingAction(kind);
     try {
       // A mode may span several entries (e.g. OpenCode Go's two kinds); connect each.
       for (const id of ids) await props.onConnectProvider?.({ providerId: id, apiKey: apiKey() });
@@ -475,7 +477,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   }
   /** Split the current connect group's ids by mode, so a group with both (the
@@ -546,7 +548,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
   }
 
   async function loadModels(): Promise<void> {
-    setLoading(true);
+    setLoadingAction("models");
     setError(null);
     try {
       const list = await props.onListModels(providerId(), apiKey());
@@ -554,7 +556,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -637,9 +639,9 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
             <div class="settings-row settings-row-end">
               <Button
                 size="sm"
-                onClick={() => void connectIds(groupApiIds())}
-                loading={loading()}
-                disabled={!apiKey().trim()}
+                onClick={() => void connectIds(groupApiIds(), "api")}
+                loading={loadingAction() === "api"}
+                disabled={!apiKey().trim() || loadingAction() !== null}
               >
                 {(useLocale(), label("settings_ai_connect_continue"))}
               </Button>
@@ -664,7 +666,12 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
             >
               <p class="settings-prose">{(useLocale(), label(groupCliDescKey()))}</p>
               <div class="settings-row settings-row-end">
-                <Button size="sm" onClick={() => void connectIds(groupCliIds())} loading={loading()}>
+                <Button
+                  size="sm"
+                  onClick={() => void connectIds(groupCliIds(), "cli")}
+                  loading={loadingAction() === "cli"}
+                  disabled={loadingAction() !== null}
+                >
                   {(useLocale(), label("settings_ai_use_subscription"))}
                 </Button>
               </div>
