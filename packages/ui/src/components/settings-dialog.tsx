@@ -641,7 +641,21 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               value={apiKey()}
               onInput={(e) => setApiKey(e.currentTarget.value)}
             />
-            <div class="settings-row settings-row-end">
+            <div class="settings-row settings-row-end" style={{ "justify-content": "space-between" }}>
+              {/* Remove sits beside the connect action (only on an API-only
+                  group; groups with a subscription show it in the CLI row). */}
+              <Show
+                when={
+                  props.onRemoveProvider &&
+                  groupCliIds().length === 0 &&
+                  providerViewData()?.ids.some((id) => connectedProviderIds().has(id))
+                }
+                fallback={<span />}
+              >
+                <button class="settings-danger-btn" type="button" onClick={() => void removeCurrentProvider()}>
+                  {(useLocale(), label("settings_ai_disconnect"))}
+                </button>
+              </Show>
               <Button
                 size="sm"
                 onClick={() => void connectIds(groupApiIds(), "api")}
@@ -670,12 +684,26 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               }
             >
               <p class="settings-prose">{(useLocale(), label(groupCliDescKey()))}</p>
-              <div class="settings-row settings-row-end">
+              <div class="settings-row settings-row-end" style={{ "justify-content": "space-between" }}>
+                <Show
+                  when={
+                    props.onRemoveProvider &&
+                    providerViewData()?.ids.some((id) => connectedProviderIds().has(id))
+                  }
+                  fallback={<span />}
+                >
+                  <button class="settings-danger-btn" type="button" onClick={() => void removeCurrentProvider()}>
+                    {(useLocale(), label("settings_ai_disconnect"))}
+                  </button>
+                </Show>
                 <Button
                   size="sm"
                   onClick={() => void connectIds(groupCliIds(), "cli")}
                   loading={loadingAction() === "cli"}
-                  disabled={loadingAction() !== null}
+                  disabled={
+                    loadingAction() !== null ||
+                    groupCliIds().some((id) => connectedProviderIds().has(id))
+                  }
                 >
                   {(useLocale(), label("settings_ai_use_subscription"))}
                 </Button>
@@ -684,28 +712,6 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
           </Show>
           <Show when={error()}>
             <div class="ai-error">{error()}</div>
-          </Show>
-          <Show
-            when={
-              props.onRemoveProvider &&
-              providerViewData()?.ids.some((id) => connectedProviderIds().has(id))
-            }
-          >
-            {/* Destructive zone, clearly separated from the connect controls —
-                only for CONNECTED providers (there's no key to delete before
-                connecting, and the confirm copy promises a keychain removal). */}
-            <div
-              class="settings-row"
-              style={{ "border-top": "1px solid hsl(var(--border))", "margin-top": "16px", "padding-top": "12px" }}
-            >
-              <button
-                class="settings-danger-btn"
-                type="button"
-                onClick={() => void removeCurrentProvider()}
-              >
-                {(useLocale(), label("settings_ai_disconnect"))}
-              </button>
-            </div>
           </Show>
         </Match>
 
