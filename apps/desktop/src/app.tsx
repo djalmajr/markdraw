@@ -396,6 +396,20 @@ export function App() {
   // openai-compatible), two entries for the same backend — are MERGED into one
   // group; each model's `value` keeps its own provider id so routing/`kind`
   // stays correct.
+  // Alphabetical, locale + numeric aware (so "K2.6" < "K2.7" < "K2.10") sort,
+  // applied to every group list — chat picker, embedding picker, Manage models.
+  const sortModelGroups = (
+    groups: { id: string; name: string; models: { value: string; label: string }[] }[],
+  ): { id: string; name: string; models: { value: string; label: string }[] }[] =>
+    groups
+      .map((g) => ({
+        ...g,
+        models: [...g.models].sort((a, b) =>
+          a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true }),
+        ),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
+
   const aiModelGroupsAll = createMemo<{ id: string; name: string; models: { value: string; label: string }[] }[]>(
     () => {
       const groups = new Map<string, { id: string; name: string; models: { value: string; label: string }[] }>();
@@ -415,7 +429,7 @@ export function App() {
         if (existing) existing.models.push(...models);
         else groups.set(base, { id: base, name: base, models });
       }
-      return [...groups.values()];
+      return sortModelGroups([...groups.values()]);
     },
   );
   // Embedding-capable, connected providers grouped for the embedding-model
@@ -433,7 +447,7 @@ export function App() {
         }));
         if (models.length > 0) groups.push({ id: pid, name: p.name, models });
       }
-      return groups;
+      return sortModelGroups(groups);
     },
   );
   /** Whether the "Complete" tier can run — at least one embedding provider connected. */
