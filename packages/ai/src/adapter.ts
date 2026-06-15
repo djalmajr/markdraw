@@ -28,6 +28,8 @@ async function loadEngine(id: AIEngineId): Promise<AIEngine> {
       return (await import("./engines/cli-bridge.ts")).claudeCliEngine;
     case "codex-cli":
       return (await import("./engines/cli-bridge.ts")).codexCliEngine;
+    case "grok-cli":
+      return (await import("./engines/cli-bridge.ts")).grokCliEngine;
   }
 }
 

@@ -53,6 +53,16 @@ function extractCodexText(obj: Record<string, unknown>): string | null {
   return null;
 }
 
+// Grok `--output-format streaming-json` emits one self-contained event per line.
+// `{"type":"text","data":"chunk"}` carries an incremental chunk (not cumulative),
+// `thought` is reasoning we skip, and `end` is metadata-only.
+function extractGrokText(obj: Record<string, unknown>): string | null {
+  if (obj.type === "text" && typeof obj.data === "string") {
+    return obj.data;
+  }
+  return null;
+}
+
 function extractUsage(
   kind: CliProviderKind,
   obj: Record<string, unknown>,
@@ -108,14 +118,21 @@ function createCliProvider(
         try {
           const obj = JSON.parse(event.line) as Record<string, unknown>;
           const text =
-            kind === "claude-cli" ? extractClaudeText(obj) : extractCodexText(obj);
+            kind === "claude-cli"
+              ? extractClaudeText(obj)
+              : kind === "codex-cli"
+                ? extractCodexText(obj)
+                : extractGrokText(obj);
           if (text) {
-            if (kind === "codex-cli") {
-              queue.push({ type: "text-delta", text });
-            } else {
+            // Claude's `assistant` events carry the full text-so-far, so we
+            // diff against what we've emitted. Codex and Grok stream genuine
+            // incremental chunks — push them verbatim.
+            if (kind === "claude-cli") {
               const delta = text.slice(emittedLen);
               emittedLen = text.length;
               if (delta) queue.push({ type: "text-delta", text: delta });
+            } else {
+              queue.push({ type: "text-delta", text });
             }
           }
           const u = extractUsage(kind, obj);
@@ -214,6 +231,13 @@ export const codexCliEngine: AIEngine = {
   id: "codex-cli",
   createProvider(resolved, _getApiKey: CredentialResolver, opts?: AIEngineOptions) {
     return createCliProvider("codex-cli", resolved, opts);
+  },
+};
+
+export const grokCliEngine: AIEngine = {
+  id: "grok-cli",
+  createProvider(resolved, _getApiKey: CredentialResolver, opts?: AIEngineOptions) {
+    return createCliProvider("grok-cli", resolved, opts);
   },
 };
 

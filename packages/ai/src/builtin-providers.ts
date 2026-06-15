@@ -143,6 +143,18 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
       "o3": { name: "o3", limit: { context: 200000, output: 100000 } },
     },
   },
+  // Grok CLI subscription — routed through the official local `grok` binary
+  // (Rust spawn + JSONL parse). Shares the "Grok" connect card with the xAI API
+  // key. Models mirror `grok models` (the CLI's own agentic catalog).
+  "grok-sub": {
+    kind: "grok-cli",
+    name: "Grok (subscription)",
+    connectGroup: "Grok",
+    models: {
+      "grok-composer-2.5-fast": { name: "Grok Composer 2.5 Fast" },
+      "grok-build": { name: "Grok Build" },
+    },
+  },
 };
 
 /** Deep-merge a parsed user config over the built-in catalog. */

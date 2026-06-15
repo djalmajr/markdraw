@@ -20,6 +20,7 @@ const ProviderKindSchema = v.picklist([
   "openai-compatible",
   "claude-cli",
   "codex-cli",
+  "grok-cli",
 ] as const);
 
 const ModelLimitSchema = v.object({
@@ -256,10 +257,17 @@ function mergeConfigs(
 }
 
 /** Whether a provider can produce embeddings for the "Full" workspace index.
- *  Subscription CLIs (claude-cli/codex-cli) are chat-only and Anthropic has no
- *  embeddings API; every other kind needs at least one declared embedding model. */
+ *  Subscription CLIs (claude-cli/codex-cli/grok-cli) are chat-only and Anthropic
+ *  has no embeddings API; every other kind needs a declared embedding model. */
 function providerCanEmbed(p: ProviderConfig): boolean {
-  if (p.kind === "claude-cli" || p.kind === "codex-cli" || p.kind === "anthropic") return false;
+  if (
+    p.kind === "claude-cli" ||
+    p.kind === "codex-cli" ||
+    p.kind === "grok-cli" ||
+    p.kind === "anthropic"
+  ) {
+    return false;
+  }
   return Object.keys(p.embeddingModels ?? {}).length > 0;
 }
 

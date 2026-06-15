@@ -15,7 +15,7 @@
 import type { ResolvedModel } from "./resolve-model.ts";
 import type { AIMessage, AIProvider } from "./types.ts";
 
-export type AIEngineId = "ai-sdk" | "tanstack" | "claude-cli" | "codex-cli";
+export type AIEngineId = "ai-sdk" | "tanstack" | "claude-cli" | "codex-cli" | "grok-cli";
 
 /** Resolves the provider's API key just-in-time. Called inside `chat()` right
  *  before the request so the key is never held longer than necessary (it lives
@@ -40,7 +40,7 @@ export type CliStreamEvent =
 export interface CliHost {
   streamChat: (
     request: {
-      provider: "claude-cli" | "codex-cli";
+      provider: "claude-cli" | "codex-cli" | "grok-cli";
       model: string;
       system?: string;
       messages: AIMessage[];
@@ -54,7 +54,7 @@ export interface CliHost {
 export interface AIEngineOptions {
   /** Custom fetch (e.g. Tauri HTTP plugin) to dodge webview CORS. */
   fetch?: FetchImpl;
-  /** Desktop injects this for `claude-cli` / `codex-cli` engines. */
+  /** Desktop injects this for `claude-cli` / `codex-cli` / `grok-cli` engines. */
   cliHost?: CliHost;
   cliPathOverride?: string;
   /** Ask the model to spend reasoning/thinking effort. Omit = off (request

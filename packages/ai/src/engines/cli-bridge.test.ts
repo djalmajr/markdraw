@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { CliStreamEvent } from "./cli-bridge.ts";
-import { claudeCliEngine } from "./cli-bridge.ts";
+import { claudeCliEngine, grokCliEngine } from "./cli-bridge.ts";
 import type { ResolvedModel } from "../resolve-model.ts";
 
 const resolved: ResolvedModel = {
@@ -62,5 +62,36 @@ describe("cli-bridge", () => {
       parts.push(part);
     }
     expect(parts.some((p) => p.type === "error" && p.message === "CLI exited")).toBe(true);
+  });
+
+  it("parses Grok streaming-json chunks into incremental text deltas", async () => {
+    const grokResolved: ResolvedModel = {
+      id: "grok-sub/grok-composer-2.5-fast",
+      providerId: "grok-sub",
+      modelId: "grok-composer-2.5-fast",
+      provider: {
+        kind: "grok-cli",
+        name: "Grok (subscription)",
+        models: { "grok-composer-2.5-fast": { name: "Grok Composer 2.5 Fast" } },
+      },
+      model: { name: "Grok Composer 2.5 Fast" },
+    };
+    const lines = [
+      JSON.stringify({ type: "text", data: "Hello" }),
+      JSON.stringify({ type: "thought", data: "thinking..." }),
+      JSON.stringify({ type: "text", data: " world" }),
+      JSON.stringify({ type: "end", stopReason: "EndTurn", sessionId: "abc123" }),
+    ];
+    const provider = grokCliEngine.createProvider(grokResolved, async () => undefined, {
+      cliHost: {
+        streamChat: async (_req, onEvent) => {
+          for (const line of lines) onEvent({ type: "line", line });
+          onEvent({ type: "done" });
+        },
+      },
+    });
+
+    const text = await provider.complete("hi");
+    expect(text).toBe("Hello world");
   });
 });
