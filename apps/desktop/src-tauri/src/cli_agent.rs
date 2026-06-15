@@ -144,6 +144,7 @@ fn binary_for_provider(provider: &str) -> Result<&'static str, String> {
     match provider {
         "claude-cli" => Ok("claude"),
         "codex-cli" => Ok("codex"),
+        "grok-cli" => Ok("grok"),
         other => Err(format!("unknown CLI provider kind: {other}")),
     }
 }
@@ -211,6 +212,16 @@ fn build_probe_command(provider: &str, binary: &str) -> Result<Command, String> 
         "codex-cli" => {
             cmd.args(["exec", "reply with exactly: ok", "--json"]);
         }
+        "grok-cli" => {
+            cmd.args([
+                "-p",
+                "reply with exactly: ok",
+                "--output-format",
+                "json",
+                "--max-turns",
+                "1",
+            ]);
+        }
         other => return Err(format!("unknown CLI provider kind: {other}")),
     }
     Ok(cmd)
@@ -239,6 +250,11 @@ fn build_chat_command(request: &CliChatRequest, binary: &str) -> Result<Command,
         }
         "codex-cli" => {
             cmd.arg("exec").arg(&prompt).arg("--json");
+            cmd.arg("-m").arg(&request.model);
+        }
+        "grok-cli" => {
+            cmd.arg("-p").arg(&prompt);
+            cmd.args(["--output-format", "streaming-json"]);
             cmd.arg("-m").arg(&request.model);
         }
         other => return Err(format!("unknown CLI provider kind: {other}")),
@@ -371,6 +387,24 @@ pub async fn cli_probe_subscription(request: CliProbeRequest) -> Result<CliProbe
                         .and_then(|t| t.as_str())
                         == Some("agent_message")
             }),
+        // Grok `--output-format json` prints a single object: a success carries
+        // `text`/`stopReason`; a failure is `{"type":"error",...}`. Parse the
+        // whole stdout (json may be pretty-printed) and any NDJSON lines.
+        "grok-cli" => {
+            let mut values: Vec<serde_json::Value> = Vec::new();
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(stdout.trim()) {
+                values.push(v);
+            }
+            for line in stdout.lines() {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                    values.push(v);
+                }
+            }
+            values.iter().any(|v| {
+                v.get("type").and_then(|t| t.as_str()) != Some("error")
+                    && (v.get("text").is_some() || v.get("stopReason").is_some())
+            })
+        }
         _ => false,
     };
 
@@ -457,6 +491,24 @@ mod tests {
     fn binary_for_provider_maps_kinds() {
         assert_eq!(binary_for_provider("claude-cli").unwrap(), "claude");
         assert_eq!(binary_for_provider("codex-cli").unwrap(), "codex");
+        assert_eq!(binary_for_provider("grok-cli").unwrap(), "grok");
         assert!(binary_for_provider("anthropic").is_err());
+    }
+
+    #[test]
+    fn build_commands_cover_grok() {
+        // The probe/chat builders must accept the grok-cli kind without erroring.
+        assert!(build_probe_command("grok-cli", "grok").is_ok());
+        let req = CliChatRequest {
+            provider: "grok-cli".to_string(),
+            model: "grok-composer-2.5-fast".to_string(),
+            system: None,
+            messages: vec![CliMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+            }],
+            path_override: None,
+        };
+        assert!(build_chat_command(&req, "grok").is_ok());
     }
 }
