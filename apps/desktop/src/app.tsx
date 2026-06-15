@@ -1109,7 +1109,9 @@ export function App() {
     if (!state.selectedFile()) return;
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => {
-      folder.handleEditorSave();
+      // Save, then re-index the saved file (the Rust staleness diff makes this
+      // cheap — only the changed doc is re-chunked/embedded).
+      void Promise.resolve(folder.handleEditorSave()).then(() => reindexActiveFile());
     }, 1000);
   });
 
@@ -1774,6 +1776,21 @@ export function App() {
     if (tier === "off") return;
     void workspaceIndexer.reindexAll();
   });
+  /** Re-index the active document after it's saved (called from the autosave
+   *  debounce). Cheap — the staleness diff re-embeds only the changed file.
+   *  Skips scratch docs, unsupported files, and the Off tier. */
+  function reindexActiveFile(): void {
+    if (indexingTier() === "off") return;
+    const file = state.selectedFile();
+    const rootId = state.selectedRootId();
+    if (!file || !rootId || rootId === SCRATCH_ROOT_ID || isScratchPath(file.path)) return;
+    const rootAbs = rootPaths().get(rootId);
+    if (!rootAbs) return;
+    let rel = file.path;
+    if (rel.startsWith(rootAbs)) rel = rel.slice(rootAbs.length).replace(/^\/+/, "");
+    if (!rel || !isSupportedFile(rel)) return;
+    void workspaceIndexer.reindexFile(rootAbs, rel);
+  }
 
   // ── Tab session restore ──────────────────────────────────────────────────
   // Restore tabs when roots become available after startup.
