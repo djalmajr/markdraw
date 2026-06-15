@@ -13,22 +13,41 @@ import { invoke } from "./chaos-invoke.ts";
 
 const keyCache = new Map<string, string | null>();
 
+// Some providers are ONE service (one key) split into two catalog shapes so the
+// model picker can offer both API styles. They must share a SINGLE keychain
+// item — otherwise the connect flow writes the same secret twice and macOS
+// prompts once per item. The canonical account collapses such aliases.
+//
+// OpenCode Go: `opencode-go` (anthropic /messages) + `opencode-go-chat`
+// (openai-compatible /chat/completions) → one key under `opencode-go`.
+const ACCOUNT_ALIASES: Record<string, string> = {
+  "opencode-go-chat": "opencode-go",
+};
+
+/** Canonical keychain account for a provider id (collapses shared-key aliases). */
+function account(providerId: string): string {
+  return ACCOUNT_ALIASES[providerId] ?? providerId;
+}
+
 export async function setApiKey(providerId: string, key: string): Promise<void> {
-  await invoke<void>("ai_set_api_key", { providerId, key });
-  keyCache.set(providerId, key);
+  const acct = account(providerId);
+  await invoke<void>("ai_set_api_key", { providerId: acct, key });
+  keyCache.set(acct, key);
 }
 
 export async function getApiKey(providerId: string): Promise<string | null> {
-  const cached = keyCache.get(providerId);
+  const acct = account(providerId);
+  const cached = keyCache.get(acct);
   if (cached !== undefined) return cached;
-  const key = (await invoke<string | null>("ai_get_api_key", { providerId })) ?? null;
-  keyCache.set(providerId, key);
+  const key = (await invoke<string | null>("ai_get_api_key", { providerId: acct })) ?? null;
+  keyCache.set(acct, key);
   return key;
 }
 
 export async function deleteApiKey(providerId: string): Promise<void> {
-  await invoke<void>("ai_delete_api_key", { providerId });
-  keyCache.delete(providerId);
+  const acct = account(providerId);
+  await invoke<void>("ai_delete_api_key", { providerId: acct });
+  keyCache.delete(acct);
 }
 
 /** Whether a key is stored for the provider (drives the Settings "Saved"/"Not
