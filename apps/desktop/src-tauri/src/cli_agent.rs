@@ -192,7 +192,8 @@ fn build_probe_command(provider: &str, binary: &str) -> Result<Command, String> 
     let mut cmd = Command::new(binary);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true); // reaped if the probe times out (see cli_probe_subscription)
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
 
@@ -312,7 +313,31 @@ pub async fn cli_probe_subscription(request: CliProbeRequest) -> Result<CliProbe
     };
 
     let mut cmd = build_probe_command(&request.provider, &path)?;
-    let output = cmd.output().await.map_err(|e| e.to_string())?;
+    // Bound the probe: the CLI runs a real (tiny) model turn, and an
+    // unauthenticated / hung binary must not leave the Settings "Continue"
+    // button (and refreshConnectedProviders) stuck forever. kill_on_drop reaps
+    // the child when this future is dropped on timeout.
+    let output = match tokio::time::timeout(
+        std::time::Duration::from_secs(25),
+        cmd.output(),
+    )
+    .await
+    {
+        Ok(Ok(o)) => o,
+        Ok(Err(e)) => {
+            return Ok(CliProbeResult { ok: false, path: Some(path), error: Some(e.to_string()) });
+        }
+        Err(_) => {
+            return Ok(CliProbeResult {
+                ok: false,
+                path: Some(path),
+                error: Some(
+                    "CLI probe timed out — make sure the CLI is installed and signed in, then try again."
+                        .to_string(),
+                ),
+            });
+        }
+    };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let msg = if stderr.trim().is_empty() {
