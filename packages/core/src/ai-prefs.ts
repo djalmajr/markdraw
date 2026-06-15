@@ -25,6 +25,7 @@ const MODE_KEY = "asciimark-ai-mode";
 const ENGINE_KEY = "asciimark-ai-engine";
 const MODEL_KEY = "asciimark-ai-model";
 const SMALL_MODEL_KEY = "asciimark-ai-small-model";
+const EMBEDDING_MODEL_KEY = "asciimark-ai-embedding-model";
 const TIER_KEY = "asciimark-ai-indexing-tier";
 const STREAMING_KEY = "asciimark-ai-streaming";
 const REASONING_KEY = "asciimark-ai-reasoning";
@@ -65,6 +66,19 @@ function getStoredAiSmallModel(): string | null {
 function setStoredAiSmallModel(modelId: string | null): void {
   if (modelId === null) localStorage.removeItem(SMALL_MODEL_KEY);
   else localStorage.setItem(SMALL_MODEL_KEY, modelId);
+}
+
+/** Selected embedding model ("provider/model") for the "Full" workspace index,
+ *  or null when unconfigured. Independent of the chat model — the user picks an
+ *  embedding-capable provider/model separately (only OpenAI/openai-compatible
+ *  qualify; see `providerCanEmbed`). */
+function getStoredAiEmbeddingModel(): string | null {
+  return localStorage.getItem(EMBEDDING_MODEL_KEY);
+}
+
+function setStoredAiEmbeddingModel(modelId: string | null): void {
+  if (modelId === null) localStorage.removeItem(EMBEDDING_MODEL_KEY);
+  else localStorage.setItem(EMBEDDING_MODEL_KEY, modelId);
 }
 
 function getStoredIndexingTier(): IndexingTier {
@@ -121,6 +135,8 @@ export type { AIChatMode, AIEngineId, AIReasoningEffort, IndexingTier };
 export {
   getStoredAiMode,
   setStoredAiMode,
+  getStoredAiEmbeddingModel,
+  setStoredAiEmbeddingModel,
   getStoredAiEngine,
   getStoredAiModel,
   getStoredAiReasoning,

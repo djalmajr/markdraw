@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
+  getStoredAiEmbeddingModel,
+  setStoredAiEmbeddingModel,
   getStoredAiEngine,
   getStoredAiMode,
   getStoredAiModel,
@@ -29,6 +31,7 @@ describe("ai preferences defaults", () => {
   it("defaults: no model, lite tier, ai-sdk engine, streaming off, reasoning off", () => {
     expect(getStoredAiModel()).toBeNull();
     expect(getStoredAiSmallModel()).toBeNull();
+    expect(getStoredAiEmbeddingModel()).toBeNull();
     expect(getStoredIndexingTier()).toBe("lite");
     expect(getStoredAiEngine()).toBe("ai-sdk");
     expect(getStoredAiStreaming()).toBe(false);
@@ -72,6 +75,16 @@ describe("ai preferences round-trip", () => {
   it("persists the small model independently", () => {
     setStoredAiSmallModel("anthropic/claude-haiku-4-5");
     expect(getStoredAiSmallModel()).toBe("anthropic/claude-haiku-4-5");
+  });
+
+  it("persists the embedding model independently of the chat model", () => {
+    setStoredAiModel("openai/gpt-4o");
+    setStoredAiEmbeddingModel("openai/text-embedding-3-small");
+    expect(getStoredAiEmbeddingModel()).toBe("openai/text-embedding-3-small");
+    expect(getStoredAiModel()).toBe("openai/gpt-4o"); // chat model untouched
+    setStoredAiEmbeddingModel(null);
+    expect(getStoredAiEmbeddingModel()).toBeNull();
+    expect(getStoredAiModel()).toBe("openai/gpt-4o");
   });
 
   it("persists tier and engine", () => {
