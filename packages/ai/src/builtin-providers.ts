@@ -15,6 +15,10 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     // user picks API key OR subscription in one place.
     connectGroup: "Claude",
     models: {
+      "claude-opus-4-8": {
+        name: "Claude Opus 4.8",
+        limit: { context: 200000, output: 64000 },
+      },
       "claude-sonnet-4-6": {
         name: "Claude Sonnet 4.6",
         limit: { context: 200000, output: 64000 },
@@ -110,12 +114,12 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     name: "Claude (subscription)",
     connectGroup: "Claude",
     models: {
-      "claude-sonnet-4-6": {
-        name: "Claude Sonnet 4.6",
+      "claude-opus-4-8": {
+        name: "Claude Opus 4.8",
         limit: { context: 200000, output: 64000 },
       },
-      "claude-opus-4-6": {
-        name: "Claude Opus 4.6",
+      "claude-sonnet-4-6": {
+        name: "Claude Sonnet 4.6",
         limit: { context: 200000, output: 64000 },
       },
     },
