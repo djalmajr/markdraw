@@ -214,6 +214,8 @@
   "ai_connect_provider": "Conectar provedor",
   "ai_manage_models": "Gerenciar modelos",
   "ai_model_none": "Sem modelos — conecte um provedor",
+  "ai_origin_subscription": "Assinatura",
+  "ai_origin_api": "API",
   "ai_context_usage": "Uso de contexto",
   "ai_context_system": "Prompt do sistema",
   "ai_context_tools": "Definições de ferramentas",

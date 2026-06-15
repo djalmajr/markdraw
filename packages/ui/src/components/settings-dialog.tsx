@@ -131,7 +131,12 @@ export interface SettingsDialogProps {
   /** Currently selected model id "provider/model", or null. */
   selectedModel: string | null;
   /** All configured models grouped by provider — drives "Manage models". */
-  allModels?: Array<{ id: string; name: string; models: Array<{ value: string; label: string }> }>;
+  allModels?: Array<{
+    id: string;
+    name: string;
+    origin?: "subscription" | "api";
+    models: Array<{ value: string; label: string }>;
+  }>;
   /** Model refs currently hidden from the chat picker. */
   hiddenModels?: string[];
   /** Toggle a model's visibility in the chat picker. */
@@ -803,7 +808,10 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
                       enterProvider({ name: group.name, ids: groupProviderIds(group) }, "manage")
                     }
                   >
-                    {group.name}
+                    {(useLocale(),
+                    group.origin
+                      ? `${group.name} · ${group.origin === "subscription" ? label("ai_origin_subscription") : label("ai_origin_api")}`
+                      : group.name)}
                   </button>
                   <ToggleSwitch
                     checked={providerAllVisible(group)}

@@ -214,6 +214,8 @@
   "ai_connect_provider": "Connect provider",
   "ai_manage_models": "Manage models",
   "ai_model_none": "No models — connect a provider",
+  "ai_origin_subscription": "Subscription",
+  "ai_origin_api": "API",
   "ai_context_usage": "Context usage",
   "ai_context_system": "System prompt",
   "ai_context_tools": "Tool definitions",

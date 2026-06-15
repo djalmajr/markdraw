@@ -443,15 +443,30 @@ export function App() {
     return ta.length - tb.length; // base before a longer variant (e.g. "…Pro")
   };
   const sortModelGroups = (
-    groups: { id: string; name: string; models: { value: string; label: string }[] }[],
-  ): { id: string; name: string; models: { value: string; label: string }[] }[] =>
+    groups: {
+      id: string;
+      name: string;
+      origin?: "subscription" | "api";
+      models: { value: string; label: string }[];
+    }[],
+  ): {
+    id: string;
+    name: string;
+    origin?: "subscription" | "api";
+    models: { value: string; label: string }[];
+  }[] =>
     groups
       .map((g) => ({ ...g, models: [...g.models].sort((a, b) => compareModelLabel(a.label, b.label)) }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
 
-  const aiModelGroupsAll = createMemo<{ id: string; name: string; models: { value: string; label: string }[] }[]>(
+  const aiModelGroupsAll = createMemo<
+    { id: string; name: string; origin?: "subscription" | "api"; models: { value: string; label: string }[] }[]
+  >(
     () => {
-      const groups = new Map<string, { id: string; name: string; models: { value: string; label: string }[] }>();
+      const groups = new Map<
+        string,
+        { id: string; name: string; origin?: "subscription" | "api"; models: { value: string; label: string }[] }
+      >();
       const connected = connectedProviders();
       for (const [pid, p] of Object.entries(aiConfig().provider)) {
         // Connected providers only — `aiModelGroups` (chat picker) derives from
@@ -466,7 +481,16 @@ export function App() {
         const base = p.name.replace(/\s*\([^)]*\)\s*$/, "").trim() || p.name;
         const existing = groups.get(base);
         if (existing) existing.models.push(...models);
-        else groups.set(base, { id: base, name: base, models });
+        // Origin (subscription vs API) is consistent within a base group — its
+        // providers are all CLI kinds or all API kinds — so the picker/Manage
+        // header can label it. Taken from the first provider of the group.
+        else
+          groups.set(base, {
+            id: base,
+            name: base,
+            origin: isCliProviderKind(p.kind) ? "subscription" : "api",
+            models,
+          });
       }
       return sortModelGroups([...groups.values()]);
     },
