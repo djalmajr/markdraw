@@ -118,6 +118,8 @@ export interface SettingsAiProvider {
   /** Connect-catalog grouping: providers sharing this render as one card (e.g.
    *  the Anthropic API + Claude subscription, both "Claude"). */
   connectGroup?: string;
+  /** The live model list can be re-fetched (openai-compatible + baseURL). */
+  fetchable?: boolean;
 }
 
 export interface SettingsDialogProps {
@@ -163,6 +165,8 @@ export interface SettingsDialogProps {
   /** Disconnect a provider group — receives EVERY provider id behind the merged
    *  base name (e.g. "OpenCode Go" → ["opencode-go", "opencode-go-chat"]). */
   onRemoveProvider?: (ids: string[]) => void | Promise<void>;
+  /** Re-fetch a provider's live model list. */
+  onRefreshModels?: (providerId: string) => void | Promise<void>;
   appVersion?: string;
   platform?: Platform;
   /** Configured MCP servers with live connection/tool status. */
@@ -484,6 +488,26 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     (providerViewData()?.ids ?? []).filter(
       (id) => props.aiProviders.find((p) => p.id === id)?.connectMode === "cli-subscription",
     );
+  /** Fetchable + connected ids in the group → eligible for "Refresh models". */
+  const groupRefreshableIds = (): string[] =>
+    groupApiIds().filter(
+      (id) =>
+        props.aiProviders.find((p) => p.id === id)?.fetchable && connectedProviderIds().has(id),
+    );
+  const [refreshing, setRefreshing] = createSignal(false);
+  async function refreshGroupModels(): Promise<void> {
+    const ids = groupRefreshableIds();
+    if (ids.length === 0) return;
+    setError(null);
+    setRefreshing(true);
+    try {
+      for (const id of ids) await props.onRefreshModels?.(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }
   /** Destructive action on the provider sub-page: confirm, then disconnect
    *  every backing id and return to Manage models. Errors render in the same
    *  inline slot the connect flow uses. */
@@ -609,6 +633,13 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
                 {(useLocale(), label("settings_ai_connect_continue"))}
               </Button>
             </div>
+            <Show when={groupRefreshableIds().length > 0}>
+              <div class="settings-row settings-row-end">
+                <Button size="sm" onClick={() => void refreshGroupModels()} disabled={refreshing()}>
+                  {(useLocale(), label("settings_ai_refresh_models"))}
+                </Button>
+              </div>
+            </Show>
           </Show>
           {/* Subscription — for any cli-subscription provider, below the API
               option so both can coexist (the "Claude" card offers each). */}

@@ -309,6 +309,7 @@
   "settings_ai_disconnect_confirm": "Remove this provider? Its API key will be deleted from the OS keychain.",
   "settings_ai_connect_continue": "Continue",
   "settings_ai_use_subscription": "Use subscription",
+  "settings_ai_refresh_models": "Refresh models",
   "settings_ai_no_models": "No models — load or pick a provider",
   "settings_ai_streaming_label": "Streaming responses (beta)",
   "settings_ai_streaming_desc": "Render replies token-by-token as they arrive. If responses hang, turn this off.",

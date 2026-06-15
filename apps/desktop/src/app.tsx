@@ -355,6 +355,9 @@ export function App() {
       kind: p.kind,
       connectMode: isCliProviderKind(p.kind) ? ("cli-subscription" as const) : ("api-key" as const),
       connectGroup: p.connectGroup,
+      // Live model list can be re-fetched (openai-compatible endpoint with a
+      // baseURL, e.g. OpenRouter / Ollama / OpenCode Zen) → show "Refresh models".
+      fetchable: !isCliProviderKind(p.kind) && !!p.options?.baseURL,
     })),
   );
 
@@ -637,6 +640,34 @@ export function App() {
    *  is cleared). Custom providers — present in the raw user config with
    *  kind+name — are also dropped from ai.json; built-ins keep their catalog
    *  entry and merely lose the credential (the connected filter hides them). */
+  /** Re-fetch a provider's live model list (openai-compatible /models) using the
+   *  stored key and overwrite its catalog entry. Used by the "Refresh models"
+   *  action on the provider page. No-ops for providers without a baseURL. */
+  async function refreshModels(providerId: string): Promise<void> {
+    const provider = aiConfig().provider[providerId];
+    if (!provider?.options?.baseURL || isCliProviderKind(provider.kind)) return;
+    const key = (await getApiKey(providerId)) ?? "";
+    let ids: string[] = [];
+    try {
+      ids = await listAiModels(providerId, key);
+    } catch {
+      ids = [];
+    }
+    if (!ids.length) return;
+    const user = await loadUserAIConfig();
+    const existing = (user.provider ?? {})[providerId] ?? {};
+    await saveAIConfig(
+      JSON.stringify({
+        ...user,
+        provider: {
+          ...(user.provider ?? {}),
+          [providerId]: { ...existing, models: Object.fromEntries(ids.map((id) => [id, { name: id }])) },
+        },
+      }),
+    );
+    setAiConfig(await loadAIConfig());
+  }
+
   async function removeProvider(ids: string[]): Promise<void> {
     for (const id of ids) await deleteApiKey(id);
     // Drop any persisted subscription connection too (no keychain key to clear).
@@ -3046,6 +3077,7 @@ export function App() {
       onSaveCustomProvider={saveCustomProvider}
       onConnectProvider={connectProvider}
       onRemoveProvider={removeProvider}
+      onRefreshModels={refreshModels}
       mcpServers={mcpServersView()}
       onSaveMcpServer={saveMcpServer}
       onRemoveMcpServer={removeMcpServer}

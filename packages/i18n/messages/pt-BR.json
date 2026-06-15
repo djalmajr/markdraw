@@ -306,6 +306,7 @@
   "settings_ai_connect_cli_desc": "Usa o login do Claude Code ou Codex CLI nesta máquina — sem API key. Instale e faça login no CLI oficial, depois continue para verificar.",
   "settings_ai_connect_continue": "Continuar",
   "settings_ai_use_subscription": "Usar assinatura",
+  "settings_ai_refresh_models": "Atualizar modelos",
   "settings_ai_reasoning_label": "Esforço de raciocínio",
   "settings_ai_disconnect": "Remover provedor",
   "settings_ai_disconnect_confirm": "Remover este provedor? A API key será apagada do chaveiro do sistema.",

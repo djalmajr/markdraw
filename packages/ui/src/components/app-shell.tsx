@@ -164,6 +164,8 @@ interface AppShellProps {
   onConnectProvider?: (input: { providerId: string; apiKey: string }) => void | Promise<void>;
   /** Disconnect a provider group (every id behind a merged base name). */
   onRemoveProvider?: (ids: string[]) => void | Promise<void>;
+  /** Re-fetch a provider's live model list (openai-compatible /models). */
+  onRefreshModels?: (providerId: string) => void | Promise<void>;
   onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;
   /** Resolve a file or folder as a chat context chip (desktop reads the file
    *  content, or builds a subtree listing for `kind: "dir"` — `path: ""` means
@@ -602,6 +604,7 @@ export function AppShell(props: AppShellProps) {
           onSaveCustomProvider={(i) => props.onSaveCustomProvider?.(i)}
           onConnectProvider={(i) => props.onConnectProvider?.(i)}
           onRemoveProvider={(ids) => props.onRemoveProvider?.(ids)}
+          onRefreshModels={(id) => props.onRefreshModels?.(id)}
           mcpServers={props.mcpServers ?? []}
           onSaveMcpServer={(s) => props.onSaveMcpServer?.(s)}
           onRemoveMcpServer={(id) => props.onRemoveMcpServer?.(id)}
