@@ -8,6 +8,8 @@ import {
   getStoredAiReasoning,
   getStoredAiSmallModel,
   getStoredAiStreaming,
+  getStoredConnectedSubscriptions,
+  setStoredConnectedSubscriptions,
   getStoredHiddenModels,
   setStoredHiddenModels,
   getStoredIndexingTier,
@@ -119,6 +121,12 @@ describe("ai preferences round-trip", () => {
     expect(getStoredHiddenModels()).toEqual([]);
     setStoredHiddenModels(["openai/gpt-4o", "openai/gpt-4o", "anthropic/claude-haiku-4-5"]);
     expect(getStoredHiddenModels().sort()).toEqual(["anthropic/claude-haiku-4-5", "openai/gpt-4o"]);
+  });
+
+  it("connected subscriptions default to empty and round-trip (deduped)", () => {
+    expect(getStoredConnectedSubscriptions()).toEqual([]);
+    setStoredConnectedSubscriptions(["claude-sub", "claude-sub", "codex-sub"]);
+    expect(getStoredConnectedSubscriptions().sort()).toEqual(["claude-sub", "codex-sub"]);
   });
 
   it("hidden models tolerate a corrupt blob (returns empty)", () => {

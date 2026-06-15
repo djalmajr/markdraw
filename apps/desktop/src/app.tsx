@@ -40,6 +40,8 @@ import {
   type AIReasoningEffort,
   getStoredHiddenModels,
   setStoredHiddenModels,
+  getStoredConnectedSubscriptions,
+  setStoredConnectedSubscriptions,
   getStoredIndexingTier,
   setStoredIndexingTier,
   type IndexingTier,
@@ -361,12 +363,31 @@ export function App() {
   // It gates the model groups (chat picker + Manage models): a builtin with
   // hardcoded models but no credential must not surface as pickable.
   const [connectedProviders, setConnectedProviders] = createSignal<Record<string, boolean>>({});
+  // Persisted set of explicitly-connected CLI subscriptions (claude-sub /
+  // codex-sub). A subscription has no keychain key, so its connection is
+  // remembered here instead of being re-probed (a real model call!) on every
+  // launch. Kept separate from API connectivity, which derives from the keychain.
+  const [connectedSubscriptions, setConnectedSubscriptions] = createSignal<Set<string>>(
+    new Set(getStoredConnectedSubscriptions()),
+  );
+  function persistConnectedSubscription(id: string, connected: boolean): void {
+    setConnectedSubscriptions((cur) => {
+      const next = new Set(cur);
+      if (connected) next.add(id);
+      else next.delete(id);
+      setStoredConnectedSubscriptions([...next]);
+      return next;
+    });
+  }
   async function refreshConnectedProviders(): Promise<void> {
     const next: Record<string, boolean> = {};
     for (const [id, p] of Object.entries(aiConfig().provider)) {
       try {
         if (isCliProviderKind(p.kind)) {
-          next[id] = (await probeCliSubscription(p.kind)).ok;
+          // No startup probe: a subscription is connected only if the user
+          // explicitly connected it (persisted). The probe runs on connect, so
+          // we never spend a model call — or hang on a missing CLI — at launch.
+          next[id] = connectedSubscriptions().has(id);
         } else if (LOCAL_PROVIDER_IDS.has(id) || !!p.options?.apiKey) {
           next[id] = true;
         } else {
@@ -579,6 +600,7 @@ export function App() {
       if (!probe.ok) {
         throw new Error(probe.error ?? "CLI subscription not available");
       }
+      persistConnectedSubscription(providerId, true); // remember across launches
       setAiConfig(await loadAIConfig());
       await refreshConnectedProviders();
       return;
@@ -616,6 +638,8 @@ export function App() {
    *  entry and merely lose the credential (the connected filter hides them). */
   async function removeProvider(ids: string[]): Promise<void> {
     for (const id of ids) await deleteApiKey(id);
+    // Drop any persisted subscription connection too (no keychain key to clear).
+    for (const id of ids) persistConnectedSubscription(id, false);
     const user = await loadUserAIConfig();
     const provider = { ...(user.provider ?? {}) };
     let changed = false;
