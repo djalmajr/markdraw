@@ -138,9 +138,12 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     kind: "codex-cli",
     name: "Codex (subscription)",
     connectGroup: "OpenAI",
+    // Mirrors the official Codex model picker (desktop + CLI), newest first.
     models: {
-      "gpt-5.4": { name: "GPT-5.4", limit: { context: 256000, output: 32768 } },
-      "o3": { name: "o3", limit: { context: 200000, output: 100000 } },
+      "gpt-5.5": { name: "GPT-5.5" },
+      "gpt-5.4": { name: "GPT-5.4" },
+      "gpt-5.4-mini": { name: "GPT-5.4-Mini" },
+      "gpt-5.3-codex-spark": { name: "GPT-5.3-Codex-Spark" },
     },
   },
   // Grok CLI subscription — routed through the official local `grok` binary
