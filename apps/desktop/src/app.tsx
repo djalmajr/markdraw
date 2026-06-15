@@ -373,12 +373,12 @@ export function App() {
           next[id] = await hasApiKey(id);
         }
       } catch {
-        // A keychain read throws when the OS unlock prompt is dismissed or the
-        // item is locked — that means a key *exists* but we can't read it right
-        // now, NOT that the provider is unconfigured. Keep it available
-        // (optimistic) instead of dropping every provider from the model picker
-        // on one cancel; the real unlock happens lazily on the next send.
-        next[id] = connectedProviders()[id] ?? true;
+        // A keychain read / CLI probe can fail (OS prompt dismissed, item
+        // locked, binary missing). Mark the provider NOT connected so the model
+        // picker shows it disabled rather than a misleading "connected" badge.
+        // The per-provider try/catch is the real fix: one failure no longer
+        // aborts the whole refresh and wipes every OTHER provider too.
+        next[id] = false;
       }
     }
     setConnectedProviders(next);
