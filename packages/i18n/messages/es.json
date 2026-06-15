@@ -306,6 +306,7 @@
   "settings_ai_connect_cli_desc": "Usa el inicio de sesión de Claude Code o Codex CLI en esta máquina — sin API key. Instala e inicia sesión en el CLI oficial y continúa para verificar.",
   "settings_ai_connect_cli_desc_claude": "Usa el inicio de sesión de Claude Code CLI en esta máquina — sin API key. Instala e inicia sesión en el CLI oficial y continúa para verificar.",
   "settings_ai_connect_cli_desc_codex": "Usa el inicio de sesión de Codex CLI en esta máquina — sin API key. Instala e inicia sesión en el CLI oficial y continúa para verificar.",
+  "settings_ai_connect_cli_desc_grok": "Usa el inicio de sesión de Grok CLI en esta máquina — sin API key. Instala e inicia sesión en el CLI oficial y continúa para verificar.",
   "settings_ai_connect_continue": "Continuar",
   "settings_ai_use_subscription": "Usar suscripción",
   "settings_ai_refresh_models": "Actualizar modelos",

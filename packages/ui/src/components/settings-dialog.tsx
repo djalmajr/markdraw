@@ -514,9 +514,9 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     const kind = groupCliIds()
       .map((id) => props.aiProviders.find((p) => p.id === id)?.kind)
       .find(Boolean);
-    return kind === "codex-cli"
-      ? "settings_ai_connect_cli_desc_codex"
-      : "settings_ai_connect_cli_desc_claude";
+    if (kind === "codex-cli") return "settings_ai_connect_cli_desc_codex";
+    if (kind === "grok-cli") return "settings_ai_connect_cli_desc_grok";
+    return "settings_ai_connect_cli_desc_claude";
   };
   /** Destructive action on the provider sub-page: confirm, then disconnect
    *  every backing id and return to Manage models. Errors render in the same
