@@ -35,15 +35,14 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     // Shares the "OpenAI" connect card with the Codex subscription: GPT models
     // via API key, or the Codex CLI via subscription.
     connectGroup: "OpenAI",
-    models: {
-      "gpt-4o": { name: "GPT-4o", limit: { context: 128000, output: 16384 } },
-      "gpt-4o-mini": {
-        name: "GPT-4o mini",
-        limit: { context: 128000, output: 16384 },
-      },
-    },
+    // Chat models are fetched live from /v1/models on connect (empty here so the
+    // connect flow triggers the fetch). listAiModels filters to chat models —
+    // OpenAI's catalog also lists embeddings, audio, image and legacy models.
+    options: { baseURL: "https://api.openai.com/v1" },
+    models: {},
     // Embedding models for the "Full" workspace index. `dim` is the native
-    // vector size; switching models (different dim) forces a reindex.
+    // vector size; switching models (different dim) forces a reindex. Kept
+    // hand-declared — /v1/models doesn't expose embedding dimensions.
     embeddingModels: {
       "text-embedding-3-small": { name: "Text Embedding 3 Small", dim: 1536 },
       "text-embedding-3-large": { name: "Text Embedding 3 Large", dim: 3072 },

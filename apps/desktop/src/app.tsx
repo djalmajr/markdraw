@@ -568,7 +568,16 @@ export function App() {
       provider?.options?.headers,
       tauriFetch as unknown as typeof globalThis.fetch,
     );
-    return list.map((mdl) => mdl.id);
+    const ids = list.map((mdl) => mdl.id);
+    // OpenAI's /v1/models also lists embeddings, audio, image and legacy models.
+    // Keep only chat-capable ids (prefix allowlist + non-chat denylist) so the
+    // picker isn't flooded. Other openai-compatible providers return clean lists.
+    if (provider?.kind === "openai") {
+      const CHAT_OK = /^(gpt-|o\d|chatgpt-)/;
+      const NON_CHAT = /(embedding|whisper|tts|audio|image|moderation|realtime|transcribe|search|dall-e)/;
+      return ids.filter((id) => CHAT_OK.test(id) && !NON_CHAT.test(id));
+    }
+    return ids;
   }
 
   async function saveAiProvider(opts: {
