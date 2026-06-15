@@ -383,8 +383,9 @@ pub fn read_files_relative_impl(
 /// One line that matches a Find-in-Files query. `path` is workspace-relative
 /// with forward slashes (matches `DirEntry::path`). `line_number` is
 /// 0-indexed so the frontend can feed it directly to the editor's
-/// scrollToLine prop. `column_start`/`column_end` are byte offsets inside
-/// `line_text` for highlighting.
+/// scrollToLine prop. `column_start`/`column_end` are UTF-16 code-unit offsets
+/// inside `line_text` — matching JS `String.slice`, which the frontend uses to
+/// highlight — so the mark lines up on accented / multi-byte lines.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct FileMatch {
     pub path: String,
@@ -497,16 +498,23 @@ pub fn find_in_files_impl(
                 } else {
                     line.to_lowercase()
                 };
-                let column = match haystack.find(&needle) {
+                let byte_col = match haystack.find(&needle) {
                     Some(c) => c,
                     None => continue,
                 };
+                // Emit UTF-16 code-unit offsets (what JS `String.slice` indexes),
+                // NOT byte offsets — otherwise the frontend highlight drifts
+                // right on lines with accents / em-dashes before the match.
+                // `byte_col` is a char boundary (it came from `find`), so the
+                // prefix slice is always valid.
+                let column_start = haystack[..byte_col].encode_utf16().count();
+                let column_end = column_start + needle.encode_utf16().count();
                 results.push(FileMatch {
                     path: rel_path.clone(),
                     line_number,
                     line_text: line.to_string(),
-                    column_start: column,
-                    column_end: column + needle.len(),
+                    column_start,
+                    column_end,
                 });
             }
         }
@@ -2442,7 +2450,28 @@ mod tests {
         let matches = find_in_files_impl(root, "needle", true, false).unwrap();
         assert_eq!(matches.len(), 1);
         let m = &matches[0];
-        assert_eq!(&m.line_text[m.column_start..m.column_end], "needle");
+        // Offsets are UTF-16 code units (what the frontend's String.slice uses).
+        let units: Vec<u16> = m.line_text.encode_utf16().collect();
+        assert_eq!(String::from_utf16(&units[m.column_start..m.column_end]).unwrap(), "needle");
+    }
+
+    #[test]
+    fn find_in_files_column_offsets_are_utf16_on_accented_lines() {
+        // Regression: byte offsets made the highlight drift right on lines with
+        // accents / em-dashes before the match (a global "GVC" search
+        // highlighting "Pip" in "GVC/Pipeline").
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_file(&root.join("a.md"), "US — Visualização — GVC/Pipeline\n");
+        let matches = find_in_files_impl(root, "GVC", false, false).unwrap();
+        assert_eq!(matches.len(), 1);
+        let m = &matches[0];
+        // Slicing the UTF-16 view (as JS String.slice does) yields exactly "GVC".
+        let units: Vec<u16> = m.line_text.encode_utf16().collect();
+        assert_eq!(String::from_utf16(&units[m.column_start..m.column_end]).unwrap(), "GVC");
+        // The UTF-16 start is strictly less than the byte index (multi-byte
+        // chars precede the match) — proving offsets aren't bytes.
+        assert!(m.column_start < m.line_text.find("GVC").unwrap());
     }
 
     // ── Tauri-command body mutation guards (Linear DJA-43) ─────────────
