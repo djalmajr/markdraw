@@ -304,6 +304,8 @@
   "settings_ai_connect": "Connect",
   "settings_ai_connect_desc": "Enter the API key to connect this provider and enable its models.",
   "settings_ai_connect_cli_desc": "Uses your Claude Code or Codex CLI login on this machine — no API key. Install and sign in to the official CLI, then continue to verify.",
+  "settings_ai_connect_cli_desc_claude": "Uses your Claude Code CLI login on this machine — no API key. Install and sign in to the official CLI, then continue to verify.",
+  "settings_ai_connect_cli_desc_codex": "Uses your Codex CLI login on this machine — no API key. Install and sign in to the official CLI, then continue to verify.",
   "settings_ai_reasoning_label": "Reasoning effort",
   "settings_ai_disconnect": "Remove provider",
   "settings_ai_disconnect_confirm": "Remove this provider? Its API key will be deleted from the OS keychain.",

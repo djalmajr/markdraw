@@ -1,5 +1,6 @@
 import type { JSX, ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
+import { Show, splitProps } from "solid-js"
+import IconLoader from "~icons/lucide/loader-circle"
 
 import * as ButtonPrimitive from "@kobalte/core/button"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
@@ -35,17 +36,35 @@ const buttonVariants = cva(
 )
 
 type ButtonProps<T extends ValidComponent = "button"> = ButtonPrimitive.ButtonRootProps<T> &
-  VariantProps<typeof buttonVariants> & { class?: string | undefined; children?: JSX.Element }
+  VariantProps<typeof buttonVariants> & {
+    class?: string | undefined
+    children?: JSX.Element
+    /** Show a spinner and disable the button while an async action runs. */
+    loading?: boolean
+  }
 
 const Button = <T extends ValidComponent = "button">(
   props: PolymorphicProps<T, ButtonProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ButtonProps, ["variant", "size", "class"])
+  const [local, others] = splitProps(props as ButtonProps, [
+    "variant",
+    "size",
+    "class",
+    "loading",
+    "children",
+    "disabled"
+  ])
   return (
     <ButtonPrimitive.Root
       class={cn(buttonVariants({ variant: local.variant, size: local.size }), local.class)}
+      disabled={local.loading || local.disabled}
       {...others}
-    />
+    >
+      <Show when={local.loading}>
+        <IconLoader class="animate-spin" />
+      </Show>
+      {local.children}
+    </ButtonPrimitive.Root>
   )
 }
 

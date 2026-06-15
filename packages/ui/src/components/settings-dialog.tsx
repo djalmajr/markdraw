@@ -508,6 +508,16 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
       setRefreshing(false);
     }
   }
+  /** Subscription description keyed to THIS card's CLI (so the Codex card never
+   *  mentions Claude Code, and vice versa). */
+  const groupCliDescKey = (): string => {
+    const kind = groupCliIds()
+      .map((id) => props.aiProviders.find((p) => p.id === id)?.kind)
+      .find(Boolean);
+    return kind === "codex-cli"
+      ? "settings_ai_connect_cli_desc_codex"
+      : "settings_ai_connect_cli_desc_claude";
+  };
   /** Destructive action on the provider sub-page: confirm, then disconnect
    *  every backing id and return to Manage models. Errors render in the same
    *  inline slot the connect flow uses. */
@@ -628,14 +638,15 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               <Button
                 size="sm"
                 onClick={() => void connectIds(groupApiIds())}
-                disabled={loading() || !apiKey().trim()}
+                loading={loading()}
+                disabled={!apiKey().trim()}
               >
                 {(useLocale(), label("settings_ai_connect_continue"))}
               </Button>
             </div>
             <Show when={groupRefreshableIds().length > 0}>
               <div class="settings-row settings-row-end">
-                <Button size="sm" onClick={() => void refreshGroupModels()} disabled={refreshing()}>
+                <Button size="sm" onClick={() => void refreshGroupModels()} loading={refreshing()}>
                   {(useLocale(), label("settings_ai_refresh_models"))}
                 </Button>
               </div>
@@ -651,9 +662,9 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
                   : {}
               }
             >
-              <p class="settings-prose">{(useLocale(), label("settings_ai_connect_cli_desc"))}</p>
+              <p class="settings-prose">{(useLocale(), label(groupCliDescKey()))}</p>
               <div class="settings-row settings-row-end">
-                <Button size="sm" onClick={() => void connectIds(groupCliIds())} disabled={loading()}>
+                <Button size="sm" onClick={() => void connectIds(groupCliIds())} loading={loading()}>
                   {(useLocale(), label("settings_ai_use_subscription"))}
                 </Button>
               </div>
