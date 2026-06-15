@@ -70,12 +70,12 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     models: {
       "glm-5.1": { name: "GLM-5.1" },
       "glm-5": { name: "GLM-5" },
+      "kimi-k2.7": { name: "Kimi K2.7" },
       "kimi-k2.6": { name: "Kimi K2.6" },
-      "kimi-k2.5": { name: "Kimi K2.5" },
       "deepseek-v4-pro": { name: "DeepSeek V4 Pro" },
       "deepseek-v4-flash": { name: "DeepSeek V4 Flash" },
-      "mimo-v2.5-pro": { name: "MiMo-V2.5-Pro" },
       "mimo-v2.5": { name: "MiMo-V2.5" },
+      "mimo-v2.5-pro": { name: "MiMo-V2.5-Pro" },
     },
   },
   // OpenCode Zen (https://opencode.ai/zen/v1) — distinct catalog; models live from /models.
