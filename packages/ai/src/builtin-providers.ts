@@ -28,6 +28,9 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
   openai: {
     kind: "openai",
     name: "OpenAI",
+    // Shares the "OpenAI" connect card with the Codex subscription: GPT models
+    // via API key, or the Codex CLI via subscription.
+    connectGroup: "OpenAI",
     models: {
       "gpt-4o": { name: "GPT-4o", limit: { context: 128000, output: 16384 } },
       "gpt-4o-mini": {
@@ -120,6 +123,7 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
   "codex-sub": {
     kind: "codex-cli",
     name: "Codex (subscription)",
+    connectGroup: "OpenAI",
     models: {
       "gpt-5.4": { name: "GPT-5.4", limit: { context: 256000, output: 32768 } },
       "o3": { name: "o3", limit: { context: 200000, output: 100000 } },
