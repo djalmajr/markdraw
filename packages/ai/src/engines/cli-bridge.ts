@@ -115,6 +115,13 @@ function createCliProvider(
 
     const onEvent = (event: CliStreamEvent) => {
       if (event.type === "line") {
+        // Antigravity (`agy --print`) emits PLAIN TEXT, not JSON — each stdout
+        // line is response text. Emit it verbatim (re-adding the stripped \n).
+        if (kind === "antigravity-cli") {
+          queue.push({ type: "text-delta", text: `${event.line}\n` });
+          wake();
+          return;
+        }
         try {
           const obj = JSON.parse(event.line) as Record<string, unknown>;
           const text =
@@ -238,6 +245,13 @@ export const grokCliEngine: AIEngine = {
   id: "grok-cli",
   createProvider(resolved, _getApiKey: CredentialResolver, opts?: AIEngineOptions) {
     return createCliProvider("grok-cli", resolved, opts);
+  },
+};
+
+export const antigravityCliEngine: AIEngine = {
+  id: "antigravity-cli",
+  createProvider(resolved, _getApiKey: CredentialResolver, opts?: AIEngineOptions) {
+    return createCliProvider("antigravity-cli", resolved, opts);
   },
 };
 

@@ -21,6 +21,7 @@ const ProviderKindSchema = v.picklist([
   "claude-cli",
   "codex-cli",
   "grok-cli",
+  "antigravity-cli",
 ] as const);
 
 const ModelLimitSchema = v.object({
@@ -275,6 +276,7 @@ function providerCanEmbed(p: ProviderConfig): boolean {
     p.kind === "claude-cli" ||
     p.kind === "codex-cli" ||
     p.kind === "grok-cli" ||
+    p.kind === "antigravity-cli" ||
     p.kind === "anthropic"
   ) {
     return false;

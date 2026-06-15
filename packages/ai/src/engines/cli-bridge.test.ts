@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { CliStreamEvent } from "./cli-bridge.ts";
-import { claudeCliEngine, grokCliEngine } from "./cli-bridge.ts";
+import { antigravityCliEngine, claudeCliEngine, grokCliEngine } from "./cli-bridge.ts";
 import type { ResolvedModel } from "../resolve-model.ts";
 
 const resolved: ResolvedModel = {
@@ -93,5 +93,32 @@ describe("cli-bridge", () => {
 
     const text = await provider.complete("hi");
     expect(text).toBe("Hello world");
+  });
+
+  it("parses Antigravity plain-text stdout lines into the response", async () => {
+    const agyResolved: ResolvedModel = {
+      id: "antigravity-sub/Gemini 3.5 Flash (Medium)",
+      providerId: "antigravity-sub",
+      modelId: "Gemini 3.5 Flash (Medium)",
+      provider: {
+        kind: "antigravity-cli",
+        name: "Antigravity (subscription)",
+        models: { "Gemini 3.5 Flash (Medium)": { name: "Gemini 3.5 Flash (Medium)" } },
+      },
+      model: { name: "Gemini 3.5 Flash (Medium)" },
+    };
+    // agy --print emits PLAIN text (not JSON) — each stdout line is response text.
+    const lines = ["Hello,", "world."];
+    const provider = antigravityCliEngine.createProvider(agyResolved, async () => undefined, {
+      cliHost: {
+        streamChat: async (_req, onEvent) => {
+          for (const line of lines) onEvent({ type: "line", line });
+          onEvent({ type: "done" });
+        },
+      },
+    });
+
+    const text = await provider.complete("hi");
+    expect(text).toBe("Hello,\nworld.\n");
   });
 });

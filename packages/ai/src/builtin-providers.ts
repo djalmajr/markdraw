@@ -161,6 +161,34 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
       "grok-build": { name: "Grok Build" },
     },
   },
+  // Google Gemini API (OpenAI-compatible endpoint). Shares the "Antigravity"
+  // connect card with the Antigravity CLI subscription. Models fetched live.
+  gemini: {
+    kind: "openai-compatible",
+    name: "Gemini",
+    connectGroup: "Antigravity",
+    options: { baseURL: "https://generativelanguage.googleapis.com/v1beta/openai" },
+    models: {},
+  },
+  // Antigravity CLI subscription — routed through the official local `agy`
+  // binary (Rust spawn, plain-text stdout). Shares the "Antigravity" connect
+  // card with the Gemini API key. Models mirror `agy models` (its agentic
+  // catalog; the display string is passed verbatim to `agy --model`).
+  "antigravity-sub": {
+    kind: "antigravity-cli",
+    name: "Antigravity (subscription)",
+    connectGroup: "Antigravity",
+    models: {
+      "Gemini 3.5 Flash (Medium)": { name: "Gemini 3.5 Flash (Medium)" },
+      "Gemini 3.5 Flash (High)": { name: "Gemini 3.5 Flash (High)" },
+      "Gemini 3.5 Flash (Low)": { name: "Gemini 3.5 Flash (Low)" },
+      "Gemini 3.1 Pro (High)": { name: "Gemini 3.1 Pro (High)" },
+      "Gemini 3.1 Pro (Low)": { name: "Gemini 3.1 Pro (Low)" },
+      "Claude Sonnet 4.6 (Thinking)": { name: "Claude Sonnet 4.6 (Thinking)" },
+      "Claude Opus 4.6 (Thinking)": { name: "Claude Opus 4.6 (Thinking)" },
+      "GPT-OSS 120B (Medium)": { name: "GPT-OSS 120B (Medium)" },
+    },
+  },
 };
 
 /** Deep-merge a parsed user config over the built-in catalog. */
