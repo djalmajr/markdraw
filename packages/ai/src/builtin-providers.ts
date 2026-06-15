@@ -32,6 +32,12 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
         limit: { context: 128000, output: 16384 },
       },
     },
+    // Embedding models for the "Full" workspace index. `dim` is the native
+    // vector size; switching models (different dim) forces a reindex.
+    embeddingModels: {
+      "text-embedding-3-small": { name: "Text Embedding 3 Small", dim: 1536 },
+      "text-embedding-3-large": { name: "Text Embedding 3 Large", dim: 3072 },
+    },
   },
   openrouter: {
     kind: "openai-compatible",
@@ -90,6 +96,30 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     name: "LM Studio (local)",
     options: { baseURL: "http://localhost:1234/v1" },
     models: {}, // the user lists models loaded in LM Studio's local server
+  },
+  // Claude Code / Codex subscription — routed through the official local CLI
+  // (Rust spawn + JSONL parse). No API key; auth comes from the CLI install.
+  "claude-sub": {
+    kind: "claude-cli",
+    name: "Claude (subscription)",
+    models: {
+      "claude-sonnet-4-6": {
+        name: "Claude Sonnet 4.6",
+        limit: { context: 200000, output: 64000 },
+      },
+      "claude-opus-4-6": {
+        name: "Claude Opus 4.6",
+        limit: { context: 200000, output: 64000 },
+      },
+    },
+  },
+  "codex-sub": {
+    kind: "codex-cli",
+    name: "Codex (subscription)",
+    models: {
+      "gpt-5.4": { name: "GPT-5.4", limit: { context: 256000, output: 32768 } },
+      "o3": { name: "o3", limit: { context: 200000, output: 100000 } },
+    },
   },
 };
 

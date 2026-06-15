@@ -18,6 +18,8 @@ const ProviderKindSchema = v.picklist([
   "anthropic",
   "openai",
   "openai-compatible",
+  "claude-cli",
+  "codex-cli",
 ] as const);
 
 const ModelLimitSchema = v.object({
@@ -28,6 +30,14 @@ const ModelLimitSchema = v.object({
 const ModelConfigSchema = v.object({
   name: v.string(),
   limit: v.optional(ModelLimitSchema),
+});
+
+/** An embedding model a provider exposes. `dim` (vector dimension) is load-bearing:
+ *  the workspace index stores it with every vector and forces a reindex when it
+ *  changes (a 1536-d query can't be scored against 768-d stored vectors). */
+const EmbeddingModelConfigSchema = v.object({
+  name: v.string(),
+  dim: v.number(),
 });
 
 const ProviderOptionsSchema = v.object({
@@ -45,6 +55,9 @@ const ProviderConfigSchema = v.object({
   npm: v.optional(v.string()),
   options: v.optional(ProviderOptionsSchema),
   models: v.record(v.string(), ModelConfigSchema),
+  /** Embedding models this provider exposes (for the "Full" workspace index).
+   *  Absent/empty ⇒ the provider can't embed (see `providerCanEmbed`). */
+  embeddingModels: v.optional(v.record(v.string(), EmbeddingModelConfigSchema)),
 });
 
 /** What the user may write in ai.json for a provider — every field optional, so
@@ -56,6 +69,7 @@ const UserProviderConfigSchema = v.object({
   npm: v.optional(v.string()),
   options: v.optional(ProviderOptionsSchema),
   models: v.optional(v.record(v.string(), ModelConfigSchema)),
+  embeddingModels: v.optional(v.record(v.string(), EmbeddingModelConfigSchema)),
 });
 
 /** Transport a configured MCP server speaks. stdio spawns a child process
@@ -148,6 +162,7 @@ const UserAIConfigSchema = v.object({
 type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
 type ModelLimit = v.InferOutput<typeof ModelLimitSchema>;
 type ModelConfig = v.InferOutput<typeof ModelConfigSchema>;
+type EmbeddingModelConfig = v.InferOutput<typeof EmbeddingModelConfigSchema>;
 type ProviderOptions = v.InferOutput<typeof ProviderOptionsSchema>;
 type ProviderConfig = v.InferOutput<typeof ProviderConfigSchema>;
 type UserProviderConfig = v.InferOutput<typeof UserProviderConfigSchema>;
@@ -174,6 +189,16 @@ function mergeOptions(
   return merged;
 }
 
+/** Merge embedding-model maps (user over builtin), omitting the field entirely
+ *  when neither side declares any — so `providerCanEmbed` stays a clean check. */
+function mergeEmbeddingModels(
+  base: Record<string, EmbeddingModelConfig> | undefined,
+  override: Record<string, EmbeddingModelConfig> | undefined,
+): { embeddingModels?: Record<string, EmbeddingModelConfig> } {
+  const merged = { ...(base ?? {}), ...(override ?? {}) };
+  return Object.keys(merged).length > 0 ? { embeddingModels: merged } : {};
+}
+
 /**
  * Deep-merge a user config over the built-in provider catalog, producing a
  * fully-resolved `AIConfig`. Known providers inherit `npm`/`name`/`models`
@@ -197,6 +222,7 @@ function mergeConfigs(
         npm: up.npm ?? base.npm,
         options: mergeOptions(base.options, up.options),
         models: { ...base.models, ...(up.models ?? {}) },
+        ...mergeEmbeddingModels(base.embeddingModels, up.embeddingModels),
       };
     } else if (up.kind && up.name) {
       provider[id] = {
@@ -205,6 +231,7 @@ function mergeConfigs(
         npm: up.npm,
         options: up.options,
         models: up.models ?? {},
+        ...mergeEmbeddingModels(undefined, up.embeddingModels),
       };
     }
     // else: incomplete custom provider — ignored
@@ -218,8 +245,17 @@ function mergeConfigs(
   };
 }
 
+/** Whether a provider can produce embeddings for the "Full" workspace index.
+ *  Subscription CLIs (claude-cli/codex-cli) are chat-only and Anthropic has no
+ *  embeddings API; every other kind needs at least one declared embedding model. */
+function providerCanEmbed(p: ProviderConfig): boolean {
+  if (p.kind === "claude-cli" || p.kind === "codex-cli" || p.kind === "anthropic") return false;
+  return Object.keys(p.embeddingModels ?? {}).length > 0;
+}
+
 export {
   type AIConfig,
+  type EmbeddingModelConfig,
   type MCPServerConfig,
   type MCPTransport,
   type ModelConfig,
@@ -230,6 +266,7 @@ export {
   type UserAIConfig,
   type UserProviderConfig,
   AIConfigSchema,
+  EmbeddingModelConfigSchema,
   MCPServerConfigSchema,
   MCPTransportSchema,
   ModelConfigSchema,
@@ -240,4 +277,5 @@ export {
   UserProviderConfigSchema,
   mergeConfigs,
   parseUserConfig,
+  providerCanEmbed,
 };
