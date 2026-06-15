@@ -364,12 +364,21 @@ export function App() {
   async function refreshConnectedProviders(): Promise<void> {
     const next: Record<string, boolean> = {};
     for (const [id, p] of Object.entries(aiConfig().provider)) {
-      if (isCliProviderKind(p.kind)) {
-        const probe = await probeCliSubscription(p.kind);
-        next[id] = probe.ok;
-      } else {
-        next[id] =
-          LOCAL_PROVIDER_IDS.has(id) || !!p.options?.apiKey || (await hasApiKey(id));
+      try {
+        if (isCliProviderKind(p.kind)) {
+          next[id] = (await probeCliSubscription(p.kind)).ok;
+        } else if (LOCAL_PROVIDER_IDS.has(id) || !!p.options?.apiKey) {
+          next[id] = true;
+        } else {
+          next[id] = await hasApiKey(id);
+        }
+      } catch {
+        // A keychain read throws when the OS unlock prompt is dismissed or the
+        // item is locked — that means a key *exists* but we can't read it right
+        // now, NOT that the provider is unconfigured. Keep it available
+        // (optimistic) instead of dropping every provider from the model picker
+        // on one cancel; the real unlock happens lazily on the next send.
+        next[id] = connectedProviders()[id] ?? true;
       }
     }
     setConnectedProviders(next);
