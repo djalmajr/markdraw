@@ -429,6 +429,15 @@ export function App() {
   );
   /** Whether the "Complete" tier can run — at least one embedding provider connected. */
   const embeddingCapable = createMemo(() => embeddingModelGroups().length > 0);
+  // Selected embedding model ("provider/model"), independent of the chat model.
+  const embeddingSelectedModel = createMemo<string | null>(() => {
+    aiConfig();
+    return getStoredAiEmbeddingModel();
+  });
+  function selectEmbeddingModel(ref: string): void {
+    setStoredAiEmbeddingModel(ref);
+    setAiConfig((c) => ({ ...c })); // bump so the pickers/memos re-derive
+  }
   // Models the user hid via "Manage models" — filtered out of the chat picker.
   const [hiddenModels, setHiddenModels] = createSignal<string[]>(getStoredHiddenModels());
   function toggleHiddenModel(ref: string): void {
@@ -2949,6 +2958,10 @@ export function App() {
         setIndexingTier(next);
         setStoredIndexingTier(next);
       }}
+      aiEmbeddingModelGroups={embeddingModelGroups()}
+      aiEmbeddingSelectedModel={embeddingSelectedModel()}
+      onSelectAiEmbeddingModel={selectEmbeddingModel}
+      aiEmbeddingCapable={embeddingCapable()}
       aiReasoning={aiReasoning()}
       onAiReasoningChange={(v) => {
         // The Select hands back a plain string; the prefs setter narrows it

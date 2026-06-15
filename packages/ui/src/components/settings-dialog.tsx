@@ -59,6 +59,7 @@ import {
   SwitchThumb,
 } from "./ui/switch.tsx";
 import { TierCard } from "./settings/tier-card.tsx";
+import { ModelPicker } from "./model-picker.tsx";
 import { confirm } from "./confirm-dialog.tsx";
 
 const messages = m as unknown as Record<string, () => string>;
@@ -132,6 +133,12 @@ export interface SettingsDialogProps {
   onToggleModel?: (ref: string) => void;
   indexingTier: IndexingTier;
   onTierChange: (tier: IndexingTier) => void;
+  /** Embedding-capable providers/models for the Complete-tier picker. */
+  embeddingModelGroups?: Array<{ id: string; name: string; models: Array<{ value: string; label: string }> }>;
+  embeddingSelectedModel?: string | null;
+  onSelectEmbeddingModel?: (ref: string) => void;
+  /** Whether the Complete tier can be enabled (≥1 embedding provider connected). */
+  embeddingCapable?: boolean;
   /** Fetch the live model list for a provider using the given key. */
   onListModels: (providerId: string, apiKey: string) => Promise<string[]>;
   /** Persist key (keychain) + selected model (ai-prefs/ai.json). */
@@ -1113,6 +1120,17 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
 }
 
 function IndexingSection(props: SettingsDialogProps): JSX.Element {
+  const embeddingGroups = (): Array<{ id: string; name: string; models: Array<{ value: string; label: string }> }> =>
+    props.embeddingModelGroups ?? [];
+  const embeddingCurrentLabel = (): string => {
+    const ref = props.embeddingSelectedModel;
+    if (!ref) return "—";
+    for (const g of embeddingGroups()) {
+      const m = g.models.find((x) => x.value === ref);
+      if (m) return m.label;
+    }
+    return ref;
+  };
   return (
     <div class="settings-section">
       <h3 class="settings-h3">{(useLocale(), label("settings_indexing_title"))}</h3>
@@ -1134,9 +1152,28 @@ function IndexingSection(props: SettingsDialogProps): JSX.Element {
           title={(useLocale(), label("settings_indexing_full_title"))}
           description={(useLocale(), label("settings_indexing_full_desc"))}
           selected={props.indexingTier === "full"}
+          disabled={props.embeddingCapable === false}
+          note={
+            props.embeddingCapable === false
+              ? (useLocale(), label("settings_indexing_full_requires_embed"))
+              : undefined
+          }
           onSelect={() => props.onTierChange("full")}
         />
       </div>
+      <Show when={props.onSelectEmbeddingModel}>
+        <div class="settings-field">
+          <label class="settings-label">
+            {(useLocale(), label("settings_indexing_embedding_label"))}
+          </label>
+          <ModelPicker
+            groups={embeddingGroups()}
+            current={props.embeddingSelectedModel ?? undefined}
+            currentLabel={embeddingCurrentLabel()}
+            onSelect={(v) => props.onSelectEmbeddingModel?.(v)}
+          />
+        </div>
+      </Show>
     </div>
   );
 }

@@ -137,6 +137,11 @@ interface AppShellProps {
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
   indexingTier?: IndexingTier;
   onIndexingTierChange?: (tier: IndexingTier) => void;
+  /** Embedding-capable providers/models for the Complete-tier picker. */
+  aiEmbeddingModelGroups?: Array<{ id: string; name: string; models: Array<{ value: string; label: string }> }>;
+  aiEmbeddingSelectedModel?: string | null;
+  onSelectAiEmbeddingModel?: (ref: string) => void;
+  aiEmbeddingCapable?: boolean;
   aiReasoning?: string;
   onAiReasoningChange?: (value: string) => void;
   aiStreaming?: boolean;
@@ -586,6 +591,10 @@ export function AppShell(props: AppShellProps) {
           onToggleModel={(ref) => props.onToggleModel?.(ref)}
           indexingTier={props.indexingTier ?? "lite"}
           onTierChange={(t) => props.onIndexingTierChange?.(t)}
+          embeddingModelGroups={props.aiEmbeddingModelGroups ?? []}
+          embeddingSelectedModel={props.aiEmbeddingSelectedModel ?? null}
+          onSelectEmbeddingModel={(ref) => props.onSelectAiEmbeddingModel?.(ref)}
+          embeddingCapable={props.aiEmbeddingCapable ?? false}
           onListModels={(id, key) =>
             props.onListModels?.(id, key) ?? Promise.resolve([])
           }
