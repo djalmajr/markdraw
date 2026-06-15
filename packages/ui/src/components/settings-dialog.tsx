@@ -128,6 +128,10 @@ export interface SettingsDialogProps {
   initialSection?: SettingsSection;
   /** AI provider catalog (built-ins + user config). */
   aiProviders: SettingsAiProvider[];
+  /** Masked preview (prefix…suffix) of each provider's stored key, by provider
+   *  id — shown as the connect input's placeholder so a set key doesn't look
+   *  empty. Never the full secret. */
+  maskedApiKeys?: Record<string, string>;
   /** Currently selected model id "provider/model", or null. */
   selectedModel: string | null;
   /** All configured models grouped by provider — drives "Manage models". */
@@ -495,6 +499,15 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     (providerViewData()?.ids ?? []).filter(
       (id) => props.aiProviders.find((p) => p.id === id)?.connectMode === "cli-subscription",
     );
+  /** Masked preview of the stored key for this group's API provider(s), if any —
+   *  used as the connect input placeholder so a saved key doesn't look empty. */
+  const groupMaskedKey = (): string | undefined => {
+    for (const id of groupApiIds()) {
+      const m = props.maskedApiKeys?.[id];
+      if (m) return m;
+    }
+    return undefined;
+  };
   /** Fetchable + connected ids in the group → eligible for "Refresh models". */
   const groupRefreshableIds = (): string[] =>
     groupApiIds().filter(
@@ -633,11 +646,13 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
           <Show when={groupApiIds().length > 0}>
             <p class="settings-prose">{(useLocale(), label("settings_ai_connect_desc"))}</p>
             <label class="settings-label">{(useLocale(), label("settings_ai_api_key"))}</label>
+            {/* Saved key → masked placeholder (prefix…suffix) so it doesn't look
+                empty; typing replaces it, leaving it blank keeps the stored key. */}
             <input
               type="password"
               autocomplete="off"
               class="settings-input ai-composer-input"
-              placeholder="sk-…"
+              placeholder={groupMaskedKey() ?? "sk-…"}
               value={apiKey()}
               onInput={(e) => setApiKey(e.currentTarget.value)}
             />

@@ -82,7 +82,7 @@ import { sceneToFile } from "@asciimark/diagram/scene.ts";
 import { loadCustomInstructions, loadSlashCommands } from "./lib/ai-commands.ts";
 import { createGenerationGuard } from "./lib/generation-guard.ts";
 import type { CustomInstructions, SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
-import { deleteApiKey, getApiKey, hasApiKey, setApiKey } from "./lib/ai-credentials.ts";
+import { deleteApiKey, getApiKey, setApiKey } from "./lib/ai-credentials.ts";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { streamingFetch } from "./lib/ai-sse-fetch.ts";
 import type { TabStore } from "@asciimark/ui/composables/create-tab-store.ts";
@@ -369,6 +369,11 @@ export function App() {
   // It gates the model groups (chat picker + Manage models): a builtin with
   // hardcoded models but no credential must not surface as pickable.
   const [connectedProviders, setConnectedProviders] = createSignal<Record<string, boolean>>({});
+  // Masked preview of each connected provider's stored key (prefix…suffix), so
+  // the connect input shows "a key is set" instead of looking empty. Computed
+  // from the value already cached by refreshConnectedProviders — no extra
+  // keychain read (no OS prompt). NEVER the full secret.
+  const [maskedApiKeys, setMaskedApiKeys] = createSignal<Record<string, string>>({});
   // Persisted set of explicitly-connected CLI subscriptions (claude-sub /
   // codex-sub). A subscription has no keychain key, so its connection is
   // remembered here instead of being re-probed (a real model call!) on every
@@ -385,8 +390,14 @@ export function App() {
       return next;
     });
   }
+  /** Prefix…suffix preview of a secret — enough to recognize it, never the key. */
+  function maskApiKey(key: string): string {
+    if (key.length <= 10) return "•".repeat(8);
+    return `${key.slice(0, 6)}…${key.slice(-4)}`;
+  }
   async function refreshConnectedProviders(): Promise<void> {
     const next: Record<string, boolean> = {};
+    const masked: Record<string, string> = {};
     for (const [id, p] of Object.entries(aiConfig().provider)) {
       try {
         if (isCliProviderKind(p.kind)) {
@@ -397,7 +408,11 @@ export function App() {
         } else if (LOCAL_PROVIDER_IDS.has(id) || !!p.options?.apiKey) {
           next[id] = true;
         } else {
-          next[id] = await hasApiKey(id);
+          // getApiKey hits the keychain at most once per session (cached), then
+          // serves the value for free — so masking adds no extra OS prompt.
+          const key = await getApiKey(id);
+          next[id] = key !== null;
+          if (key) masked[id] = maskApiKey(key);
         }
       } catch {
         // A keychain read / CLI probe can fail (OS prompt dismissed, item
@@ -409,6 +424,7 @@ export function App() {
       }
     }
     setConnectedProviders(next);
+    setMaskedApiKeys(masked);
   }
 
   // Model picker shown in the chat composer footer. Reads `aiConfig()` so it
@@ -3092,6 +3108,7 @@ export function App() {
       settingsOpen={settingsOpen()}
       onSettingsClose={() => setSettingsOpen(false)}
       aiProviders={aiProviders()}
+      aiMaskedApiKeys={maskedApiKeys()}
       aiSelectedModel={getStoredAiModel()}
       aiAllModels={aiModelGroupsAll()}
       aiHiddenModels={hiddenModels()}

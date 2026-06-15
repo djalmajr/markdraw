@@ -112,6 +112,7 @@ interface AppShellProps {
   settingsOpen?: boolean;
   onSettingsClose?: () => void;
   aiProviders?: SettingsAiProvider[];
+  aiMaskedApiKeys?: Record<string, string>;
   aiSelectedModel?: string | null;
   /** All configured models grouped by provider — Settings → Manage models. */
   aiAllModels?: Array<{ id: string; name: string; models: Array<{ value: string; label: string }> }>;
@@ -587,6 +588,7 @@ export function AppShell(props: AppShellProps) {
           open={!!props.settingsOpen}
           onClose={() => props.onSettingsClose?.()}
           aiProviders={props.aiProviders ?? []}
+          maskedApiKeys={props.aiMaskedApiKeys ?? {}}
           selectedModel={props.aiSelectedModel ?? null}
           allModels={props.aiAllModels ?? []}
           hiddenModels={props.aiHiddenModels ?? []}
