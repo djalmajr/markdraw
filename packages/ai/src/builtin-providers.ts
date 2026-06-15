@@ -90,7 +90,7 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     models: {
       "glm-5.1": { name: "GLM-5.1" },
       "glm-5": { name: "GLM-5" },
-      "kimi-k2.7": { name: "Kimi K2.7" },
+      "kimi-k2.7-code": { name: "Kimi K2.7 Code" },
       "kimi-k2.6": { name: "Kimi K2.6" },
       "deepseek-v4-pro": { name: "DeepSeek V4 Pro" },
       "deepseek-v4-flash": { name: "DeepSeek V4 Flash" },
