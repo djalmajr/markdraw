@@ -309,6 +309,7 @@
   "settings_ai_connect_cli_desc_claude": "Usa o login do Claude Code CLI nesta máquina — sem API key. Instale e faça login no CLI oficial, depois continue para verificar.",
   "settings_ai_connect_cli_desc_codex": "Usa o login do Codex CLI nesta máquina — sem API key. Instale e faça login no CLI oficial, depois continue para verificar.",
   "settings_ai_connect_cli_desc_grok": "Usa o login do Grok CLI nesta máquina — sem API key. Instale e faça login no CLI oficial, depois continue para verificar.",
+  "settings_ai_connect_cli_desc_antigravity": "Usa o login do Antigravity CLI nesta máquina — sem API key. Instale e faça login no CLI oficial, depois continue para verificar.",
   "settings_ai_connect_continue": "Continuar",
   "settings_ai_use_subscription": "Usar assinatura",
   "settings_ai_refresh_models": "Atualizar modelos",

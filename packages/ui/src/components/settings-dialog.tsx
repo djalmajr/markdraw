@@ -536,6 +536,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
       .find(Boolean);
     if (kind === "codex-cli") return "settings_ai_connect_cli_desc_codex";
     if (kind === "grok-cli") return "settings_ai_connect_cli_desc_grok";
+    if (kind === "antigravity-cli") return "settings_ai_connect_cli_desc_antigravity";
     return "settings_ai_connect_cli_desc_claude";
   };
   /** Destructive action on the provider sub-page: confirm, then disconnect
