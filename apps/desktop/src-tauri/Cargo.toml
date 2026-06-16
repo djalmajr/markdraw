@@ -76,7 +76,16 @@ reqwest = { version = "0.12", features = ["stream"] }
 # the 0.13 one rmcp's `StreamableHttpClient` impl targets. Alias the 0.13 line —
 # already compiled in-tree for rmcp + tauri-plugin-updater, so zero extra build
 # cost — under a second name to construct exactly that type (see ai_mcp.rs).
-reqwest_oauth = { package = "reqwest", version = "0.13" }
+#
+# `default-tls` is LOAD-BEARING, not cosmetic: reqwest 0.13's `default-tls` pulls
+# `rustls` → `__rustls-aws-lc-rs` (a rustls crypto provider). tauri-plugin-updater
+# pulls reqwest's `rustls-tls` = `rustls-no-provider` (rustls with NO provider), so
+# without a provider in the UNIFIED reqwest 0.13, any client built with rustls
+# panics at startup — `default_rustls_crypto_provider` aborts with "No provider
+# set". That bit RELEASE builds only (the updater is disabled in dev), crashing on
+# the startup update check. Keep this feature even if default-features are ever
+# turned off here.
+reqwest_oauth = { package = "reqwest", version = "0.13", features = ["default-tls"] }
 futures-util = "0.3"
 # Percent-decode the path of `htmlpreview://` requests (the custom scheme that
 # serves an HTML file's directory as an isolated origin for SPA previews).
