@@ -60,6 +60,7 @@ import { loadAIConfig, loadUserAIConfig, saveAIConfig } from "./lib/ai-config.ts
 import { buildMcpTools } from "@asciimark/ai/mcp-tools.ts";
 import {
   createMcpBridge,
+  authorizeMcpServer,
   connectEnabledServers,
   connectMcpServer,
   disconnectMcpServer,
@@ -993,6 +994,32 @@ export function App() {
     await refreshMcpStatuses();
   }
 
+  // Last interactive-authorize error per server id (consent denied, registration
+  // failed, callback timeout…). Surfaced on the card only while it still needs
+  // auth; cleared on a fresh attempt and auto-hidden once the server connects.
+  const [mcpAuthErrors, setMcpAuthErrors] = createSignal<Map<string, string>>(new Map());
+
+  /** Kick off the interactive OAuth flow for an OAuth-gated server (Rust opens
+   *  the browser), then refresh so the now-connected server shows its tools. A
+   *  failed flow surfaces its reason on the card instead of failing silently. */
+  async function authorizeMcpServerById(id: string): Promise<void> {
+    const server = (aiConfig().mcp ?? []).find((s) => s.id === id);
+    if (!server) return;
+    setMcpAuthErrors((m) => {
+      const next = new Map(m);
+      next.delete(id);
+      return next;
+    });
+    try {
+      await authorizeMcpServer(server);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setMcpAuthErrors((m) => new Map(m).set(id, message));
+      console.warn(`[mcp] authorize failed for "${id}":`, e);
+    }
+    await refreshMcpStatuses();
+  }
+
   async function removeMcpServer(id: string): Promise<void> {
     const servers = (aiConfig().mcp ?? []).filter((s) => s.id !== id);
     try {
@@ -1032,6 +1059,10 @@ export function App() {
         transport: s.transport,
         enabled: s.enabled !== false,
         connected: st?.connected ?? false,
+        requiresAuth: st?.requiresAuth ?? false,
+        // Only show an authorize error while the server still needs auth — once
+        // it connects, requiresAuth flips false and the message auto-clears.
+        error: st?.requiresAuth ? mcpAuthErrors().get(s.id) : undefined,
         toolCount: st?.toolCount ?? 0,
         tools: mcpTools()[s.id],
         command: s.command,
@@ -3171,6 +3202,7 @@ export function App() {
       onSaveMcpServer={saveMcpServer}
       onRemoveMcpServer={removeMcpServer}
       onToggleMcpServer={toggleMcpServer}
+      onAuthorizeMcpServer={authorizeMcpServerById}
       showRecentHistory={true}
       showEditorTabs={rootPaths().size > 0 || tabStore().tabs().length > 0}
       showNavButtons={rootPaths().size > 0 || tabStore().tabs().length > 0}

@@ -13,6 +13,9 @@ export interface McpServerStatus {
   id: string;
   connected: boolean;
   toolCount: number;
+  /** OAuth-gated HTTP server with no usable stored tokens — the UI offers an
+   *  "Authorize" action wired to {@link authorizeMcpServer}. */
+  requiresAuth?: boolean;
 }
 
 /** Last-known config per server id — what auto-reconnect replays. Captured on
@@ -135,6 +138,17 @@ export async function connectMcpServer(config: MCPServerConfig): Promise<McpServ
   // reconnected by the tool-call retry path (breaker-guarded).
   knownConfigs.set(config.id, resolved);
   const status = await invoke<McpServerStatus>("ai_mcp_connect", { config: resolved });
+  reconnectBreaker.reset(config.id);
+  return status;
+}
+
+/** Run the interactive OAuth flow for an OAuth-gated HTTP server: Rust opens the
+ *  browser, captures the loopback redirect, stores the tokens, then reconnects.
+ *  Resolves to the post-auth status (connected, with its tools). */
+export async function authorizeMcpServer(config: MCPServerConfig): Promise<McpServerStatus> {
+  const resolved = await resolveServerSecrets(config);
+  knownConfigs.set(config.id, resolved);
+  const status = await invoke<McpServerStatus>("ai_mcp_authorize", { config: resolved });
   reconnectBreaker.reset(config.id);
   return status;
 }

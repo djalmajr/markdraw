@@ -85,6 +85,9 @@ export interface SettingsMcpServer {
   error?: string;
   id: string;
   name?: string;
+  /** OAuth-gated HTTP server with no usable stored tokens — the card shows an
+   *  "Authorize" button that runs the interactive flow. */
+  requiresAuth?: boolean;
   toolCount: number;
   tools?: string[];
   transport: McpTransport;
@@ -186,6 +189,8 @@ export interface SettingsDialogProps {
   onRemoveMcpServer?: (id: string) => void | Promise<void>;
   /** Enable/disable an MCP server. */
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
+  /** Run the interactive OAuth flow for an OAuth-gated server (opens the browser). */
+  onAuthorizeMcpServer?: (id: string) => void | Promise<void>;
   /** Reasoning effort forwarded to the engine ("off" | "low" | "medium" | "high"). */
   aiReasoning?: string;
   onAiReasoningChange?: (value: string) => void;
@@ -922,8 +927,16 @@ function McpServerCard(props: {
   server: SettingsMcpServer;
   onRemove: () => void;
   onToggle: (enabled: boolean) => void;
+  onAuthorize: () => void | Promise<void>;
 }): JSX.Element {
   const [expanded, setExpanded] = createSignal(false);
+  const [authorizing, setAuthorizing] = createSignal(false);
+
+  function authorize(): void {
+    if (authorizing()) return;
+    setAuthorizing(true);
+    void Promise.resolve(props.onAuthorize()).finally(() => setAuthorizing(false));
+  }
 
   const tools = createMemo(() => props.server.tools ?? []);
   const visibleTools = createMemo(() =>
@@ -974,6 +987,16 @@ function McpServerCard(props: {
           </button>
         </div>
       </div>
+      <Show when={props.server.requiresAuth && props.server.enabled}>
+        <div class="settings-mcp-auth">
+          <span class="settings-mcp-auth-note">
+            {(useLocale(), label("settings_mcp_requires_auth"))}
+          </span>
+          <Button size="sm" loading={authorizing()} onClick={() => authorize()}>
+            {(useLocale(), label("settings_mcp_authorize"))}
+          </Button>
+        </div>
+      </Show>
       <Show when={tools().length > 0}>
         <div class="settings-mcp-tool-chips">
           <For each={visibleTools()}>
@@ -1087,6 +1110,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
                     server={server}
                     onRemove={() => void props.onRemoveMcpServer?.(server.id)}
                     onToggle={(checked) => void props.onToggleMcpServer?.(server.id, checked)}
+                    onAuthorize={() => props.onAuthorizeMcpServer?.(server.id)}
                   />
                 )}
               </For>

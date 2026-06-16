@@ -136,6 +136,7 @@ interface AppShellProps {
   }) => void | Promise<void>;
   onRemoveMcpServer?: (id: string) => void | Promise<void>;
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
+  onAuthorizeMcpServer?: (id: string) => void | Promise<void>;
   indexingTier?: IndexingTier;
   onIndexingTierChange?: (tier: IndexingTier) => void;
   /** Embedding-capable providers/models for the Complete-tier picker. */
@@ -611,6 +612,7 @@ export function AppShell(props: AppShellProps) {
           onSaveMcpServer={(s) => props.onSaveMcpServer?.(s)}
           onRemoveMcpServer={(id) => props.onRemoveMcpServer?.(id)}
           onToggleMcpServer={(id, enabled) => props.onToggleMcpServer?.(id, enabled)}
+          onAuthorizeMcpServer={(id) => props.onAuthorizeMcpServer?.(id)}
           aiReasoning={props.aiReasoning}
           onAiReasoningChange={(v) => props.onAiReasoningChange?.(v)}
           aiStreaming={props.aiStreaming ?? false}

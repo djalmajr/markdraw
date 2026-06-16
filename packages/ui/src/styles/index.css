@@ -4750,6 +4750,19 @@ kbd.shortcuts-help-key {
   color: hsl(var(--muted-foreground));
 }
 
+.settings-mcp-auth {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-mcp-auth-note {
+  font-size: 12px;
+  line-height: 1.4;
+  color: hsl(var(--muted-foreground));
+}
+
 .settings-mcp-show-toggle {
   align-self: flex-start;
   font-size: 11px;

@@ -345,6 +345,8 @@
   "settings_mcp_show_less": "Show less",
   "settings_mcp_show_more": "Show more ({count})",
   "settings_mcp_connected": "Connected",
+  "settings_mcp_authorize": "Authorize",
+  "settings_mcp_requires_auth": "This server needs sign-in. Authorize opens your browser to grant access.",
   "settings_privacy_body": "AsciiMark is local-first with zero telemetry. AI provider keys live only in the OS keychain, never in plaintext config.",
   "settings_placeholder": "These settings are managed in the toolbar for now.",
   "menu_about": "About AsciiMark",
