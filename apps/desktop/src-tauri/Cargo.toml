@@ -19,6 +19,9 @@ serde = { version = "1", features = ["derive"] }
 # cargo-machete reports it as unused because no Rust source references it
 # directly, but removing it breaks the build.
 serde_json = "1"
+# rmcp's CredentialStore / StateStore traits are `#[async_trait]`, so our
+# keychain-backed impl needs the same attribute macro (ai_mcp_oauth.rs).
+async-trait = "0.1"
 notify = { version = "8", features = ["macos_fsevent"] }
 notify-debouncer-mini = "0.7"
 tauri-plugin-clipboard-manager = "2.3.2"
@@ -51,6 +54,10 @@ rmcp = { version = "1", default-features = false, features = [
     "client",
     "transport-child-process",
     "transport-streamable-http-client-reqwest",
+    # Generic MCP OAuth (RFC 9728 discovery + DCR + auth-code/PKCE + refresh) for
+    # OAuth-gated HTTP servers — AuthorizationManager + AuthClient + the keychain
+    # CredentialStore in ai_mcp_oauth.rs. Pulls in `oauth2`.
+    "auth",
 ] }
 # For typed HTTP header names/values when passing custom MCP auth headers.
 http = "1"

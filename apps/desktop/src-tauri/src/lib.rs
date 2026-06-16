@@ -18,6 +18,7 @@ use ai_keychain::{
 // them via ai_mcp_call_tool. Imported by simple name so the IPC-contract check
 // (scripts/check-ipc-contract.sh) sees the commands as registered.
 mod ai_mcp;
+mod ai_mcp_oauth;
 use ai_mcp::{
     ai_mcp_call_tool, ai_mcp_cancel_call, ai_mcp_connect, ai_mcp_disconnect, ai_mcp_list_servers,
     ai_mcp_list_tools, McpManager,
