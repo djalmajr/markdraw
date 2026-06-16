@@ -13,9 +13,15 @@
 // Concrete engines live in engines/ and are loaded lazily by adapter.ts.
 
 import type { ResolvedModel } from "./resolve-model.ts";
-import type { AIProvider } from "./types.ts";
+import type { AIMessage, AIProvider } from "./types.ts";
 
-export type AIEngineId = "ai-sdk" | "tanstack";
+export type AIEngineId =
+  | "ai-sdk"
+  | "tanstack"
+  | "claude-cli"
+  | "codex-cli"
+  | "grok-cli"
+  | "antigravity-cli";
 
 /** Resolves the provider's API key just-in-time. Called inside `chat()` right
  *  before the request so the key is never held longer than necessary (it lives
@@ -31,9 +37,32 @@ export type CredentialResolver = () => Promise<string | undefined>;
  *  AI SDK never calls. */
 export type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+export type CliStreamEvent =
+  | { type: "line"; line: string }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
+/** Host-injected IPC for CLI subscription engines (desktop → cli_agent.rs). */
+export interface CliHost {
+  streamChat: (
+    request: {
+      provider: "claude-cli" | "codex-cli" | "grok-cli" | "antigravity-cli";
+      model: string;
+      system?: string;
+      messages: AIMessage[];
+      pathOverride?: string;
+    },
+    onEvent: (event: CliStreamEvent) => void,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+}
+
 export interface AIEngineOptions {
   /** Custom fetch (e.g. Tauri HTTP plugin) to dodge webview CORS. */
   fetch?: FetchImpl;
+  /** Desktop injects this for the CLI subscription engines (claude/codex/grok/agy). */
+  cliHost?: CliHost;
+  cliPathOverride?: string;
   /** Ask the model to spend reasoning/thinking effort. Omit = off (request
    *  unchanged). Each engine maps it onto the provider family's native option
    *  (see engines/ai-sdk.ts: anthropic → `thinking` budget, openai →

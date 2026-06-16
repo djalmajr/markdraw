@@ -5,6 +5,11 @@ describe("BUILTIN_PROVIDERS", () => {
   it("ships the builtin providers with valid kinds", () => {
     expect(Object.keys(BUILTIN_PROVIDERS).sort()).toEqual([
       "anthropic",
+      "antigravity-sub",
+      "claude-sub",
+      "codex-sub",
+      "gemini",
+      "grok-sub",
       "lmstudio",
       "ollama",
       "openai",
@@ -12,7 +17,20 @@ describe("BUILTIN_PROVIDERS", () => {
       "opencode-go-chat",
       "opencode-zen",
       "openrouter",
+      "xai",
     ]);
+    expect(BUILTIN_PROVIDERS["claude-sub"].kind).toBe("claude-cli");
+    expect(BUILTIN_PROVIDERS["codex-sub"].kind).toBe("codex-cli");
+    expect(BUILTIN_PROVIDERS["grok-sub"].kind).toBe("grok-cli");
+    expect(BUILTIN_PROVIDERS["grok-sub"].connectGroup).toBe("Grok");
+    expect(BUILTIN_PROVIDERS.xai.connectGroup).toBe("Grok");
+    expect(BUILTIN_PROVIDERS["antigravity-sub"].kind).toBe("antigravity-cli");
+    expect(BUILTIN_PROVIDERS["antigravity-sub"].connectGroup).toBe("Antigravity");
+    expect(BUILTIN_PROVIDERS.gemini.kind).toBe("openai-compatible");
+    expect(BUILTIN_PROVIDERS.gemini.connectGroup).toBe("Antigravity");
+    expect(BUILTIN_PROVIDERS.gemini.options?.baseURL).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+    );
     expect(BUILTIN_PROVIDERS.anthropic.kind).toBe("anthropic");
     expect(BUILTIN_PROVIDERS.openai.kind).toBe("openai");
     expect(BUILTIN_PROVIDERS.ollama.kind).toBe("openai-compatible");
@@ -29,6 +47,21 @@ describe("BUILTIN_PROVIDERS", () => {
     expect(goChat.options?.baseURL).toBe("https://opencode.ai/zen/go/v1");
     expect(go.models["minimax-m3"].name).toBe("MiniMax M3");
     expect(goChat.models["glm-5"].name).toBe("GLM-5");
+    // Hand-maintained split — opted out of live /models refresh (the endpoint
+    // can't say which API shape each model uses).
+    expect(go.curatedModels).toBe(true);
+    expect(goChat.curatedModels).toBe(true);
+  });
+
+  it("declares OpenAI embedding models with dims; chat-only providers have none", () => {
+    expect(BUILTIN_PROVIDERS.openai.embeddingModels?.["text-embedding-3-small"]?.dim).toBe(1536);
+    expect(BUILTIN_PROVIDERS.openai.embeddingModels?.["text-embedding-3-large"]?.dim).toBe(3072);
+    // Subscription CLIs and Anthropic have no embeddings API.
+    expect(BUILTIN_PROVIDERS.anthropic.embeddingModels).toBeUndefined();
+    expect(BUILTIN_PROVIDERS["claude-sub"].embeddingModels).toBeUndefined();
+    expect(BUILTIN_PROVIDERS["codex-sub"].embeddingModels).toBeUndefined();
+    expect(BUILTIN_PROVIDERS["grok-sub"].embeddingModels).toBeUndefined();
+    expect(BUILTIN_PROVIDERS["antigravity-sub"].embeddingModels).toBeUndefined();
   });
 
   it("ships OpenCode Zen as openai-compatible at zen/v1 with a live model catalog", () => {
@@ -53,7 +86,7 @@ describe("withBuiltins", () => {
 
   it("returns the full catalog for an empty config", () => {
     const config = withBuiltins({});
-    expect(Object.keys(config.provider)).toHaveLength(8);
+    expect(Object.keys(config.provider)).toHaveLength(14);
     expect(config.provider["opencode-go"].options?.baseURL).toBe("https://opencode.ai/zen/go/v1");
     expect(config.provider["opencode-zen"].options?.baseURL).toBe("https://opencode.ai/zen/v1");
   });

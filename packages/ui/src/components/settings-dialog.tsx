@@ -59,6 +59,7 @@ import {
   SwitchThumb,
 } from "./ui/switch.tsx";
 import { TierCard } from "./settings/tier-card.tsx";
+import { ModelPicker } from "./model-picker.tsx";
 import { confirm } from "./confirm-dialog.tsx";
 
 const messages = m as unknown as Record<string, () => string>;
@@ -84,10 +85,22 @@ export interface SettingsMcpServer {
   error?: string;
   id: string;
   name?: string;
+  /** OAuth-gated HTTP server with no usable stored tokens — the card shows an
+   *  "Authorize" button that runs the interactive flow. */
+  requiresAuth?: boolean;
   toolCount: number;
   tools?: string[];
   transport: McpTransport;
   url?: string;
+  /** HTTP custom headers (config refs, never resolved secrets) — pre-fills the
+   *  edit form so a header can be reviewed or changed. */
+  headers?: Record<string, string>;
+  /** Set when this server was auto-discovered from another tool's config
+   *  (Claude/Codex/OpenCode). Such cards are read-only (no edit/remove/toggle)
+   *  and show a source badge. */
+  discovered?: { tools: string[]; scope: string };
+  /** A discovered project-scoped server awaiting the user's approval to connect. */
+  pendingApproval?: boolean;
 }
 
 export interface SaveMcpServerInput {
@@ -104,11 +117,21 @@ export interface SaveMcpServerInput {
 
 export type IndexingTier = "off" | "lite" | "full";
 
+export type SettingsAiConnectMode = "api-key" | "cli-subscription";
+
 export interface SettingsAiProvider {
   id: string;
   name: string;
   /** Known model ids for the provider (may be empty until loaded). */
   models: string[];
+  kind?: string;
+  /** CLI subscription providers probe the local binary instead of an API key. */
+  connectMode?: SettingsAiConnectMode;
+  /** Connect-catalog grouping: providers sharing this render as one card (e.g.
+   *  the Anthropic API + Claude subscription, both "Claude"). */
+  connectGroup?: string;
+  /** The live model list can be re-fetched (openai-compatible + baseURL). */
+  fetchable?: boolean;
 }
 
 export interface SettingsDialogProps {
@@ -117,16 +140,31 @@ export interface SettingsDialogProps {
   initialSection?: SettingsSection;
   /** AI provider catalog (built-ins + user config). */
   aiProviders: SettingsAiProvider[];
+  /** Masked preview (prefix…suffix) of each provider's stored key, by provider
+   *  id — shown as the connect input's placeholder so a set key doesn't look
+   *  empty. Never the full secret. */
+  maskedApiKeys?: Record<string, string>;
   /** Currently selected model id "provider/model", or null. */
   selectedModel: string | null;
   /** All configured models grouped by provider — drives "Manage models". */
-  allModels?: Array<{ id: string; name: string; models: Array<{ value: string; label: string }> }>;
+  allModels?: Array<{
+    id: string;
+    name: string;
+    origin?: "subscription" | "api";
+    models: Array<{ value: string; label: string }>;
+  }>;
   /** Model refs currently hidden from the chat picker. */
   hiddenModels?: string[];
   /** Toggle a model's visibility in the chat picker. */
   onToggleModel?: (ref: string) => void;
   indexingTier: IndexingTier;
   onTierChange: (tier: IndexingTier) => void;
+  /** Embedding-capable providers/models for the Complete-tier picker. */
+  embeddingModelGroups?: Array<{ id: string; name: string; models: Array<{ value: string; label: string }> }>;
+  embeddingSelectedModel?: string | null;
+  onSelectEmbeddingModel?: (ref: string) => void;
+  /** Whether the Complete tier can be enabled (≥1 embedding provider connected). */
+  embeddingCapable?: boolean;
   /** Fetch the live model list for a provider using the given key. */
   onListModels: (providerId: string, apiKey: string) => Promise<string[]>;
   /** Persist key (keychain) + selected model (ai-prefs/ai.json). */
@@ -148,6 +186,8 @@ export interface SettingsDialogProps {
   /** Disconnect a provider group — receives EVERY provider id behind the merged
    *  base name (e.g. "OpenCode Go" → ["opencode-go", "opencode-go-chat"]). */
   onRemoveProvider?: (ids: string[]) => void | Promise<void>;
+  /** Re-fetch a provider's live model list. */
+  onRefreshModels?: (providerId: string) => void | Promise<void>;
   appVersion?: string;
   platform?: Platform;
   /** Configured MCP servers with live connection/tool status. */
@@ -158,6 +198,13 @@ export interface SettingsDialogProps {
   onRemoveMcpServer?: (id: string) => void | Promise<void>;
   /** Enable/disable an MCP server. */
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
+  /** Run the interactive OAuth flow for an OAuth-gated server (opens the browser). */
+  onAuthorizeMcpServer?: (id: string) => void | Promise<void>;
+  /** Approve a discovered project-scoped server so it may connect (spawns it). */
+  onApproveMcpServer?: (id: string) => void | Promise<void>;
+  /** Whether to import MCP servers from the OpenCode CLI's config. */
+  importOpenCodeMcps?: boolean;
+  onImportOpenCodeMcpsChange?: (enabled: boolean) => void;
   /** Reasoning effort forwarded to the engine ("off" | "low" | "medium" | "high"). */
   aiReasoning?: string;
   onAiReasoningChange?: (value: string) => void;
@@ -195,7 +242,7 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
 
   return (
     <AlertDialog open={props.open} onOpenChange={(o) => !o && props.onClose()}>
-      <AlertDialogContent class="flex h-[80vh] max-h-[640px] w-full max-w-3xl flex-col gap-0 overflow-hidden p-0">
+      <AlertDialogContent class="flex max-h-[90vh] min-h-[60vh] w-full max-w-3xl flex-col gap-0 overflow-hidden p-0">
         <button
           type="button"
           aria-label={(useLocale(), label("ai_inline_reject"))}
@@ -315,7 +362,9 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     props.aiProviders.find((p) => p.id === initialProvider)?.models ?? [],
   );
   const [modelId, setModelId] = createSignal(initialModel);
-  const [loading, setLoading] = createSignal(false);
+  // Which async action is in flight, so its spinner shows on ONLY the clicked
+  // button (the API "Continue" and CLI "Use subscription" share this sub-page).
+  const [loadingAction, setLoadingAction] = createSignal<"api" | "cli" | "models" | null>(null);
   const [saved, setSaved] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [modelQuery, setModelQuery] = createSignal("");
@@ -425,7 +474,10 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
   const catalogProviders = createMemo<{ name: string; ids: string[] }[]>(() => {
     const byBase = new Map<string, { name: string; ids: string[] }>();
     for (const p of props.aiProviders) {
-      const base = p.name.replace(/\s*\([^)]*\)\s*$/, "").trim() || p.name;
+      // Explicit connectGroup wins (e.g. "Claude" = Anthropic API + Claude
+      // subscription); otherwise fall back to the name minus a "(chat)"-style
+      // parenthetical so e.g. OpenCode Go's two entries still merge.
+      const base = p.connectGroup ?? (p.name.replace(/\s*\([^)]*\)\s*$/, "").trim() || p.name);
       const existing = byBase.get(base);
       if (existing) existing.ids.push(p.id);
       else byBase.set(base, { name: base, ids: [p.id] });
@@ -441,22 +493,71 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     setError(null);
     setView({ kind: "provider", from, ids: group.ids, name: group.name });
   }
-  async function continueConnect(): Promise<void> {
-    const v = view();
-    if (v.kind !== "provider") return;
+  async function connectIds(ids: string[], kind: "api" | "cli"): Promise<void> {
+    if (ids.length === 0) return;
     setError(null);
-    setLoading(true);
+    setLoadingAction(kind);
     try {
-      // One backend may have several entries (different `kind`); connect each.
-      for (const id of v.ids) await props.onConnectProvider?.({ providerId: id, apiKey: apiKey() });
+      // A mode may span several entries (e.g. OpenCode Go's two kinds); connect each.
+      for (const id of ids) await props.onConnectProvider?.({ providerId: id, apiKey: apiKey() });
       setApiKey("");
       setView({ kind: "manage" });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   }
+  /** Split the current connect group's ids by mode, so a group with both (the
+   *  "Claude" card = Anthropic API + Claude subscription) shows both options. */
+  const groupApiIds = (): string[] =>
+    (providerViewData()?.ids ?? []).filter(
+      (id) => (props.aiProviders.find((p) => p.id === id)?.connectMode ?? "api-key") !== "cli-subscription",
+    );
+  const groupCliIds = (): string[] =>
+    (providerViewData()?.ids ?? []).filter(
+      (id) => props.aiProviders.find((p) => p.id === id)?.connectMode === "cli-subscription",
+    );
+  /** Masked preview of the stored key for this group's API provider(s), if any —
+   *  used as the connect input placeholder so a saved key doesn't look empty. */
+  const groupMaskedKey = (): string | undefined => {
+    for (const id of groupApiIds()) {
+      const m = props.maskedApiKeys?.[id];
+      if (m) return m;
+    }
+    return undefined;
+  };
+  /** Fetchable + connected ids in the group → eligible for "Refresh models". */
+  const groupRefreshableIds = (): string[] =>
+    groupApiIds().filter(
+      (id) =>
+        props.aiProviders.find((p) => p.id === id)?.fetchable && connectedProviderIds().has(id),
+    );
+  const [refreshing, setRefreshing] = createSignal(false);
+  async function refreshGroupModels(): Promise<void> {
+    const ids = groupRefreshableIds();
+    if (ids.length === 0) return;
+    setError(null);
+    setRefreshing(true);
+    try {
+      for (const id of ids) await props.onRefreshModels?.(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }
+  /** Subscription description keyed to THIS card's CLI (so the Codex card never
+   *  mentions Claude Code, and vice versa). */
+  const groupCliDescKey = (): string => {
+    const kind = groupCliIds()
+      .map((id) => props.aiProviders.find((p) => p.id === id)?.kind)
+      .find(Boolean);
+    if (kind === "codex-cli") return "settings_ai_connect_cli_desc_codex";
+    if (kind === "grok-cli") return "settings_ai_connect_cli_desc_grok";
+    if (kind === "antigravity-cli") return "settings_ai_connect_cli_desc_antigravity";
+    return "settings_ai_connect_cli_desc_claude";
+  };
   /** Destructive action on the provider sub-page: confirm, then disconnect
    *  every backing id and return to Manage models. Errors render in the same
    *  inline slot the connect flow uses. */
@@ -485,7 +586,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
   }
 
   async function loadModels(): Promise<void> {
-    setLoading(true);
+    setLoadingAction("models");
     setError(null);
     try {
       const list = await props.onListModels(providerId(), apiKey());
@@ -493,7 +594,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   }
 
@@ -546,7 +647,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
           </div>
         </Match>
 
-        {/* ── Per-provider connect: just the API key ── */}
+        {/* ── Per-provider connect: API key or CLI subscription ── */}
         <Match when={view().kind === "provider"}>
           <div class="settings-subpage-header">
             <button
@@ -561,45 +662,91 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               {(useLocale(), label("settings_ai_connect"))} {providerViewData()?.name}
             </h3>
           </div>
-          <p class="settings-prose">{(useLocale(), label("settings_ai_connect_desc"))}</p>
-          <label class="settings-label">{(useLocale(), label("settings_ai_api_key"))}</label>
-          <input
-            type="password"
-            autocomplete="off"
-            class="settings-input ai-composer-input"
-            placeholder="sk-…"
-            value={apiKey()}
-            onInput={(e) => setApiKey(e.currentTarget.value)}
-          />
+          {/* API key — for any api-key provider in this group (e.g. Anthropic). */}
+          <Show when={groupApiIds().length > 0}>
+            <p class="settings-prose">{(useLocale(), label("settings_ai_connect_desc"))}</p>
+            <label class="settings-label">{(useLocale(), label("settings_ai_api_key"))}</label>
+            {/* Saved key → masked placeholder (prefix…suffix) so it doesn't look
+                empty; typing replaces it, leaving it blank keeps the stored key. */}
+            <input
+              type="password"
+              autocomplete="off"
+              class="settings-input ai-composer-input"
+              placeholder={groupMaskedKey() ?? "sk-…"}
+              value={apiKey()}
+              onInput={(e) => setApiKey(e.currentTarget.value)}
+            />
+            <div class="settings-row settings-row-end" style={{ "justify-content": "space-between" }}>
+              {/* Remove sits beside the connect action (only on an API-only
+                  group; groups with a subscription show it in the CLI row). */}
+              <Show
+                when={
+                  props.onRemoveProvider &&
+                  groupCliIds().length === 0 &&
+                  providerViewData()?.ids.some((id) => connectedProviderIds().has(id))
+                }
+                fallback={<span />}
+              >
+                <button class="settings-danger-btn" type="button" onClick={() => void removeCurrentProvider()}>
+                  {(useLocale(), label("settings_ai_disconnect"))}
+                </button>
+              </Show>
+              <Button
+                size="sm"
+                onClick={() => void connectIds(groupApiIds(), "api")}
+                loading={loadingAction() === "api"}
+                disabled={!apiKey().trim() || loadingAction() !== null}
+              >
+                {(useLocale(), label("settings_ai_connect_continue"))}
+              </Button>
+            </div>
+            <Show when={groupRefreshableIds().length > 0}>
+              <div class="settings-row settings-row-end">
+                <Button size="sm" onClick={() => void refreshGroupModels()} loading={refreshing()}>
+                  {(useLocale(), label("settings_ai_refresh_models"))}
+                </Button>
+              </div>
+            </Show>
+          </Show>
+          {/* Subscription — for any cli-subscription provider, below the API
+              option so both can coexist (the "Claude" card offers each). */}
+          <Show when={groupCliIds().length > 0}>
+            <div
+              style={
+                groupApiIds().length > 0
+                  ? { "border-top": "1px solid hsl(var(--border))", "margin-top": "16px", "padding-top": "12px" }
+                  : {}
+              }
+            >
+              <p class="settings-prose">{(useLocale(), label(groupCliDescKey()))}</p>
+              <div class="settings-row settings-row-end" style={{ "justify-content": "space-between" }}>
+                <Show
+                  when={
+                    props.onRemoveProvider &&
+                    providerViewData()?.ids.some((id) => connectedProviderIds().has(id))
+                  }
+                  fallback={<span />}
+                >
+                  <button class="settings-danger-btn" type="button" onClick={() => void removeCurrentProvider()}>
+                    {(useLocale(), label("settings_ai_disconnect"))}
+                  </button>
+                </Show>
+                <Button
+                  size="sm"
+                  onClick={() => void connectIds(groupCliIds(), "cli")}
+                  loading={loadingAction() === "cli"}
+                  disabled={
+                    loadingAction() !== null ||
+                    groupCliIds().some((id) => connectedProviderIds().has(id))
+                  }
+                >
+                  {(useLocale(), label("settings_ai_use_subscription"))}
+                </Button>
+              </div>
+            </div>
+          </Show>
           <Show when={error()}>
             <div class="ai-error">{error()}</div>
-          </Show>
-          <div class="settings-row settings-row-end">
-            <Button size="sm" onClick={() => void continueConnect()} disabled={loading()}>
-              {(useLocale(), label("settings_ai_connect_continue"))}
-            </Button>
-          </div>
-          <Show
-            when={
-              props.onRemoveProvider &&
-              providerViewData()?.ids.some((id) => connectedProviderIds().has(id))
-            }
-          >
-            {/* Destructive zone, clearly separated from the connect controls —
-                only for CONNECTED providers (there's no key to delete before
-                connecting, and the confirm copy promises a keychain removal). */}
-            <div
-              class="settings-row"
-              style={{ "border-top": "1px solid hsl(var(--border))", "margin-top": "16px", "padding-top": "12px" }}
-            >
-              <button
-                class="settings-danger-btn"
-                type="button"
-                onClick={() => void removeCurrentProvider()}
-              >
-                {(useLocale(), label("settings_ai_disconnect"))}
-              </button>
-            </div>
           </Show>
         </Match>
 
@@ -692,27 +839,37 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
             {(group) => (
               <>
                 <div class="settings-models-group">
-                  {/* The name navigates to the provider sub-page (connect /
-                      remove); the toggle stays a separate control, so clicking
-                      the name never flips visibility. */}
-                  <button
-                    class="settings-models-group-name"
-                    type="button"
-                    onClick={() =>
-                      enterProvider({ name: group.name, ids: groupProviderIds(group) }, "manage")
-                    }
-                  >
-                    {group.name}
-                  </button>
-                  <ToggleSwitch
-                    checked={providerAllVisible(group)}
-                    onChange={() => toggleProvider(group)}
-                    aria-label={group.name}
-                  >
-                    <SwitchControl size="sm">
-                      <SwitchThumb size="sm" />
-                    </SwitchControl>
-                  </ToggleSwitch>
+                  {/* The name is a plain label; an explicit pencil opens the
+                      provider sub-page (connect / remove / manage). The toggle
+                      stays a separate control, so neither flips the other. */}
+                  <span class="settings-models-group-name">
+                    {(useLocale(),
+                    group.origin
+                      ? `${group.name} · ${group.origin === "subscription" ? label("ai_origin_subscription") : label("ai_origin_api")}`
+                      : group.name)}
+                  </span>
+                  <div class="settings-models-group-actions">
+                    <button
+                      type="button"
+                      class="ai-mp-icon-btn"
+                      title={(useLocale(), label("settings_ai_edit_provider"))}
+                      aria-label={`${label("settings_ai_edit_provider")}: ${group.name}`}
+                      onClick={() =>
+                        enterProvider({ name: group.name, ids: groupProviderIds(group) }, "manage")
+                      }
+                    >
+                      <IconPencil width={14} height={14} />
+                    </button>
+                    <ToggleSwitch
+                      checked={providerAllVisible(group)}
+                      onChange={() => toggleProvider(group)}
+                      aria-label={group.name}
+                    >
+                      <SwitchControl size="sm">
+                        <SwitchThumb size="sm" />
+                      </SwitchControl>
+                    </ToggleSwitch>
+                  </div>
                 </div>
                 <For each={group.models}>
                   {(mdl) => (
@@ -791,8 +948,38 @@ function McpServerCard(props: {
   server: SettingsMcpServer;
   onRemove: () => void;
   onToggle: (enabled: boolean) => void;
+  onAuthorize: () => void | Promise<void>;
+  onApprove: () => void | Promise<void>;
+  onEdit: () => void;
 }): JSX.Element {
   const [expanded, setExpanded] = createSignal(false);
+  const [authorizing, setAuthorizing] = createSignal(false);
+  const [approving, setApproving] = createSignal(false);
+
+  function authorize(): void {
+    if (authorizing()) return;
+    setAuthorizing(true);
+    void Promise.resolve(props.onAuthorize()).finally(() => setAuthorizing(false));
+  }
+  function approve(): void {
+    if (approving()) return;
+    setApproving(true);
+    void Promise.resolve(props.onApprove()).finally(() => setApproving(false));
+  }
+  /** Discovered servers are read-only: no enable toggle, no edit/remove. */
+  const discovered = (): SettingsMcpServer["discovered"] => props.server.discovered;
+  const sourceBadge = (): string => {
+    const d = props.server.discovered;
+    if (!d) return "";
+    const tools = d.tools
+      .map((t) => t.charAt(0).toUpperCase() + t.slice(1))
+      .join(", ");
+    const scope =
+      d.scope === "global"
+        ? label("settings_mcp_scope_global")
+        : label("settings_mcp_scope_project");
+    return `${label("settings_mcp_discovered_via")} ${tools} · ${scope}`;
+  };
 
   const tools = createMemo(() => props.server.tools ?? []);
   const visibleTools = createMemo(() =>
@@ -823,26 +1010,43 @@ function McpServerCard(props: {
           <span class="settings-mcp-card-name">{props.server.name || props.server.id}</span>
           <span class="settings-mcp-cmd" title={subtitle()}>{subtitle()}</span>
         </div>
-        <div class="settings-mcp-card-actions">
-          <ToggleSwitch
-            aria-label={(useLocale(), label("settings_mcp_connected"))}
-            checked={props.server.enabled}
-            onChange={(checked) => props.onToggle(checked)}
-          >
-            <SwitchControl size="sm">
-              <SwitchThumb size="sm" />
-            </SwitchControl>
-          </ToggleSwitch>
-          <button
-            type="button"
-            aria-label={(useLocale(), label("settings_mcp_remove"))}
-            class="settings-mcp-remove"
-            onClick={() => props.onRemove()}
-          >
-            <IconTrash width={14} height={14} />
-          </button>
-        </div>
+        <Show when={!discovered()}>
+          <div class="settings-mcp-card-actions">
+            <ToggleSwitch
+              aria-label={(useLocale(), label("settings_mcp_connected"))}
+              checked={props.server.enabled}
+              onChange={(checked) => props.onToggle(checked)}
+            >
+              <SwitchControl size="sm">
+                <SwitchThumb size="sm" />
+              </SwitchControl>
+            </ToggleSwitch>
+          </div>
+        </Show>
       </div>
+      <Show when={discovered()}>
+        <div class="settings-mcp-badge">{(useLocale(), sourceBadge())}</div>
+      </Show>
+      <Show when={props.server.pendingApproval}>
+        <div class="settings-mcp-auth">
+          <span class="settings-mcp-auth-note">
+            {(useLocale(), label("settings_mcp_approve_note"))}
+          </span>
+          <Button size="sm" loading={approving()} onClick={() => approve()}>
+            {(useLocale(), label("settings_mcp_approve"))}
+          </Button>
+        </div>
+      </Show>
+      <Show when={props.server.requiresAuth && props.server.enabled}>
+        <div class="settings-mcp-auth">
+          <span class="settings-mcp-auth-note">
+            {(useLocale(), label("settings_mcp_requires_auth"))}
+          </span>
+          <Button size="sm" loading={authorizing()} onClick={() => authorize()}>
+            {(useLocale(), label("settings_mcp_authorize"))}
+          </Button>
+        </div>
+      </Show>
       <Show when={tools().length > 0}>
         <div class="settings-mcp-tool-chips">
           <For each={visibleTools()}>
@@ -868,14 +1072,40 @@ function McpServerCard(props: {
       <Show when={props.server.error}>
         <span class="ai-error">{props.server.error}</span>
       </Show>
+      {/* Edit + remove live at the card's bottom-right, kept clear of the
+          enable/disable Switch up in the header so a destructive action is
+          never a slip away from a quick toggle. Discovered servers are
+          read-only (owned by the other tool's config), so they get neither. */}
+      <Show when={!discovered()}>
+        <div class="settings-mcp-card-footer">
+          <button
+            type="button"
+            aria-label={(useLocale(), label("settings_mcp_edit"))}
+            class="settings-mcp-remove"
+            onClick={() => props.onEdit()}
+          >
+            <IconPencil width={14} height={14} />
+          </button>
+          <button
+            type="button"
+            aria-label={(useLocale(), label("settings_mcp_remove"))}
+            class="settings-mcp-remove"
+            onClick={() => props.onRemove()}
+          >
+            <IconTrash width={14} height={14} />
+          </button>
+        </div>
+      </Show>
     </div>
   );
 }
 
 function McpSection(props: SettingsDialogProps): JSX.Element {
-  // Same sub-page pattern as the AI section: the add form is a dedicated view
-  // entered from the "New MCP Server" row, with a back arrow to the list.
-  const [view, setView] = createSignal<"add" | "list">("list");
+  // Same sub-page pattern as the AI section: a dedicated form view entered from
+  // the "New MCP Server" row (add) or a card's pencil (edit), with a back arrow
+  // to the list. `editingId` distinguishes the two: non-null = editing that id.
+  const [view, setView] = createSignal<"form" | "list">("list");
+  const [editingId, setEditingId] = createSignal<string | null>(null);
   const [id, setId] = createSignal("");
   const [name, setName] = createSignal("");
   const [transport, setTransport] = createSignal<McpTransport>("stdio");
@@ -885,6 +1115,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
   const [headers, setHeaders] = createSignal("");
 
   function resetForm(): void {
+    setEditingId(null);
     setId("");
     setName("");
     setTransport("stdio");
@@ -892,6 +1123,32 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
     setArgs("");
     setUrl("");
     setHeaders("");
+  }
+
+  /** Serialize a header record back to the "Key: Value" (one per line) textarea
+   *  format. Values are config refs (`{file:…}`/`{keychain:…}`), never resolved
+   *  secrets, so they round-trip safely through the form. */
+  function serializeHeaders(record: Record<string, string> | undefined): string {
+    return Object.entries(record ?? {})
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n");
+  }
+
+  function openAdd(): void {
+    resetForm();
+    setView("form");
+  }
+
+  function openEdit(server: SettingsMcpServer): void {
+    setEditingId(server.id);
+    setId(server.id);
+    setName(server.name ?? "");
+    setTransport(server.transport);
+    setCommand(server.command ?? "");
+    setArgs((server.args ?? []).join(" "));
+    setUrl(server.url ?? "");
+    setHeaders(serializeHeaders(server.headers));
+    setView("form");
   }
 
   /** Parse the "Key: Value" (one per line) headers textarea into a record. */
@@ -912,6 +1169,12 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
     if (!trimmedId) return;
     const trimmedName = name().trim();
     const t = transport();
+    const editing = editingId() !== null;
+    // Editing preserves the server's current enabled state (a tweak must not
+    // silently re-enable a disabled server); a brand-new server starts enabled.
+    const enabled = editing
+      ? ((props.mcpServers ?? []).find((s) => s.id === trimmedId)?.enabled ?? true)
+      : true;
     const argList = args()
       .split(/\s+/)
       .map((a) => a.trim())
@@ -919,7 +1182,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
     const headerMap = t === "http" ? parseHeaders(headers()) : {};
     const server: SaveMcpServerInput = {
       id: trimmedId,
-      enabled: true,
+      enabled,
       transport: t,
       ...(trimmedName ? { name: trimmedName } : {}),
       ...(t === "stdio"
@@ -929,7 +1192,10 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
           }
         : {
             url: url().trim(),
-            ...(Object.keys(headerMap).length ? { headers: headerMap } : {}),
+            // While adding, omit empty headers so the persist layer can keep any
+            // set via ai.json. While editing, the form is pre-filled, so pass the
+            // map verbatim — letting the user actually clear headers.
+            ...(editing || Object.keys(headerMap).length ? { headers: headerMap } : {}),
           }),
     };
     void props.onSaveMcpServer?.(server);
@@ -942,6 +1208,24 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
       <Switch>
         <Match when={view() === "list"}>
           <h3 class="settings-h3">{(useLocale(), label("settings_mcp_title"))}</h3>
+
+          {/* OpenCode has no first-class AI provider in AsciiMark (Claude/Codex
+              are gated on their connected provider), so importing its configured
+              MCP servers rides this explicit toggle. */}
+          <div class="settings-row" style={{ "align-items": "center", gap: "10px", margin: "0 0 12px" }}>
+            <ToggleSwitch
+              checked={props.importOpenCodeMcps ?? false}
+              onChange={(checked) => props.onImportOpenCodeMcpsChange?.(checked)}
+              aria-label={(useLocale(), label("settings_mcp_import_opencode"))}
+            >
+              <SwitchControl size="sm">
+                <SwitchThumb size="sm" />
+              </SwitchControl>
+            </ToggleSwitch>
+            <label class="settings-label" style={{ margin: "0" }}>
+              {(useLocale(), label("settings_mcp_import_opencode"))}
+            </label>
+          </div>
 
           <Show
             when={(props.mcpServers ?? []).length > 0}
@@ -956,6 +1240,9 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
                     server={server}
                     onRemove={() => void props.onRemoveMcpServer?.(server.id)}
                     onToggle={(checked) => void props.onToggleMcpServer?.(server.id, checked)}
+                    onAuthorize={() => props.onAuthorizeMcpServer?.(server.id)}
+                    onApprove={() => props.onApproveMcpServer?.(server.id)}
+                    onEdit={() => openEdit(server)}
                   />
                 )}
               </For>
@@ -965,7 +1252,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
           <button
             type="button"
             class="settings-mcp-new-row"
-            onClick={() => setView("add")}
+            onClick={() => openAdd()}
           >
             <span class="settings-mcp-avatar" aria-hidden="true">
               <IconPlus width={15} height={15} />
@@ -977,7 +1264,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
           </button>
         </Match>
 
-        <Match when={view() === "add"}>
+        <Match when={view() === "form"}>
           {/* Back arrow mirrors the AI section's sub-pages (shared aria label). */}
           <div class="settings-subpage-header">
             <button
@@ -992,13 +1279,17 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
               <IconArrowLeft width={16} height={16} />
             </button>
             <h3 class="settings-h3" style={{ margin: "0" }}>
-              {(useLocale(), label("settings_mcp_new_server"))}
+              {(useLocale(),
+              label(editingId() ? "settings_mcp_edit_server" : "settings_mcp_new_server"))}
             </h3>
           </div>
       <label class="settings-label">{(useLocale(), label("settings_mcp_id"))}</label>
+      {/* The id keys the server in ai.json, so it's immutable once created —
+          editing it would orphan the old entry instead of updating it. */}
       <input
         class="ai-composer-input settings-input"
         autocomplete="off"
+        readOnly={editingId() !== null}
         value={id()}
         onInput={(e) => setId(e.currentTarget.value)}
       />
@@ -1078,7 +1369,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
           }
           onClick={save}
         >
-          {(useLocale(), label("settings_mcp_add"))}
+          {(useLocale(), label(editingId() ? "settings_mcp_save" : "settings_mcp_add"))}
         </Button>
       </div>
         </Match>
@@ -1088,6 +1379,17 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
 }
 
 function IndexingSection(props: SettingsDialogProps): JSX.Element {
+  const embeddingGroups = (): Array<{ id: string; name: string; models: Array<{ value: string; label: string }> }> =>
+    props.embeddingModelGroups ?? [];
+  const embeddingCurrentLabel = (): string => {
+    const ref = props.embeddingSelectedModel;
+    if (!ref) return "—";
+    for (const g of embeddingGroups()) {
+      const m = g.models.find((x) => x.value === ref);
+      if (m) return m.label;
+    }
+    return ref;
+  };
   return (
     <div class="settings-section">
       <h3 class="settings-h3">{(useLocale(), label("settings_indexing_title"))}</h3>
@@ -1109,9 +1411,28 @@ function IndexingSection(props: SettingsDialogProps): JSX.Element {
           title={(useLocale(), label("settings_indexing_full_title"))}
           description={(useLocale(), label("settings_indexing_full_desc"))}
           selected={props.indexingTier === "full"}
+          disabled={props.embeddingCapable === false}
+          note={
+            props.embeddingCapable === false
+              ? (useLocale(), label("settings_indexing_full_requires_embed"))
+              : undefined
+          }
           onSelect={() => props.onTierChange("full")}
         />
       </div>
+      <Show when={props.onSelectEmbeddingModel}>
+        <div class="settings-field">
+          <label class="settings-label">
+            {(useLocale(), label("settings_indexing_embedding_label"))}
+          </label>
+          <ModelPicker
+            groups={embeddingGroups()}
+            current={props.embeddingSelectedModel ?? undefined}
+            currentLabel={embeddingCurrentLabel()}
+            onSelect={(v) => props.onSelectEmbeddingModel?.(v)}
+          />
+        </div>
+      </Show>
     </div>
   );
 }

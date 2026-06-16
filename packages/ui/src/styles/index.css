@@ -2998,10 +2998,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   border: 1px solid hsl(var(--border));
   border-radius: 5px;
   overflow: hidden;
-  max-height: 320px;
-  overflow-y: auto;
-  /* Reserve the scrollbar gutter so toggling a row never shifts the layout. */
-  scrollbar-gutter: stable;
+  /* No inner scroll: the list grows with the modal (which caps at 90vh), and
+     the settings content area provides the single scroll once that cap hits. */
 }
 .settings-models-group {
   display: flex;
@@ -3020,6 +3018,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .settings-models-group-name {
   text-transform: uppercase;
   letter-spacing: 0.02em;
+}
+.settings-models-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .settings-models-empty {
   padding: 16px 12px;
@@ -4749,6 +4752,41 @@ kbd.shortcuts-help-key {
   border-radius: 6px;
   background: color-mix(in srgb, hsl(var(--muted)) 95%, black);
   border: 1px solid color-mix(in srgb, hsl(var(--muted)) 87%, black);
+  color: hsl(var(--muted-foreground));
+}
+
+.settings-mcp-auth {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-mcp-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, hsl(var(--border)) 60%, transparent);
+}
+
+.settings-mcp-auth-note {
+  font-size: 12px;
+  line-height: 1.4;
+  color: hsl(var(--muted-foreground));
+}
+
+.settings-mcp-badge {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, hsl(var(--muted)) 92%, black);
+  border: 1px solid color-mix(in srgb, hsl(var(--muted)) 84%, black);
   color: hsl(var(--muted-foreground));
 }
 

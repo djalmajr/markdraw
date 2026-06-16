@@ -109,6 +109,10 @@ tmp/
 !.opencode/plugins/
 !.opencode/hooks/
 
+# Antigravity / Gemini CLI per-operator config (symlink into ~/.gemini). Like
+# the operator-local agent dirs above, never commit — it's machine-specific.
+.antigravitycli/
+
 # CLAUDE.md files (except root)
 **/CLAUDE.md
 !/CLAUDE.md

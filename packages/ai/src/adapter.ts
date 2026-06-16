@@ -24,6 +24,14 @@ async function loadEngine(id: AIEngineId): Promise<AIEngine> {
       return (await import("./engines/ai-sdk.ts")).aiSdkEngine;
     case "tanstack":
       return (await import("./engines/tanstack.ts")).tanstackEngine;
+    case "claude-cli":
+      return (await import("./engines/cli-bridge.ts")).claudeCliEngine;
+    case "codex-cli":
+      return (await import("./engines/cli-bridge.ts")).codexCliEngine;
+    case "grok-cli":
+      return (await import("./engines/cli-bridge.ts")).grokCliEngine;
+    case "antigravity-cli":
+      return (await import("./engines/cli-bridge.ts")).antigravityCliEngine;
   }
 }
 

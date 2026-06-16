@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
+  getStoredAiEmbeddingModel,
+  setStoredAiEmbeddingModel,
   getStoredAiEngine,
   getStoredAiMode,
   getStoredAiModel,
   getStoredAiReasoning,
   getStoredAiSmallModel,
   getStoredAiStreaming,
+  getStoredConnectedSubscriptions,
+  setStoredConnectedSubscriptions,
   getStoredHiddenModels,
   setStoredHiddenModels,
   getStoredIndexingTier,
@@ -29,6 +33,7 @@ describe("ai preferences defaults", () => {
   it("defaults: no model, lite tier, ai-sdk engine, streaming off, reasoning off", () => {
     expect(getStoredAiModel()).toBeNull();
     expect(getStoredAiSmallModel()).toBeNull();
+    expect(getStoredAiEmbeddingModel()).toBeNull();
     expect(getStoredIndexingTier()).toBe("lite");
     expect(getStoredAiEngine()).toBe("ai-sdk");
     expect(getStoredAiStreaming()).toBe(false);
@@ -74,6 +79,16 @@ describe("ai preferences round-trip", () => {
     expect(getStoredAiSmallModel()).toBe("anthropic/claude-haiku-4-5");
   });
 
+  it("persists the embedding model independently of the chat model", () => {
+    setStoredAiModel("openai/gpt-4o");
+    setStoredAiEmbeddingModel("openai/text-embedding-3-small");
+    expect(getStoredAiEmbeddingModel()).toBe("openai/text-embedding-3-small");
+    expect(getStoredAiModel()).toBe("openai/gpt-4o"); // chat model untouched
+    setStoredAiEmbeddingModel(null);
+    expect(getStoredAiEmbeddingModel()).toBeNull();
+    expect(getStoredAiModel()).toBe("openai/gpt-4o");
+  });
+
   it("persists tier and engine", () => {
     setStoredIndexingTier("full");
     expect(getStoredIndexingTier()).toBe("full");
@@ -106,6 +121,12 @@ describe("ai preferences round-trip", () => {
     expect(getStoredHiddenModels()).toEqual([]);
     setStoredHiddenModels(["openai/gpt-4o", "openai/gpt-4o", "anthropic/claude-haiku-4-5"]);
     expect(getStoredHiddenModels().sort()).toEqual(["anthropic/claude-haiku-4-5", "openai/gpt-4o"]);
+  });
+
+  it("connected subscriptions default to empty and round-trip (deduped)", () => {
+    expect(getStoredConnectedSubscriptions()).toEqual([]);
+    setStoredConnectedSubscriptions(["claude-sub", "claude-sub", "codex-sub"]);
+    expect(getStoredConnectedSubscriptions().sort()).toEqual(["claude-sub", "codex-sub"]);
   });
 
   it("hidden models tolerate a corrupt blob (returns empty)", () => {

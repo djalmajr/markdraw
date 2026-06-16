@@ -132,6 +132,21 @@ export interface InProcessToolDeps {
    *  into the target `.excalidraw` file, creating/opening it. Omitted → the tool
    *  isn't offered (hosts without a real filesystem). */
   generateExcalidrawDiagram?: (input: ExcalidrawGenerateRequest) => Promise<ExcalidrawGenerateOutcome>;
+  /** Active workspace-indexing tier. Off → app__search_workspace greps (today's
+   *  behavior); lite/full → it queries the prepared index (with grep fallback
+   *  when the index is empty). Omitted → treated as "off". */
+  getIndexingTier?: () => "off" | "lite" | "full";
+  /** Query the per-root index. Returns file-relative hits ({path, line, text});
+   *  the host maps the Rust IndexHit. Omitted → no index path (grep only). */
+  indexSearch?: (
+    root: string,
+    query: string,
+    tier: "lite" | "full",
+    queryVector?: number[],
+  ) => Promise<{ path: string; line: number; text: string }[]>;
+  /** Embed a query string for Full semantic search. Resolves null when no
+   *  embedding provider is available (caller degrades to keyword search). */
+  embedQuery?: (query: string) => Promise<number[] | null>;
 }
 
 const APPLY_MODES: readonly ExcalidrawApplyMode[] = ["replace-selection", "append", "replace-all"];
@@ -218,8 +233,41 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
       if (!query) return { matches: [], note: "empty query" };
       const roots = rootNamesFor(deps.getWorkspaceRoots());
       if (roots.length === 0) return { matches: [], note: "no workspace open" };
-      // Every root is searched concurrently; the result cap applies to the
-      // MERGED list so the model sees one consistent budget across roots.
+
+      // Prepared-index path (Fast/Complete tiers). For Complete we embed the
+      // query first; if that yields no vector we fall back to keyword search.
+      const tier = deps.getIndexingTier?.() ?? "off";
+      const indexSearch = deps.indexSearch;
+      if (tier !== "off" && indexSearch) {
+        const queryVector =
+          tier === "full" && deps.embedQuery ? await deps.embedQuery(query).catch(() => null) : null;
+        const indexTier: "lite" | "full" = tier === "full" && queryVector ? "full" : "lite";
+        const perRoot = await Promise.all(
+          roots.map(async (root) => {
+            const hits = await indexSearch(root.path, query, indexTier, queryVector ?? undefined).catch(
+              () => [],
+            );
+            return hits.map((h) => ({
+              path: roots.length > 1 ? `${root.name}/${h.path}` : h.path,
+              line: h.line,
+              text: scrub(h.text),
+            }));
+          }),
+        );
+        const merged = perRoot.flat();
+        // A non-empty index answers; an empty result (index not built yet) falls
+        // through to grep so search keeps working before the first index pass.
+        if (merged.length > 0) {
+          return {
+            matches: merged.slice(0, SEARCH_RESULT_CAP),
+            truncated: merged.length > SEARCH_RESULT_CAP,
+            mode: indexTier,
+          };
+        }
+      }
+
+      // Off, or the index produced nothing: literal grep across roots,
+      // concurrently; the result cap applies to the MERGED list.
       const perRoot = await Promise.all(
         roots.map(async (root) => {
           const matches = await invoke<FileMatch[]>("find_in_files", { root: root.path, query });

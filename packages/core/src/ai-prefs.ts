@@ -25,10 +25,12 @@ const MODE_KEY = "asciimark-ai-mode";
 const ENGINE_KEY = "asciimark-ai-engine";
 const MODEL_KEY = "asciimark-ai-model";
 const SMALL_MODEL_KEY = "asciimark-ai-small-model";
+const EMBEDDING_MODEL_KEY = "asciimark-ai-embedding-model";
 const TIER_KEY = "asciimark-ai-indexing-tier";
 const STREAMING_KEY = "asciimark-ai-streaming";
 const REASONING_KEY = "asciimark-ai-reasoning";
 const HIDDEN_MODELS_KEY = "asciimark-ai-hidden-models";
+const CONNECTED_SUBS_KEY = "asciimark-ai-connected-subscriptions";
 
 function getStoredAiMode(): AIChatMode {
   return localStorage.getItem(MODE_KEY) === "plan" ? "plan" : "build";
@@ -65,6 +67,19 @@ function getStoredAiSmallModel(): string | null {
 function setStoredAiSmallModel(modelId: string | null): void {
   if (modelId === null) localStorage.removeItem(SMALL_MODEL_KEY);
   else localStorage.setItem(SMALL_MODEL_KEY, modelId);
+}
+
+/** Selected embedding model ("provider/model") for the "Full" workspace index,
+ *  or null when unconfigured. Independent of the chat model — the user picks an
+ *  embedding-capable provider/model separately (only OpenAI/openai-compatible
+ *  qualify; see `providerCanEmbed`). */
+function getStoredAiEmbeddingModel(): string | null {
+  return localStorage.getItem(EMBEDDING_MODEL_KEY);
+}
+
+function setStoredAiEmbeddingModel(modelId: string | null): void {
+  if (modelId === null) localStorage.removeItem(EMBEDDING_MODEL_KEY);
+  else localStorage.setItem(EMBEDDING_MODEL_KEY, modelId);
 }
 
 function getStoredIndexingTier(): IndexingTier {
@@ -117,15 +132,39 @@ function setStoredHiddenModels(refs: string[]): void {
   localStorage.setItem(HIDDEN_MODELS_KEY, JSON.stringify([...new Set(refs)]));
 }
 
+/** Provider ids of CLI subscriptions (claude-sub / codex-sub) the user has
+ *  explicitly connected. Unlike API providers — whose "connected" state is
+ *  derived from a stored keychain key — a subscription has no key, so its
+ *  connection is persisted here and NEVER auto-probed on startup. Lenient read
+ *  drops malformed blobs. */
+function getStoredConnectedSubscriptions(): string[] {
+  const raw = localStorage.getItem(CONNECTED_SUBS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function setStoredConnectedSubscriptions(ids: string[]): void {
+  localStorage.setItem(CONNECTED_SUBS_KEY, JSON.stringify([...new Set(ids)]));
+}
+
 export type { AIChatMode, AIEngineId, AIReasoningEffort, IndexingTier };
 export {
   getStoredAiMode,
   setStoredAiMode,
+  getStoredAiEmbeddingModel,
+  setStoredAiEmbeddingModel,
   getStoredAiEngine,
   getStoredAiModel,
   getStoredAiReasoning,
   getStoredAiSmallModel,
   getStoredAiStreaming,
+  getStoredConnectedSubscriptions,
+  setStoredConnectedSubscriptions,
   getStoredHiddenModels,
   getStoredIndexingTier,
   setStoredAiEngine,

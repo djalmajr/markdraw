@@ -18,15 +18,37 @@ use ai_keychain::{
 // them via ai_mcp_call_tool. Imported by simple name so the IPC-contract check
 // (scripts/check-ipc-contract.sh) sees the commands as registered.
 mod ai_mcp;
+mod ai_mcp_oauth;
 use ai_mcp::{
-    ai_mcp_call_tool, ai_mcp_cancel_call, ai_mcp_connect, ai_mcp_disconnect, ai_mcp_list_servers,
-    ai_mcp_list_tools, McpManager,
+    ai_mcp_authorize, ai_mcp_call_tool, ai_mcp_cancel_call, ai_mcp_connect, ai_mcp_disconnect,
+    ai_mcp_list_servers, ai_mcp_list_tools, McpManager,
 };
+
+// Discovers MCP servers other agent tools (Claude Code, Codex, OpenCode) already
+// configure, at global + per-project scope, normalized for AsciiMark. Read-only;
+// the JS host gates which tools to read and approves project servers.
+mod mcp_discovery;
+use mcp_discovery::mcp_discover;
 
 // Streaming provider HTTP — Rust-side POST + SSE line framing over an ipc
 // Channel (tauri-plugin-http buffers whole responses, so SSE never streamed).
 mod ai_http;
 use ai_http::{ai_http_stream, ai_http_stream_cancel, HttpStreamManager};
+
+// Claude Code / Codex subscription via local CLI binaries (JSONL over Channel).
+mod cli_agent;
+use cli_agent::{
+    cli_chat_cancel, cli_chat_stream, cli_detect_binary, cli_probe_subscription, CliStreamManager,
+};
+
+// Per-root workspace index (DJA-15): SQLite FTS5 keyword search + provider-
+// supplied embedding vectors fused with RRF. Commands imported by simple name
+// so the IPC-contract check (scripts/check-ipc-contract.sh) sees them.
+mod ai_index;
+use ai_index::{
+    ai_index_delete, ai_index_search, ai_index_staleness, ai_index_status, ai_index_sync,
+    IndexManager,
+};
 
 // `asciimark-preview://` custom scheme — serves an HTML file's directory as an
 // isolated web origin so multi-file pages / SPAs preview with full fidelity
@@ -368,8 +390,9 @@ pub fn read_files_relative_impl(
 /// One line that matches a Find-in-Files query. `path` is workspace-relative
 /// with forward slashes (matches `DirEntry::path`). `line_number` is
 /// 0-indexed so the frontend can feed it directly to the editor's
-/// scrollToLine prop. `column_start`/`column_end` are byte offsets inside
-/// `line_text` for highlighting.
+/// scrollToLine prop. `column_start`/`column_end` are UTF-16 code-unit offsets
+/// inside `line_text` — matching JS `String.slice`, which the frontend uses to
+/// highlight — so the mark lines up on accented / multi-byte lines.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct FileMatch {
     pub path: String,
@@ -482,16 +505,23 @@ pub fn find_in_files_impl(
                 } else {
                     line.to_lowercase()
                 };
-                let column = match haystack.find(&needle) {
+                let byte_col = match haystack.find(&needle) {
                     Some(c) => c,
                     None => continue,
                 };
+                // Emit UTF-16 code-unit offsets (what JS `String.slice` indexes),
+                // NOT byte offsets — otherwise the frontend highlight drifts
+                // right on lines with accents / em-dashes before the match.
+                // `byte_col` is a char boundary (it came from `find`), so the
+                // prefix slice is always valid.
+                let column_start = haystack[..byte_col].encode_utf16().count();
+                let column_end = column_start + needle.encode_utf16().count();
                 results.push(FileMatch {
                     path: rel_path.clone(),
                     line_number,
                     line_text: line.to_string(),
-                    column_start: column,
-                    column_end: column + needle.len(),
+                    column_start,
+                    column_end,
                 });
             }
         }
@@ -1125,6 +1155,8 @@ pub fn run() {
         .manage(DirWatcherHolder(Mutex::new(None)))
         .manage(McpManager::default())
         .manage(HttpStreamManager::default())
+        .manage(CliStreamManager::default())
+        .manage(IndexManager::default())
         .manage(html_preview::HtmlPreviewState::default())
         .invoke_handler(tauri::generate_handler![
             open_directory_dialog,
@@ -1156,13 +1188,24 @@ pub fn run() {
             ai_read_config,
             ai_write_config,
             ai_mcp_connect,
+            ai_mcp_authorize,
             ai_mcp_disconnect,
             ai_mcp_list_servers,
+            mcp_discover,
             ai_mcp_list_tools,
             ai_mcp_call_tool,
             ai_mcp_cancel_call,
             ai_http_stream,
             ai_http_stream_cancel,
+            cli_detect_binary,
+            cli_probe_subscription,
+            cli_chat_stream,
+            cli_chat_cancel,
+            ai_index_status,
+            ai_index_staleness,
+            ai_index_sync,
+            ai_index_search,
+            ai_index_delete,
             html_preview_register,
             html_preview_set_overlay,
             html_preview_clear_overlay,
@@ -2416,7 +2459,28 @@ mod tests {
         let matches = find_in_files_impl(root, "needle", true, false).unwrap();
         assert_eq!(matches.len(), 1);
         let m = &matches[0];
-        assert_eq!(&m.line_text[m.column_start..m.column_end], "needle");
+        // Offsets are UTF-16 code units (what the frontend's String.slice uses).
+        let units: Vec<u16> = m.line_text.encode_utf16().collect();
+        assert_eq!(String::from_utf16(&units[m.column_start..m.column_end]).unwrap(), "needle");
+    }
+
+    #[test]
+    fn find_in_files_column_offsets_are_utf16_on_accented_lines() {
+        // Regression: byte offsets made the highlight drift right on lines with
+        // accents / em-dashes before the match (a global "GVC" search
+        // highlighting "Pip" in "GVC/Pipeline").
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_file(&root.join("a.md"), "US — Visualização — GVC/Pipeline\n");
+        let matches = find_in_files_impl(root, "GVC", false, false).unwrap();
+        assert_eq!(matches.len(), 1);
+        let m = &matches[0];
+        // Slicing the UTF-16 view (as JS String.slice does) yields exactly "GVC".
+        let units: Vec<u16> = m.line_text.encode_utf16().collect();
+        assert_eq!(String::from_utf16(&units[m.column_start..m.column_end]).unwrap(), "GVC");
+        // The UTF-16 start is strictly less than the byte index (multi-byte
+        // chars precede the match) — proving offsets aren't bytes.
+        assert!(m.column_start < m.line_text.find("GVC").unwrap());
     }
 
     // ── Tauri-command body mutation guards (Linear DJA-43) ─────────────

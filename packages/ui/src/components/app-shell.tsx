@@ -112,6 +112,7 @@ interface AppShellProps {
   settingsOpen?: boolean;
   onSettingsClose?: () => void;
   aiProviders?: SettingsAiProvider[];
+  aiMaskedApiKeys?: Record<string, string>;
   aiSelectedModel?: string | null;
   /** All configured models grouped by provider — Settings → Manage models. */
   aiAllModels?: Array<{ id: string; name: string; models: Array<{ value: string; label: string }> }>;
@@ -135,8 +136,17 @@ interface AppShellProps {
   }) => void | Promise<void>;
   onRemoveMcpServer?: (id: string) => void | Promise<void>;
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
+  onAuthorizeMcpServer?: (id: string) => void | Promise<void>;
+  onApproveMcpServer?: (id: string) => void | Promise<void>;
+  importOpenCodeMcps?: boolean;
+  onImportOpenCodeMcpsChange?: (enabled: boolean) => void;
   indexingTier?: IndexingTier;
   onIndexingTierChange?: (tier: IndexingTier) => void;
+  /** Embedding-capable providers/models for the Complete-tier picker. */
+  aiEmbeddingModelGroups?: Array<{ id: string; name: string; models: Array<{ value: string; label: string }> }>;
+  aiEmbeddingSelectedModel?: string | null;
+  onSelectAiEmbeddingModel?: (ref: string) => void;
+  aiEmbeddingCapable?: boolean;
   aiReasoning?: string;
   onAiReasoningChange?: (value: string) => void;
   aiStreaming?: boolean;
@@ -159,6 +169,8 @@ interface AppShellProps {
   onConnectProvider?: (input: { providerId: string; apiKey: string }) => void | Promise<void>;
   /** Disconnect a provider group (every id behind a merged base name). */
   onRemoveProvider?: (ids: string[]) => void | Promise<void>;
+  /** Re-fetch a provider's live model list (openai-compatible /models). */
+  onRefreshModels?: (providerId: string) => void | Promise<void>;
   onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;
   /** Resolve a file or folder as a chat context chip (desktop reads the file
    *  content, or builds a subtree listing for `kind: "dir"` — `path: ""` means
@@ -580,12 +592,17 @@ export function AppShell(props: AppShellProps) {
           open={!!props.settingsOpen}
           onClose={() => props.onSettingsClose?.()}
           aiProviders={props.aiProviders ?? []}
+          maskedApiKeys={props.aiMaskedApiKeys ?? {}}
           selectedModel={props.aiSelectedModel ?? null}
           allModels={props.aiAllModels ?? []}
           hiddenModels={props.aiHiddenModels ?? []}
           onToggleModel={(ref) => props.onToggleModel?.(ref)}
           indexingTier={props.indexingTier ?? "lite"}
           onTierChange={(t) => props.onIndexingTierChange?.(t)}
+          embeddingModelGroups={props.aiEmbeddingModelGroups ?? []}
+          embeddingSelectedModel={props.aiEmbeddingSelectedModel ?? null}
+          onSelectEmbeddingModel={(ref) => props.onSelectAiEmbeddingModel?.(ref)}
+          embeddingCapable={props.aiEmbeddingCapable ?? false}
           onListModels={(id, key) =>
             props.onListModels?.(id, key) ?? Promise.resolve([])
           }
@@ -593,10 +610,15 @@ export function AppShell(props: AppShellProps) {
           onSaveCustomProvider={(i) => props.onSaveCustomProvider?.(i)}
           onConnectProvider={(i) => props.onConnectProvider?.(i)}
           onRemoveProvider={(ids) => props.onRemoveProvider?.(ids)}
+          onRefreshModels={(id) => props.onRefreshModels?.(id)}
           mcpServers={props.mcpServers ?? []}
           onSaveMcpServer={(s) => props.onSaveMcpServer?.(s)}
           onRemoveMcpServer={(id) => props.onRemoveMcpServer?.(id)}
           onToggleMcpServer={(id, enabled) => props.onToggleMcpServer?.(id, enabled)}
+          onAuthorizeMcpServer={(id) => props.onAuthorizeMcpServer?.(id)}
+          onApproveMcpServer={(id) => props.onApproveMcpServer?.(id)}
+          importOpenCodeMcps={props.importOpenCodeMcps}
+          onImportOpenCodeMcpsChange={(on) => props.onImportOpenCodeMcpsChange?.(on)}
           aiReasoning={props.aiReasoning}
           onAiReasoningChange={(v) => props.onAiReasoningChange?.(v)}
           aiStreaming={props.aiStreaming ?? false}

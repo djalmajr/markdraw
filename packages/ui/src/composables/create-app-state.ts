@@ -762,7 +762,31 @@ export function createAppState(config: AppStateConfig) {
     onAssistantTurn: (content) => {
       if (aiMode() === "plan") config.onPlanComplete?.(content);
     },
-    getContext: () => buildContextPreamble(aiContextItems()),
+    getContext: () => {
+      const items: AiContextItem[] = [];
+      // The open document is implicit context (the active-file chip) unless the
+      // user dismissed it — include its CURRENT editor content so a plain
+      // question about "this document" actually considers it, with no @-mention
+      // or tool round-trip needed. This matters most for CLI-subscription chats,
+      // which have no AsciiMark read tool to fetch it on their own.
+      const active = activeFileContext();
+      const f = selectedFile();
+      // Only text documents dump their content; an Excalidraw scene's chip stays
+      // label-only (its raw JSON is noise — the read tool serves an outline).
+      if (active && f && fileKind(f.name) === "document") {
+        const content = editorContent();
+        if (content.trim()) {
+          items.push({ id: `active:${active.path}`, kind: "file", label: active.label, content });
+        }
+      }
+      // Explicit attachments (selections, @-mentions) follow; skip one that just
+      // duplicates the active file by path.
+      for (const item of aiContextItems()) {
+        if (active && item.kind === "file" && item.path === active.path) continue;
+        items.push(item);
+      }
+      return buildContextPreamble(items);
+    },
     // Engine-level approval (F3): the host's Accept/Reject gate rides the
     // ChatOptions instead of pre-wrapping every tool.
     ...(config.onToolApprovalRequest

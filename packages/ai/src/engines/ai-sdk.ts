@@ -10,7 +10,7 @@
 // surface on `fullStream` as `{type:"error"}`. We iterate `fullStream` so auth /
 // network / rate-limit errors reach the UI instead of a silent empty reply.
 
-import type { LanguageModel } from "ai";
+import type { EmbeddingModel, LanguageModel } from "ai";
 import { withApproval } from "../approval-policy.ts";
 import { compactMessages } from "../compaction.ts";
 import type { AIEngine, AIEngineOptions, CredentialResolver } from "../engine.ts";
@@ -87,6 +87,49 @@ async function buildModel(
         ...fetchOpt,
       })(modelId);
     }
+    default:
+      throw new Error(`ai-sdk engine does not support provider kind: ${provider.kind}`);
+  }
+}
+
+/** Build a text-embedding model for the "Full" workspace index. Only OpenAI and
+ *  OpenAI-compatible providers expose embeddings; Anthropic (and the CLI kinds,
+ *  which never reach this engine) have no embeddings API — they throw
+ *  NotSupportedError so the indexer degrades to keyword-only. Same lazy-import +
+ *  injected-fetch (CORS) pattern as buildModel. */
+async function buildEmbeddingModel(
+  resolved: ResolvedModel,
+  apiKey: string | undefined,
+  fetchImpl: AIEngineOptions["fetch"],
+): Promise<EmbeddingModel> {
+  const { modelId, providerId, provider } = resolved;
+  const baseURL = provider.options?.baseURL;
+  const headers = provider.options?.headers;
+  const fetch = fetchImpl as Parameters<typeof import("@ai-sdk/openai-compatible").createOpenAICompatible>[0]["fetch"];
+  const fetchOpt = fetchImpl ? { fetch } : {};
+
+  switch (provider.kind) {
+    case "openai": {
+      const { createOpenAI } = await import("@ai-sdk/openai");
+      return createOpenAI({
+        apiKey,
+        ...(baseURL ? { baseURL } : {}),
+        ...(headers ? { headers } : {}),
+        ...fetchOpt,
+      }).textEmbeddingModel(modelId);
+    }
+    case "openai-compatible": {
+      const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
+      return createOpenAICompatible({
+        name: providerId,
+        baseURL: baseURL ?? "",
+        ...(apiKey ? { apiKey } : {}),
+        ...(headers ? { headers } : {}),
+        ...fetchOpt,
+      }).textEmbeddingModel(modelId);
+    }
+    default:
+      throw new NotSupportedError("embed");
   }
 }
 
@@ -448,13 +491,17 @@ function createProvider(
     return out;
   }
 
-  return {
-    chat,
-    complete,
-    embed(): Promise<number[][]> {
-      return Promise.reject(new NotSupportedError("embed"));
-    },
-  };
+  async function embed(text: string | string[]): Promise<number[][]> {
+    const inputs = Array.isArray(text) ? text : [text];
+    if (inputs.length === 0) return [];
+    const apiKey = await getApiKey();
+    const model = await buildEmbeddingModel(resolved, apiKey, opts?.fetch);
+    const ai = await import("ai");
+    const { embeddings } = await ai.embedMany({ model, values: inputs });
+    return embeddings;
+  }
+
+  return { chat, complete, embed };
 }
 
 export const aiSdkEngine: AIEngine = { id: "ai-sdk", createProvider };

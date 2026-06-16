@@ -18,6 +18,10 @@ const ProviderKindSchema = v.picklist([
   "anthropic",
   "openai",
   "openai-compatible",
+  "claude-cli",
+  "codex-cli",
+  "grok-cli",
+  "antigravity-cli",
 ] as const);
 
 const ModelLimitSchema = v.object({
@@ -28,6 +32,14 @@ const ModelLimitSchema = v.object({
 const ModelConfigSchema = v.object({
   name: v.string(),
   limit: v.optional(ModelLimitSchema),
+});
+
+/** An embedding model a provider exposes. `dim` (vector dimension) is load-bearing:
+ *  the workspace index stores it with every vector and forces a reindex when it
+ *  changes (a 1536-d query can't be scored against 768-d stored vectors). */
+const EmbeddingModelConfigSchema = v.object({
+  name: v.string(),
+  dim: v.number(),
 });
 
 const ProviderOptionsSchema = v.object({
@@ -45,6 +57,20 @@ const ProviderConfigSchema = v.object({
   npm: v.optional(v.string()),
   options: v.optional(ProviderOptionsSchema),
   models: v.record(v.string(), ModelConfigSchema),
+  /** Embedding models this provider exposes (for the "Full" workspace index).
+   *  Absent/empty ⇒ the provider can't embed (see `providerCanEmbed`). */
+  embeddingModels: v.optional(v.record(v.string(), EmbeddingModelConfigSchema)),
+  /** Settings "Connect" catalog grouping. Providers sharing a `connectGroup`
+   *  (e.g. the Anthropic API + the Claude subscription, both "Claude") render as
+   *  ONE connect card offering each id's mode. Catalog-only — the model picker
+   *  still groups by provider name, so the same model isn't listed twice. */
+  connectGroup: v.optional(v.string()),
+  /** Treat `models` as a hand-maintained list even though the provider has a
+   *  baseURL: don't offer "Refresh models" / live `/models` fetch. For catalogs
+   *  the live endpoint can't reproduce correctly (e.g. OpenCode Go, whose single
+   *  /models can't say which API shape each model uses). CLI kinds are curated
+   *  implicitly; this flag is for API-shaped providers we still maintain by hand. */
+  curatedModels: v.optional(v.boolean()),
 });
 
 /** What the user may write in ai.json for a provider — every field optional, so
@@ -56,6 +82,9 @@ const UserProviderConfigSchema = v.object({
   npm: v.optional(v.string()),
   options: v.optional(ProviderOptionsSchema),
   models: v.optional(v.record(v.string(), ModelConfigSchema)),
+  embeddingModels: v.optional(v.record(v.string(), EmbeddingModelConfigSchema)),
+  connectGroup: v.optional(v.string()),
+  curatedModels: v.optional(v.boolean()),
 });
 
 /** Transport a configured MCP server speaks. stdio spawns a child process
@@ -148,6 +177,7 @@ const UserAIConfigSchema = v.object({
 type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
 type ModelLimit = v.InferOutput<typeof ModelLimitSchema>;
 type ModelConfig = v.InferOutput<typeof ModelConfigSchema>;
+type EmbeddingModelConfig = v.InferOutput<typeof EmbeddingModelConfigSchema>;
 type ProviderOptions = v.InferOutput<typeof ProviderOptionsSchema>;
 type ProviderConfig = v.InferOutput<typeof ProviderConfigSchema>;
 type UserProviderConfig = v.InferOutput<typeof UserProviderConfigSchema>;
@@ -174,6 +204,16 @@ function mergeOptions(
   return merged;
 }
 
+/** Merge embedding-model maps (user over builtin), omitting the field entirely
+ *  when neither side declares any — so `providerCanEmbed` stays a clean check. */
+function mergeEmbeddingModels(
+  base: Record<string, EmbeddingModelConfig> | undefined,
+  override: Record<string, EmbeddingModelConfig> | undefined,
+): { embeddingModels?: Record<string, EmbeddingModelConfig> } {
+  const merged = { ...(base ?? {}), ...(override ?? {}) };
+  return Object.keys(merged).length > 0 ? { embeddingModels: merged } : {};
+}
+
 /**
  * Deep-merge a user config over the built-in provider catalog, producing a
  * fully-resolved `AIConfig`. Known providers inherit `npm`/`name`/`models`
@@ -197,6 +237,13 @@ function mergeConfigs(
         npm: up.npm ?? base.npm,
         options: mergeOptions(base.options, up.options),
         models: { ...base.models, ...(up.models ?? {}) },
+        ...mergeEmbeddingModels(base.embeddingModels, up.embeddingModels),
+        ...(up.connectGroup ?? base.connectGroup
+          ? { connectGroup: up.connectGroup ?? base.connectGroup }
+          : {}),
+        ...(up.curatedModels ?? base.curatedModels
+          ? { curatedModels: up.curatedModels ?? base.curatedModels }
+          : {}),
       };
     } else if (up.kind && up.name) {
       provider[id] = {
@@ -205,6 +252,9 @@ function mergeConfigs(
         npm: up.npm,
         options: up.options,
         models: up.models ?? {},
+        ...mergeEmbeddingModels(undefined, up.embeddingModels),
+        ...(up.connectGroup ? { connectGroup: up.connectGroup } : {}),
+        ...(up.curatedModels ? { curatedModels: up.curatedModels } : {}),
       };
     }
     // else: incomplete custom provider — ignored
@@ -218,8 +268,25 @@ function mergeConfigs(
   };
 }
 
+/** Whether a provider can produce embeddings for the "Full" workspace index.
+ *  Subscription CLIs (claude-cli/codex-cli/grok-cli/antigravity-cli) are chat-only
+ *  and Anthropic has no embeddings API; every other kind needs a declared model. */
+function providerCanEmbed(p: ProviderConfig): boolean {
+  if (
+    p.kind === "claude-cli" ||
+    p.kind === "codex-cli" ||
+    p.kind === "grok-cli" ||
+    p.kind === "antigravity-cli" ||
+    p.kind === "anthropic"
+  ) {
+    return false;
+  }
+  return Object.keys(p.embeddingModels ?? {}).length > 0;
+}
+
 export {
   type AIConfig,
+  type EmbeddingModelConfig,
   type MCPServerConfig,
   type MCPTransport,
   type ModelConfig,
@@ -230,6 +297,7 @@ export {
   type UserAIConfig,
   type UserProviderConfig,
   AIConfigSchema,
+  EmbeddingModelConfigSchema,
   MCPServerConfigSchema,
   MCPTransportSchema,
   ModelConfigSchema,
@@ -240,4 +308,5 @@ export {
   UserProviderConfigSchema,
   mergeConfigs,
   parseUserConfig,
+  providerCanEmbed,
 };

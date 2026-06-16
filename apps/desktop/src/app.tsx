@@ -25,10 +25,14 @@ import {
   scrubSecrets,
 } from "@asciimark/ai/secret-scrub.ts";
 import { withBuiltins } from "@asciimark/ai/builtin-providers.ts";
+import { isCliProviderKind } from "@asciimark/ai/cli-providers.ts";
+import { createCliHost, probeCliSubscription } from "./lib/cli-agent.ts";
 import {
   getStoredAiEngine,
   getStoredAiModel,
   setStoredAiModel,
+  getStoredAiEmbeddingModel,
+  setStoredAiEmbeddingModel,
   getStoredAiReasoning,
   setStoredAiReasoning,
   getStoredAiStreaming,
@@ -36,21 +40,46 @@ import {
   type AIReasoningEffort,
   getStoredHiddenModels,
   setStoredHiddenModels,
+  getStoredConnectedSubscriptions,
+  setStoredConnectedSubscriptions,
   getStoredIndexingTier,
   setStoredIndexingTier,
   type IndexingTier,
 } from "@asciimark/core/ai-prefs.ts";
+import { providerCanEmbed } from "@asciimark/ai/config-schema.ts";
+import { createWorkspaceIndexer } from "@asciimark/ui/composables/create-workspace-indexer.ts";
+import {
+  aiIndexDelete,
+  aiIndexSearch,
+  aiIndexStaleness,
+  aiIndexSync,
+  type EmbeddingMeta,
+} from "./lib/ai-index.ts";
 import { fetchModels } from "@asciimark/ai/model-catalog.ts";
 import { loadAIConfig, loadUserAIConfig, saveAIConfig } from "./lib/ai-config.ts";
 import { buildMcpTools } from "@asciimark/ai/mcp-tools.ts";
 import {
   createMcpBridge,
+  authorizeMcpServer,
   connectEnabledServers,
   connectMcpServer,
   disconnectMcpServer,
   listMcpServers,
   type McpServerStatus,
 } from "./lib/ai-mcp.ts";
+import {
+  approveDiscovered,
+  dedupeDiscovered,
+  discoverMcpServers,
+  discoveryToolsFor,
+  getImportOpenCodeMcps,
+  isApproved,
+  serverIdentity,
+  setImportOpenCodeMcps,
+  toMcpServerConfig,
+  withConfigHashes,
+  type DiscoveredEntry,
+} from "./lib/mcp-discovery.ts";
 import {
   buildInProcessTools,
   type ExcalidrawGenerateOutcome,
@@ -65,9 +94,14 @@ import { composeBelow } from "@asciimark/diagram/compose.ts";
 import { generate } from "@asciimark/diagram/generate.ts";
 import { sceneToFile } from "@asciimark/diagram/scene.ts";
 import { loadCustomInstructions, loadSlashCommands } from "./lib/ai-commands.ts";
+import {
+  buildMemoryScopesInstruction,
+  loadMemoryScopes,
+  type MemoryScope,
+} from "./lib/ai-memory-scopes.ts";
 import { createGenerationGuard } from "./lib/generation-guard.ts";
 import type { CustomInstructions, SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
-import { deleteApiKey, getApiKey, hasApiKey, setApiKey } from "./lib/ai-credentials.ts";
+import { deleteApiKey, getApiKey, setApiKey } from "./lib/ai-credentials.ts";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { streamingFetch } from "./lib/ai-sse-fetch.ts";
 import type { TabStore } from "@asciimark/ui/composables/create-tab-store.ts";
@@ -132,6 +166,8 @@ const { convertAdoc, convertMarkdown } = createConverter(new ConvertWorker());
 // as "connected" without a keychain or config credential.
 const LOCAL_PROVIDER_IDS = new Set(["ollama", "lmstudio"]);
 
+const cliHost = createCliHost();
+
 // Skeleton written when app__excalidraw_write targets a file that doesn't
 // exist yet. The frame's loader would boot an empty scene from "" too (its
 // JSON.parse catch), but a 0-byte file isn't a valid .excalidraw — the
@@ -151,6 +187,11 @@ export function App() {
   const [mcpStatuses, setMcpStatuses] = createSignal<McpServerStatus[]>([]);
   // Tool names grouped by server id — feeds the settings card tool chips.
   const [mcpTools, setMcpTools] = createSignal<Record<string, string[]>>({});
+  // MCP servers discovered from other agent tools (Claude/Codex/OpenCode), deduped
+  // + hashed. Global ones auto-connect; project ones wait for approval.
+  const [discoveredMcp, setDiscoveredMcp] = createSignal<DiscoveredEntry[]>([]);
+  // OpenCode has no first-class provider, so its discovery rides this toggle.
+  const [importOpenCode, setImportOpenCode] = createSignal(getImportOpenCodeMcps());
 
   // Deterministic secret scrubbing (omp#5), session-scoped: one map per app
   // run keeps `[secret-<nonce>-N]` placeholders stable across every outbound
@@ -180,13 +221,19 @@ export function App() {
   /** Engine options read fresh per provider build: streaming picks the Rust
    *  SSE transport (tauri-plugin-http buffers whole bodies); reasoning "off"
    *  omits the option entirely (engines map low/medium/high only). */
-  function buildEngineOptions(): Parameters<typeof createAiProvider>[3] {
+  function buildEngineOptions(
+    kind?: string,
+  ): Parameters<typeof createAiProvider>[3] {
     const reasoning: AIReasoningEffort = getStoredAiReasoning();
-    return {
+    const base = {
       fetch: getStoredAiStreaming() ? streamingFetch : tauriFetch,
       streaming: getStoredAiStreaming(),
       ...(reasoning !== "off" ? { reasoningEffort: reasoning } : {}),
     };
+    if (kind && isCliProviderKind(kind as never)) {
+      return { ...base, cliHost };
+    }
+    return base;
   }
 
   // Build the active provider from ai-prefs + config + keychain. With no model
@@ -200,23 +247,63 @@ export function App() {
     // If the user put the key in ai.json (config), use it directly and skip the
     // keychain — avoids touching the OS keychain when it isn't the source.
     const hasConfigKey = !!resolved.provider.options?.apiKey;
+    const engineId = isCliProviderKind(resolved.provider.kind)
+      ? resolved.provider.kind
+      : getStoredAiEngine();
     return createAiProvider(
-      getStoredAiEngine(),
+      engineId,
+      resolved,
+      () =>
+        isCliProviderKind(resolved.provider.kind)
+          ? Promise.resolve(undefined)
+          : resolveCredential(
+              resolved.providerId,
+              resolved.provider,
+              hasConfigKey
+                ? {}
+                : { keychain: (id) => getApiKey(id).then((k) => k ?? undefined) },
+            ),
+      // Route provider HTTP through Rust to avoid the webview CORS wall.
+      // CLI subscription providers use cli_agent.rs instead (cliHost).
+      buildEngineOptions(resolved.provider.kind),
+    );
+  }
+
+  /** Build an embedder for the "Complete" index from the separately-selected
+   *  embedding model (independent of the chat model). Null when none is chosen
+   *  or the provider can't embed — the indexer then stays keyword-only. Always
+   *  the ai-sdk engine (the only one that implements embeddings). */
+  function buildEmbeddingProvider():
+    | { embed: (texts: string[]) => Promise<number[][]>; meta: EmbeddingMeta }
+    | null {
+    const modelId = getStoredAiEmbeddingModel();
+    const resolved = modelId ? resolveModel(aiConfig(), modelId) : null;
+    if (!resolved || !providerCanEmbed(resolved.provider)) return null;
+    const dim = resolved.provider.embeddingModels?.[resolved.modelId]?.dim ?? 0;
+    if (dim <= 0) return null;
+    const hasConfigKey = !!resolved.provider.options?.apiKey;
+    const provider = createAiProvider(
+      "ai-sdk",
       resolved,
       () =>
         resolveCredential(
           resolved.providerId,
           resolved.provider,
-          hasConfigKey
-            ? {}
-            : { keychain: (id) => getApiKey(id).then((k) => k ?? undefined) },
+          hasConfigKey ? {} : { keychain: (id) => getApiKey(id).then((k) => k ?? undefined) },
         ),
-      // Route provider HTTP through Rust to avoid the webview CORS wall.
-      // Streaming ON swaps in the Rust SSE transport (ai_http.rs → Channel →
-      // streaming Response), which actually delivers deltas — tauri-plugin-http
-      // buffers whole bodies, so it stays the buffered default only.
-      buildEngineOptions(),
+      buildEngineOptions(resolved.provider.kind),
     );
+    return {
+      meta: { provider: resolved.providerId, model: resolved.modelId, dim },
+      embed: (texts) => provider.embed(texts),
+    };
+  }
+
+  async function computeSha(content: string): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
   }
 
   /** Provider chip label: real "Provider · model" when configured; the mock
@@ -224,7 +311,10 @@ export function App() {
   const aiProviderLabel = (): string | null => {
     const modelId = getStoredAiModel();
     const resolved = modelId ? resolveModel(aiConfig(), modelId) : null;
-    if (resolved) return `${resolved.provider.name} · ${resolved.modelId}`;
+    // The picker trigger shows the selected MODEL's friendly name — resolved from
+    // the full config, so it stays correct even when that model's provider isn't
+    // currently connected (it just won't appear in the popover until it is).
+    if (resolved) return resolved.model.name ?? resolved.modelId;
     return import.meta.env.DEV ? "Mock (dev)" : null;
   };
 
@@ -238,9 +328,19 @@ export function App() {
     createAIProvider: () => buildAIProvider(),
     // Tools for the chat tool-calling loop: in-process app tools + MCP servers.
     getAITools,
-    // Workspace custom instructions (.asciimark/instructions.md) merged into
-    // the system prompt (arrow defers the read — the signal is declared below).
-    getCustomInstructions: () => aiInstructions() ?? undefined,
+    // Workspace custom instructions (.asciimark/instructions.md) plus, when an
+    // MCP server is connected, the ai-memory scopes from the open roots'
+    // `.ai-memory.toml` — appended so the model queries the right project(s).
+    getCustomInstructions: () => {
+      const base = aiInstructions();
+      const note = mcpStatuses().some((s) => s.connected)
+        ? buildMemoryScopesInstruction(aiMemoryScopes())
+        : null;
+      if (!note) return base ?? undefined;
+      return base
+        ? { ...base, text: `${base.text}\n\n${note}` }
+        : { mode: "append" as const, text: note };
+    },
     // Engine-enforced Accept/Reject for prompt-tier tools (arrow defers the
     // read — the gate is defined further down in this component).
     onToolApprovalRequest: (req) => requestToolApproval(req),
@@ -264,6 +364,15 @@ export function App() {
     // Independent of config-load success — the builtins-only fallback still
     // needs its keychain probe so connected providers surface in the pickers.
     await refreshConnectedProviders();
+    // (MCP discovery from connected tools runs via a reactive effect keyed on
+    // the open roots + provider connectivity — see below.)
+    // A previously-saved "Complete" tier downgrades to "Fast" when no embedding
+    // provider is connected (the Full card is gated, but the stored choice may
+    // predate a disconnect).
+    if (indexingTier() === "full" && !embeddingCapable()) {
+      setIndexingTier("lite");
+      setStoredIndexingTier("lite");
+    }
   });
 
   // ── Settings modal (DJA-15) ────────────────────────────────────────────
@@ -282,6 +391,14 @@ export function App() {
       id,
       name: p.name,
       models: Object.keys(p.models),
+      kind: p.kind,
+      connectMode: isCliProviderKind(p.kind) ? ("cli-subscription" as const) : ("api-key" as const),
+      connectGroup: p.connectGroup,
+      // Live model list can be re-fetched (openai-compatible endpoint with a
+      // baseURL, e.g. OpenRouter / Ollama / OpenCode Zen) → show "Refresh models".
+      // `curatedModels` opts a baseURL provider OUT (OpenCode Go: hand-maintained
+      // split the live /models can't reproduce). CLI kinds are curated implicitly.
+      fetchable: !isCliProviderKind(p.kind) && !!p.options?.baseURL && !p.curatedModels,
     })),
   );
 
@@ -291,13 +408,62 @@ export function App() {
   // It gates the model groups (chat picker + Manage models): a builtin with
   // hardcoded models but no credential must not surface as pickable.
   const [connectedProviders, setConnectedProviders] = createSignal<Record<string, boolean>>({});
+  // Masked preview of each connected provider's stored key (prefix…suffix), so
+  // the connect input shows "a key is set" instead of looking empty. Computed
+  // from the value already cached by refreshConnectedProviders — no extra
+  // keychain read (no OS prompt). NEVER the full secret.
+  const [maskedApiKeys, setMaskedApiKeys] = createSignal<Record<string, string>>({});
+  // Persisted set of explicitly-connected CLI subscriptions (claude-sub /
+  // codex-sub). A subscription has no keychain key, so its connection is
+  // remembered here instead of being re-probed (a real model call!) on every
+  // launch. Kept separate from API connectivity, which derives from the keychain.
+  const [connectedSubscriptions, setConnectedSubscriptions] = createSignal<Set<string>>(
+    new Set(getStoredConnectedSubscriptions()),
+  );
+  function persistConnectedSubscription(id: string, connected: boolean): void {
+    setConnectedSubscriptions((cur) => {
+      const next = new Set(cur);
+      if (connected) next.add(id);
+      else next.delete(id);
+      setStoredConnectedSubscriptions([...next]);
+      return next;
+    });
+  }
+  /** Prefix…suffix preview of a secret — enough to recognize it, never the key. */
+  function maskApiKey(key: string): string {
+    if (key.length <= 10) return "•".repeat(8);
+    return `${key.slice(0, 6)}…${key.slice(-4)}`;
+  }
   async function refreshConnectedProviders(): Promise<void> {
     const next: Record<string, boolean> = {};
+    const masked: Record<string, string> = {};
     for (const [id, p] of Object.entries(aiConfig().provider)) {
-      next[id] =
-        LOCAL_PROVIDER_IDS.has(id) || !!p.options?.apiKey || (await hasApiKey(id));
+      try {
+        if (isCliProviderKind(p.kind)) {
+          // No startup probe: a subscription is connected only if the user
+          // explicitly connected it (persisted). The probe runs on connect, so
+          // we never spend a model call — or hang on a missing CLI — at launch.
+          next[id] = connectedSubscriptions().has(id);
+        } else if (LOCAL_PROVIDER_IDS.has(id) || !!p.options?.apiKey) {
+          next[id] = true;
+        } else {
+          // getApiKey hits the keychain at most once per session (cached), then
+          // serves the value for free — so masking adds no extra OS prompt.
+          const key = await getApiKey(id);
+          next[id] = key !== null;
+          if (key) masked[id] = maskApiKey(key);
+        }
+      } catch {
+        // A keychain read / CLI probe can fail (OS prompt dismissed, item
+        // locked, binary missing). Mark the provider NOT connected so the model
+        // picker shows it disabled rather than a misleading "connected" badge.
+        // The per-provider try/catch is the real fix: one failure no longer
+        // aborts the whole refresh and wipes every OTHER provider too.
+        next[id] = false;
+      }
     }
     setConnectedProviders(next);
+    setMaskedApiKeys(masked);
   }
 
   // Model picker shown in the chat composer footer. Reads `aiConfig()` so it
@@ -312,9 +478,52 @@ export function App() {
   // openai-compatible), two entries for the same backend — are MERGED into one
   // group; each model's `value` keeps its own provider id so routing/`kind`
   // stays correct.
-  const aiModelGroupsAll = createMemo<{ id: string; name: string; models: { value: string; label: string }[] }[]>(
+  // Group names ascending; within a group, model NAMES ascending but VERSIONS
+  // descending (newest first) — "GLM-5.1" before "GLM-5", "Kimi K2.7" before
+  // "K2.6". Tokenise each label into text/number runs: text compared ascending,
+  // numbers descending.
+  const compareModelLabel = (a: string, b: string): number => {
+    const ta = a.match(/\d+(?:\.\d+)?|\D+/g) ?? [a];
+    const tb = b.match(/\d+(?:\.\d+)?|\D+/g) ?? [b];
+    const n = Math.min(ta.length, tb.length);
+    for (let i = 0; i < n; i += 1) {
+      const sa = ta[i]!;
+      const sb = tb[i]!;
+      if (/^\d/.test(sa) && /^\d/.test(sb)) {
+        const d = parseFloat(sb) - parseFloat(sa); // versions: newest first
+        if (d !== 0) return d;
+      } else {
+        const c = sa.localeCompare(sb, undefined, { sensitivity: "base" }); // names ascending
+        if (c !== 0) return c;
+      }
+    }
+    return ta.length - tb.length; // base before a longer variant (e.g. "…Pro")
+  };
+  const sortModelGroups = (
+    groups: {
+      id: string;
+      name: string;
+      origin?: "subscription" | "api";
+      models: { value: string; label: string }[];
+    }[],
+  ): {
+    id: string;
+    name: string;
+    origin?: "subscription" | "api";
+    models: { value: string; label: string }[];
+  }[] =>
+    groups
+      .map((g) => ({ ...g, models: [...g.models].sort((a, b) => compareModelLabel(a.label, b.label)) }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
+
+  const aiModelGroupsAll = createMemo<
+    { id: string; name: string; origin?: "subscription" | "api"; models: { value: string; label: string }[] }[]
+  >(
     () => {
-      const groups = new Map<string, { id: string; name: string; models: { value: string; label: string }[] }>();
+      const groups = new Map<
+        string,
+        { id: string; name: string; origin?: "subscription" | "api"; models: { value: string; label: string }[] }
+      >();
       const connected = connectedProviders();
       for (const [pid, p] of Object.entries(aiConfig().provider)) {
         // Connected providers only — `aiModelGroups` (chat picker) derives from
@@ -329,11 +538,49 @@ export function App() {
         const base = p.name.replace(/\s*\([^)]*\)\s*$/, "").trim() || p.name;
         const existing = groups.get(base);
         if (existing) existing.models.push(...models);
-        else groups.set(base, { id: base, name: base, models });
+        // Origin (subscription vs API) is consistent within a base group — its
+        // providers are all CLI kinds or all API kinds — so the picker/Manage
+        // header can label it. Taken from the first provider of the group.
+        else
+          groups.set(base, {
+            id: base,
+            name: base,
+            origin: isCliProviderKind(p.kind) ? "subscription" : "api",
+            models,
+          });
       }
-      return [...groups.values()];
+      return sortModelGroups([...groups.values()]);
     },
   );
+  // Embedding-capable, connected providers grouped for the embedding-model
+  // picker (Complete tier). Only OpenAI / openai-compatible with declared
+  // embedding models qualify (see providerCanEmbed).
+  const embeddingModelGroups = createMemo<{ id: string; name: string; models: { value: string; label: string }[] }[]>(
+    () => {
+      const connected = connectedProviders();
+      const groups: { id: string; name: string; models: { value: string; label: string }[] }[] = [];
+      for (const [pid, p] of Object.entries(aiConfig().provider)) {
+        if (!connected[pid] || !providerCanEmbed(p)) continue;
+        const models = Object.entries(p.embeddingModels ?? {}).map(([mid, mdl]) => ({
+          value: `${pid}/${mid}`,
+          label: mdl.name ?? mid,
+        }));
+        if (models.length > 0) groups.push({ id: pid, name: p.name, models });
+      }
+      return sortModelGroups(groups);
+    },
+  );
+  /** Whether the "Complete" tier can run — at least one embedding provider connected. */
+  const embeddingCapable = createMemo(() => embeddingModelGroups().length > 0);
+  // Selected embedding model ("provider/model"), independent of the chat model.
+  const embeddingSelectedModel = createMemo<string | null>(() => {
+    aiConfig();
+    return getStoredAiEmbeddingModel();
+  });
+  function selectEmbeddingModel(ref: string): void {
+    setStoredAiEmbeddingModel(ref);
+    setAiConfig((c) => ({ ...c })); // bump so the pickers/memos re-derive
+  }
   // Models the user hid via "Manage models" — filtered out of the chat picker.
   const [hiddenModels, setHiddenModels] = createSignal<string[]>(getStoredHiddenModels());
   function toggleHiddenModel(ref: string): void {
@@ -346,9 +593,29 @@ export function App() {
   // What the chat picker shows: all groups minus the hidden models.
   const aiModelGroups = createMemo(() => {
     const hidden = new Set(hiddenModels());
-    return aiModelGroupsAll()
+    const groups = aiModelGroupsAll()
       .map((g) => ({ ...g, models: g.models.filter((mdl) => !hidden.has(mdl.value)) }))
       .filter((g) => g.models.length > 0);
+    // Always surface the ACTIVE model in the picker — even if its provider isn't
+    // connected (or the model is hidden) — so the popover reflects what the
+    // trigger shows and the current selection is never invisible/unhighlighted.
+    // Resolved from the full config; added once when missing from the groups.
+    const current = aiCurrentModel();
+    const present = groups.some((g) => g.models.some((mdl) => mdl.value === current));
+    if (current && !present) {
+      const resolved = resolveModel(aiConfig(), current);
+      if (resolved) {
+        const base =
+          resolved.provider.name.replace(/\s*\([^)]*\)\s*$/, "").trim() || resolved.provider.name;
+        groups.unshift({
+          id: base,
+          name: base,
+          origin: isCliProviderKind(resolved.provider.kind) ? "subscription" : "api",
+          models: [{ value: current, label: resolved.model.name ?? resolved.modelId }],
+        });
+      }
+    }
+    return groups;
   });
   /** Context window (tokens) of the active model — drives the composer's
    *  context-usage ring. Undefined when the model config has no `limit`. */
@@ -376,7 +643,16 @@ export function App() {
       provider?.options?.headers,
       tauriFetch as unknown as typeof globalThis.fetch,
     );
-    return list.map((mdl) => mdl.id);
+    const ids = list.map((mdl) => mdl.id);
+    // OpenAI's /v1/models also lists embeddings, audio, image and legacy models.
+    // Keep only chat-capable ids (prefix allowlist + non-chat denylist) so the
+    // picker isn't flooded. Other openai-compatible providers return clean lists.
+    if (provider?.kind === "openai") {
+      const CHAT_OK = /^(gpt-|o\d|chatgpt-)/;
+      const NON_CHAT = /(embedding|whisper|tts|audio|image|moderation|realtime|transcribe|search|dall-e)/;
+      return ids.filter((id) => CHAT_OK.test(id) && !NON_CHAT.test(id));
+    }
+    return ids;
   }
 
   async function saveAiProvider(opts: {
@@ -446,8 +722,18 @@ export function App() {
    *  Manage models. Used by the per-provider connect sub-page. */
   async function connectProvider(input: { providerId: string; apiKey: string }): Promise<void> {
     const { providerId, apiKey } = input;
-    if (apiKey) await setApiKey(providerId, apiKey);
     const provider = aiConfig().provider[providerId];
+    if (provider && isCliProviderKind(provider.kind)) {
+      const probe = await probeCliSubscription(provider.kind);
+      if (!probe.ok) {
+        throw new Error(probe.error ?? "CLI subscription not available");
+      }
+      persistConnectedSubscription(providerId, true); // remember across launches
+      setAiConfig(await loadAIConfig());
+      await refreshConnectedProviders();
+      return;
+    }
+    if (apiKey) await setApiKey(providerId, apiKey);
     if (provider && Object.keys(provider.models).length === 0 && provider.options?.baseURL) {
       let ids: string[] = [];
       try {
@@ -478,8 +764,38 @@ export function App() {
    *  is cleared). Custom providers — present in the raw user config with
    *  kind+name — are also dropped from ai.json; built-ins keep their catalog
    *  entry and merely lose the credential (the connected filter hides them). */
+  /** Re-fetch a provider's live model list (openai-compatible /models) using the
+   *  stored key and overwrite its catalog entry. Used by the "Refresh models"
+   *  action on the provider page. No-ops for providers without a baseURL. */
+  async function refreshModels(providerId: string): Promise<void> {
+    const provider = aiConfig().provider[providerId];
+    if (!provider?.options?.baseURL || isCliProviderKind(provider.kind)) return;
+    const key = (await getApiKey(providerId)) ?? "";
+    let ids: string[] = [];
+    try {
+      ids = await listAiModels(providerId, key);
+    } catch {
+      ids = [];
+    }
+    if (!ids.length) return;
+    const user = await loadUserAIConfig();
+    const existing = (user.provider ?? {})[providerId] ?? {};
+    await saveAIConfig(
+      JSON.stringify({
+        ...user,
+        provider: {
+          ...(user.provider ?? {}),
+          [providerId]: { ...existing, models: Object.fromEntries(ids.map((id) => [id, { name: id }])) },
+        },
+      }),
+    );
+    setAiConfig(await loadAIConfig());
+  }
+
   async function removeProvider(ids: string[]): Promise<void> {
     for (const id of ids) await deleteApiKey(id);
+    // Drop any persisted subscription connection too (no keychain key to clear).
+    for (const id of ids) persistConnectedSubscription(id, false);
     const user = await loadUserAIConfig();
     const provider = { ...(user.provider ?? {}) };
     let changed = false;
@@ -540,6 +856,30 @@ export function App() {
       updatePlan: (items) => (items === null ? state.clearAiPlan() : state.setAiPlanItems(items)),
       applyExcalidrawMermaid,
       generateExcalidrawDiagram,
+      // Workspace-indexing search: Off → grep; Fast → keyword index; Complete →
+      // hybrid (embed the query, fuse with vectors). See app__search_workspace.
+      getIndexingTier: () => indexingTier(),
+      indexSearch: async (root, query, tier, queryVector) => {
+        const hits = await aiIndexSearch({
+          rootPath: root,
+          query,
+          tier,
+          queryVector,
+          embedding: buildEmbeddingProvider()?.meta ?? undefined,
+          limit: 20,
+        });
+        return hits.map((h) => ({ path: h.path, line: h.bestChunkLine, text: h.snippet }));
+      },
+      embedQuery: async (query) => {
+        const src = buildEmbeddingProvider();
+        if (!src) return null;
+        try {
+          const [v] = await src.embed([query]);
+          return v ?? null;
+        } catch {
+          return null;
+        }
+      },
     });
     let mcp: AITool[] = [];
     try {
@@ -652,6 +992,82 @@ export function App() {
     }
   }
 
+  // Re-read the open roots' (+ global) MCP configs from the tools whose provider
+  // is connected, dedupe, then auto-connect the global ones and any project ones
+  // already approved. Pending project servers are surfaced (not connected) for an
+  // explicit "Approve". Latest-wins so rapid provider/root changes don't race.
+  const discoveryGuard = createGenerationGuard();
+  async function refreshDiscoveredMcp(): Promise<void> {
+    const isLatest = discoveryGuard.begin();
+    const roots = Array.from(rootPaths().values());
+    const providerKinds: Record<string, string> = Object.fromEntries(
+      Object.entries(aiConfig().provider).map(([id, p]) => [id, p.kind]),
+    );
+    const tools = discoveryToolsFor({
+      connected: connectedProviders(),
+      providerKinds,
+      importOpenCode: importOpenCode(),
+    });
+    let entries: DiscoveredEntry[];
+    try {
+      const raw = await discoverMcpServers(roots, tools);
+      const existing = new Set((aiConfig().mcp ?? []).map(serverIdentity));
+      entries = await withConfigHashes(dedupeDiscovered(raw, existing));
+    } catch (e) {
+      console.warn("[mcp] discovery failed:", e);
+      return;
+    }
+    if (!isLatest()) return;
+    setDiscoveredMcp(entries);
+    // Connect what's allowed, skipping anything already live (no re-spawn). Fire
+    // in PARALLEL and don't await — each connect is bounded by a Rust-side
+    // timeout, so one misbehaving server can't stall the others or the UI. The
+    // cards render immediately from `discoveredMcp`; status fills in as connects
+    // land.
+    const live = new Set(mcpStatuses().filter((s) => s.connected).map((s) => s.id));
+    const toConnect = entries.filter(
+      (e) =>
+        (e.scope === "global" || (!!e.root && isApproved(e.root, e.configHash))) &&
+        !live.has(e.id),
+    );
+    void Promise.allSettled(
+      toConnect.map((e) =>
+        connectMcpServer(toMcpServerConfig(e)).catch((err) =>
+          console.warn(`[mcp] discovered connect failed for "${e.id}":`, err),
+        ),
+      ),
+    ).then(() => refreshMcpStatuses());
+    await refreshMcpStatuses();
+  }
+
+  /** Approve a pending project-scoped discovered server, then connect it. */
+  async function approveDiscoveredMcp(id: string): Promise<void> {
+    const entry = discoveredMcp().find((e) => e.id === id);
+    if (!entry?.root) return;
+    approveDiscovered(entry.root, entry.configHash);
+    try {
+      await connectMcpServer(toMcpServerConfig(entry));
+    } catch (e) {
+      console.warn(`[mcp] approve+connect failed for "${id}":`, e);
+    }
+    await refreshMcpStatuses();
+    setDiscoveredMcp((d) => [...d]); // bump so pendingApproval recomputes
+  }
+
+  function toggleImportOpenCode(on: boolean): void {
+    setImportOpenCode(on);
+    setImportOpenCodeMcps(on);
+  }
+  // Re-discover whenever the open roots, provider connectivity, or the OpenCode
+  // toggle change. Fires once on mount too (empty connectivity → no-op until the
+  // keychain probe lands), and is latest-wins via the guard inside.
+  createEffect(() => {
+    rootPaths();
+    connectedProviders();
+    importOpenCode();
+    void refreshDiscoveredMcp();
+  });
+
   /** Persist the MCP server list into ai.json, preserving sibling sections. */
   async function persistMcpServers(servers: MCPServerConfig[]): Promise<void> {
     const user = await loadUserAIConfig();
@@ -697,6 +1113,32 @@ export function App() {
     await refreshMcpStatuses();
   }
 
+  // Last interactive-authorize error per server id (consent denied, registration
+  // failed, callback timeout…). Surfaced on the card only while it still needs
+  // auth; cleared on a fresh attempt and auto-hidden once the server connects.
+  const [mcpAuthErrors, setMcpAuthErrors] = createSignal<Map<string, string>>(new Map());
+
+  /** Kick off the interactive OAuth flow for an OAuth-gated server (Rust opens
+   *  the browser), then refresh so the now-connected server shows its tools. A
+   *  failed flow surfaces its reason on the card instead of failing silently. */
+  async function authorizeMcpServerById(id: string): Promise<void> {
+    const server = (aiConfig().mcp ?? []).find((s) => s.id === id);
+    if (!server) return;
+    setMcpAuthErrors((m) => {
+      const next = new Map(m);
+      next.delete(id);
+      return next;
+    });
+    try {
+      await authorizeMcpServer(server);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setMcpAuthErrors((m) => new Map(m).set(id, message));
+      console.warn(`[mcp] authorize failed for "${id}":`, e);
+    }
+    await refreshMcpStatuses();
+  }
+
   async function removeMcpServer(id: string): Promise<void> {
     const servers = (aiConfig().mcp ?? []).filter((s) => s.id !== id);
     try {
@@ -728,7 +1170,7 @@ export function App() {
   /** View model for the settings MCP list: persisted config + live status. */
   const mcpServersView = createMemo(() => {
     const statuses = new Map(mcpStatuses().map((s) => [s.id, s]));
-    return (aiConfig().mcp ?? []).map((s) => {
+    const explicit = (aiConfig().mcp ?? []).map((s) => {
       const st = statuses.get(s.id);
       return {
         id: s.id,
@@ -736,13 +1178,44 @@ export function App() {
         transport: s.transport,
         enabled: s.enabled !== false,
         connected: st?.connected ?? false,
+        requiresAuth: st?.requiresAuth ?? false,
+        // Only show an authorize error while the server still needs auth — once
+        // it connects, requiresAuth flips false and the message auto-clears.
+        error: st?.requiresAuth ? mcpAuthErrors().get(s.id) : undefined,
         toolCount: st?.toolCount ?? 0,
         tools: mcpTools()[s.id],
         command: s.command,
         args: s.args,
         url: s.url,
+        headers: s.headers,
       };
     });
+    // Discovered (read-only) servers from other tools, with their source badge
+    // and — for unapproved project servers — a pending-approval flag.
+    const discovered = discoveredMcp().map((e) => {
+      const st = statuses.get(e.id);
+      const pendingApproval =
+        e.scope === "project" && !!e.root && !isApproved(e.root, e.configHash);
+      return {
+        id: e.id,
+        name: e.name,
+        transport: e.transport,
+        enabled: true,
+        connected: st?.connected ?? false,
+        requiresAuth: st?.requiresAuth ?? false,
+        toolCount: st?.toolCount ?? 0,
+        tools: mcpTools()[e.id],
+        command: e.command,
+        args: e.args,
+        url: e.url,
+        discovered: {
+          tools: [...new Set(e.sources.map((s) => s.tool))],
+          scope: e.scope,
+        },
+        pendingApproval,
+      };
+    });
+    return [...explicit, ...discovered];
   });
 
   // TabStore lives inside each PaneStore (see `createPaneStore`). The
@@ -763,15 +1236,23 @@ export function App() {
   // may settle out of order, and a stale load must not clobber a fresh one.
   const [aiSlashCommands, setAiSlashCommands] = createSignal<SlashCommandDef[]>([]);
   const [aiInstructions, setAiInstructions] = createSignal<CustomInstructions | null>(null);
+  // ai-memory scopes from every open root's `.ai-memory.toml` (multi-workspace).
+  const [aiMemoryScopes, setAiMemoryScopes] = createSignal<MemoryScope[]>([]);
   const aiCommandsGuard = createGenerationGuard();
   function reloadAiCommands(): void {
-    const root = Array.from(rootPaths().values())[0] ?? null;
+    const allRoots = Array.from(rootPaths().values());
+    const root = allRoots[0] ?? null;
     const isLatest = aiCommandsGuard.begin();
     void loadSlashCommands(root).then((commands) => {
       if (isLatest()) setAiSlashCommands(commands);
     });
     void loadCustomInstructions(root).then((instructions) => {
       if (isLatest()) setAiInstructions(instructions);
+    });
+    // Memory scoping reads ALL roots (not just the primary), so a query can
+    // span every open workspace that carries an `.ai-memory.toml`.
+    void loadMemoryScopes(allRoots).then((scopes) => {
+      if (isLatest()) setAiMemoryScopes(scopes);
     });
   }
   // reloadAiCommands reads rootPaths() synchronously, so the effect tracks it.
@@ -972,7 +1453,9 @@ export function App() {
     if (!state.selectedFile()) return;
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => {
-      folder.handleEditorSave();
+      // Save, then re-index the saved file (the Rust staleness diff makes this
+      // cheap — only the changed doc is re-chunked/embedded).
+      void Promise.resolve(folder.handleEditorSave()).then(() => reindexActiveFile());
     }, 1000);
   });
 
@@ -1607,6 +2090,51 @@ export function App() {
       setWorkspaceSymbols(buildWorkspaceSymbols(filesForSymbols));
     })();
   });
+
+  // ── Workspace index (Fast/Complete tiers, DJA-15) ─────────────────────────
+  // Enumerate → sha-diff → chunk → embed (Complete) → push to the per-root Rust
+  // index. Re-runs on workspace open, root changes, and tier switches; the
+  // staleness diff keeps re-runs cheap (only changed files re-embed).
+  const workspaceIndexer = createWorkspaceIndexer({
+    getRoots: () => Array.from(rootPaths().values()),
+    listSupportedFiles: async (rootAbs) => {
+      const entry = [...rootPaths().entries()].find(([, abs]) => abs === rootAbs);
+      if (!entry) return [];
+      const rootId = entry[0];
+      return flattenWorkspace(state.rootsList())
+        .filter((f) => f.rootId === rootId && isSupportedFile(f.path))
+        .map((f) => ({ path: f.path, mtime: 0 }));
+    },
+    readFile: (rootAbs, path) => readFileContent(`${rootAbs}/${path}`),
+    computeSha,
+    staleness: (root, entries) => aiIndexStaleness(root, entries),
+    sync: (input) => aiIndexSync(input),
+    remove: (root, paths) => aiIndexDelete(root, paths),
+    dropRoot: (root) => aiIndexDelete(root),
+    getTier: () => indexingTier(),
+    getEmbedding: () => buildEmbeddingProvider(),
+  });
+  createEffect(() => {
+    const tier = indexingTier();
+    rootPaths(); // re-index when the open roots change
+    if (tier === "off") return;
+    void workspaceIndexer.reindexAll();
+  });
+  /** Re-index the active document after it's saved (called from the autosave
+   *  debounce). Cheap — the staleness diff re-embeds only the changed file.
+   *  Skips scratch docs, unsupported files, and the Off tier. */
+  function reindexActiveFile(): void {
+    if (indexingTier() === "off") return;
+    const file = state.selectedFile();
+    const rootId = state.selectedRootId();
+    if (!file || !rootId || rootId === SCRATCH_ROOT_ID || isScratchPath(file.path)) return;
+    const rootAbs = rootPaths().get(rootId);
+    if (!rootAbs) return;
+    let rel = file.path;
+    if (rel.startsWith(rootAbs)) rel = rel.slice(rootAbs.length).replace(/^\/+/, "");
+    if (!rel || !isSupportedFile(rel)) return;
+    void workspaceIndexer.reindexFile(rootAbs, rel);
+  }
 
   // ── Tab session restore ──────────────────────────────────────────────────
   // Restore tabs when roots become available after startup.
@@ -2780,15 +3308,22 @@ export function App() {
       settingsOpen={settingsOpen()}
       onSettingsClose={() => setSettingsOpen(false)}
       aiProviders={aiProviders()}
+      aiMaskedApiKeys={maskedApiKeys()}
       aiSelectedModel={getStoredAiModel()}
       aiAllModels={aiModelGroupsAll()}
       aiHiddenModels={hiddenModels()}
       onToggleModel={toggleHiddenModel}
       indexingTier={indexingTier()}
       onIndexingTierChange={(t) => {
-        setIndexingTier(t);
-        setStoredIndexingTier(t);
+        // Gate "Complete" on an embedding provider being connected.
+        const next = t === "full" && !embeddingCapable() ? "lite" : t;
+        setIndexingTier(next);
+        setStoredIndexingTier(next);
       }}
+      aiEmbeddingModelGroups={embeddingModelGroups()}
+      aiEmbeddingSelectedModel={embeddingSelectedModel()}
+      onSelectAiEmbeddingModel={selectEmbeddingModel}
+      aiEmbeddingCapable={embeddingCapable()}
       aiReasoning={aiReasoning()}
       onAiReasoningChange={(v) => {
         // The Select hands back a plain string; the prefs setter narrows it
@@ -2808,10 +3343,15 @@ export function App() {
       onSaveCustomProvider={saveCustomProvider}
       onConnectProvider={connectProvider}
       onRemoveProvider={removeProvider}
+      onRefreshModels={refreshModels}
       mcpServers={mcpServersView()}
       onSaveMcpServer={saveMcpServer}
       onRemoveMcpServer={removeMcpServer}
       onToggleMcpServer={toggleMcpServer}
+      onAuthorizeMcpServer={authorizeMcpServerById}
+      onApproveMcpServer={approveDiscoveredMcp}
+      importOpenCodeMcps={importOpenCode()}
+      onImportOpenCodeMcpsChange={toggleImportOpenCode}
       showRecentHistory={true}
       showEditorTabs={rootPaths().size > 0 || tabStore().tabs().length > 0}
       showNavButtons={rootPaths().size > 0 || tabStore().tabs().length > 0}

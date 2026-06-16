@@ -18,6 +18,9 @@ export interface ModelGroup {
   id: string;
   /** Provider display name (group header). */
   name: string;
+  /** Whether this group's models come from a CLI subscription or an API key —
+   *  appended to the header so the user can tell the source apart. */
+  origin?: "subscription" | "api";
   models: ModelOption[];
 }
 
@@ -105,7 +108,12 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
           <For each={filtered()}>
             {(group) => (
               <>
-                <div class="ai-mp-group-label">{group.name}</div>
+                <div class="ai-mp-group-label">
+                  {(useLocale(),
+                  group.origin
+                    ? `${group.name} · ${group.origin === "subscription" ? m.ai_origin_subscription() : m.ai_origin_api()}`
+                    : group.name)}
+                </div>
                 <For each={group.models}>
                   {(mdl) => (
                     <button
