@@ -92,6 +92,9 @@ export interface SettingsMcpServer {
   tools?: string[];
   transport: McpTransport;
   url?: string;
+  /** HTTP custom headers (config refs, never resolved secrets) — pre-fills the
+   *  edit form so a header can be reviewed or changed. */
+  headers?: Record<string, string>;
 }
 
 export interface SaveMcpServerInput {
@@ -928,6 +931,7 @@ function McpServerCard(props: {
   onRemove: () => void;
   onToggle: (enabled: boolean) => void;
   onAuthorize: () => void | Promise<void>;
+  onEdit: () => void;
 }): JSX.Element {
   const [expanded, setExpanded] = createSignal(false);
   const [authorizing, setAuthorizing] = createSignal(false);
@@ -977,14 +981,6 @@ function McpServerCard(props: {
               <SwitchThumb size="sm" />
             </SwitchControl>
           </ToggleSwitch>
-          <button
-            type="button"
-            aria-label={(useLocale(), label("settings_mcp_remove"))}
-            class="settings-mcp-remove"
-            onClick={() => props.onRemove()}
-          >
-            <IconTrash width={14} height={14} />
-          </button>
         </div>
       </div>
       <Show when={props.server.requiresAuth && props.server.enabled}>
@@ -1022,14 +1018,37 @@ function McpServerCard(props: {
       <Show when={props.server.error}>
         <span class="ai-error">{props.server.error}</span>
       </Show>
+      {/* Edit + remove live at the card's bottom-right, kept clear of the
+          enable/disable Switch up in the header so a destructive action is
+          never a slip away from a quick toggle. */}
+      <div class="settings-mcp-card-footer">
+        <button
+          type="button"
+          aria-label={(useLocale(), label("settings_mcp_edit"))}
+          class="settings-mcp-remove"
+          onClick={() => props.onEdit()}
+        >
+          <IconPencil width={14} height={14} />
+        </button>
+        <button
+          type="button"
+          aria-label={(useLocale(), label("settings_mcp_remove"))}
+          class="settings-mcp-remove"
+          onClick={() => props.onRemove()}
+        >
+          <IconTrash width={14} height={14} />
+        </button>
+      </div>
     </div>
   );
 }
 
 function McpSection(props: SettingsDialogProps): JSX.Element {
-  // Same sub-page pattern as the AI section: the add form is a dedicated view
-  // entered from the "New MCP Server" row, with a back arrow to the list.
-  const [view, setView] = createSignal<"add" | "list">("list");
+  // Same sub-page pattern as the AI section: a dedicated form view entered from
+  // the "New MCP Server" row (add) or a card's pencil (edit), with a back arrow
+  // to the list. `editingId` distinguishes the two: non-null = editing that id.
+  const [view, setView] = createSignal<"form" | "list">("list");
+  const [editingId, setEditingId] = createSignal<string | null>(null);
   const [id, setId] = createSignal("");
   const [name, setName] = createSignal("");
   const [transport, setTransport] = createSignal<McpTransport>("stdio");
@@ -1039,6 +1058,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
   const [headers, setHeaders] = createSignal("");
 
   function resetForm(): void {
+    setEditingId(null);
     setId("");
     setName("");
     setTransport("stdio");
@@ -1046,6 +1066,32 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
     setArgs("");
     setUrl("");
     setHeaders("");
+  }
+
+  /** Serialize a header record back to the "Key: Value" (one per line) textarea
+   *  format. Values are config refs (`{file:…}`/`{keychain:…}`), never resolved
+   *  secrets, so they round-trip safely through the form. */
+  function serializeHeaders(record: Record<string, string> | undefined): string {
+    return Object.entries(record ?? {})
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n");
+  }
+
+  function openAdd(): void {
+    resetForm();
+    setView("form");
+  }
+
+  function openEdit(server: SettingsMcpServer): void {
+    setEditingId(server.id);
+    setId(server.id);
+    setName(server.name ?? "");
+    setTransport(server.transport);
+    setCommand(server.command ?? "");
+    setArgs((server.args ?? []).join(" "));
+    setUrl(server.url ?? "");
+    setHeaders(serializeHeaders(server.headers));
+    setView("form");
   }
 
   /** Parse the "Key: Value" (one per line) headers textarea into a record. */
@@ -1066,6 +1112,12 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
     if (!trimmedId) return;
     const trimmedName = name().trim();
     const t = transport();
+    const editing = editingId() !== null;
+    // Editing preserves the server's current enabled state (a tweak must not
+    // silently re-enable a disabled server); a brand-new server starts enabled.
+    const enabled = editing
+      ? ((props.mcpServers ?? []).find((s) => s.id === trimmedId)?.enabled ?? true)
+      : true;
     const argList = args()
       .split(/\s+/)
       .map((a) => a.trim())
@@ -1073,7 +1125,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
     const headerMap = t === "http" ? parseHeaders(headers()) : {};
     const server: SaveMcpServerInput = {
       id: trimmedId,
-      enabled: true,
+      enabled,
       transport: t,
       ...(trimmedName ? { name: trimmedName } : {}),
       ...(t === "stdio"
@@ -1083,7 +1135,10 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
           }
         : {
             url: url().trim(),
-            ...(Object.keys(headerMap).length ? { headers: headerMap } : {}),
+            // While adding, omit empty headers so the persist layer can keep any
+            // set via ai.json. While editing, the form is pre-filled, so pass the
+            // map verbatim — letting the user actually clear headers.
+            ...(editing || Object.keys(headerMap).length ? { headers: headerMap } : {}),
           }),
     };
     void props.onSaveMcpServer?.(server);
@@ -1111,6 +1166,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
                     onRemove={() => void props.onRemoveMcpServer?.(server.id)}
                     onToggle={(checked) => void props.onToggleMcpServer?.(server.id, checked)}
                     onAuthorize={() => props.onAuthorizeMcpServer?.(server.id)}
+                    onEdit={() => openEdit(server)}
                   />
                 )}
               </For>
@@ -1120,7 +1176,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
           <button
             type="button"
             class="settings-mcp-new-row"
-            onClick={() => setView("add")}
+            onClick={() => openAdd()}
           >
             <span class="settings-mcp-avatar" aria-hidden="true">
               <IconPlus width={15} height={15} />
@@ -1132,7 +1188,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
           </button>
         </Match>
 
-        <Match when={view() === "add"}>
+        <Match when={view() === "form"}>
           {/* Back arrow mirrors the AI section's sub-pages (shared aria label). */}
           <div class="settings-subpage-header">
             <button
@@ -1147,13 +1203,17 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
               <IconArrowLeft width={16} height={16} />
             </button>
             <h3 class="settings-h3" style={{ margin: "0" }}>
-              {(useLocale(), label("settings_mcp_new_server"))}
+              {(useLocale(),
+              label(editingId() ? "settings_mcp_edit_server" : "settings_mcp_new_server"))}
             </h3>
           </div>
       <label class="settings-label">{(useLocale(), label("settings_mcp_id"))}</label>
+      {/* The id keys the server in ai.json, so it's immutable once created —
+          editing it would orphan the old entry instead of updating it. */}
       <input
         class="ai-composer-input settings-input"
         autocomplete="off"
+        readOnly={editingId() !== null}
         value={id()}
         onInput={(e) => setId(e.currentTarget.value)}
       />
@@ -1233,7 +1293,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
           }
           onClick={save}
         >
-          {(useLocale(), label("settings_mcp_add"))}
+          {(useLocale(), label(editingId() ? "settings_mcp_save" : "settings_mcp_add"))}
         </Button>
       </div>
         </Match>

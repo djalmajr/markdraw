@@ -1068,6 +1068,7 @@ export function App() {
         command: s.command,
         args: s.args,
         url: s.url,
+        headers: s.headers,
       };
     });
   });
