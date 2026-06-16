@@ -140,6 +140,18 @@ fn resolve_binary(program: &str) -> Option<String> {
     }
 }
 
+/// Whether agy's plain-text stdout indicates an authenticated, successful reply.
+/// `agy --print` exits 0 even when NOT signed in (it prints an OAuth URL / an
+/// "authentication timed out" message instead of a reply), so success can't rely
+/// on the exit code — only a non-empty reply lacking those markers counts.
+fn antigravity_probe_ok(stdout: &str) -> bool {
+    let s = stdout.trim();
+    !s.is_empty()
+        && !s.contains("Authentication required")
+        && !s.contains("authentication timed out")
+        && !s.contains("Please visit the URL")
+}
+
 fn binary_for_provider(provider: &str) -> Result<&'static str, String> {
     match provider {
         "claude-cli" => Ok("claude"),
@@ -265,7 +277,9 @@ fn build_chat_command(request: &CliChatRequest, binary: &str) -> Result<Command,
         }
         "antigravity-cli" => {
             // agy --print prints plain text. The model is the `agy models`
-            // display string, passed verbatim via --model.
+            // display string, passed verbatim via --model. No --print-timeout
+            // here (unlike the probe): a chat turn is long-lived and bounded by
+            // cancellation (cli_chat_cancel) / process exit, not a fixed deadline.
             cmd.arg("-p").arg(&prompt);
             if !request.model.trim().is_empty() {
                 cmd.arg("--model").arg(&request.model);
@@ -419,27 +433,25 @@ pub async fn cli_probe_subscription(request: CliProbeRequest) -> Result<CliProbe
                     && (v.get("text").is_some() || v.get("stopReason").is_some())
             })
         }
-        // agy --print emits plain text and exits 0 even when NOT authenticated
-        // (it prints an OAuth URL / "authentication timed out" instead of a
-        // reply). So success = a non-empty reply with none of those markers.
-        "antigravity-cli" => {
-            let s = stdout.trim();
-            !s.is_empty()
-                && !s.contains("Authentication required")
-                && !s.contains("authentication timed out")
-                && !s.contains("Please visit the URL")
-        }
+        // agy --print emits plain text; see antigravity_probe_ok for why exit
+        // code alone is unreliable.
+        "antigravity-cli" => antigravity_probe_ok(&stdout),
         _ => false,
     };
 
+    // Distinguish "no output at all" (crash / not installed) from "ran but the
+    // subscription auth didn't take" so the Settings error is actionable.
+    let error = if ok {
+        None
+    } else if stdout.trim().is_empty() {
+        Some("The CLI produced no output — make sure it's installed and signed in, then try again.".to_string())
+    } else {
+        Some("CLI ran but subscription auth did not succeed".to_string())
+    };
     Ok(CliProbeResult {
         ok,
         path: Some(path),
-        error: if ok {
-            None
-        } else {
-            Some("CLI ran but subscription auth did not succeed".to_string())
-        },
+        error,
     })
 }
 
@@ -535,6 +547,21 @@ mod tests {
             path_override: None,
         };
         assert!(build_chat_command(&req, "grok").is_ok());
+    }
+
+    #[test]
+    fn antigravity_probe_detects_auth_state() {
+        // A real reply (authenticated) → ok.
+        assert!(antigravity_probe_ok("ok"));
+        assert!(antigravity_probe_ok("  Here is your answer.\n"));
+        // No output (crash / not installed) → not ok.
+        assert!(!antigravity_probe_ok(""));
+        assert!(!antigravity_probe_ok("   \n  "));
+        // Auth-required / timed-out markers → not ok (agy still exits 0).
+        assert!(!antigravity_probe_ok(
+            "Authentication required. Please visit the URL to log in:\n  https://accounts.google.com/..."
+        ));
+        assert!(!antigravity_probe_ok("Error: authentication timed out."));
     }
 
     #[test]

@@ -269,8 +269,8 @@ function mergeConfigs(
 }
 
 /** Whether a provider can produce embeddings for the "Full" workspace index.
- *  Subscription CLIs (claude-cli/codex-cli/grok-cli) are chat-only and Anthropic
- *  has no embeddings API; every other kind needs a declared embedding model. */
+ *  Subscription CLIs (claude-cli/codex-cli/grok-cli/antigravity-cli) are chat-only
+ *  and Anthropic has no embeddings API; every other kind needs a declared model. */
 function providerCanEmbed(p: ProviderConfig): boolean {
   if (
     p.kind === "claude-cli" ||
