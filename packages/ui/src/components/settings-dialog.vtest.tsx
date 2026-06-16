@@ -127,7 +127,7 @@ describe("SettingsDialog", () => {
     expect(onToggleModel).toHaveBeenCalledWith("openai/b");
   });
 
-  it("Manage models: group name opens the provider sub-page; Remove provider confirms then fires onRemoveProvider", async () => {
+  it("Manage models: the edit icon opens the provider sub-page; Remove provider confirms then fires onRemoveProvider", async () => {
     const onRemoveProvider = vi.fn();
     const onToggleModel = vi.fn();
     const { baseElement } = setup({
@@ -148,16 +148,19 @@ describe("SettingsDialog", () => {
       onRemoveProvider,
       onToggleModel,
     });
-    // Headers no longer carry a remove button — just the name + group toggle.
+    // The header carries no remove button — just the name label, an edit
+    // pencil, and the group toggle.
     expect(
       baseElement.querySelectorAll('.settings-models-group button[aria-label="Remove provider"]')
         .length,
     ).toBe(0);
-    const nameBtn = [
-      ...baseElement.querySelectorAll("button.settings-models-group-name"),
-    ].find((b) => /OpenCode Go/i.test(b.textContent ?? "")) as HTMLElement;
-    fireEvent.click(nameBtn);
-    // Navigating via the name must not flip the group toggle.
+    // The name is a plain label; the explicit pencil opens the sub-page.
+    expect(baseElement.querySelectorAll("button.settings-models-group-name").length).toBe(0);
+    const editBtn = [
+      ...baseElement.querySelectorAll("button.ai-mp-icon-btn"),
+    ].find((b) => /Edit provider: OpenCode Go/i.test(b.getAttribute("aria-label") ?? "")) as HTMLElement;
+    fireEvent.click(editBtn);
+    // Navigating via the pencil must not flip the group toggle.
     expect(onToggleModel).not.toHaveBeenCalled();
     // Provider sub-page: connect controls + the separated destructive action.
     expect(baseElement.querySelector('input[type="password"]')).not.toBeNull();

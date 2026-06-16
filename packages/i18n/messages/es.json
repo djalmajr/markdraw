@@ -301,6 +301,7 @@
   "settings_ai_custom_submit": "Añadir proveedor",
   "settings_ai_custom_required": "El ID del proveedor y la Base URL son obligatorios.",
   "settings_ai_back": "Volver",
+  "settings_ai_edit_provider": "Editar proveedor",
   "settings_ai_custom_provider": "Proveedor personalizado",
   "settings_ai_custom_desc": "Configura un proveedor compatible con OpenAI.",
   "settings_ai_connect": "Conectar",

@@ -301,6 +301,7 @@
   "settings_ai_custom_submit": "Add provider",
   "settings_ai_custom_required": "Provider ID and Base URL are required.",
   "settings_ai_back": "Back",
+  "settings_ai_edit_provider": "Edit provider",
   "settings_ai_custom_provider": "Custom provider",
   "settings_ai_custom_desc": "Configure an OpenAI-compatible provider.",
   "settings_ai_connect": "Connect",

@@ -3019,6 +3019,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
+.settings-models-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .settings-models-empty {
   padding: 16px 12px;
   text-align: center;

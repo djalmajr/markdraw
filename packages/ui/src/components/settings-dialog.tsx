@@ -828,30 +828,37 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
             {(group) => (
               <>
                 <div class="settings-models-group">
-                  {/* The name navigates to the provider sub-page (connect /
-                      remove); the toggle stays a separate control, so clicking
-                      the name never flips visibility. */}
-                  <button
-                    class="settings-models-group-name"
-                    type="button"
-                    onClick={() =>
-                      enterProvider({ name: group.name, ids: groupProviderIds(group) }, "manage")
-                    }
-                  >
+                  {/* The name is a plain label; an explicit pencil opens the
+                      provider sub-page (connect / remove / manage). The toggle
+                      stays a separate control, so neither flips the other. */}
+                  <span class="settings-models-group-name">
                     {(useLocale(),
                     group.origin
                       ? `${group.name} · ${group.origin === "subscription" ? label("ai_origin_subscription") : label("ai_origin_api")}`
                       : group.name)}
-                  </button>
-                  <ToggleSwitch
-                    checked={providerAllVisible(group)}
-                    onChange={() => toggleProvider(group)}
-                    aria-label={group.name}
-                  >
-                    <SwitchControl size="sm">
-                      <SwitchThumb size="sm" />
-                    </SwitchControl>
-                  </ToggleSwitch>
+                  </span>
+                  <div class="settings-models-group-actions">
+                    <button
+                      type="button"
+                      class="ai-mp-icon-btn"
+                      title={(useLocale(), label("settings_ai_edit_provider"))}
+                      aria-label={`${label("settings_ai_edit_provider")}: ${group.name}`}
+                      onClick={() =>
+                        enterProvider({ name: group.name, ids: groupProviderIds(group) }, "manage")
+                      }
+                    >
+                      <IconPencil width={14} height={14} />
+                    </button>
+                    <ToggleSwitch
+                      checked={providerAllVisible(group)}
+                      onChange={() => toggleProvider(group)}
+                      aria-label={group.name}
+                    >
+                      <SwitchControl size="sm">
+                        <SwitchThumb size="sm" />
+                      </SwitchControl>
+                    </ToggleSwitch>
+                  </div>
                 </div>
                 <For each={group.models}>
                   {(mdl) => (
