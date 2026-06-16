@@ -311,7 +311,10 @@ export function App() {
   const aiProviderLabel = (): string | null => {
     const modelId = getStoredAiModel();
     const resolved = modelId ? resolveModel(aiConfig(), modelId) : null;
-    if (resolved) return `${resolved.provider.name} · ${resolved.modelId}`;
+    // The picker trigger shows the selected MODEL's friendly name — resolved from
+    // the full config, so it stays correct even when that model's provider isn't
+    // currently connected (it just won't appear in the popover until it is).
+    if (resolved) return resolved.model.name ?? resolved.modelId;
     return import.meta.env.DEV ? "Mock (dev)" : null;
   };
 
@@ -590,9 +593,29 @@ export function App() {
   // What the chat picker shows: all groups minus the hidden models.
   const aiModelGroups = createMemo(() => {
     const hidden = new Set(hiddenModels());
-    return aiModelGroupsAll()
+    const groups = aiModelGroupsAll()
       .map((g) => ({ ...g, models: g.models.filter((mdl) => !hidden.has(mdl.value)) }))
       .filter((g) => g.models.length > 0);
+    // Always surface the ACTIVE model in the picker — even if its provider isn't
+    // connected (or the model is hidden) — so the popover reflects what the
+    // trigger shows and the current selection is never invisible/unhighlighted.
+    // Resolved from the full config; added once when missing from the groups.
+    const current = aiCurrentModel();
+    const present = groups.some((g) => g.models.some((mdl) => mdl.value === current));
+    if (current && !present) {
+      const resolved = resolveModel(aiConfig(), current);
+      if (resolved) {
+        const base =
+          resolved.provider.name.replace(/\s*\([^)]*\)\s*$/, "").trim() || resolved.provider.name;
+        groups.unshift({
+          id: base,
+          name: base,
+          origin: isCliProviderKind(resolved.provider.kind) ? "subscription" : "api",
+          models: [{ value: current, label: resolved.model.name ?? resolved.modelId }],
+        });
+      }
+    }
+    return groups;
   });
   /** Context window (tokens) of the active model — drives the composer's
    *  context-usage ring. Undefined when the model config has no `limit`. */
