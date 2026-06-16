@@ -80,6 +80,11 @@ import { composeBelow } from "@asciimark/diagram/compose.ts";
 import { generate } from "@asciimark/diagram/generate.ts";
 import { sceneToFile } from "@asciimark/diagram/scene.ts";
 import { loadCustomInstructions, loadSlashCommands } from "./lib/ai-commands.ts";
+import {
+  buildMemoryScopesInstruction,
+  loadMemoryScopes,
+  type MemoryScope,
+} from "./lib/ai-memory-scopes.ts";
 import { createGenerationGuard } from "./lib/generation-guard.ts";
 import type { CustomInstructions, SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
 import { deleteApiKey, getApiKey, setApiKey } from "./lib/ai-credentials.ts";
@@ -301,9 +306,19 @@ export function App() {
     createAIProvider: () => buildAIProvider(),
     // Tools for the chat tool-calling loop: in-process app tools + MCP servers.
     getAITools,
-    // Workspace custom instructions (.asciimark/instructions.md) merged into
-    // the system prompt (arrow defers the read — the signal is declared below).
-    getCustomInstructions: () => aiInstructions() ?? undefined,
+    // Workspace custom instructions (.asciimark/instructions.md) plus, when an
+    // MCP server is connected, the ai-memory scopes from the open roots'
+    // `.ai-memory.toml` — appended so the model queries the right project(s).
+    getCustomInstructions: () => {
+      const base = aiInstructions();
+      const note = mcpStatuses().some((s) => s.connected)
+        ? buildMemoryScopesInstruction(aiMemoryScopes())
+        : null;
+      if (!note) return base ?? undefined;
+      return base
+        ? { ...base, text: `${base.text}\n\n${note}` }
+        : { mode: "append" as const, text: note };
+    },
     // Engine-enforced Accept/Reject for prompt-tier tools (arrow defers the
     // read — the gate is defined further down in this component).
     onToolApprovalRequest: (req) => requestToolApproval(req),
@@ -1044,15 +1059,23 @@ export function App() {
   // may settle out of order, and a stale load must not clobber a fresh one.
   const [aiSlashCommands, setAiSlashCommands] = createSignal<SlashCommandDef[]>([]);
   const [aiInstructions, setAiInstructions] = createSignal<CustomInstructions | null>(null);
+  // ai-memory scopes from every open root's `.ai-memory.toml` (multi-workspace).
+  const [aiMemoryScopes, setAiMemoryScopes] = createSignal<MemoryScope[]>([]);
   const aiCommandsGuard = createGenerationGuard();
   function reloadAiCommands(): void {
-    const root = Array.from(rootPaths().values())[0] ?? null;
+    const allRoots = Array.from(rootPaths().values());
+    const root = allRoots[0] ?? null;
     const isLatest = aiCommandsGuard.begin();
     void loadSlashCommands(root).then((commands) => {
       if (isLatest()) setAiSlashCommands(commands);
     });
     void loadCustomInstructions(root).then((instructions) => {
       if (isLatest()) setAiInstructions(instructions);
+    });
+    // Memory scoping reads ALL roots (not just the primary), so a query can
+    // span every open workspace that carries an `.ai-memory.toml`.
+    void loadMemoryScopes(allRoots).then((scopes) => {
+      if (isLatest()) setAiMemoryScopes(scopes);
     });
   }
   // reloadAiCommands reads rootPaths() synchronously, so the effect tracks it.
