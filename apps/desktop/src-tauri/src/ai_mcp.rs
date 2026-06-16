@@ -13,12 +13,13 @@
 //! is a cheap read. Secrets (auth headers) belong in the OS keychain like API
 //! keys (see `ai_keychain.rs`), never in `ai.json`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
 use rmcp::model::{CallToolRequestParams, CallToolResult, Content, TaskSupport};
 use rmcp::service::{RoleClient, RunningService};
+use rmcp::transport::auth::AuthClient;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::ServiceExt;
@@ -26,6 +27,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use tokio::process::Command;
 use tokio::sync::{oneshot, Mutex};
+
+use crate::ai_mcp_oauth;
 
 /// A live client handle. Both transports collapse to the same type after the
 /// connection is established (`RunningService` is parameterized by role +
@@ -45,6 +48,17 @@ pub struct McpManager {
     /// In-flight tool calls keyed by a caller-supplied call id, so the webview
     /// can cancel a long-running call (e.g. when the user stops the turn).
     inflight: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    /// Ids of OAuth-gated HTTP servers that couldn't connect for lack of stored
+    /// tokens. Surfaced by [`ai_mcp_list_servers`] as `requiresAuth` so the UI can
+    /// offer "Authorize"; cleared on a successful connect or on disconnect.
+    needs_auth: Mutex<HashSet<String>>,
+}
+
+/// Outcome of a connection attempt: a live client, or a signal that the server is
+/// OAuth-gated and needs the interactive [`ai_mcp_authorize`] flow first.
+enum ConnectOutcome {
+    Connected(McpClient),
+    RequiresAuth,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +107,10 @@ pub struct McpServerStatus {
     pub id: String,
     pub connected: bool,
     pub tool_count: usize,
+    /// An OAuth-gated HTTP server with no usable stored tokens: the UI shows an
+    /// "Authorize" action that triggers [`ai_mcp_authorize`]. Always `false` for
+    /// a connected server.
+    pub requires_auth: bool,
 }
 
 /// Pure PATH × PATHEXT scan (first hit wins, directories outrank extensions —
@@ -169,20 +187,23 @@ fn build_command(config: &McpServerConfig) -> Result<Command, String> {
     Ok(cmd)
 }
 
-async fn connect_client(config: &McpServerConfig) -> Result<McpClient, String> {
+async fn connect_client(config: &McpServerConfig) -> Result<ConnectOutcome, String> {
     match config.transport.as_str() {
         "stdio" => {
             let cmd = build_command(config)?;
             let transport = TokioChildProcess::new(cmd).map_err(|e| e.to_string())?;
-            ().serve(transport).await.map_err(|e| e.to_string())
+            let client = ().serve(transport).await.map_err(|e| e.to_string())?;
+            Ok(ConnectOutcome::Connected(client))
         }
         "http" => {
             let url = config
                 .url
                 .clone()
                 .ok_or_else(|| "http transport requires `url`".to_string())?;
-            let mut http_config = StreamableHttpClientTransportConfig::with_uri(url);
-            if let Some(headers) = &config.headers {
+            // Static custom headers (a server with a fixed Bearer/API token) take
+            // the simple non-OAuth path: OAuth is attempted only when no headers
+            // are supplied, so a statically-authed server is never disturbed.
+            if let Some(headers) = config.headers.as_ref().filter(|h| !h.is_empty()) {
                 let mut map: HashMap<HeaderName, HeaderValue> = HashMap::new();
                 for (key, value) in headers {
                     let name = HeaderName::from_bytes(key.as_bytes())
@@ -191,15 +212,75 @@ async fn connect_client(config: &McpServerConfig) -> Result<McpClient, String> {
                         .map_err(|e| format!("invalid MCP header value for {key:?}: {e}"))?;
                     map.insert(name, val);
                 }
-                if !map.is_empty() {
-                    http_config = http_config.custom_headers(map);
-                }
+                let http_config =
+                    StreamableHttpClientTransportConfig::with_uri(url).custom_headers(map);
+                let transport = StreamableHttpClientTransport::from_config(http_config);
+                let client = ().serve(transport).await.map_err(|e| e.to_string())?;
+                return Ok(ConnectOutcome::Connected(client));
             }
-            let transport = StreamableHttpClientTransport::from_config(http_config);
-            ().serve(transport).await.map_err(|e| e.to_string())
+            connect_http_oauth(&config.id, &url).await
         }
         other => Err(format!("unknown MCP transport: {other}")),
     }
+}
+
+/// Connect to an HTTP MCP server that may be OAuth-gated. With usable stored
+/// tokens, wraps the client in an [`AuthClient`] that injects + refreshes the
+/// bearer per request. Without tokens, tries a plain connection (the server may
+/// be public); if that fails AND the server advertises OAuth metadata, reports
+/// [`ConnectOutcome::RequiresAuth`] so the UI can offer "Authorize" — WITHOUT
+/// opening a browser (only the explicit [`ai_mcp_authorize`] command does that).
+async fn connect_http_oauth(server_id: &str, url: &str) -> Result<ConnectOutcome, String> {
+    let mut manager = ai_mcp_oauth::manager_with_store(server_id, url).await?;
+    let has_creds = manager
+        .initialize_from_store()
+        .await
+        .map_err(|e| format!("load OAuth credentials: {e}"))?;
+    let http_config = StreamableHttpClientTransportConfig::with_uri(url.to_string());
+
+    let served = if has_creds {
+        // `reqwest_oauth` is reqwest 0.13 (rmcp's pin) — see Cargo.toml. The
+        // AuthClient injects the bearer + refreshes it per request.
+        let auth_client = AuthClient::new(reqwest_oauth::Client::new(), manager);
+        let transport = StreamableHttpClientTransport::with_client(auth_client, http_config);
+        ().serve(transport).await
+    } else {
+        let transport = StreamableHttpClientTransport::from_config(http_config);
+        ().serve(transport).await
+    };
+
+    match served {
+        Ok(client) => Ok(ConnectOutcome::Connected(client)),
+        // A real authorization failure (401/403/token rejected → "Auth required",
+        // "Insufficient scope", AuthorizationRequired) is fixable by (re)authorizing.
+        // So is ANY failure when we hold no token yet but the server advertises
+        // OAuth (first-time auth). Everything else (5xx, network, protocol) is a
+        // genuine error — surface it instead of pushing a pointless browser flow
+        // that can't fix a server outage.
+        Err(e) => {
+            if is_auth_error(&e) || (!has_creds && ai_mcp_oauth::server_advertises_oauth(url).await)
+            {
+                Ok(ConnectOutcome::RequiresAuth)
+            } else {
+                Err(e.to_string())
+            }
+        }
+    }
+}
+
+/// Whether a connect error is an authorization failure (vs a transient/protocol
+/// error). rmcp's reqwest transport maps HTTP 401→"Auth required",
+/// 403→"Insufficient scope", and an exhausted token→"Auth error: OAuth
+/// authorization required"; thiserror interpolates the full source chain into the
+/// top-level Display, so a substring scan is reliable and avoids a brittle
+/// downcast through `DynamicTransportError` (whose concrete transport type
+/// differs between the plain and AuthClient branches).
+fn is_auth_error<E: std::error::Error>(err: &E) -> bool {
+    let s = err.to_string().to_ascii_lowercase();
+    s.contains("auth required")
+        || s.contains("insufficient scope")
+        || s.contains("authorization required")
+        || s.contains("unauthorized")
 }
 
 /// Whether a tool can be surfaced to the model. Tools that *require* task-based
@@ -292,20 +373,52 @@ pub async fn ai_mcp_connect(
     if let Some(prev) = state.servers.lock().await.remove(&id) {
         let _ = prev.client.cancel().await;
     }
-    let client = connect_client(&config).await?;
-    let tools = client.list_all_tools().await.map_err(|e| e.to_string())?;
-    let tools = tool_infos(&id, tools);
-    let tool_count = tools.len();
-    state
-        .servers
-        .lock()
-        .await
-        .insert(id.clone(), Connected { client, tools });
-    Ok(McpServerStatus {
-        id,
-        connected: true,
-        tool_count,
-    })
+    match connect_client(&config).await? {
+        ConnectOutcome::Connected(client) => {
+            let tools = client.list_all_tools().await.map_err(|e| e.to_string())?;
+            let tools = tool_infos(&id, tools);
+            let tool_count = tools.len();
+            state.needs_auth.lock().await.remove(&id);
+            state
+                .servers
+                .lock()
+                .await
+                .insert(id.clone(), Connected { client, tools });
+            Ok(McpServerStatus {
+                id,
+                connected: true,
+                tool_count,
+                requires_auth: false,
+            })
+        }
+        ConnectOutcome::RequiresAuth => {
+            state.needs_auth.lock().await.insert(id.clone());
+            Ok(McpServerStatus {
+                id,
+                connected: false,
+                tool_count: 0,
+                requires_auth: true,
+            })
+        }
+    }
+}
+
+/// Run the interactive OAuth authorization flow for an OAuth-gated HTTP MCP
+/// server (opens the browser, captures the loopback redirect, stores tokens),
+/// then reconnect so its tools go live. Generic across any OAuth-gated server.
+#[tauri::command]
+pub async fn ai_mcp_authorize<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, McpManager>,
+    config: McpServerConfig,
+) -> Result<McpServerStatus, String> {
+    let url = config
+        .url
+        .clone()
+        .ok_or_else(|| "OAuth authorization requires an http `url`".to_string())?;
+    ai_mcp_oauth::authorize(&app, &config.id, &url).await?;
+    // Tokens are now in the keychain; a normal connect picks them up.
+    ai_mcp_connect(state, config).await
 }
 
 #[tauri::command]
@@ -313,6 +426,7 @@ pub async fn ai_mcp_disconnect(state: State<'_, McpManager>, id: String) -> Resu
     if let Some(conn) = state.servers.lock().await.remove(&id) {
         let _ = conn.client.cancel().await;
     }
+    state.needs_auth.lock().await.remove(&id);
     Ok(())
 }
 
@@ -320,15 +434,31 @@ pub async fn ai_mcp_disconnect(state: State<'_, McpManager>, id: String) -> Resu
 pub async fn ai_mcp_list_servers(
     state: State<'_, McpManager>,
 ) -> Result<Vec<McpServerStatus>, String> {
+    // Snapshot pending-auth ids first (lock, clone, drop) so we never hold two
+    // manager locks at once.
+    let pending: Vec<String> = state.needs_auth.lock().await.iter().cloned().collect();
     let servers = state.servers.lock().await;
-    Ok(servers
+    let mut out: Vec<McpServerStatus> = servers
         .iter()
         .map(|(id, conn)| McpServerStatus {
             id: id.clone(),
             connected: true,
             tool_count: conn.tools.len(),
+            requires_auth: false,
         })
-        .collect())
+        .collect();
+    for id in pending {
+        // A connected server is never also pending-auth, but guard anyway.
+        if !servers.contains_key(&id) {
+            out.push(McpServerStatus {
+                id,
+                connected: false,
+                tool_count: 0,
+                requires_auth: true,
+            });
+        }
+    }
+    Ok(out)
 }
 
 #[tauri::command]

@@ -20,8 +20,8 @@ use ai_keychain::{
 mod ai_mcp;
 mod ai_mcp_oauth;
 use ai_mcp::{
-    ai_mcp_call_tool, ai_mcp_cancel_call, ai_mcp_connect, ai_mcp_disconnect, ai_mcp_list_servers,
-    ai_mcp_list_tools, McpManager,
+    ai_mcp_authorize, ai_mcp_call_tool, ai_mcp_cancel_call, ai_mcp_connect, ai_mcp_disconnect,
+    ai_mcp_list_servers, ai_mcp_list_tools, McpManager,
 };
 
 // Streaming provider HTTP — Rust-side POST + SSE line framing over an ipc
@@ -1182,6 +1182,7 @@ pub fn run() {
             ai_read_config,
             ai_write_config,
             ai_mcp_connect,
+            ai_mcp_authorize,
             ai_mcp_disconnect,
             ai_mcp_list_servers,
             ai_mcp_list_tools,

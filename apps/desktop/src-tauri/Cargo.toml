@@ -63,9 +63,16 @@ rmcp = { version = "1", default-features = false, features = [
 http = "1"
 # Streaming provider HTTP (ai_http.rs): tauri-plugin-http buffers whole
 # responses so SSE never streams — the POST happens here in Rust instead and
-# body chunks flow to the webview over an ipc Channel. Already compiled
-# transitively via rmcp's reqwest transport; `stream` adds bytes_stream().
+# body chunks flow to the webview over an ipc Channel. Pinned to 0.12 to share
+# tauri-plugin-http's reqwest; `stream` adds bytes_stream().
 reqwest = { version = "0.12", features = ["stream"] }
+# rmcp 1.7's OAuth `AuthClient` wraps a reqwest **0.13** client (rmcp pins 0.13,
+# while the rest of the app + tauri-plugin-http stay on 0.12 above). The two
+# `reqwest::Client` types don't unify, so the AuthClient's inner client must be
+# the 0.13 one rmcp's `StreamableHttpClient` impl targets. Alias the 0.13 line —
+# already compiled in-tree for rmcp + tauri-plugin-updater, so zero extra build
+# cost — under a second name to construct exactly that type (see ai_mcp.rs).
+reqwest_oauth = { package = "reqwest", version = "0.13" }
 futures-util = "0.3"
 # Percent-decode the path of `htmlpreview://` requests (the custom scheme that
 # serves an HTML file's directory as an isolated origin for SPA previews).
