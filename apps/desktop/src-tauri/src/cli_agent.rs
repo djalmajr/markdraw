@@ -145,6 +145,7 @@ fn binary_for_provider(provider: &str) -> Result<&'static str, String> {
         "claude-cli" => Ok("claude"),
         "codex-cli" => Ok("codex"),
         "grok-cli" => Ok("grok"),
+        "antigravity-cli" => Ok("agy"),
         other => Err(format!("unknown CLI provider kind: {other}")),
     }
 }
@@ -222,6 +223,11 @@ fn build_probe_command(provider: &str, binary: &str) -> Result<Command, String> 
                 "1",
             ]);
         }
+        "antigravity-cli" => {
+            // agy --print emits plain text; --print-timeout bounds its own wait
+            // (incl. the 30s auth wait when not logged in) so the probe resolves.
+            cmd.args(["-p", "reply with exactly: ok", "--print-timeout", "20s"]);
+        }
         other => return Err(format!("unknown CLI provider kind: {other}")),
     }
     Ok(cmd)
@@ -256,6 +262,14 @@ fn build_chat_command(request: &CliChatRequest, binary: &str) -> Result<Command,
             cmd.arg("-p").arg(&prompt);
             cmd.args(["--output-format", "streaming-json"]);
             cmd.arg("-m").arg(&request.model);
+        }
+        "antigravity-cli" => {
+            // agy --print prints plain text. The model is the `agy models`
+            // display string, passed verbatim via --model.
+            cmd.arg("-p").arg(&prompt);
+            if !request.model.trim().is_empty() {
+                cmd.arg("--model").arg(&request.model);
+            }
         }
         other => return Err(format!("unknown CLI provider kind: {other}")),
     }
@@ -405,6 +419,16 @@ pub async fn cli_probe_subscription(request: CliProbeRequest) -> Result<CliProbe
                     && (v.get("text").is_some() || v.get("stopReason").is_some())
             })
         }
+        // agy --print emits plain text and exits 0 even when NOT authenticated
+        // (it prints an OAuth URL / "authentication timed out" instead of a
+        // reply). So success = a non-empty reply with none of those markers.
+        "antigravity-cli" => {
+            let s = stdout.trim();
+            !s.is_empty()
+                && !s.contains("Authentication required")
+                && !s.contains("authentication timed out")
+                && !s.contains("Please visit the URL")
+        }
         _ => false,
     };
 
@@ -492,6 +516,7 @@ mod tests {
         assert_eq!(binary_for_provider("claude-cli").unwrap(), "claude");
         assert_eq!(binary_for_provider("codex-cli").unwrap(), "codex");
         assert_eq!(binary_for_provider("grok-cli").unwrap(), "grok");
+        assert_eq!(binary_for_provider("antigravity-cli").unwrap(), "agy");
         assert!(binary_for_provider("anthropic").is_err());
     }
 
@@ -510,5 +535,21 @@ mod tests {
             path_override: None,
         };
         assert!(build_chat_command(&req, "grok").is_ok());
+    }
+
+    #[test]
+    fn build_commands_cover_antigravity() {
+        assert!(build_probe_command("antigravity-cli", "agy").is_ok());
+        let req = CliChatRequest {
+            provider: "antigravity-cli".to_string(),
+            model: "Gemini 3.5 Flash (Medium)".to_string(),
+            system: None,
+            messages: vec![CliMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+            }],
+            path_override: None,
+        };
+        assert!(build_chat_command(&req, "agy").is_ok());
     }
 }
