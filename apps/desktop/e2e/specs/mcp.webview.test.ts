@@ -25,6 +25,7 @@ const SERVER_ID = "e2e-echo";
 interface McpServerStatus {
   connected: boolean;
   id: string;
+  requiresAuth: boolean;
   toolCount: number;
 }
 
@@ -72,7 +73,9 @@ describe("MCP manager (stdio)", () => {
         args: [FIXTURE],
       },
     })) as McpServerStatus;
-    expect(status).toEqual({ id: SERVER_ID, connected: true, toolCount: 2 });
+    // requiresAuth is part of McpServerStatus since the MCP OAuth work — a stdio
+    // server never needs auth, so it's always false here.
+    expect(status).toEqual({ id: SERVER_ID, connected: true, toolCount: 2, requiresAuth: false });
 
     const tools = (await bridge.invoke("ai_mcp_list_tools")) as McpToolInfo[];
     const echo = tools.find((t) => t.server === SERVER_ID && t.name === "echo");
