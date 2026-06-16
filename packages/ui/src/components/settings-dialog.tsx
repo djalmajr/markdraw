@@ -95,6 +95,12 @@ export interface SettingsMcpServer {
   /** HTTP custom headers (config refs, never resolved secrets) — pre-fills the
    *  edit form so a header can be reviewed or changed. */
   headers?: Record<string, string>;
+  /** Set when this server was auto-discovered from another tool's config
+   *  (Claude/Codex/OpenCode). Such cards are read-only (no edit/remove/toggle)
+   *  and show a source badge. */
+  discovered?: { tools: string[]; scope: string };
+  /** A discovered project-scoped server awaiting the user's approval to connect. */
+  pendingApproval?: boolean;
 }
 
 export interface SaveMcpServerInput {
@@ -194,6 +200,11 @@ export interface SettingsDialogProps {
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
   /** Run the interactive OAuth flow for an OAuth-gated server (opens the browser). */
   onAuthorizeMcpServer?: (id: string) => void | Promise<void>;
+  /** Approve a discovered project-scoped server so it may connect (spawns it). */
+  onApproveMcpServer?: (id: string) => void | Promise<void>;
+  /** Whether to import MCP servers from the OpenCode CLI's config. */
+  importOpenCodeMcps?: boolean;
+  onImportOpenCodeMcpsChange?: (enabled: boolean) => void;
   /** Reasoning effort forwarded to the engine ("off" | "low" | "medium" | "high"). */
   aiReasoning?: string;
   onAiReasoningChange?: (value: string) => void;
@@ -938,16 +949,37 @@ function McpServerCard(props: {
   onRemove: () => void;
   onToggle: (enabled: boolean) => void;
   onAuthorize: () => void | Promise<void>;
+  onApprove: () => void | Promise<void>;
   onEdit: () => void;
 }): JSX.Element {
   const [expanded, setExpanded] = createSignal(false);
   const [authorizing, setAuthorizing] = createSignal(false);
+  const [approving, setApproving] = createSignal(false);
 
   function authorize(): void {
     if (authorizing()) return;
     setAuthorizing(true);
     void Promise.resolve(props.onAuthorize()).finally(() => setAuthorizing(false));
   }
+  function approve(): void {
+    if (approving()) return;
+    setApproving(true);
+    void Promise.resolve(props.onApprove()).finally(() => setApproving(false));
+  }
+  /** Discovered servers are read-only: no enable toggle, no edit/remove. */
+  const discovered = (): SettingsMcpServer["discovered"] => props.server.discovered;
+  const sourceBadge = (): string => {
+    const d = props.server.discovered;
+    if (!d) return "";
+    const tools = d.tools
+      .map((t) => t.charAt(0).toUpperCase() + t.slice(1))
+      .join(", ");
+    const scope =
+      d.scope === "global"
+        ? label("settings_mcp_scope_global")
+        : label("settings_mcp_scope_project");
+    return `${label("settings_mcp_discovered_via")} ${tools} · ${scope}`;
+  };
 
   const tools = createMemo(() => props.server.tools ?? []);
   const visibleTools = createMemo(() =>
@@ -978,18 +1010,33 @@ function McpServerCard(props: {
           <span class="settings-mcp-card-name">{props.server.name || props.server.id}</span>
           <span class="settings-mcp-cmd" title={subtitle()}>{subtitle()}</span>
         </div>
-        <div class="settings-mcp-card-actions">
-          <ToggleSwitch
-            aria-label={(useLocale(), label("settings_mcp_connected"))}
-            checked={props.server.enabled}
-            onChange={(checked) => props.onToggle(checked)}
-          >
-            <SwitchControl size="sm">
-              <SwitchThumb size="sm" />
-            </SwitchControl>
-          </ToggleSwitch>
-        </div>
+        <Show when={!discovered()}>
+          <div class="settings-mcp-card-actions">
+            <ToggleSwitch
+              aria-label={(useLocale(), label("settings_mcp_connected"))}
+              checked={props.server.enabled}
+              onChange={(checked) => props.onToggle(checked)}
+            >
+              <SwitchControl size="sm">
+                <SwitchThumb size="sm" />
+              </SwitchControl>
+            </ToggleSwitch>
+          </div>
+        </Show>
       </div>
+      <Show when={discovered()}>
+        <div class="settings-mcp-badge">{(useLocale(), sourceBadge())}</div>
+      </Show>
+      <Show when={props.server.pendingApproval}>
+        <div class="settings-mcp-auth">
+          <span class="settings-mcp-auth-note">
+            {(useLocale(), label("settings_mcp_approve_note"))}
+          </span>
+          <Button size="sm" loading={approving()} onClick={() => approve()}>
+            {(useLocale(), label("settings_mcp_approve"))}
+          </Button>
+        </div>
+      </Show>
       <Show when={props.server.requiresAuth && props.server.enabled}>
         <div class="settings-mcp-auth">
           <span class="settings-mcp-auth-note">
@@ -1027,25 +1074,28 @@ function McpServerCard(props: {
       </Show>
       {/* Edit + remove live at the card's bottom-right, kept clear of the
           enable/disable Switch up in the header so a destructive action is
-          never a slip away from a quick toggle. */}
-      <div class="settings-mcp-card-footer">
-        <button
-          type="button"
-          aria-label={(useLocale(), label("settings_mcp_edit"))}
-          class="settings-mcp-remove"
-          onClick={() => props.onEdit()}
-        >
-          <IconPencil width={14} height={14} />
-        </button>
-        <button
-          type="button"
-          aria-label={(useLocale(), label("settings_mcp_remove"))}
-          class="settings-mcp-remove"
-          onClick={() => props.onRemove()}
-        >
-          <IconTrash width={14} height={14} />
-        </button>
-      </div>
+          never a slip away from a quick toggle. Discovered servers are
+          read-only (owned by the other tool's config), so they get neither. */}
+      <Show when={!discovered()}>
+        <div class="settings-mcp-card-footer">
+          <button
+            type="button"
+            aria-label={(useLocale(), label("settings_mcp_edit"))}
+            class="settings-mcp-remove"
+            onClick={() => props.onEdit()}
+          >
+            <IconPencil width={14} height={14} />
+          </button>
+          <button
+            type="button"
+            aria-label={(useLocale(), label("settings_mcp_remove"))}
+            class="settings-mcp-remove"
+            onClick={() => props.onRemove()}
+          >
+            <IconTrash width={14} height={14} />
+          </button>
+        </div>
+      </Show>
     </div>
   );
 }
@@ -1159,6 +1209,24 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
         <Match when={view() === "list"}>
           <h3 class="settings-h3">{(useLocale(), label("settings_mcp_title"))}</h3>
 
+          {/* OpenCode has no first-class AI provider in AsciiMark (Claude/Codex
+              are gated on their connected provider), so importing its configured
+              MCP servers rides this explicit toggle. */}
+          <div class="settings-row" style={{ "align-items": "center", gap: "10px", margin: "0 0 12px" }}>
+            <ToggleSwitch
+              checked={props.importOpenCodeMcps ?? false}
+              onChange={(checked) => props.onImportOpenCodeMcpsChange?.(checked)}
+              aria-label={(useLocale(), label("settings_mcp_import_opencode"))}
+            >
+              <SwitchControl size="sm">
+                <SwitchThumb size="sm" />
+              </SwitchControl>
+            </ToggleSwitch>
+            <label class="settings-label" style={{ margin: "0" }}>
+              {(useLocale(), label("settings_mcp_import_opencode"))}
+            </label>
+          </div>
+
           <Show
             when={(props.mcpServers ?? []).length > 0}
             fallback={
@@ -1173,6 +1241,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
                     onRemove={() => void props.onRemoveMcpServer?.(server.id)}
                     onToggle={(checked) => void props.onToggleMcpServer?.(server.id, checked)}
                     onAuthorize={() => props.onAuthorizeMcpServer?.(server.id)}
+                    onApprove={() => props.onApproveMcpServer?.(server.id)}
                     onEdit={() => openEdit(server)}
                   />
                 )}

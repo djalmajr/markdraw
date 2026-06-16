@@ -61,6 +61,10 @@ enum ConnectOutcome {
     RequiresAuth,
 }
 
+/// Upper bound on a single connect (handshake + first tool list). Generous enough
+/// for a slow remote, short enough that a hung stdio child doesn't wedge startup.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerConfig {
@@ -373,9 +377,19 @@ pub async fn ai_mcp_connect(
     if let Some(prev) = state.servers.lock().await.remove(&id) {
         let _ = prev.client.cancel().await;
     }
-    match connect_client(&config).await? {
+    // Bound the whole connect — a misbehaving server (e.g. a discovered stdio
+    // child that never completes the MCP handshake) must fail, not hang the app
+    // forever. `serve` does the initialize handshake; `list_all_tools` the first
+    // real round-trip, so both can stall.
+    let outcome = tokio::time::timeout(CONNECT_TIMEOUT, connect_client(&config))
+        .await
+        .map_err(|_| format!("MCP connect timed out: {id}"))??;
+    match outcome {
         ConnectOutcome::Connected(client) => {
-            let tools = client.list_all_tools().await.map_err(|e| e.to_string())?;
+            let tools = tokio::time::timeout(CONNECT_TIMEOUT, client.list_all_tools())
+                .await
+                .map_err(|_| format!("MCP list-tools timed out: {id}"))?
+                .map_err(|e| e.to_string())?;
             let tools = tool_infos(&id, tools);
             let tool_count = tools.len();
             state.needs_auth.lock().await.remove(&id);

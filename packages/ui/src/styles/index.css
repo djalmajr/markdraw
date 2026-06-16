@@ -4777,6 +4777,19 @@ kbd.shortcuts-help-key {
   color: hsl(var(--muted-foreground));
 }
 
+.settings-mcp-badge {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, hsl(var(--muted)) 92%, black);
+  border: 1px solid color-mix(in srgb, hsl(var(--muted)) 84%, black);
+  color: hsl(var(--muted-foreground));
+}
+
 .settings-mcp-show-toggle {
   align-self: flex-start;
   font-size: 11px;

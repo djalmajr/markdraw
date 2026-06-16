@@ -68,6 +68,19 @@ import {
   type McpServerStatus,
 } from "./lib/ai-mcp.ts";
 import {
+  approveDiscovered,
+  dedupeDiscovered,
+  discoverMcpServers,
+  discoveryToolsFor,
+  getImportOpenCodeMcps,
+  isApproved,
+  serverIdentity,
+  setImportOpenCodeMcps,
+  toMcpServerConfig,
+  withConfigHashes,
+  type DiscoveredEntry,
+} from "./lib/mcp-discovery.ts";
+import {
   buildInProcessTools,
   type ExcalidrawGenerateOutcome,
   type ExcalidrawGenerateRequest,
@@ -174,6 +187,11 @@ export function App() {
   const [mcpStatuses, setMcpStatuses] = createSignal<McpServerStatus[]>([]);
   // Tool names grouped by server id — feeds the settings card tool chips.
   const [mcpTools, setMcpTools] = createSignal<Record<string, string[]>>({});
+  // MCP servers discovered from other agent tools (Claude/Codex/OpenCode), deduped
+  // + hashed. Global ones auto-connect; project ones wait for approval.
+  const [discoveredMcp, setDiscoveredMcp] = createSignal<DiscoveredEntry[]>([]);
+  // OpenCode has no first-class provider, so its discovery rides this toggle.
+  const [importOpenCode, setImportOpenCode] = createSignal(getImportOpenCodeMcps());
 
   // Deterministic secret scrubbing (omp#5), session-scoped: one map per app
   // run keeps `[secret-<nonce>-N]` placeholders stable across every outbound
@@ -343,6 +361,8 @@ export function App() {
     // Independent of config-load success — the builtins-only fallback still
     // needs its keychain probe so connected providers surface in the pickers.
     await refreshConnectedProviders();
+    // (MCP discovery from connected tools runs via a reactive effect keyed on
+    // the open roots + provider connectivity — see below.)
     // A previously-saved "Complete" tier downgrades to "Fast" when no embedding
     // provider is connected (the Full card is gated, but the stored choice may
     // predate a disconnect).
@@ -949,6 +969,82 @@ export function App() {
     }
   }
 
+  // Re-read the open roots' (+ global) MCP configs from the tools whose provider
+  // is connected, dedupe, then auto-connect the global ones and any project ones
+  // already approved. Pending project servers are surfaced (not connected) for an
+  // explicit "Approve". Latest-wins so rapid provider/root changes don't race.
+  const discoveryGuard = createGenerationGuard();
+  async function refreshDiscoveredMcp(): Promise<void> {
+    const isLatest = discoveryGuard.begin();
+    const roots = Array.from(rootPaths().values());
+    const providerKinds: Record<string, string> = Object.fromEntries(
+      Object.entries(aiConfig().provider).map(([id, p]) => [id, p.kind]),
+    );
+    const tools = discoveryToolsFor({
+      connected: connectedProviders(),
+      providerKinds,
+      importOpenCode: importOpenCode(),
+    });
+    let entries: DiscoveredEntry[];
+    try {
+      const raw = await discoverMcpServers(roots, tools);
+      const existing = new Set((aiConfig().mcp ?? []).map(serverIdentity));
+      entries = await withConfigHashes(dedupeDiscovered(raw, existing));
+    } catch (e) {
+      console.warn("[mcp] discovery failed:", e);
+      return;
+    }
+    if (!isLatest()) return;
+    setDiscoveredMcp(entries);
+    // Connect what's allowed, skipping anything already live (no re-spawn). Fire
+    // in PARALLEL and don't await — each connect is bounded by a Rust-side
+    // timeout, so one misbehaving server can't stall the others or the UI. The
+    // cards render immediately from `discoveredMcp`; status fills in as connects
+    // land.
+    const live = new Set(mcpStatuses().filter((s) => s.connected).map((s) => s.id));
+    const toConnect = entries.filter(
+      (e) =>
+        (e.scope === "global" || (!!e.root && isApproved(e.root, e.configHash))) &&
+        !live.has(e.id),
+    );
+    void Promise.allSettled(
+      toConnect.map((e) =>
+        connectMcpServer(toMcpServerConfig(e)).catch((err) =>
+          console.warn(`[mcp] discovered connect failed for "${e.id}":`, err),
+        ),
+      ),
+    ).then(() => refreshMcpStatuses());
+    await refreshMcpStatuses();
+  }
+
+  /** Approve a pending project-scoped discovered server, then connect it. */
+  async function approveDiscoveredMcp(id: string): Promise<void> {
+    const entry = discoveredMcp().find((e) => e.id === id);
+    if (!entry?.root) return;
+    approveDiscovered(entry.root, entry.configHash);
+    try {
+      await connectMcpServer(toMcpServerConfig(entry));
+    } catch (e) {
+      console.warn(`[mcp] approve+connect failed for "${id}":`, e);
+    }
+    await refreshMcpStatuses();
+    setDiscoveredMcp((d) => [...d]); // bump so pendingApproval recomputes
+  }
+
+  function toggleImportOpenCode(on: boolean): void {
+    setImportOpenCode(on);
+    setImportOpenCodeMcps(on);
+  }
+  // Re-discover whenever the open roots, provider connectivity, or the OpenCode
+  // toggle change. Fires once on mount too (empty connectivity → no-op until the
+  // keychain probe lands), and is latest-wins via the guard inside.
+  createEffect(() => {
+    rootPaths();
+    connectedProviders();
+    importOpenCode();
+    void refreshDiscoveredMcp();
+  });
+
   /** Persist the MCP server list into ai.json, preserving sibling sections. */
   async function persistMcpServers(servers: MCPServerConfig[]): Promise<void> {
     const user = await loadUserAIConfig();
@@ -1051,7 +1147,7 @@ export function App() {
   /** View model for the settings MCP list: persisted config + live status. */
   const mcpServersView = createMemo(() => {
     const statuses = new Map(mcpStatuses().map((s) => [s.id, s]));
-    return (aiConfig().mcp ?? []).map((s) => {
+    const explicit = (aiConfig().mcp ?? []).map((s) => {
       const st = statuses.get(s.id);
       return {
         id: s.id,
@@ -1071,6 +1167,32 @@ export function App() {
         headers: s.headers,
       };
     });
+    // Discovered (read-only) servers from other tools, with their source badge
+    // and — for unapproved project servers — a pending-approval flag.
+    const discovered = discoveredMcp().map((e) => {
+      const st = statuses.get(e.id);
+      const pendingApproval =
+        e.scope === "project" && !!e.root && !isApproved(e.root, e.configHash);
+      return {
+        id: e.id,
+        name: e.name,
+        transport: e.transport,
+        enabled: true,
+        connected: st?.connected ?? false,
+        requiresAuth: st?.requiresAuth ?? false,
+        toolCount: st?.toolCount ?? 0,
+        tools: mcpTools()[e.id],
+        command: e.command,
+        args: e.args,
+        url: e.url,
+        discovered: {
+          tools: [...new Set(e.sources.map((s) => s.tool))],
+          scope: e.scope,
+        },
+        pendingApproval,
+      };
+    });
+    return [...explicit, ...discovered];
   });
 
   // TabStore lives inside each PaneStore (see `createPaneStore`). The
@@ -3204,6 +3326,9 @@ export function App() {
       onRemoveMcpServer={removeMcpServer}
       onToggleMcpServer={toggleMcpServer}
       onAuthorizeMcpServer={authorizeMcpServerById}
+      onApproveMcpServer={approveDiscoveredMcp}
+      importOpenCodeMcps={importOpenCode()}
+      onImportOpenCodeMcpsChange={toggleImportOpenCode}
       showRecentHistory={true}
       showEditorTabs={rootPaths().size > 0 || tabStore().tabs().length > 0}
       showNavButtons={rootPaths().size > 0 || tabStore().tabs().length > 0}
