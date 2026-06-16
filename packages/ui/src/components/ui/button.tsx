@@ -1,6 +1,5 @@
 import type { JSX, ValidComponent } from "solid-js"
 import { Show, splitProps } from "solid-js"
-import IconLoader from "~icons/lucide/loader-circle"
 
 import * as ButtonPrimitive from "@kobalte/core/button"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
@@ -61,7 +60,21 @@ const Button = <T extends ValidComponent = "button">(
       {...others}
     >
       <Show when={local.loading}>
-        <IconLoader class="animate-spin" />
+        {/* Inline lucide `loader-circle` — keeps this shared primitive consumable
+            by builds without unplugin-icons (e.g. the marketing site), matching
+            the inline-svg convention of the sibling Kobalte wrappers. */}
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-4 animate-spin"
+        >
+          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+        </svg>
       </Show>
       {local.children}
     </ButtonPrimitive.Root>
