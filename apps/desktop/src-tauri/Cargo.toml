@@ -61,6 +61,10 @@ rmcp = { version = "1", default-features = false, features = [
 ] }
 # For typed HTTP header names/values when passing custom MCP auth headers.
 http = "1"
+# Parse Codex's `~/.codex/config.toml` (and per-project `.codex/config.toml`)
+# when discovering MCP servers other agent tools already configure (mcp_discovery.rs).
+# Already compiled transitively; declared direct so the module can `use toml`.
+toml = "0.9"
 # Streaming provider HTTP (ai_http.rs): tauri-plugin-http buffers whole
 # responses so SSE never streams — the POST happens here in Rust instead and
 # body chunks flow to the webview over an ipc Channel. Pinned to 0.12 to share

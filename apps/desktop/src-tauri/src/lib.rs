@@ -24,6 +24,12 @@ use ai_mcp::{
     ai_mcp_list_servers, ai_mcp_list_tools, McpManager,
 };
 
+// Discovers MCP servers other agent tools (Claude Code, Codex, OpenCode) already
+// configure, at global + per-project scope, normalized for AsciiMark. Read-only;
+// the JS host gates which tools to read and approves project servers.
+mod mcp_discovery;
+use mcp_discovery::mcp_discover;
+
 // Streaming provider HTTP — Rust-side POST + SSE line framing over an ipc
 // Channel (tauri-plugin-http buffers whole responses, so SSE never streamed).
 mod ai_http;
@@ -1185,6 +1191,7 @@ pub fn run() {
             ai_mcp_authorize,
             ai_mcp_disconnect,
             ai_mcp_list_servers,
+            mcp_discover,
             ai_mcp_list_tools,
             ai_mcp_call_tool,
             ai_mcp_cancel_call,
