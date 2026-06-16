@@ -257,7 +257,16 @@ fn build_chat_command(request: &CliChatRequest, binary: &str) -> Result<Command,
     match request.provider.as_str() {
         "claude-cli" => {
             cmd.arg("-p").arg(&prompt);
-            cmd.args(["--output-format", "stream-json", "--include-partial-messages"]);
+            // `--print --output-format=stream-json` REQUIRES `--verbose` (Claude
+            // CLI ≥ 2.x rejects the combo otherwise, exiting 1). The probe uses
+            // plain `json`, which doesn't need it — so a Claude subscription
+            // connects fine but every chat turn failed until this was added.
+            cmd.args([
+                "--output-format",
+                "stream-json",
+                "--include-partial-messages",
+                "--verbose",
+            ]);
             cmd.arg("--model").arg(&request.model);
             if let Some(sys) = request.system.as_deref() {
                 let trimmed = sys.trim();
