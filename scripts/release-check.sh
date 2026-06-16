@@ -9,10 +9,10 @@ step() {
   printf "\n\033[1;36m▶ %s\033[0m\n" "$1"
 }
 
-step "1/9 typecheck (all workspaces)"
+step "1/10 typecheck (all workspaces)"
 bun run typecheck
 
-step "2/9 bun test"
+step "2/10 bun test"
 bun test
 
 # Windows: test executables need the common-controls manifest embedded or they
@@ -20,27 +20,33 @@ bun test
 # cargo test/coverage invocations ONLY — exported globally it would leak into
 # the e2e gate's app build, where tauri-build already embeds a manifest and the
 # duplicate fails the link (CVT1100 → LNK1123).
-step "3/9 cargo test (incl. perf stress)"
+step "3/10 cargo test (incl. perf stress)"
 (cd apps/desktop/src-tauri \
   && ASCIIMARK_EMBED_TEST_MANIFEST=1 cargo test --lib \
   && ASCIIMARK_EMBED_TEST_MANIFEST=1 cargo test --lib -- --ignored)
 
-step "4/9 vitest (UI components)"
+step "4/10 vitest (UI components)"
 (cd packages/ui && bun run test:vitest)
 
-step "5/9 cargo coverage (Rust)"
+# Builds the marketing site — the one packages/ui consumer whose Vite config has
+# NO unplugin-icons, so a stray `~icons/*` import in a shared component is caught
+# here rather than in the post-merge "Deploy Site" CI job. (smoke runs this too.)
+step "5/10 site frontend build (plugin-less packages/ui consumer)"
+bun run --filter @asciimark/site build
+
+step "6/10 cargo coverage (Rust)"
 (cd apps/desktop/src-tauri && ASCIIMARK_EMBED_TEST_MANIFEST=1 cargo llvm-cov --lib --summary-only)
 
-step "6/9 conversion benchmarks (smoke)"
+step "7/10 conversion benchmarks (smoke)"
 bun run packages/core/src/__bench__/conversion.bench.ts
 
-step "7/9 stryker mutation testing on packages/core (~2 min)"
+step "8/10 stryker mutation testing on packages/core (~2 min)"
 (cd packages/core && bunx stryker run)
 
-step "8/9 E2E (spawns tauri dev, runs specs, tears down)"
+step "9/10 E2E (spawns tauri dev, runs specs, tears down)"
 bash scripts/run-e2e.sh
 
-step "9/9 dependency audits (advisory: doesn't fail the gate)"
+step "10/10 dependency audits (advisory: doesn't fail the gate)"
 bun run audit:js || true
 bun run audit:rust || true
 
