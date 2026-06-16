@@ -6,7 +6,27 @@ import * as SwitchPrimitive from "@kobalte/core/switch"
 
 import { cn } from "@asciimark/core/utils.ts"
 
-const Switch = SwitchPrimitive.Root
+type SwitchRootProps = SwitchPrimitive.SwitchRootProps & {
+  class?: string | undefined
+  children?: JSX.Element
+}
+
+/** Switch root. kobalte renders a visually-hidden `<input>` as
+ *  `position: absolute`; without a positioned root it anchors to the nearest
+ *  positioned ancestor (e.g. a `fixed` modal), so a real click on a switch in a
+ *  SCROLLED list makes the browser scroll-into-view to that stale position —
+ *  jumping the list and leaving a blank gap. `relative` anchors the input to the
+ *  switch itself, keeping the scroll put. */
+const Switch = <T extends ValidComponent = "div">(
+  props: PolymorphicProps<T, SwitchRootProps>
+) => {
+  const [local, others] = splitProps(props as SwitchRootProps, ["class", "children"])
+  return (
+    <SwitchPrimitive.Root class={cn("relative", local.class)} {...others}>
+      {local.children}
+    </SwitchPrimitive.Root>
+  )
+}
 const SwitchDescription = SwitchPrimitive.Description
 const SwitchErrorMessage = SwitchPrimitive.ErrorMessage
 
