@@ -176,6 +176,62 @@ describe("desktop palettes (Cmd/Ctrl+P family)", () => {
     );
   });
 
+  it("Command Palette: running 'Theme: Dark' actually applies the theme (regression)", async () => {
+    if (!bridge) return;
+    // Regression guard: the theme commands once called the RAW `setThemeMode`
+    // signal setter, which updated state but never applied the theme — no
+    // `applyTheme`, no `dark` class, a silent no-op. The fix routes them through
+    // `handleThemeChange`. This drives the real palette → command → DOM, the only
+    // level that catches a command wired to the wrong function.
+
+    // Start from a known non-dark state.
+    await bridge.evalJs(`document.documentElement.classList.remove("dark")`);
+
+    const runThemeCommand = async (query: string) => {
+      await pressShortcut(bridge!, "p", true);
+      await expectEventually(async () =>
+        (await bridge!.evalJs(
+          `!!document.querySelector(".quick-open-panel input[placeholder='Type a command…']")`,
+        )) === true,
+      );
+      await bridge!.evalJs(
+        `(() => {
+          const input = document.querySelector(".quick-open-panel input");
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+          setter.call(input, ${JSON.stringify(query)});
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`,
+      );
+      // The top option must be the matching Theme command.
+      await expectEventually(async () =>
+        (await bridge!.evalJs(
+          `(document.querySelector(".quick-open-list [role='option']")?.textContent ?? "").includes("Theme")`,
+        )) === true,
+      );
+      // Enter runs the highlighted command and closes the palette.
+      await bridge!.evalJs(
+        `document.querySelector(".quick-open-panel input")?.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
+        )`,
+      );
+      await expectEventually(async () =>
+        (await bridge!.evalJs(`!document.querySelector(".quick-open-panel")`)) === true,
+      );
+    };
+
+    // Dark applies.
+    await runThemeCommand("Dark");
+    await expectEventually(async () =>
+      (await bridge!.evalJs(`document.documentElement.classList.contains("dark")`)) === true,
+    );
+
+    // Light reverts (also leaves a clean state for later specs / manual use).
+    await runThemeCommand("Light");
+    await expectEventually(async () =>
+      (await bridge!.evalJs(`!document.documentElement.classList.contains("dark")`)) === true,
+    );
+  });
+
   it("Cmd/Ctrl+Shift+O lists headings of the active file", async () => {
     if (!bridge) return;
     // Open a real markdown/adoc file so the heading extractor has content.
