@@ -122,7 +122,7 @@
   "tree_new_folder": "New Folder",
   "tree_expand_all": "Expand All",
   "tree_collapse_all": "Collapse All",
-  "tree_remove_from_workspace": "Remove from Workspace",
+  "tree_close_workspace": "Close Workspace",
   "tree_cut": "Cut",
   "tree_copy": "Copy",
   "tree_paste": "Paste",

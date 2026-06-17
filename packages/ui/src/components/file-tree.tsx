@@ -28,7 +28,7 @@ import IconFolderPlus from "~icons/lucide/folder-plus";
 import IconClipboard from "~icons/lucide/clipboard-copy";
 import IconClipboardPaste from "~icons/lucide/clipboard-paste";
 import IconSparkles from "~icons/lucide/sparkles";
-import IconTrash from "~icons/lucide/trash-2";
+import IconFolderX from "~icons/lucide/folder-x";
 import { fileKind, isSupportedFile } from "@asciimark/core/utils.ts";
 import type { FSEntry, WorkspaceRoot } from "@asciimark/core/types.ts";
 
@@ -593,7 +593,7 @@ export function FileTree(props: FileTreeProps) {
                     class="gap-2"
                     onSelect={() => props.onCloseRoot!(rootId)}
                   >
-                    <span class="flex items-center gap-2"><IconTrash width={14} height={14} /> {m.tree_remove_from_workspace()}</span>
+                    <span class="flex items-center gap-2"><IconFolderX width={14} height={14} /> {m.tree_close_workspace()}</span>
                   </DropdownMenuItem>
                 </Show>
               </DropdownMenuContent>
