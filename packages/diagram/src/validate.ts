@@ -35,12 +35,16 @@ export interface ValidateOpts {
   /** Allowed overlap (px²) between two node boxes before it's an error — guards
    *  against floating-point touching. */
   overlapTolerance?: number;
+  /** Px a left-aligned label may extend past its box's right edge before it's
+   *  flagged as overflowing (guards against sub-pixel touching). */
+  textOverflowTolerance?: number;
 }
 
 const DEFAULTS: Required<ValidateOpts> = {
   hitInset: 1.5,
   samplesPerSegment: 24,
   overlapTolerance: 1,
+  textOverflowTolerance: 2,
 };
 
 function overlapArea(a: BoundingBox, b: BoundingBox): number {
@@ -121,10 +125,43 @@ export function validate(
     }
   }
 
+  // ── Geometric: text overflow ───────────────────────────────────────────────
+  // Labels are left-aligned and container-unbound (containerId: null), so a title
+  // or body wider than its card spills past the right edge into the gutter rather
+  // than wrapping. Widths come from the DOM-free 0.58 char-width heuristic
+  // (factories.ts) so this is advisory (warning). Mirrors the skill's lint-scene
+  // overflow check (over = text.right - box.right).
+  for (const node of placed) {
+    const rightEdge = node.bounds.x + node.bounds.width;
+    for (const kind of ["title", "body"] as const) {
+      const el = node[kind];
+      if (!el) continue;
+      const over = el.x + el.width - rightEdge;
+      if (over > o.textOverflowTolerance) {
+        add("warning", "text-overflow", `Node '${node.id}' ${kind} overflows its box by ${Math.round(over)}px.`, [node.id]);
+      }
+    }
+  }
+
   // ── Geometric: arrows ──────────────────────────────────────────────────────
   for (const r of routeResult.routed) {
     const fromId = r.edge.from;
     const toId = r.edge.to;
+    // binding guard: every routed arrow must be reciprocally bound to BOTH cards,
+    // else it won't follow when a node moves (the whole point of the diagram). The
+    // router always binds (routing.ts bindArrow), so this catches a regression — or
+    // a hand-assembled scene — that left an arrow one-way or unbound.
+    const a = r.arrow;
+    if (!a.startBinding || !a.endBinding) {
+      add("error", "arrow-unbound", `Edge ${fromId}→${toId} isn't bound at both ends — it won't follow a moved node.`, [fromId, toId]);
+    } else {
+      for (const b of [a.startBinding, a.endBinding]) {
+        const owner = placed.find((n) => n.rect.id === b.elementId);
+        if (owner && !owner.rect.boundElements.some((be) => be.id === a.id)) {
+          add("error", "arrow-binding-not-reciprocal", `Edge ${fromId}→${toId} is bound one-way to '${owner.id}' — the node won't carry the arrow on move.`, [fromId, toId, owner.id]);
+        }
+      }
+    }
     // line-through-box: any segment passing through a node that is NOT an endpoint
     for (let s = 1; s < r.points.length; s++) {
       const p0 = r.points[s - 1];

@@ -100,6 +100,31 @@ describe("layout engine", () => {
     expect(groupIdx).toBeLessThan(firstNodeIdx);
   });
 
+  test("a group makes its members a real Excalidraw group (one shared id, no dupes)", () => {
+    const res = build({
+      groups: [{ id: "g", title: "Cluster", nodes: ["a", "b"] }],
+      nodes: [
+        { id: "a", lane: "l", title: "A", body: "body a" },
+        { id: "b", lane: "l", title: "B" },
+        { id: "c", lane: "r", title: "C" }, // not in the group
+      ],
+      edges: [],
+    });
+    const a = res.nodes.get("a")!;
+    const b = res.nodes.get("b")!;
+    const c = res.nodes.get("c")!;
+    const gid = "group-g";
+    // Every element of each grouped member carries the id EXACTLY ONCE. The
+    // shared-groupIds-array aliasing bug made this [gid, gid, gid].
+    for (const el of [a.rect, a.title, a.body!, b.rect, b.title]) {
+      expect(el.groupIds).toEqual([gid]);
+    }
+    // The frame shares the id too → dragging any member moves the whole cluster.
+    expect(res.groups[0].rect.groupIds).toEqual([gid]);
+    // A non-member is untouched.
+    expect(c.rect.groupIds).toEqual([]);
+  });
+
   test("is deterministic for a fixed spec", () => {
     const spec: DiagramSpec = {
       nodes: [

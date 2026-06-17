@@ -21,7 +21,9 @@
       "strokeStyle": "dashed",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100083,
       "versionNonce": 100084,
@@ -48,7 +50,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100085,
       "versionNonce": 100086,
@@ -380,7 +384,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100017,
       "versionNonce": 100018,
@@ -420,7 +426,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100019,
       "versionNonce": 100020,
@@ -457,7 +465,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100021,
       "versionNonce": 100022,
@@ -496,7 +506,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100023,
       "versionNonce": 100024,
@@ -532,7 +544,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100025,
       "versionNonce": 100026,
@@ -569,7 +583,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100027,
       "versionNonce": 100028,
@@ -608,7 +624,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100029,
       "versionNonce": 100030,
@@ -644,7 +662,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100031,
       "versionNonce": 100032,
@@ -681,7 +701,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100033,
       "versionNonce": 100034,
@@ -720,7 +742,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100035,
       "versionNonce": 100036,
@@ -760,7 +784,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100037,
       "versionNonce": 100038,
@@ -797,7 +823,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100039,
       "versionNonce": 100040,
@@ -836,7 +864,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100041,
       "versionNonce": 100042,
@@ -868,7 +898,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100043,
       "versionNonce": 100044,
@@ -905,7 +937,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100045,
       "versionNonce": 100046,
@@ -944,7 +978,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100047,
       "versionNonce": 100048,
@@ -984,7 +1020,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100049,
       "versionNonce": 100050,
@@ -1021,7 +1059,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100051,
       "versionNonce": 100052,
@@ -1060,7 +1100,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100053,
       "versionNonce": 100054,
@@ -1092,7 +1134,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100055,
       "versionNonce": 100056,
@@ -1129,7 +1173,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100057,
       "versionNonce": 100058,
@@ -1168,7 +1214,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100059,
       "versionNonce": 100060,
@@ -1204,7 +1252,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100061,
       "versionNonce": 100062,
@@ -1241,7 +1291,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100063,
       "versionNonce": 100064,
@@ -1280,7 +1332,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100065,
       "versionNonce": 100066,
@@ -1312,7 +1366,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100067,
       "versionNonce": 100068,
@@ -1349,7 +1405,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100069,
       "versionNonce": 100070,
@@ -1388,7 +1446,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100071,
       "versionNonce": 100072,
@@ -1415,7 +1475,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100073,
       "versionNonce": 100074,
@@ -1452,7 +1514,9 @@
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
-      "groupIds": [],
+      "groupIds": [
+        "group-cluster"
+      ],
       "frameId": null,
       "seed": 100075,
       "versionNonce": 100076,
