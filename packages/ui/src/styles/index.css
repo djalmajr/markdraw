@@ -1477,12 +1477,26 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .media-image {
   display: block;
   margin: auto;
+  transform-origin: center center;
 }
 
 .media-image-fit {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+/* Zoomed image pans via transform inside a CLIPPED stage (no scrollbars). The
+   default .media-stage is overflow:auto for the PDF page column; the image stage
+   overrides it so the transform — not scrollbars — moves the content around. */
+.media-stage-pan {
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.media-stage-pan.is-grabbing {
+  cursor: grabbing;
 }
 
 /* Continuous vertical scroll: every page stacked, no page navigation. */
@@ -4010,6 +4024,149 @@ kbd.shortcuts-help-key {
 .diagram-viewer-transform svg {
   display: block;
   pointer-events: none;
+}
+
+/* === Shared zoom controls (image pane + diagram/mermaid lightbox) === */
+.zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.zoom-controls-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+
+.zoom-controls-btn:hover:not(:disabled) {
+  background: hsl(var(--bg-hover));
+  color: hsl(var(--foreground));
+}
+
+.zoom-controls-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.zoom-controls-btn:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.zoom-controls-label {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--muted-foreground));
+  min-width: 44px;
+  text-align: center;
+  padding: 0 4px;
+}
+
+/* The image inside the lightbox: fit the viewport at scale=1, then the pan-zoom
+   transform scales/moves it. pointer-events:none so the canvas owns wheel/drag. */
+.image-lightbox-img {
+  display: block;
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+/* Clicking an inline image opens its size/zoom menu (pointer cursor). The
+   max-height keeps a tall screenshot from dominating the preview; max-width fits
+   it to the column by default. The "original" preset removes both caps — the
+   .doc-img-scroll wrapper then gives a horizontal scroll (like wide tables). */
+.doc-body img {
+  cursor: pointer;
+  max-height: 70vh;
+  max-width: 100%;
+}
+
+.doc-body a img {
+  cursor: pointer;
+}
+
+/* Wrapper added in JS (wrapImagesForScroll): a column-width box that scrolls
+   horizontally when the image inside is shown wider than it (original size). */
+.doc-img-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Standalone images are block + auto-margined: centered in the column when they
+   fit, and left-aligned (so the scroll starts at the left) when wider. */
+.doc-img-scroll > img {
+  display: block;
+  margin-inline: auto;
+}
+
+/* Per-image display-size presets, set by the click size menu. Default (no
+   data-size) is "fit" = the 70vh cap above. */
+.doc-body img[data-size="small"] {
+  max-height: 32vh;
+}
+
+.doc-body img[data-size="wide"] {
+  width: 100%;
+  max-width: 100%;
+  max-height: none;
+}
+
+.doc-body img[data-size="original"] {
+  max-height: none;
+  max-width: none;
+}
+
+/* Floating menu shown when CLICKING an inline preview image — anchored centered
+   at the image's top (translateX(-50%) centers it on the anchor point). */
+.img-size-menu {
+  position: fixed;
+  z-index: 50;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  box-shadow: 0 2px 10px hsl(var(--foreground) / 0.15);
+}
+
+.img-size-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: hsl(var(--border));
+}
+
+.img-size-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+
+.img-size-btn:hover {
+  background: hsl(var(--bg-hover));
+  color: hsl(var(--foreground));
 }
 
 .preview-scope {

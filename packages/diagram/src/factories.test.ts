@@ -93,6 +93,16 @@ describe("factories", () => {
     expect(withBody.elements).toHaveLength(3);
   });
 
+  test("box gives each element its own groupIds array (no shared mutation)", () => {
+    const ctx = createCtx();
+    const b = box(ctx, 0, 0, 200, "T", "body", { groupIds: ["g"] });
+    // Independent arrays: mutating the rect's must not leak into title/body.
+    b.rect.groupIds.push("x");
+    expect(b.title.groupIds).toEqual(["g"]);
+    expect(b.body!.groupIds).toEqual(["g"]);
+    expect(b.rect.groupIds).toEqual(["g", "x"]);
+  });
+
   test("bindArrow wires both endpoints and back-references", () => {
     const ctx = createCtx();
     const from = rect(ctx, 0, 0, 10, 10);

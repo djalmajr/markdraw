@@ -228,12 +228,15 @@ export function box(
 ): BoxResult {
   const bodyLines = bodyStr ? bodyStr.split("\n").length : 0;
   const h = opts.h ?? 44 + bodyLines * 18 + 10;
+  // Each element gets its OWN groupIds array. Sharing one reference across the
+  // rect/title/body means a later `.push` (e.g. assigning group membership in
+  // layout.ts) lands on all three at once — triple-counting the id. Copy per use.
   const groupIds = opts.groupIds ?? [];
-  const r = rect(ctx, x, y, w, h, { bg: opts.bg, stroke: opts.stroke, groupIds });
+  const r = rect(ctx, x, y, w, h, { bg: opts.bg, stroke: opts.stroke, groupIds: [...groupIds] });
   const titleEl = text(ctx, x + 14, y + 12, title, {
     size: opts.titleSize ?? 16,
     color: opts.titleColor ?? DEFAULT_STROKE,
-    groupIds,
+    groupIds: [...groupIds],
   });
   const elements: Array<RectangleElement | TextElement> = [r, titleEl];
   let bodyEl: TextElement | undefined;
@@ -241,7 +244,7 @@ export function box(
     bodyEl = text(ctx, x + 14, y + 40, bodyStr, {
       size: opts.bodySize ?? 12.5,
       color: opts.bodyColor ?? "#343a40",
-      groupIds,
+      groupIds: [...groupIds],
     });
     elements.push(bodyEl);
   }

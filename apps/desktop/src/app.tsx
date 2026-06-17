@@ -2615,7 +2615,7 @@ export function App() {
         group: "Theme",
         title: m.command_theme_system(),
         run: () => {
-          state.setThemeMode("system");
+          state.handleThemeChange("system");
         },
       },
       {
@@ -2623,7 +2623,7 @@ export function App() {
         group: "Theme",
         title: m.command_theme_light(),
         run: () => {
-          state.setThemeMode("light");
+          state.handleThemeChange("light");
         },
       },
       {
@@ -2631,7 +2631,7 @@ export function App() {
         group: "Theme",
         title: m.command_theme_dark(),
         run: () => {
-          state.setThemeMode("dark");
+          state.handleThemeChange("dark");
         },
       },
       {

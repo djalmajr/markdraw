@@ -89,6 +89,42 @@ describe("validator", () => {
     expect(report.ok).toBe(true); // warning, not error
   });
 
+  test("warns when a label overflows its box, but doesn't fail the build", () => {
+    const report = check({
+      nodes: [
+        { id: "wide", lane: "l", title: "A title far too long to ever fit the default lane width" },
+        { id: "fits", lane: "l", title: "Short" },
+      ],
+      edges: [],
+    });
+    const overflow = report.warnings.find((w) => w.code === "text-overflow");
+    expect(overflow).toBeDefined();
+    expect(overflow!.ids).toContain("wide");
+    // the short label must NOT be flagged
+    expect(report.warnings.some((w) => w.code === "text-overflow" && w.ids?.includes("fits"))).toBe(false);
+    expect(report.ok).toBe(true); // advisory warning, not an error
+  });
+
+  test("flags an arrow that isn't reciprocally bound (binding guard)", () => {
+    const spec: DiagramSpec = {
+      nodes: [
+        { id: "a", lane: "l", title: "A" },
+        { id: "b", lane: "l", title: "B" },
+      ],
+      edges: [{ from: "a", to: "b" }],
+    };
+    const ctx = createCtx();
+    const lay = layout(ctx, spec);
+    const routes = route(ctx, lay, spec.edges);
+    // The router always binds; strip it to simulate a regression / hand-built
+    // scene. An unbound arrow won't follow a moved node — the guard must catch it.
+    routes.routed[0].arrow.startBinding = null;
+    routes.routed[0].arrow.endBinding = null;
+    const report = validate(spec, lay, routes);
+    expect(report.ok).toBe(false);
+    expect(report.errors.some((e) => e.code === "arrow-unbound")).toBe(true);
+  });
+
   test("formatReport renders one line per issue", () => {
     const report = check({
       nodes: [{ id: "a", lane: "l", title: "A" }],

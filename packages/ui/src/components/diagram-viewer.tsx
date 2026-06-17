@@ -1,9 +1,7 @@
-import { createEffect, onCleanup, Show, createSignal } from "solid-js";
+import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import { Portal } from "solid-js/web";
-import IconX from "~icons/lucide/x";
-import IconZoomIn from "~icons/lucide/zoom-in";
-import IconZoomOut from "~icons/lucide/zoom-out";
-import IconRotateCcw from "~icons/lucide/rotate-ccw";
+import { createPanZoom } from "../composables/create-pan-zoom.ts";
+import { ZoomControls } from "./zoom-controls.tsx";
 
 interface DiagramViewerProps {
   /** outerHTML of the SVG to display, or null when closed */
@@ -14,95 +12,23 @@ interface DiagramViewerProps {
 
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 8;
-const BUTTON_FACTOR = 1.25;
 
 export function DiagramViewer(props: DiagramViewerProps) {
-  const [scale, setScale] = createSignal(1);
-  const [tx, setTx] = createSignal(0);
-  const [ty, setTy] = createSignal(0);
-  const [dragging, setDragging] = createSignal(false);
+  // Zoom + pan via the shared hook (same interaction as the image viewer).
+  const pz = createPanZoom({ minScale: MIN_SCALE, maxScale: MAX_SCALE });
+
   // Base SVG dimensions in pixels at scale=1, computed after the SVG is injected.
-  // Scaling is applied directly to the SVG's width/height (not via CSS transform)
-  // so the browser re-rasterizes the vector at each zoom level — keeps it crisp.
+  // Scaling is applied to the SVG's own width/height (not CSS transform) so the
+  // browser re-rasterizes the vector at each zoom level — keeps it crisp. Pan is
+  // the wrapper's translate.
   const [baseW, setBaseW] = createSignal(0);
   const [baseH, setBaseH] = createSignal(0);
 
-  let containerRef: HTMLDivElement | undefined;
   let transformRef: HTMLDivElement | undefined;
-  let closeBtnRef: HTMLButtonElement | undefined;
-
-  let dragStart = { x: 0, y: 0, tx: 0, ty: 0 };
-
-  function reset() {
-    setScale(1);
-    setTx(0);
-    setTy(0);
-  }
+  let canvasRef: HTMLDivElement | undefined;
 
   function getSvgEl(): SVGSVGElement | null {
     return transformRef?.querySelector("svg") ?? null;
-  }
-
-  function clamp(s: number) {
-    return Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
-  }
-
-  /**
-   * Zoom by `factor`, anchored at (ax, ay) in container-local pixels.
-   * Without an anchor, zooms around the container center.
-   *
-   * Math: transform-origin sits at the wrapper's center, which (untransformed)
-   * coincides with the container's center (cx, cy). With
-   * `transform: translate(tx,ty) scale(s)`, a wrapper-local point p maps to
-   * container coords (cx + tx + s*p). To keep an anchor (ax, ay) fixed under
-   * a scale change s -> s', we solve for tx', ty':
-   *   tx' = ax - cx - (s'/s) * (ax - cx - tx)
-   */
-  function zoomBy(factor: number, ax?: number, ay?: number) {
-    if (!containerRef) return;
-    const oldScale = scale();
-    const newScale = clamp(oldScale * factor);
-    if (newScale === oldScale) return;
-
-    const rect = containerRef.getBoundingClientRect();
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
-    const px = ax ?? cx;
-    const py = ay ?? cy;
-
-    const ratio = newScale / oldScale;
-    setTx(px - cx - ratio * (px - cx - tx()));
-    setTy(py - cy - ratio * (py - cy - ty()));
-    setScale(newScale);
-  }
-
-  function onWheel(e: WheelEvent) {
-    e.preventDefault();
-    if (!containerRef) return;
-    const rect = containerRef.getBoundingClientRect();
-    // Smooth exponential zoom: feels natural with both wheel and trackpad pinch
-    const factor = Math.exp(-e.deltaY * 0.0015);
-    zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
-  }
-
-  function onPointerDown(e: PointerEvent) {
-    if (e.button !== 0) return;
-    setDragging(true);
-    dragStart = { x: e.clientX, y: e.clientY, tx: tx(), ty: ty() };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }
-
-  function onPointerMove(e: PointerEvent) {
-    if (!dragging()) return;
-    setTx(dragStart.tx + (e.clientX - dragStart.x));
-    setTy(dragStart.ty + (e.clientY - dragStart.y));
-  }
-
-  function onPointerUp(e: PointerEvent) {
-    if (!dragging()) return;
-    setDragging(false);
-    const el = e.currentTarget as HTMLElement;
-    if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
   }
 
   function onKeyDown(e: KeyboardEvent) {
@@ -111,28 +37,28 @@ export function DiagramViewer(props: DiagramViewerProps) {
       props.onClose();
     } else if (e.key === "+" || e.key === "=") {
       e.preventDefault();
-      zoomBy(BUTTON_FACTOR);
+      pz.zoomIn();
     } else if (e.key === "-" || e.key === "_") {
       e.preventDefault();
-      zoomBy(1 / BUTTON_FACTOR);
+      pz.zoomOut();
     } else if (e.key === "0") {
       e.preventDefault();
-      reset();
+      pz.reset();
     }
   }
 
-  // Reset state and inject SVG when a new diagram is opened
+  // Reset state and inject SVG when a new diagram is opened.
   createEffect(() => {
     const svg = props.svg;
     if (!svg) return;
-    reset();
+    pz.reset();
     queueMicrotask(() => {
       if (!transformRef) return;
       transformRef.innerHTML = svg;
       const svgEl = getSvgEl();
       if (svgEl) {
-        // Compute intrinsic dimensions from viewBox or width/height attributes,
-        // then fit within 80vw/80vh as the base (scale=1).
+        // Intrinsic dimensions from viewBox or width/height attrs, fit within
+        // 80vw/80vh as the base (scale=1).
         const vb = svgEl.viewBox?.baseVal;
         const intrinsicW = vb && vb.width ? vb.width : svgEl.width.baseVal.value || 800;
         const intrinsicH = vb && vb.height ? vb.height : svgEl.height.baseVal.value || 600;
@@ -150,13 +76,14 @@ export function DiagramViewer(props: DiagramViewerProps) {
         svgEl.style.maxWidth = "none";
         svgEl.style.maxHeight = "none";
       }
-      closeBtnRef?.focus();
+      // Move focus into the modal so Esc/±/0 land and focus isn't left behind.
+      canvasRef?.focus();
     });
   });
 
   // Apply scale by resizing the SVG itself — keeps the rendering crisp at any zoom.
   createEffect(() => {
-    const s = scale();
+    const s = pz.scale();
     const bw = baseW();
     const bh = baseH();
     if (!bw || !bh) return;
@@ -167,7 +94,7 @@ export function DiagramViewer(props: DiagramViewerProps) {
     }
   });
 
-  // Lock body scroll while open
+  // Lock body scroll while open.
   createEffect(() => {
     if (!props.svg) return;
     const prev = document.body.style.overflow;
@@ -177,7 +104,7 @@ export function DiagramViewer(props: DiagramViewerProps) {
     });
   });
 
-  // Global Esc + keyboard shortcuts
+  // Global Esc + keyboard shortcuts.
   createEffect(() => {
     if (!props.svg) return;
     window.addEventListener("keydown", onKeyDown);
@@ -199,56 +126,32 @@ export function DiagramViewer(props: DiagramViewerProps) {
         aria-label="Diagram viewer"
         onClick={handleBackdropClick}
       >
-        <div class="diagram-viewer-toolbar">
-          <button
-            class="diagram-viewer-btn"
-            aria-label="Zoom out"
-            title="Zoom out (-)"
-            onClick={() => zoomBy(1 / BUTTON_FACTOR)}
-          >
-            <IconZoomOut width={16} height={16} />
-          </button>
-          <span class="diagram-viewer-zoom">{Math.round(scale() * 100)}%</span>
-          <button
-            class="diagram-viewer-btn"
-            aria-label="Zoom in"
-            title="Zoom in (+)"
-            onClick={() => zoomBy(BUTTON_FACTOR)}
-          >
-            <IconZoomIn width={16} height={16} />
-          </button>
-          <button
-            class="diagram-viewer-btn"
-            aria-label="Reset"
-            title="Reset (0)"
-            onClick={reset}
-          >
-            <IconRotateCcw width={16} height={16} />
-          </button>
-          <button
-            class="diagram-viewer-btn"
-            aria-label="Close"
-            title="Close (Esc)"
-            ref={(el) => (closeBtnRef = el)}
-            onClick={props.onClose}
-          >
-            <IconX width={16} height={16} />
-          </button>
-        </div>
+        <ZoomControls
+          class="diagram-viewer-toolbar"
+          scale={pz.scale()}
+          onZoomIn={pz.zoomIn}
+          onZoomOut={pz.zoomOut}
+          onReset={pz.reset}
+          onClose={props.onClose}
+        />
         <div
           class="diagram-viewer-canvas"
-          classList={{ "diagram-viewer-grabbing": dragging() }}
-          ref={(el) => (containerRef = el)}
-          onWheel={onWheel}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
+          classList={{ "diagram-viewer-grabbing": pz.dragging() }}
+          tabindex={-1}
+          ref={(el) => {
+            canvasRef = el;
+            pz.setContainer(el);
+          }}
+          onWheel={pz.handlers.onWheel}
+          onPointerDown={pz.handlers.onPointerDown}
+          onPointerMove={pz.handlers.onPointerMove}
+          onPointerUp={pz.handlers.onPointerUp}
+          onPointerCancel={pz.handlers.onPointerCancel}
         >
           <div
             class="diagram-viewer-transform"
             ref={(el) => (transformRef = el)}
-            style={`transform: translate(${tx()}px, ${ty()}px)`}
+            style={`transform: translate(${pz.tx()}px, ${pz.ty()}px)`}
           />
         </div>
       </div>

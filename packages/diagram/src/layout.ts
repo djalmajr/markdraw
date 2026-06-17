@@ -156,9 +156,25 @@ export function layout(ctx: BuildCtx, spec: DiagramSpec, defaults: Partial<Layou
     if (members.length === 0) continue;
     const bounds = padBounds(unionBounds(members.map((m) => m.bounds)), d.groupPad, g.title ? d.groupTitlePad : d.groupPad);
     const r = rect(ctx, bounds.x, bounds.y, bounds.width, bounds.height, { dash: true, stroke: g.color ?? "#adb5bd" });
+    // Make it a REAL Excalidraw group, not just a visual frame: a shared groupId
+    // on every member element (card rect + title + body), the dashed frame, and
+    // the label. In the editor that means selecting or dragging any one moves the
+    // whole cluster together. Deterministic id (no random) keeps the golden
+    // snapshot byte-stable; a node in two groups gets both ids (nested groups).
+    const groupId = `group-${g.id}`;
+    for (const m of members) {
+      m.rect.groupIds.push(groupId);
+      m.title.groupIds.push(groupId);
+      if (m.body) m.body.groupIds.push(groupId);
+    }
+    r.groupIds.push(groupId);
     groups.push({ id: g.id, spec: g, bounds, rect: r });
     groupElements.push(r);
-    if (g.title) groupElements.push(text(ctx, bounds.x + 10, bounds.y + 6, g.title, { size: 12, color: g.color ?? "#868e96" }));
+    if (g.title) {
+      groupElements.push(
+        text(ctx, bounds.x + 10, bounds.y + 6, g.title, { size: 12, color: g.color ?? "#868e96", groupIds: [groupId] }),
+      );
+    }
   }
 
   const contentBoxes = [

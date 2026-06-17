@@ -25,6 +25,13 @@ import "prismjs/components/prism-toml";
 import "prismjs/components/prism-ini";
 import { SearchOverlay } from "./search-overlay.tsx";
 import { DiagramViewer } from "./diagram-viewer.tsx";
+import { ImageLightbox } from "./image-lightbox.tsx";
+import IconScan from "~icons/lucide/scan";
+import IconMinimize from "~icons/lucide/minimize-2";
+import IconMaximize from "~icons/lucide/maximize-2";
+import IconStretch from "~icons/lucide/move-horizontal";
+import IconExpand from "~icons/lucide/expand";
+import { Portal } from "solid-js/web";
 import { FrontmatterPanel } from "./frontmatter-panel.tsx";
 import { renderKroki } from "@asciimark/core/kroki.ts";
 import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
@@ -344,6 +351,38 @@ function wrapTablesForScroll(container: HTMLElement): void {
     wrapper.className = "table-wrapper";
     table.parentElement?.insertBefore(wrapper, table);
     wrapper.appendChild(table);
+  }
+}
+
+/**
+ * Wrap every inline <img> in a `.doc-img-scroll` div so an image shown at original
+ * size (wider than the content column) gets a horizontal scroll instead of being
+ * clipped — the same treatment wide tables get. Linked images are left alone.
+ */
+function wrapImagesForScroll(container: HTMLElement): void {
+  // The kind of the image's nearest non-whitespace neighbor on one side.
+  const neighbor = (img: HTMLImageElement, dir: "prev" | "next"): "text" | "other" | null => {
+    let n: Node | null = dir === "prev" ? img.previousSibling : img.nextSibling;
+    while (n && n.nodeType === Node.TEXT_NODE && !n.textContent?.trim()) {
+      n = dir === "prev" ? n.previousSibling : n.nextSibling;
+    }
+    if (!n) return null;
+    return n.nodeType === Node.TEXT_NODE ? "text" : "other";
+  };
+  const imgs = container.querySelectorAll<HTMLImageElement>("img");
+  for (const img of imgs) {
+    if (img.parentElement?.classList.contains("doc-img-scroll")) continue;
+    if (img.closest("a")) continue;
+    // Skip only a TRUE inline icon — real text immediately on BOTH sides (an image
+    // mid-sentence). An image that's alone, at the start/end of its block, or set
+    // off by <br>s is block-level → it gets the centered, scrollable wrapper.
+    if (neighbor(img, "prev") === "text" && neighbor(img, "next") === "text") continue;
+    const parent = img.parentElement;
+    if (!parent) continue;
+    const wrapper = document.createElement("div");
+    wrapper.className = "doc-img-scroll";
+    parent.insertBefore(wrapper, img);
+    wrapper.appendChild(img);
   }
 }
 
@@ -706,6 +745,51 @@ export function Preview(props: PreviewProps) {
   const [hasArticle, setHasArticle] = createSignal(false);
   const [overlayHost, setOverlayHost] = createSignal<HTMLElement | undefined>(undefined);
   const [viewerSvg, setViewerSvg] = createSignal<string | null>(null);
+  const [viewerImage, setViewerImage] = createSignal<string | null>(null);
+
+  // Per-image display menu for inline preview images. Opened by CLICKING the
+  // image (hover put the menu too far to reach before it dismissed); it floats at
+  // the click point and offers size presets (set via a `data-size` attr — the
+  // images are innerHTML, not Solid nodes) plus a Zoom action that opens the
+  // lightbox.
+  const [sizeMenuImg, setSizeMenuImg] = createSignal<HTMLImageElement | null>(null);
+  const [sizeMenuPos, setSizeMenuPos] = createSignal<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  function applyImageSize(size: "small" | "fit" | "wide" | "original") {
+    const img = sizeMenuImg();
+    if (!img) return;
+    if (size === "fit") delete img.dataset.size;
+    else img.dataset.size = size;
+  }
+  function openImageZoom() {
+    const img = sizeMenuImg();
+    setSizeMenuImg(null);
+    if (img) setViewerImage(img.currentSrc || img.src);
+  }
+
+  // Dismiss the image menu on outside-click / Escape / scroll. Deferred so the
+  // click that opened it doesn't immediately close it.
+  createEffect(() => {
+    if (!sizeMenuImg()) return;
+    const close = () => setSizeMenuImg(null);
+    const onDown = (ev: MouseEvent) => {
+      if (!(ev.target as HTMLElement).closest(".img-size-menu")) close();
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") close();
+    };
+    const t = setTimeout(() => {
+      document.addEventListener("mousedown", onDown, true);
+      document.addEventListener("keydown", onKey);
+      window.addEventListener("scroll", close, { capture: true, passive: true });
+    }, 0);
+    onCleanup(() => {
+      clearTimeout(t);
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, { capture: true } as EventListenerOptions);
+    });
+  });
   let lastFindTrigger = props.findTrigger;
   let lastSyncScrollTargetVersion = props.syncScrollTargetVersion;
   let articleRef: HTMLElement | undefined;
@@ -915,6 +999,22 @@ export function Preview(props: PreviewProps) {
         setViewerSvg(svgEl.outerHTML);
         return;
       }
+    }
+
+    // Click an inline image (not a linked one) → open its menu centered at the top
+    // of the image (size presets + a Zoom action that opens the lightbox). Top is
+    // clamped so the menu stays on-screen if the image top is scrolled out of view.
+    const clickedImg = (e.target as HTMLElement).closest<HTMLImageElement>("img");
+    if (clickedImg && !clickedImg.closest("a")) {
+      e.preventDefault();
+      e.stopPropagation();
+      const r = clickedImg.getBoundingClientRect();
+      // Centered at the image's top; clamp the center X so the menu (centered via
+      // translateX(-50%)) stays on-screen for very wide / scrolled images.
+      const centerX = Math.min(Math.max(r.left + r.width / 2, 100), window.innerWidth - 100);
+      setSizeMenuPos({ top: Math.max(r.top + 8, 8), left: centerX });
+      setSizeMenuImg(clickedImg);
+      return;
     }
 
     const anchor = (e.target as HTMLElement).closest("a");
@@ -1158,6 +1258,7 @@ export function Preview(props: PreviewProps) {
       const buffer = document.createElement("div");
       buffer.innerHTML = sanitizedHtml;
       wrapTablesForScroll(buffer);
+      wrapImagesForScroll(buffer);
       if (props.resolveImageSrc) rewriteImageSources(buffer, props.resolveImageSrc);
 
       queueMicrotask(async () => {
@@ -1199,6 +1300,7 @@ export function Preview(props: PreviewProps) {
       articleRef!.innerHTML = sanitizedHtml;
       if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
       wrapTablesForScroll(articleRef!);
+      wrapImagesForScroll(articleRef!);
       if (props.resolveImageSrc) rewriteImageSources(articleRef!, props.resolveImageSrc);
 
       afterSwap(articleRef!, false, tocVis);
@@ -1227,6 +1329,32 @@ export function Preview(props: PreviewProps) {
         />
       </Show>
       <DiagramViewer svg={viewerSvg()} onClose={() => setViewerSvg(null)} />
+      <ImageLightbox src={viewerImage()} onClose={() => setViewerImage(null)} />
+      <Show when={sizeMenuImg()}>
+        <Portal>
+        <div
+          class="img-size-menu"
+          style={`top:${sizeMenuPos().top}px; left:${sizeMenuPos().left}px`}
+        >
+          <button class="img-size-btn" title="Small" onClick={() => applyImageSize("small")}>
+            <IconMinimize width={13} height={13} />
+          </button>
+          <button class="img-size-btn" title="Fit (default)" onClick={() => applyImageSize("fit")}>
+            <IconScan width={13} height={13} />
+          </button>
+          <button class="img-size-btn" title="Full width" onClick={() => applyImageSize("wide")}>
+            <IconStretch width={13} height={13} />
+          </button>
+          <button class="img-size-btn" title="Original size" onClick={() => applyImageSize("original")}>
+            <IconMaximize width={13} height={13} />
+          </button>
+          <span class="img-size-sep" />
+          <button class="img-size-btn" title="Zoom (open viewer)" onClick={openImageZoom}>
+            <IconExpand width={13} height={13} />
+          </button>
+        </div>
+        </Portal>
+      </Show>
       <div class="preview">
         <Show when={props.loading}>
           <div class="preview-loading">{(useLocale(), m.preview_loading())}</div>

@@ -49,6 +49,7 @@ const featureItems: FeatureItem[] = [
   { title: m.site_feature_symbols_title, description: m.site_feature_symbols_description },
   { title: m.site_feature_reader_title, description: m.site_feature_reader_description },
   { title: m.site_feature_diagrams_title, description: m.site_feature_diagrams_description },
+  { title: m.site_feature_ai_title, description: m.site_feature_ai_description },
   { title: m.site_feature_multiroot_title, description: m.site_feature_multiroot_description },
   { title: m.site_feature_localfirst_title, description: m.site_feature_localfirst_description },
 ];

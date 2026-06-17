@@ -2,10 +2,8 @@ import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import * as m from "@asciimark/i18n";
 import { useLocale } from "@asciimark/i18n/solid";
-import IconScan from "~icons/lucide/scan";
-import IconZoomIn from "~icons/lucide/zoom-in";
-import IconZoomOut from "~icons/lucide/zoom-out";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
+import { createPanZoom } from "../composables/create-pan-zoom.ts";
+import { ZoomControls } from "./zoom-controls.tsx";
 
 // Worker asset URL. Vite emits the worker as a standalone file and hands
 // back a URL it can resolve under Tauri's asset/file protocol and in the
@@ -39,11 +37,18 @@ function clampScale(n: number): number {
  * web/extension builds too.
  */
 export function MediaViewer(props: MediaViewerProps) {
+  // PDF zoom: an absolute scale we re-rasterize the pages at (+ fit-to-width).
+  // Images use the shared pan-zoom hook below instead — transform-based, pannable.
   const [scale, setScale] = createSignal(1);
   // Image-only: fit-to-container mode (CSS object-fit). Zooming exits it.
   const [fit, setFit] = createSignal(true);
-  const [naturalWidth, setNaturalWidth] = createSignal(0);
   const [imageError, setImageError] = createSignal(false);
+  // Image zoom + pan via `transform: translate(tx,ty) scale(scale)`. Multiplicative
+  // step, clamped to the same MIN/MAX as the PDF path; cursor-anchored wheel +
+  // drag-to-pan. Replaces the old naturalWidth-gated width/transform fork (which
+  // silently fell back to a paint-only, un-scrollable transform → "zoom stops at
+  // 100%") with one mechanism that always works.
+  const imageZoom = createPanZoom({ minScale: MIN_SCALE, maxScale: MAX_SCALE });
 
   const [pageCount, setPageCount] = createSignal(0);
   const [pdfError, setPdfError] = createSignal<string | null>(null);
@@ -89,6 +94,7 @@ export function MediaViewer(props: MediaViewerProps) {
           pdfDoc = null;
         }
         setScale(1);
+        imageZoom.reset();
         setFit(props.kind === "image");
         setImageError(false);
         setPdfError(null);
@@ -165,32 +171,53 @@ export function MediaViewer(props: MediaViewerProps) {
     if (pdfDoc) void pdfDoc.destroy();
   });
 
+  // Zoom dispatches to the right engine: images use the pan-zoom hook
+  // (multiplicative step + drag-to-pan), PDFs re-rasterize at an absolute scale.
   function zoomIn() {
-    setFit(false);
-    setScale((s) => clampScale(s + SCALE_STEP));
+    if (props.kind === "image") {
+      setFit(false);
+      imageZoom.zoomIn();
+    } else setScale((s) => clampScale(s + SCALE_STEP));
   }
   function zoomOut() {
-    setFit(false);
-    setScale((s) => clampScale(s - SCALE_STEP));
+    if (props.kind === "image") {
+      setFit(false);
+      imageZoom.zoomOut();
+    } else setScale((s) => clampScale(s - SCALE_STEP));
   }
   function fitView() {
     if (props.kind === "image") {
       setFit(true);
+      imageZoom.reset();
       return;
     }
     setScale(computeFitScale());
   }
 
-  const zoomLabel = () =>
-    fit() && props.kind === "image" ? m.media_fit_label() : `${Math.round(scale() * 100)}%`;
+  // Wheel / trackpad-pinch zoom on the image; the first tick leaves fit mode so
+  // the transform takes over from object-fit.
+  function onImageWheel(e: WheelEvent) {
+    if (fit()) setFit(false);
+    imageZoom.handlers.onWheel(e);
+  }
+  function onImagePointerDown(e: PointerEvent) {
+    if (fit()) return; // nothing is transformed in fit mode, so there's nothing to pan
+    imageZoom.handlers.onPointerDown(e);
+  }
 
-  const imageStyle = () => {
-    if (fit()) return undefined;
-    const w = naturalWidth();
-    return w
-      ? { width: `${Math.round(w * scale())}px` }
-      : { transform: `scale(${scale()})` };
-  };
+  const displayScale = () => (props.kind === "image" ? imageZoom.scale() : scale());
+  const zoomLabel = () =>
+    fit() && props.kind === "image" ? m.media_fit_label() : `${Math.round(displayScale() * 100)}%`;
+  const zoomOutDisabled = () => !fit() && displayScale() <= MIN_SCALE;
+  const zoomInDisabled = () => !fit() && displayScale() >= MAX_SCALE;
+
+  // Images: pan + zoom via ONE transform (no naturalWidth race). Fit mode returns
+  // undefined so CSS object-fit governs. PDFs never hit this — their canvases are
+  // rasterized at `scale` instead.
+  const imageStyle = () =>
+    fit()
+      ? undefined
+      : { transform: `translate(${imageZoom.tx()}px, ${imageZoom.ty()}px) scale(${imageZoom.scale()})` };
 
   return (
     <div class="media-viewer">
@@ -202,54 +229,66 @@ export function MediaViewer(props: MediaViewerProps) {
           </span>
         </Show>
         <div class="media-toolbar-spacer" />
-        <Tooltip>
-          <TooltipTrigger
-            as="button"
-            class="content-toolbar-btn"
-            aria-label={(useLocale(), m.media_zoom_out())}
-            disabled={!fit() && scale() <= MIN_SCALE}
-            onClick={zoomOut}
-          >
-            <IconZoomOut width={14} height={14} />
-          </TooltipTrigger>
-          <TooltipContent>{(useLocale(), m.media_zoom_out())}</TooltipContent>
-        </Tooltip>
-        <span class="media-zoom-value">{(useLocale(), zoomLabel())}</span>
-        <Tooltip>
-          <TooltipTrigger
-            as="button"
-            class="content-toolbar-btn"
-            aria-label={(useLocale(), m.media_zoom_in())}
-            disabled={!fit() && scale() >= MAX_SCALE}
-            onClick={zoomIn}
-          >
-            <IconZoomIn width={14} height={14} />
-          </TooltipTrigger>
-          <TooltipContent>{(useLocale(), m.media_zoom_in())}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            as="button"
-            class="content-toolbar-btn"
-            aria-label={(useLocale(), props.kind === "pdf" ? m.media_fit_width() : m.media_fit_window())}
-            onClick={fitView}
-          >
-            <IconScan width={14} height={14} />
-          </TooltipTrigger>
-          <TooltipContent>{(useLocale(), props.kind === "pdf" ? m.media_fit_width() : m.media_fit_window())}</TooltipContent>
-        </Tooltip>
+        <ZoomControls
+          scale={displayScale()}
+          label={(useLocale(), zoomLabel())}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          zoomInDisabled={zoomInDisabled()}
+          zoomOutDisabled={zoomOutDisabled()}
+          onFit={fitView}
+          zoomInLabel={(useLocale(), m.media_zoom_in())}
+          zoomOutLabel={(useLocale(), m.media_zoom_out())}
+          fitLabel={(useLocale(), props.kind === "pdf" ? m.media_fit_width() : m.media_fit_window())}
+        />
       </div>
 
-      <div
-        class="media-stage"
-        classList={{ "media-stage-image": props.kind === "image" }}
-        ref={stageRef}
+      <Show
+        when={props.kind === "image"}
+        fallback={
+          <div class="media-stage" ref={stageRef}>
+            <Show
+              when={props.src}
+              fallback={<div class="media-message">{(useLocale(), m.media_unable_to_load({ name: props.fileName }))}</div>}
+            >
+              <Show
+                when={!pdfError()}
+                fallback={<div class="media-message">{(useLocale(), m.media_unable_to_display({ name: props.fileName }))}</div>}
+              >
+                <Show when={pdfLoading() && pageCount() === 0}>
+                  <div class="media-message">{(useLocale(), m.media_loading())}</div>
+                </Show>
+                <div class="media-pdf-doc">
+                  <For each={Array.from({ length: pageCount() }, (_, i) => i)}>
+                    {(i) => (
+                      <canvas
+                        class="media-pdf-page"
+                        ref={(el) => (canvasRefs[i] = el)}
+                      />
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </Show>
+          </div>
+        }
       >
-        <Show
-          when={props.src}
-          fallback={<div class="media-message">{(useLocale(), m.media_unable_to_load({ name: props.fileName }))}</div>}
+        {/* Pannable image stage: clipped (overflow:hidden) with the zoomed image
+            moved by transform — drag to pan, wheel/pinch to zoom (see onImage*). */}
+        <div
+          class="media-stage media-stage-image"
+          classList={{ "media-stage-pan": !fit(), "is-grabbing": imageZoom.dragging() }}
+          ref={(el) => imageZoom.setContainer(el)}
+          onWheel={onImageWheel}
+          onPointerDown={onImagePointerDown}
+          onPointerMove={imageZoom.handlers.onPointerMove}
+          onPointerUp={imageZoom.handlers.onPointerUp}
+          onPointerCancel={imageZoom.handlers.onPointerCancel}
         >
-          <Show when={props.kind === "image"}>
+          <Show
+            when={props.src}
+            fallback={<div class="media-message">{(useLocale(), m.media_unable_to_load({ name: props.fileName }))}</div>}
+          >
             <Show
               when={!imageError()}
               fallback={<div class="media-message">{(useLocale(), m.media_unable_to_display({ name: props.fileName }))}</div>}
@@ -260,34 +299,12 @@ export function MediaViewer(props: MediaViewerProps) {
                 src={props.src!}
                 alt={props.fileName}
                 style={imageStyle()}
-                onLoad={(e) => setNaturalWidth(e.currentTarget.naturalWidth)}
                 onError={() => setImageError(true)}
               />
             </Show>
           </Show>
-
-          <Show when={props.kind === "pdf"}>
-            <Show
-              when={!pdfError()}
-              fallback={<div class="media-message">{(useLocale(), m.media_unable_to_display({ name: props.fileName }))}</div>}
-            >
-              <Show when={pdfLoading() && pageCount() === 0}>
-                <div class="media-message">{(useLocale(), m.media_loading())}</div>
-              </Show>
-              <div class="media-pdf-doc">
-                <For each={Array.from({ length: pageCount() }, (_, i) => i)}>
-                  {(i) => (
-                    <canvas
-                      class="media-pdf-page"
-                      ref={(el) => (canvasRefs[i] = el)}
-                    />
-                  )}
-                </For>
-              </div>
-            </Show>
-          </Show>
-        </Show>
-      </div>
+        </div>
+      </Show>
     </div>
   );
 }

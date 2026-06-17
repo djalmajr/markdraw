@@ -33,6 +33,10 @@ const sectionIds = [
   "appearance",
   "processing",
   "diagrams",
+  "assistant",
+  "providers",
+  "mcp",
+  "indexing",
   "export",
   "shortcuts",
   "screenshots",
@@ -52,6 +56,10 @@ const sectionLabels: Record<(typeof sectionIds)[number], () => string> = {
   appearance: m.guide_section_appearance,
   processing: m.guide_section_processing,
   diagrams: m.guide_section_diagrams,
+  assistant: m.guide_section_assistant,
+  providers: m.guide_section_providers,
+  mcp: m.guide_section_mcp,
+  indexing: m.guide_section_indexing,
   export: m.guide_section_export,
   shortcuts: m.guide_section_shortcuts,
   screenshots: m.guide_section_screenshots,
@@ -81,6 +89,14 @@ const guideScreenshots: GuideScreenshot[] = [
   { src: "/screenshots/desktop-find-in-files.png", alt: m.guide_shortcut_find_in_files, caption: m.guide_shortcut_find_in_files },
   { src: "/screenshots/desktop-shortcuts-help.png", alt: m.guide_shortcut_modal, caption: m.guide_shortcut_modal },
   { src: "/screenshots/desktop-dark-theme.png", alt: m.guide_appearance_caption, caption: m.guide_appearance_caption },
+  { src: "/screenshots/desktop-ai-panel.png", alt: m.guide_shot_ai_panel_caption, caption: m.guide_shot_ai_panel_caption },
+  { src: "/screenshots/desktop-ai-model-picker.png", alt: m.guide_shot_ai_models_caption, caption: m.guide_shot_ai_models_caption },
+  { src: "/screenshots/desktop-settings-ai.png", alt: m.guide_shot_settings_ai_caption, caption: m.guide_shot_settings_ai_caption },
+  { src: "/screenshots/desktop-settings-mcp.png", alt: m.guide_shot_settings_mcp_caption, caption: m.guide_shot_settings_mcp_caption },
+  { src: "/screenshots/desktop-settings-indexing.png", alt: m.guide_shot_settings_indexing_caption, caption: m.guide_shot_settings_indexing_caption },
+  { src: "/screenshots/desktop-diagram-viewer.png", alt: m.guide_shot_diagram_viewer_caption, caption: m.guide_shot_diagram_viewer_caption },
+  { src: "/screenshots/desktop-image-viewer.png", alt: m.guide_shot_image_viewer_caption, caption: m.guide_shot_image_viewer_caption },
+  { src: "/screenshots/desktop-excalidraw.png", alt: m.guide_shot_excalidraw_caption, caption: m.guide_shot_excalidraw_caption },
 ];
 
 export function GuidePage() {
@@ -263,6 +279,20 @@ export function GuidePage() {
             <HtmlLi html={(useLocale(), m.guide_media_modes_item_text())} />
             <HtmlLi html={(useLocale(), m.guide_media_modes_item_unsupported())} />
           </ul>
+          <h3>{(useLocale(), m.guide_media_zoom_h3())}</h3>
+          <p>{(useLocale(), m.guide_media_zoom_p())}</p>
+          <figure class="guide-media">
+            <button
+              class="guide-media-button"
+              onClick={() => openImageWith(m.guide_media_zoom_caption, m.guide_media_zoom_caption, "/screenshots/desktop-image-viewer.png")}
+              type="button"
+            >
+              <img alt={(useLocale(), m.guide_media_zoom_caption())} src="/screenshots/desktop-image-viewer.png" />
+            </button>
+            <figcaption>{(useLocale(), m.guide_media_zoom_caption())}</figcaption>
+          </figure>
+          <h3>{(useLocale(), m.guide_media_inline_h3())}</h3>
+          <p>{(useLocale(), m.guide_media_inline_p())}</p>
         </section>
 
         <section class="content-panel" id="tabs">
@@ -441,10 +471,143 @@ export function GuidePage() {
 
         <section class="content-panel" id="diagrams">
           <h2>{(useLocale(), m.guide_diagrams_h2())}</h2>
+          <p>{(useLocale(), m.guide_diagrams_intro_p())}</p>
+          <h3>{(useLocale(), m.guide_diagrams_render_h3())}</h3>
           <ul>
             <li>{(useLocale(), m.guide_diagrams_item1())}</li>
             <li>{(useLocale(), m.guide_diagrams_item2())}</li>
           </ul>
+          <h3>{(useLocale(), m.guide_diagrams_viewer_h3())}</h3>
+          <p>{(useLocale(), m.guide_diagrams_viewer_p())}</p>
+          <figure class="guide-media">
+            <button
+              class="guide-media-button"
+              onClick={() => openImageWith(m.guide_diagrams_viewer_caption, m.guide_diagrams_viewer_caption, "/screenshots/desktop-diagram-viewer.png")}
+              type="button"
+            >
+              <img alt={(useLocale(), m.guide_diagrams_viewer_caption())} src="/screenshots/desktop-diagram-viewer.png" />
+            </button>
+            <figcaption>{(useLocale(), m.guide_diagrams_viewer_caption())}</figcaption>
+          </figure>
+          <h3>{(useLocale(), m.guide_diagrams_excalidraw_h3())}</h3>
+          <HtmlP html={(useLocale(), m.guide_diagrams_excalidraw_p())} />
+          <figure class="guide-media">
+            <button
+              class="guide-media-button"
+              onClick={() => openImageWith(m.guide_diagrams_excalidraw_caption, m.guide_diagrams_excalidraw_caption, "/screenshots/desktop-excalidraw.png")}
+              type="button"
+            >
+              <img alt={(useLocale(), m.guide_diagrams_excalidraw_caption())} src="/screenshots/desktop-excalidraw.png" />
+            </button>
+            <figcaption>{(useLocale(), m.guide_diagrams_excalidraw_caption())}</figcaption>
+          </figure>
+          <h3>{(useLocale(), m.guide_diagrams_ai_h3())}</h3>
+          <p>{(useLocale(), m.guide_diagrams_ai_p())}</p>
+        </section>
+
+        <section class="content-panel" id="assistant">
+          <h2>{(useLocale(), m.guide_assistant_h2())}</h2>
+          <HtmlP html={(useLocale(), m.guide_assistant_intro_p())} />
+          <figure class="guide-media">
+            <button
+              class="guide-media-button"
+              onClick={() => openImageWith(m.guide_assistant_caption, m.guide_assistant_caption, "/screenshots/desktop-ai-panel.png")}
+              type="button"
+            >
+              <img alt={(useLocale(), m.guide_assistant_caption())} src="/screenshots/desktop-ai-panel.png" />
+            </button>
+            <figcaption>{(useLocale(), m.guide_assistant_caption())}</figcaption>
+          </figure>
+          <h3>{(useLocale(), m.guide_assistant_modes_h3())}</h3>
+          <HtmlP html={(useLocale(), m.guide_assistant_modes_p())} />
+          <h3>{(useLocale(), m.guide_assistant_context_h3())}</h3>
+          <HtmlP html={(useLocale(), m.guide_assistant_context_p())} />
+          <h3>{(useLocale(), m.guide_assistant_slash_h3())}</h3>
+          <HtmlP html={(useLocale(), m.guide_assistant_slash_p())} />
+          <h3>{(useLocale(), m.guide_assistant_sessions_h3())}</h3>
+          <p>{(useLocale(), m.guide_assistant_sessions_p())}</p>
+          <figure class="guide-media guide-media-compact">
+            <button
+              class="guide-media-button"
+              onClick={() => openImageWith(m.guide_assistant_models_caption, m.guide_assistant_models_caption, "/screenshots/desktop-ai-model-picker.png")}
+              type="button"
+            >
+              <img alt={(useLocale(), m.guide_assistant_models_caption())} src="/screenshots/desktop-ai-model-picker.png" />
+            </button>
+            <figcaption>{(useLocale(), m.guide_assistant_models_caption())}</figcaption>
+          </figure>
+          <h3>{(useLocale(), m.guide_assistant_tools_h3())}</h3>
+          <p>{(useLocale(), m.guide_assistant_tools_p())}</p>
+          <ul>
+            <HtmlLi html={(useLocale(), m.guide_assistant_tools_item1())} />
+            <HtmlLi html={(useLocale(), m.guide_assistant_tools_item2())} />
+            <HtmlLi html={(useLocale(), m.guide_assistant_tools_item3())} />
+            <HtmlLi html={(useLocale(), m.guide_assistant_tools_item4())} />
+          </ul>
+        </section>
+
+        <section class="content-panel" id="providers">
+          <h2>{(useLocale(), m.guide_providers_h2())}</h2>
+          <HtmlP html={(useLocale(), m.guide_providers_intro_p())} />
+          <h3>{(useLocale(), m.guide_providers_keys_h3())}</h3>
+          <p>{(useLocale(), m.guide_providers_keys_p())}</p>
+          <h3>{(useLocale(), m.guide_providers_subscription_h3())}</h3>
+          <p>{(useLocale(), m.guide_providers_subscription_p())}</p>
+          <h3>{(useLocale(), m.guide_providers_custom_h3())}</h3>
+          <p>{(useLocale(), m.guide_providers_custom_p())}</p>
+          <h3>{(useLocale(), m.guide_providers_models_h3())}</h3>
+          <p>{(useLocale(), m.guide_providers_models_p())}</p>
+          <figure class="guide-media">
+            <button
+              class="guide-media-button"
+              onClick={() => openImageWith(m.guide_providers_caption, m.guide_providers_caption, "/screenshots/desktop-settings-ai.png")}
+              type="button"
+            >
+              <img alt={(useLocale(), m.guide_providers_caption())} src="/screenshots/desktop-settings-ai.png" />
+            </button>
+            <figcaption>{(useLocale(), m.guide_providers_caption())}</figcaption>
+          </figure>
+        </section>
+
+        <section class="content-panel" id="mcp">
+          <h2>{(useLocale(), m.guide_mcp_h2())}</h2>
+          <HtmlP html={(useLocale(), m.guide_mcp_intro_p())} />
+          <h3>{(useLocale(), m.guide_mcp_add_h3())}</h3>
+          <p>{(useLocale(), m.guide_mcp_add_p())}</p>
+          <h3>{(useLocale(), m.guide_mcp_discovered_h3())}</h3>
+          <p>{(useLocale(), m.guide_mcp_discovered_p())}</p>
+          <h3>{(useLocale(), m.guide_mcp_auth_h3())}</h3>
+          <HtmlP html={(useLocale(), m.guide_mcp_auth_p())} />
+          <figure class="guide-media">
+            <button
+              class="guide-media-button"
+              onClick={() => openImageWith(m.guide_mcp_caption, m.guide_mcp_caption, "/screenshots/desktop-settings-mcp.png")}
+              type="button"
+            >
+              <img alt={(useLocale(), m.guide_mcp_caption())} src="/screenshots/desktop-settings-mcp.png" />
+            </button>
+            <figcaption>{(useLocale(), m.guide_mcp_caption())}</figcaption>
+          </figure>
+        </section>
+
+        <section class="content-panel" id="indexing">
+          <h2>{(useLocale(), m.guide_indexing_h2())}</h2>
+          <HtmlP html={(useLocale(), m.guide_indexing_intro_p())} />
+          <ul>
+            <li><strong>{(useLocale(), m.guide_indexing_off_h3())}</strong> — {(useLocale(), m.guide_indexing_off_p())}</li>
+            <li><strong>{(useLocale(), m.guide_indexing_fast_h3())}</strong> — {(useLocale(), m.guide_indexing_fast_p())}</li>
+            <li><strong>{(useLocale(), m.guide_indexing_full_h3())}</strong> — {(useLocale(), m.guide_indexing_full_p())}</li>
+          </ul>
+          <figure class="guide-media">
+            <button
+              class="guide-media-button"
+              onClick={() => openImageWith(m.guide_indexing_caption, m.guide_indexing_caption, "/screenshots/desktop-settings-indexing.png")}
+              type="button"
+            >
+              <img alt={(useLocale(), m.guide_indexing_caption())} src="/screenshots/desktop-settings-indexing.png" />
+            </button>
+            <figcaption>{(useLocale(), m.guide_indexing_caption())}</figcaption>
+          </figure>
         </section>
 
         <section class="content-panel" id="export">
