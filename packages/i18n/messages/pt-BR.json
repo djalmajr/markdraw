@@ -122,7 +122,7 @@
   "tree_new_folder": "Nova pasta",
   "tree_expand_all": "Expandir tudo",
   "tree_collapse_all": "Recolher tudo",
-  "tree_remove_from_workspace": "Remover do workspace",
+  "tree_close_workspace": "Fechar workspace",
   "tree_cut": "Recortar",
   "tree_copy": "Copiar",
   "tree_paste": "Colar",
