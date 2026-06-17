@@ -1477,12 +1477,26 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .media-image {
   display: block;
   margin: auto;
+  transform-origin: center center;
 }
 
 .media-image-fit {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+/* Zoomed image pans via transform inside a CLIPPED stage (no scrollbars). The
+   default .media-stage is overflow:auto for the PDF page column; the image stage
+   overrides it so the transform — not scrollbars — moves the content around. */
+.media-stage-pan {
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.media-stage-pan.is-grabbing {
+  cursor: grabbing;
 }
 
 /* Continuous vertical scroll: every page stacked, no page navigation. */
@@ -4010,6 +4024,76 @@ kbd.shortcuts-help-key {
 .diagram-viewer-transform svg {
   display: block;
   pointer-events: none;
+}
+
+/* === Shared zoom controls (image pane + diagram/mermaid lightbox) === */
+.zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.zoom-controls-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+
+.zoom-controls-btn:hover:not(:disabled) {
+  background: hsl(var(--bg-hover));
+  color: hsl(var(--foreground));
+}
+
+.zoom-controls-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.zoom-controls-btn:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.zoom-controls-label {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--muted-foreground));
+  min-width: 44px;
+  text-align: center;
+  padding: 0 4px;
+}
+
+/* The image inside the lightbox: fit the viewport at scale=1, then the pan-zoom
+   transform scales/moves it. pointer-events:none so the canvas owns wheel/drag. */
+.image-lightbox-img {
+  display: block;
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+/* Inline images in the rendered doc are click-to-zoom (open the lightbox); a
+   linked image keeps the link affordance instead. The max-height keeps a tall
+   image (e.g. a full-page screenshot) from dominating the preview — the full
+   image is one click away in the lightbox. (max-width is governed by the column.) */
+.doc-body img {
+  cursor: zoom-in;
+  max-height: 70vh;
+}
+
+.doc-body a img {
+  cursor: pointer;
 }
 
 .preview-scope {

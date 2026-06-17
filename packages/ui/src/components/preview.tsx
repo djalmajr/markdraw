@@ -25,6 +25,7 @@ import "prismjs/components/prism-toml";
 import "prismjs/components/prism-ini";
 import { SearchOverlay } from "./search-overlay.tsx";
 import { DiagramViewer } from "./diagram-viewer.tsx";
+import { ImageLightbox } from "./image-lightbox.tsx";
 import { FrontmatterPanel } from "./frontmatter-panel.tsx";
 import { renderKroki } from "@asciimark/core/kroki.ts";
 import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
@@ -706,6 +707,7 @@ export function Preview(props: PreviewProps) {
   const [hasArticle, setHasArticle] = createSignal(false);
   const [overlayHost, setOverlayHost] = createSignal<HTMLElement | undefined>(undefined);
   const [viewerSvg, setViewerSvg] = createSignal<string | null>(null);
+  const [viewerImage, setViewerImage] = createSignal<string | null>(null);
   let lastFindTrigger = props.findTrigger;
   let lastSyncScrollTargetVersion = props.syncScrollTargetVersion;
   let articleRef: HTMLElement | undefined;
@@ -913,6 +915,19 @@ export function Preview(props: PreviewProps) {
         e.preventDefault();
         e.stopPropagation();
         setViewerSvg(svgEl.outerHTML);
+        return;
+      }
+    }
+
+    // Open the image lightbox when clicking an inline image in the rendered doc —
+    // unless it's wrapped in a link (let the anchor handler below run instead).
+    const clickedImg = (e.target as HTMLElement).closest<HTMLImageElement>("img");
+    if (clickedImg && !clickedImg.closest("a")) {
+      const src = clickedImg.currentSrc || clickedImg.src;
+      if (src) {
+        e.preventDefault();
+        e.stopPropagation();
+        setViewerImage(src);
         return;
       }
     }
@@ -1227,6 +1242,7 @@ export function Preview(props: PreviewProps) {
         />
       </Show>
       <DiagramViewer svg={viewerSvg()} onClose={() => setViewerSvg(null)} />
+      <ImageLightbox src={viewerImage()} onClose={() => setViewerImage(null)} />
       <div class="preview">
         <Show when={props.loading}>
           <div class="preview-loading">{(useLocale(), m.preview_loading())}</div>
