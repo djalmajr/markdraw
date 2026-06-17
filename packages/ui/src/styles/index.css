@@ -4083,17 +4083,90 @@ kbd.shortcuts-help-key {
   pointer-events: none;
 }
 
-/* Inline images in the rendered doc are click-to-zoom (open the lightbox); a
-   linked image keeps the link affordance instead. The max-height keeps a tall
-   image (e.g. a full-page screenshot) from dominating the preview — the full
-   image is one click away in the lightbox. (max-width is governed by the column.) */
+/* Clicking an inline image opens its size/zoom menu (pointer cursor). The
+   max-height keeps a tall screenshot from dominating the preview; max-width fits
+   it to the column by default. The "original" preset removes both caps — the
+   .doc-img-scroll wrapper then gives a horizontal scroll (like wide tables). */
 .doc-body img {
-  cursor: zoom-in;
+  cursor: pointer;
   max-height: 70vh;
+  max-width: 100%;
 }
 
 .doc-body a img {
   cursor: pointer;
+}
+
+/* Wrapper added in JS (wrapImagesForScroll): a column-width box that scrolls
+   horizontally when the image inside is shown wider than it (original size). */
+.doc-img-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Standalone images are block + auto-margined: centered in the column when they
+   fit, and left-aligned (so the scroll starts at the left) when wider. */
+.doc-img-scroll > img {
+  display: block;
+  margin-inline: auto;
+}
+
+/* Per-image display-size presets, set by the click size menu. Default (no
+   data-size) is "fit" = the 70vh cap above. */
+.doc-body img[data-size="small"] {
+  max-height: 32vh;
+}
+
+.doc-body img[data-size="wide"] {
+  width: 100%;
+  max-width: 100%;
+  max-height: none;
+}
+
+.doc-body img[data-size="original"] {
+  max-height: none;
+  max-width: none;
+}
+
+/* Floating menu shown when CLICKING an inline preview image — anchored centered
+   at the image's top (translateX(-50%) centers it on the anchor point). */
+.img-size-menu {
+  position: fixed;
+  z-index: 50;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  box-shadow: 0 2px 10px hsl(var(--foreground) / 0.15);
+}
+
+.img-size-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: hsl(var(--border));
+}
+
+.img-size-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+
+.img-size-btn:hover {
+  background: hsl(var(--bg-hover));
+  color: hsl(var(--foreground));
 }
 
 .preview-scope {
