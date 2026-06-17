@@ -12,6 +12,16 @@ use tauri::{AppHandle, Manager};
 /// Uses the app's own reverse-DNS identifier — a namespace we actually control
 /// (`dev.djalmajr.asciimark`) — instead of `com.asciimark` (we don't own
 /// asciimark.com).
+///
+/// The dev build uses a distinct service so its items are isolated from the
+/// installed release's. macOS grants "Always Allow" per code signature, and dev
+/// (self-signed, bundle `…-dev`) and prod (Developer ID, bundle `…`) are
+/// different apps to the keychain — a shared service makes them collide on the
+/// same items and re-prompt for a password forever. This mirrors the dev
+/// bundle-identifier split (tauri.dev.conf.json).
+#[cfg(debug_assertions)]
+const SERVICE: &str = "dev.djalmajr.asciimark-dev";
+#[cfg(not(debug_assertions))]
 const SERVICE: &str = "dev.djalmajr.asciimark";
 
 /// Pre-rename service name. Read once for a lazy migration so users who stored
