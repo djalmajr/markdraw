@@ -1,0 +1,85 @@
+:toc: macro
+:toclevels: 3
+:sectnums:
+
+= Architecture
+
+A short tour of how Markdraw renders documents and synchronizes
+the right gutter. For day-to-day workflows see
+xref:usage.adoc[Usage].
+
+toc::[]
+
+== Pipeline
+
+Every document goes through the same five-stage pipeline before
+showing up in the preview:
+
+[mermaid]
+----
+graph LR
+  A[Source .adoc/.md] --> B(Sanitize)
+  B --> C(Highlight)
+  C --> D[Attach to article]
+  D --> E(Mermaid / Kroki)
+  E --> F[Sync TOC + Backlinks]
+----
+
+Mermaid and Kroki run *after* the swap into the live article — both
+libraries measure layout in `document.body`, and rendering against
+a detached buffer trips a known race in their first call.
+
+== Rendering modes
+
+=== Edit
+
+CodeMirror full screen — fast typing, syntax highlighting, no
+preview overhead.
+
+=== Edit & Preview
+
+Side-by-side. Sync scroll links the two panes; the editor's
+caret line drives the preview's scroll position when enabled.
+
+=== Preview
+
+Reading mode. Add Reader / Zen on top (`Cmd/Ctrl+.`) for the
+chrome-less variant.
+
+== TOC
+
+The right gutter has two tabs. Both stay mounted — switching is a
+visibility toggle, not a remount.
+
+=== Summary
+
+The rendered `#toc` block, moved out of the article into the
+shared gutter. Scroll position drives the active heading
+highlight via an IntersectionObserver-style scroll listener.
+
+=== References
+
+A reverse index of incoming links. Built once when the workspace
+opens and rebuilt when the file tree changes. Click a row to
+navigate.
+
+== Cross-file navigation
+
+xref:usage.adoc[Usage] explains the shortcuts. Under the hood,
+opening a file from Workspace Symbol Search dispatches both:
+
+* `setScrollToLine(line)` — used by the editor in Edit / Split
+  modes.
+* `setPendingHeadingText(text)` — Preview's `afterSwap` walks
+  `h1-h6` by `textContent.trim()` and scrolls the matching node
+  into view. The scroll then drives the existing TOC active-link
+  tracker, so the highlight follows automatically.
+
+Sending only one of the two leaves either the editor or the TOC
+out of sync depending on which mode the user is in.
+
+== See also
+
+* xref:getting-started.adoc[Getting Started] — quick tour.
+* xref:usage.adoc[Usage] — daily workflows.
+* xref:installation.adoc[Installation] — install + update paths.
