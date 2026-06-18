@@ -42,7 +42,7 @@
     "valibot": "^1.1.0"
   },
   "devDependencies": {
-    "@jazzer.js/core": "^2.1.0",
+    "@jazzer.js/core": "^4.0.0",
     "@stryker-mutator/core": "^9.6.1",
     "@types/js-yaml": "^4.0.9",
     "@types/markdown-it": "^14.1.2",
