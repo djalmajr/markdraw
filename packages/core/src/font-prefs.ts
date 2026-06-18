@@ -24,7 +24,7 @@ const FAMILY_MAP: Record<string, string> = {
 };
 
 function getStoredFontPrefs(): FontPrefs {
-  // Storage boundary: validate the partial shape (older AsciiMark
+  // Storage boundary: validate the partial shape (older Markdraw
   // installs persisted only `fontSize` before `fontFamily` shipped,
   // so a strict parse would reject those legacy entries). Validated
   // fields are merged onto defaults; anything missing or invalid

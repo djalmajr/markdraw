@@ -1,13 +1,13 @@
-# Licensing — AsciiMark
+# Licensing — Markdraw
 
 ## TL;DR
 
-AsciiMark is **source-available**, not open source. The source is
+Markdraw is **source-available**, not open source. The source is
 public so anyone can audit security, file bugs, or learn from it —
 but the code is not licensed for reuse, redistribution, modification,
 or competing products.
 
-If you want to use AsciiMark, install the binary from one of the
+If you want to use Markdraw, install the binary from one of the
 official channels:
 
 * Desktop: [github.com/djalmajr/asciimark](https://github.com/djalmajr/asciimark/releases/latest)
@@ -29,8 +29,8 @@ That's it — the binary is free to use forever.
 * Fork the repo and publish a competing product, commercial or not.
 * Redistribute the source code or modified binaries.
 * Remove or alter copyright / trademark notices.
-* Use the names "AsciiMark" or the logo for anything that is not
-  AsciiMark.
+* Use the names "Markdraw" or the logo for anything that is not
+  Markdraw.
 
 ## Why source-available and not open source?
 
@@ -54,7 +54,7 @@ release notes.
 
 ## Commercial licensing
 
-Want to embed AsciiMark into another product, redistribute the
+Want to embed Markdraw into another product, redistribute the
 binary internally inside a regulated environment, or get a copy of
 the source under different terms? Reach out:
 
@@ -62,6 +62,6 @@ the source under different terms? Reach out:
 
 ## Trademarks
 
-"AsciiMark" and the AsciiMark logo are trademarks of Djalma Júnior.
+"Markdraw" and the Markdraw logo are trademarks of Djalma Júnior.
 Use in a way that suggests endorsement or compatibility requires
 written permission.

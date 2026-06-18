@@ -38,7 +38,7 @@ const FontPrefsSchema = v.object({
   fontFamily: v.string(),
 });
 
-/** Lenient form used at the storage boundary so an older AsciiMark
+/** Lenient form used at the storage boundary so an older Markdraw
  *  install that only persisted one of the two fields still upgrades
  *  cleanly — the caller merges the result onto its defaults. */
 const PartialFontPrefsSchema = v.partial(FontPrefsSchema);

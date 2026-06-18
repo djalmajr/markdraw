@@ -54,7 +54,7 @@ export function FileAccessWarning(props: FileAccessWarningProps) {
           </code>
         </li>
         <li>
-          Find <strong>"AsciiMark"</strong> and click <strong>Details</strong>
+          Find <strong>"Markdraw"</strong> and click <strong>Details</strong>
         </li>
         <li>
           Enable <strong>"Allow access to file URLs"</strong>

@@ -1,11 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "AsciiMark Dev",
+  "productName": "Markdraw Dev",
   "identifier": "dev.djalmajr.asciimark-dev",
   "app": {
     "windows": [
       {
-        "title": "AsciiMark (dev)",
+        "title": "Markdraw (dev)",
         "width": 1200,
         "height": 800,
         "minWidth": 600,

@@ -4,7 +4,7 @@
 
 = Usage
 
-Daily workflows that get the most out of AsciiMark. New here? Start
+Daily workflows that get the most out of Markdraw. New here? Start
 with xref:getting-started.adoc[Getting Started] first.
 
 toc::[]

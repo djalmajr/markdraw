@@ -5,7 +5,7 @@ the Vite-served bundle in headless Chromium and detect retention
 patterns across three heap snapshots: baseline, end-of-action, and
 end-of-revert.
 
-## Why this matters for AsciiMark
+## Why this matters for Markdraw
 
 The desktop app stays open all day. The watcher (`make_watcher`)
 emits `fs-change` continuously while a workspace is loaded — over

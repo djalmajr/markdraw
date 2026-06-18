@@ -1,4 +1,4 @@
-// The declarative diagram spec — AsciiMark's own format, deliberately NOT tied to
+// The declarative diagram spec — Markdraw's own format, deliberately NOT tied to
 // Mermaid's node/edge model so it can express lanes, groups, and routing hints
 // the layout engine needs. A spec describes WHAT the diagram contains; the layout
 // engine decides WHERE everything goes. Editing architecture = editing the spec,

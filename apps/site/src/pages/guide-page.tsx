@@ -206,12 +206,12 @@ export function GuidePage() {
           <p>{(useLocale(), m.guide_installation_desktop_p())}</p>
           <h3>{(useLocale(), m.guide_installation_macos_h3())}</h3>
           <p>{(useLocale(), m.guide_installation_macos_p())}</p>
-          <p><code>xattr -cr /Applications/AsciiMark.app</code></p>
+          <p><code>xattr -cr /Applications/Markdraw.app</code></p>
           <h3>{(useLocale(), m.guide_installation_windows_h3())}</h3>
           <HtmlP html={(useLocale(), m.guide_installation_windows_p())} />
           <h3>{(useLocale(), m.guide_installation_linux_h3())}</h3>
           <p>{(useLocale(), m.guide_installation_linux_p())}</p>
-          <p><code>chmod +x AsciiMark_*.AppImage</code></p>
+          <p><code>chmod +x Markdraw_*.AppImage</code></p>
           <HtmlP html={(useLocale(), m.guide_installation_linux_deb())} />
         </section>
 

@@ -8,7 +8,7 @@ export interface BacklinkEntry {
   /** Display label — typically the basename. */
   label: string;
   /** Optional rootId so the click handler knows which workspace it
-   *  belongs to (a single AsciiMark window can have multiple roots). */
+   *  belongs to (a single Markdraw window can have multiple roots). */
   rootId?: string;
 }
 

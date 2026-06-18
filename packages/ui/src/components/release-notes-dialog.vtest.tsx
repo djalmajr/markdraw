@@ -6,7 +6,7 @@ afterEach(cleanup);
 
 function entry(overrides: Partial<ReleaseNotesEntry> = {}): ReleaseNotesEntry {
   return {
-    name: "AsciiMark v0.10.0",
+    name: "Markdraw v0.10.0",
     version: "0.10.0",
     body: "## Features\n\n- thing",
     htmlUrl: "https://example.test/v0.10.0",
@@ -90,8 +90,8 @@ describe("ReleaseNotesDialog", () => {
         {...baseProps}
         loading={false}
         entries={[
-          entry({ name: "AsciiMark v0.10.0", version: "0.10.0", body: "## Features\n\n- alpha" }),
-          entry({ name: "AsciiMark v0.9.1", version: "0.9.1", body: "## Fixes\n\n- beta" }),
+          entry({ name: "Markdraw v0.10.0", version: "0.10.0", body: "## Features\n\n- alpha" }),
+          entry({ name: "Markdraw v0.9.1", version: "0.9.1", body: "## Fixes\n\n- beta" }),
         ]}
         error={null}
         onClose={() => {}}
@@ -100,8 +100,8 @@ describe("ReleaseNotesDialog", () => {
     ));
     const cards = screen.getAllByTestId("release-notes-entry");
     expect(cards).toHaveLength(2);
-    expect(screen.getByText("AsciiMark v0.10.0")).not.toBeNull();
-    expect(screen.getByText("AsciiMark v0.9.1")).not.toBeNull();
+    expect(screen.getByText("Markdraw v0.10.0")).not.toBeNull();
+    expect(screen.getByText("Markdraw v0.9.1")).not.toBeNull();
     expect(screen.getByText(/alpha/)).not.toBeNull();
     expect(screen.getByText(/beta/)).not.toBeNull();
   });

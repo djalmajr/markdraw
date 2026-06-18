@@ -4,7 +4,7 @@
 
 = Getting Started
 
-A quick tour of AsciiMark — the local-first AsciiDoc and Markdown
+A quick tour of Markdraw — the local-first AsciiDoc and Markdown
 viewer with diagrams, math, and a workspace-aware navigator.
 
 toc::[]
@@ -12,7 +12,7 @@ toc::[]
 == Open a workspace
 
 Drop any folder onto the welcome screen, or click the dropzone to
-pick one. AsciiMark scans the tree, hides `node_modules` /  `.git`
+pick one. Markdraw scans the tree, hides `node_modules` /  `.git`
 by default, and lists `.adoc` and `.md` files in the sidebar.
 
 === Multiple roots

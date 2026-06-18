@@ -123,7 +123,7 @@ function isCaptureActive(): boolean {
 
 /**
  * Apply the figma capture WITHOUT a full reload. Two reasons:
- *  1. TanStack-style routers (and AsciiMark's pane router) often
+ *  1. TanStack-style routers (and Markdraw's pane router) often
  *     re-encode the hash on rehydration, dropping `figmaselector`.
  *  2. Reload kills the user-gesture activation context and creates
  *     a confusing flicker.
@@ -135,7 +135,7 @@ function isCaptureActive(): boolean {
 function applyCapture(key: string) {
   patchClipboardForTauri();
 
-  // #root is AsciiMark's mount point (see apps/desktop/index.html).
+  // #root is Markdraw's mount point (see apps/desktop/index.html).
   const hash =
     `#figmacapture=${encodeURIComponent(key)}` +
     `&figmaselector=${encodeURIComponent("#root")}` +

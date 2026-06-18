@@ -19,9 +19,9 @@ export interface AboutDialogProps {
 }
 
 /**
- * "About AsciiMark" modal — version, links, license. Triggered by the
- * Command Palette's `Help: About AsciiMark` entry and the
- * "About AsciiMark" menu item. Mirrors the layout of
+ * "About Markdraw" modal — version, links, license. Triggered by the
+ * Command Palette's `Help: About Markdraw` entry and the
+ * "About Markdraw" menu item. Mirrors the layout of
  * `<UpdateAvailableDialog>` so the two dialogs feel consistent.
  */
 export function AboutDialog(props: AboutDialogProps) {
@@ -51,7 +51,7 @@ export function AboutDialog(props: AboutDialogProps) {
 
         <div class="flex flex-col items-center gap-2 pb-2">
           <img
-            alt="AsciiMark"
+            alt="Markdraw"
             class="h-12 w-12"
             src="/asciimark-logo.svg"
             onError={(e) => {
@@ -62,7 +62,7 @@ export function AboutDialog(props: AboutDialogProps) {
           />
           <div class="flex flex-col items-center gap-0.5">
             <AlertDialogTitle class="text-lg font-semibold leading-none">
-              AsciiMark
+              Markdraw
             </AlertDialogTitle>
             {/* Version slips in directly under the wordmark — no chip,
                 no label, sized to match the footer link row so the

@@ -1,4 +1,4 @@
-# AsciiMark
+# Markdraw
 
 Tauri 2 + SolidJS monorepo — desktop app, browser extension, and marketing
 site under `apps/*`, with shared logic in `packages/*`.

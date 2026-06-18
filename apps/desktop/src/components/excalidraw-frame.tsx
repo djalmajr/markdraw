@@ -230,7 +230,7 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
   // (the route, default "/"). We must land on the EXACT file `/excalidraw/
   // index.html`: vite's dev server SPA-falls-back to the host's own index.html
   // for any directory/non-file path (so `/excalidraw/` would recursively load
-  // AsciiMark itself). So pass the origin as `src` and the full file path as
+  // Markdraw itself). So pass the origin as `src` and the full file path as
   // `pathname`. `src` is also absolute, as the z-frame does `new URL(this.src)`.
   const guestOrigin = window.location.origin;
 

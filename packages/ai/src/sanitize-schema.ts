@@ -12,7 +12,7 @@
 //     rewrite `oneOf` -> `anyOf` (Gemini/Vertex don't support `oneOf`/`$ref`).
 //   - STRICT (opt-in): additionally tighten every object for OpenAI strict mode
 //     (`additionalProperties: false`, `required` = all property keys) and strip
-//     keywords strict rejects. OFF by default because AsciiMark does not enable
+//     keywords strict rejects. OFF by default because Markdraw does not enable
 //     OpenAI strict on its `dynamicTool`s today, and required-fill would force
 //     otherwise-optional parameters.
 

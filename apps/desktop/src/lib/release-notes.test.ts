@@ -114,14 +114,14 @@ describe("fetchReleaseHistory", () => {
       jsonResponse([
         {
           tag_name: "v0.10.0",
-          name: "AsciiMark v0.10.0",
+          name: "Markdraw v0.10.0",
           body: "## Features\n\n- thing",
           html_url: "https://github.com/djalmajr/asciimark/releases/tag/v0.10.0",
           published_at: "2026-05-06T23:46:24Z",
         },
         {
           tag_name: "v0.9.1",
-          name: "AsciiMark v0.9.1",
+          name: "Markdraw v0.9.1",
           body: "## Fixes\n\n- crash",
           html_url: "https://github.com/djalmajr/asciimark/releases/tag/v0.9.1",
           published_at: "2026-05-06T01:36:30Z",
@@ -133,7 +133,7 @@ describe("fetchReleaseHistory", () => {
     expect(list[0]).toMatchObject({
       tagName: "v0.10.0",
       version: "0.10.0",
-      name: "AsciiMark v0.10.0",
+      name: "Markdraw v0.10.0",
       body: "## Features\n\n- thing",
       publishedAt: "2026-05-06T23:46:24Z",
     });
@@ -146,7 +146,7 @@ describe("fetchReleaseHistory", () => {
     const fetcher = mock(async () =>
       jsonResponse([
         { tag_name: "v0.11.0", draft: true, body: "WIP" },
-        { tag_name: "v0.10.0", name: "AsciiMark v0.10.0" },
+        { tag_name: "v0.10.0", name: "Markdraw v0.10.0" },
         // missing tag_name → discarded (no way to render it)
         { name: "broken", body: "x" },
       ]),

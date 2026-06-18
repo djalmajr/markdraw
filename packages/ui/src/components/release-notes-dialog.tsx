@@ -17,7 +17,7 @@ const md = new MarkdownIt({ html: false, breaks: true, linkify: false });
 
 /** One row in the release-history list rendered by the dialog. */
 export interface ReleaseNotesEntry {
-  /** Display name (e.g. "AsciiMark v0.10.0"). */
+  /** Display name (e.g. "Markdraw v0.10.0"). */
   name: string;
   /** Bare version (e.g. "0.10.0") — compared against the installed
    *  version to mark the current row. */
@@ -65,7 +65,7 @@ function formatDate(iso: string): string {
 
 /**
  * Standalone read-only dialog that shows the recent release history
- * for AsciiMark — used by the "Release notes" menu entry and Command
+ * for Markdraw — used by the "Release notes" menu entry and Command
  * Palette command. Pulls the last ~10 entries from
  * djalmajr/asciimark and lays them out as a scrollable
  * stack; the entry that matches the currently-installed version is

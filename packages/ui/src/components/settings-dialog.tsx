@@ -303,7 +303,7 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
               </Match>
               <Match when={section() === "about"}>
                 <div class="settings-prose">
-                  <p class="font-semibold">AsciiMark{props.appVersion ? ` v${props.appVersion}` : ""}</p>
+                  <p class="font-semibold">Markdraw{props.appVersion ? ` v${props.appVersion}` : ""}</p>
                   <p>{(useLocale(), label("about_tagline"))}</p>
                   <Show when={props.onShowReleaseNotes}>
                     <Button
@@ -1209,7 +1209,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
         <Match when={view() === "list"}>
           <h3 class="settings-h3">{(useLocale(), label("settings_mcp_title"))}</h3>
 
-          {/* OpenCode has no first-class AI provider in AsciiMark (Claude/Codex
+          {/* OpenCode has no first-class AI provider in Markdraw (Claude/Codex
               are gated on their connected provider), so importing its configured
               MCP servers rides this explicit toggle. */}
           <div class="settings-row" style={{ "align-items": "center", gap: "10px", margin: "0 0 12px" }}>

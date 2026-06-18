@@ -768,7 +768,7 @@ export function createAppState(config: AppStateConfig) {
       // user dismissed it — include its CURRENT editor content so a plain
       // question about "this document" actually considers it, with no @-mention
       // or tool round-trip needed. This matters most for CLI-subscription chats,
-      // which have no AsciiMark read tool to fetch it on their own.
+      // which have no Markdraw read tool to fetch it on their own.
       const active = activeFileContext();
       const f = selectedFile();
       // Only text documents dump their content; an Excalidraw scene's chip stays

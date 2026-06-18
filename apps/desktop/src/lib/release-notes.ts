@@ -1,4 +1,4 @@
-// Fetches the release notes for a given AsciiMark version from the
+// Fetches the release notes for a given Markdraw version from the
 // public release repo (`djalmajr/asciimark`). The result is
 // cached in-memory per version so reopening the dialog never refetches.
 //
@@ -38,7 +38,7 @@ export interface ReleaseHistoryEntry {
    *  this for the header label and for matching against the locally
    *  installed version. */
   version: string;
-  /** Display name (`AsciiMark v0.10.0` etc.). Falls back to tagName
+  /** Display name (`Markdraw v0.10.0` etc.). Falls back to tagName
    *  when the release has no `name`. */
   name: string;
   /** Release body (markdown). Empty string when the release shipped

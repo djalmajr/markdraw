@@ -14,12 +14,12 @@ toc::[]
 
 === Apple Silicon
 
-Download `AsciiMark-macos-arm64.dmg`, drag the app into
+Download `Markdraw-macos-arm64.dmg`, drag the app into
 Applications, then run:
 
 [source,bash]
 ----
-xattr -cr /Applications/AsciiMark.app
+xattr -cr /Applications/Markdraw.app
 ----
 
 The `xattr` step strips the quarantine flag macOS adds to unsigned
@@ -27,19 +27,19 @@ builds. Skip it and Gatekeeper blocks the first launch.
 
 === Intel
 
-Same flow, but use `AsciiMark-macos-x64.dmg`. Auto-update keeps
+Same flow, but use `Markdraw-macos-x64.dmg`. Auto-update keeps
 both architectures in sync once installed.
 
 == Linux
 
 === AppImage
 
-`chmod +x AsciiMark-linux-x64.AppImage` and run it. The binary is
+`chmod +x Markdraw-linux-x64.AppImage` and run it. The binary is
 self-contained — no system packages required.
 
 === Debian / Ubuntu
 
-`sudo apt install ./AsciiMark-linux-x64.deb`. Adds a desktop
+`sudo apt install ./Markdraw-linux-x64.deb`. Adds a desktop
 launcher under "Office" / "Development".
 
 == Windows

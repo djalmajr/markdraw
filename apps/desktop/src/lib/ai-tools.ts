@@ -420,7 +420,7 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
       source: APP,
       description:
         "Generate a diagram into a workspace .excalidraw file from a declarative `spec` " +
-        "(AsciiMark's own format — more powerful than Mermaid for architecture diagrams). " +
+        "(Markdraw's own format — more powerful than Mermaid for architecture diagrams). " +
         "The engine assigns positions, auto-sizes boxes from their text, routes arrows " +
         "through the gutters, and BINDS arrows to their nodes (so they follow when moved); " +
         "a validation gate rejects overlaps and arrows crossing unrelated boxes. The spec: " +

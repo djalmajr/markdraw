@@ -1,6 +1,6 @@
 # Demo Workspace
 
-This folder is used by the AsciiMark marketing site to capture
+This folder is used by the Markdraw marketing site to capture
 screenshots of the desktop app in action. The content is intentionally
 fictional so it works as a clean visual.
 
@@ -15,7 +15,7 @@ fictional so it works as a clean visual.
 
 ## Where to start
 
-New to AsciiMark? Open
+New to Markdraw? Open
 [`docs/getting-started.adoc`](docs/getting-started.adoc). Already
 familiar with the editor and want to dig deeper?
 [`docs/architecture.adoc`](docs/architecture.adoc) covers the

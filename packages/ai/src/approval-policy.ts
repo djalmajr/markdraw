@@ -1,7 +1,7 @@
 // Decides whether a tool call runs automatically or asks the user first
 // (human-in-the-loop). This is a tiny pure policy, separate from how the prompt
 // is rendered: `prompt`-tier tools are wrapped so their `execute` awaits an
-// Accept/Reject before running (the omp two-tier model, applied to AsciiMark).
+// Accept/Reject before running (the omp two-tier model, applied to Markdraw).
 // The wrap is applied by the ENGINE when the host passes
 // `ChatOptions.onApprovalRequest` (engines/ai-sdk.ts — the single enforcement
 // point); hosts that pre-wrap tools themselves keep working unchanged.

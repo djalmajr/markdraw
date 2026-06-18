@@ -3,7 +3,7 @@
   "app": {
     "windows": [
       {
-        "title": "AsciiMark",
+        "title": "Markdraw",
         "width": 1200,
         "height": 800,
         "minWidth": 600,

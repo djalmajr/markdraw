@@ -38,7 +38,7 @@ export interface BuildMcpToolsOptions {
    *  into each schema node's `description` so the model still sees them even
    *  though the provider schema can't carry the keywords. Default false. */
   spillConstraints?: boolean;
-  /** Apply OpenAI strict-mode schema tightening. Default false: AsciiMark does
+  /** Apply OpenAI strict-mode schema tightening. Default false: Markdraw does
    *  not enable the SDK's strict tool mode, so the broad (semantics-preserving)
    *  sanitization is enough and required-fill would force optional params. */
   strictSchema?: boolean;

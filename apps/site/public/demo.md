@@ -1,4 +1,4 @@
-# AsciiMark Demo
+# Markdraw Demo
 
 This sample document is used for screenshots of the extension web mode.
 

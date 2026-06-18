@@ -1,7 +1,7 @@
 // Bridge + logic for MCP servers that OTHER agent tools (Claude Code, Codex,
 // OpenCode) already configure. Rust (`mcp_discover`) reads + normalizes the raw
 // configs; this module decides WHICH tools to read (gated on a connected
-// AsciiMark provider), dedupes across tools/scopes, and gates project-scoped
+// Markdraw provider), dedupes across tools/scopes, and gates project-scoped
 // servers behind explicit approval (remembered per root + config hash, TOFU).
 
 import { invoke } from "./chaos-invoke.ts";

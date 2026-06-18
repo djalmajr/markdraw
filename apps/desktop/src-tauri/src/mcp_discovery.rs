@@ -1,11 +1,11 @@
 //! Discovery of MCP servers that OTHER agent tools (Claude Code, Codex,
 //! OpenCode) already configure — at GLOBAL (`~/…`) and per-PROJECT (`<root>/…`)
-//! scope — normalized to AsciiMark's `McpServerConfig` shape.
+//! scope — normalized to Markdraw's `McpServerConfig` shape.
 //!
 //! This module ONLY reads + normalizes. It never connects: the JS host decides
-//! which tools to read (gated on a *connected* AsciiMark provider) and gates
+//! which tools to read (gated on a *connected* Markdraw provider) and gates
 //! project-scoped servers behind explicit user approval before they're spawned.
-//! Secret refs (`${VAR}`) are rewritten to AsciiMark's `{env:VAR}` so the
+//! Secret refs (`${VAR}`) are rewritten to Markdraw's `{env:VAR}` so the
 //! existing in-memory resolver expands them at connect time — nothing is
 //! persisted and no value is resolved here.
 
@@ -15,7 +15,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime};
 
-/// One MCP server found in another tool's config, normalized for AsciiMark.
+/// One MCP server found in another tool's config, normalized for Markdraw.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredMcpServer {
@@ -44,7 +44,7 @@ pub struct DiscoveredMcpServer {
     pub source_path: String,
 }
 
-/// Rewrite shell-style `${VAR}` references to AsciiMark's `{env:VAR}` so the JS
+/// Rewrite shell-style `${VAR}` references to Markdraw's `{env:VAR}` so the JS
 /// resolver expands them in memory at connect time. Literal values (no `${}`)
 /// pass through untouched. Claude and OpenCode both use `${VAR}`; Codex env
 /// values are literal, so this is a no-op there.

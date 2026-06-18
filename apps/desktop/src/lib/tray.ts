@@ -33,7 +33,7 @@ function base64ToBytes(base64: string): Uint8Array {
  * on dark bar, black on light bar), matching native tray icons.
  */
 /**
- * Stable id for the AsciiMark tray entry. Used both when creating
+ * Stable id for the Markdraw tray entry. Used both when creating
  * the tray and when removing any leftover one before re-creating —
  * HMR (and even cold dev restarts when the previous Rust process
  * lingered briefly) can leave duplicates in the macOS menu bar.
@@ -99,7 +99,7 @@ export async function setupTray(deps: TrayDeps): Promise<void> {
     menu,
     menuOnLeftClick: false,
     iconAsTemplate: true,
-    tooltip: "AsciiMark",
+    tooltip: "Markdraw",
     action: async (event) => {
       if (event.type === "Click" && event.button === "Left") {
         const win = getCurrentWindow();

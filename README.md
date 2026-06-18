@@ -1,4 +1,4 @@
-# AsciiMark
+# Markdraw
 
 A local-first viewer and editor for AsciiDoc and Markdown — runs as
 a desktop app (Tauri) or a Chrome extension. Diagrams, math, split
@@ -31,7 +31,7 @@ navigation layer; everything renders locally without telemetry.
 * Backlinks panel + workspace-wide heading search across every doc.
 * Multi-root workspaces, recent files/folders, favorites.
 * Mac/Linux/Windows file-system watcher with debouncing.
-* Local-first: no analytics, no telemetry, no AsciiMark backend.
+* Local-first: no analytics, no telemetry, no Markdraw backend.
 
 ## Status
 
@@ -82,13 +82,13 @@ but the code is **not licensed for reuse, redistribution, or
 competing products**. See [LICENSE](./LICENSE) and
 [LICENSING.md](./LICENSING.md) for the precise terms.
 
-To use AsciiMark: install one of the official binaries linked above.
+To use Markdraw: install one of the official binaries linked above.
 That's free, forever.
 
 For commercial licensing (embedding, redistribution, source under
 different terms), reach out: djalmajr@gmail.com.
 
-"AsciiMark" and the AsciiMark logo are trademarks of Djalma Júnior.
+"Markdraw" and the Markdraw logo are trademarks of Djalma Júnior.
 
 ## Contributing
 

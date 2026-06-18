@@ -4,7 +4,7 @@
 
 = Architecture
 
-A short tour of how AsciiMark renders documents and synchronizes
+A short tour of how Markdraw renders documents and synchronizes
 the right gutter. For day-to-day workflows see
 xref:usage.adoc[Usage].
 

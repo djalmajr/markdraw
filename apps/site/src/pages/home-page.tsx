@@ -119,21 +119,21 @@ function detectPreferredDownload(): PreferredDownload {
     const hasIntelHint = userAgent.includes("intel") || userAgent.includes("x86_64");
     const isAppleSilicon = hasSiliconHint || !hasIntelHint;
     return {
-      href: releaseUrl(isAppleSilicon ? "AsciiMark-macos-arm64.dmg" : "AsciiMark-macos-x64.dmg"),
+      href: releaseUrl(isAppleSilicon ? "Markdraw-macos-arm64.dmg" : "Markdraw-macos-x64.dmg"),
       platform: isAppleSilicon ? m.site_platform_mac_arm64 : m.site_platform_mac_x64,
     };
   }
 
   if (platform.includes("win")) {
     return {
-      href: releaseUrl("AsciiMark-windows-x64.msi"),
+      href: releaseUrl("Markdraw-windows-x64.msi"),
       platform: m.site_platform_windows,
     };
   }
 
   if (platform.includes("linux")) {
     return {
-      href: releaseUrl("AsciiMark-linux-x64.AppImage"),
+      href: releaseUrl("Markdraw-linux-x64.AppImage"),
       platform: m.site_platform_linux,
     };
   }
@@ -170,14 +170,14 @@ async function refineMacDownloadWithUserAgentData(
 
     if (architecture?.includes("arm")) {
       return {
-        href: releaseUrl("AsciiMark-macos-arm64.dmg"),
+        href: releaseUrl("Markdraw-macos-arm64.dmg"),
         platform: m.site_platform_mac_arm64,
       };
     }
 
     if (architecture?.includes("x86")) {
       return {
-        href: releaseUrl("AsciiMark-macos-x64.dmg"),
+        href: releaseUrl("Markdraw-macos-x64.dmg"),
         platform: m.site_platform_mac_x64,
       };
     }
@@ -339,7 +339,7 @@ export function HomePage() {
       <section class="notice-panel">
         <p>
           {(useLocale(),
-            m.site_notice_macos({ cmd: "xattr -cr /Applications/AsciiMark.app" }))}
+            m.site_notice_macos({ cmd: "xattr -cr /Applications/Markdraw.app" }))}
         </p>
         <p>{(useLocale(), m.site_notice_windows())}</p>
       </section>

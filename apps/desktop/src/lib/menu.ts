@@ -31,11 +31,11 @@ export async function setupAppMenu(deps: MenuDeps): Promise<void> {
   // in the menu bar). "About" is not a valid PredefinedMenuItem type in the JS
   // API, so we use a regular MenuItem.
   const appSubmenu = await Submenu.new({
-    text: "AsciiMark",
+    text: "Markdraw",
     items: [
       await MenuItem.new({
         id: "about",
-        text: "About AsciiMark",
+        text: "About Markdraw",
         enabled: false,
       }),
       await MenuItem.new({

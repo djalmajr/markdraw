@@ -107,7 +107,7 @@ export async function checkForAppUpdates(silent: boolean): Promise<void> {
     if (!update) {
       if (!silent) {
         await message(m.update_up_to_date(), {
-          title: "AsciiMark",
+          title: "Markdraw",
           kind: "info",
         });
       }
@@ -159,7 +159,7 @@ export async function checkForAppUpdates(silent: boolean): Promise<void> {
     await message(
       m.update_check_failed({ message: (e as Error)?.message ?? String(e) }),
       {
-        title: "AsciiMark",
+        title: "Markdraw",
         kind: "error",
       },
     );

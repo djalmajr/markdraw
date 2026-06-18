@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capabilities for AsciiMark desktop",
+  "description": "Default capabilities for Markdraw desktop",
   "windows": ["main"],
   "permissions": [
     "core:default",

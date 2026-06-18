@@ -1,4 +1,4 @@
-// memlab scenario for AsciiMark soak testing.
+// memlab scenario for Markdraw soak testing.
 //
 // memlab drives a Puppeteer-controlled Chromium and compares three
 // heap snapshots: baseline (before action), end (after action), and

@@ -288,7 +288,7 @@ export async function* mapFullStream(
         return;
       case "tool-output-denied":
         // Only emitted if a tool sets the SDK's loop-level `needsApproval`, which
-        // AsciiMark does NOT (approval is the execute-wrapper in approval-policy.ts,
+        // Markdraw does NOT (approval is the execute-wrapper in approval-policy.ts,
         // applied by the engine when ChatOptions.onApprovalRequest is set — see
         // the gating note in chat() for why native needsApproval is deferred).
         // Mapped defensively so a denial is never invisible if that ever changes.

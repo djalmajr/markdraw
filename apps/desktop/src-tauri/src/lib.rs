@@ -25,7 +25,7 @@ use ai_mcp::{
 };
 
 // Discovers MCP servers other agent tools (Claude Code, Codex, OpenCode) already
-// configure, at global + per-project scope, normalized for AsciiMark. Read-only;
+// configure, at global + per-project scope, normalized for Markdraw. Read-only;
 // the JS host gates which tools to read and approves project servers.
 mod mcp_discovery;
 use mcp_discovery::mcp_discover;
@@ -1102,7 +1102,7 @@ pub fn run() {
             // (= classic "maximize") instead of entering native
             // fullscreen. The default behaviour hides the entire
             // title bar — including the close/min/max buttons — and
-            // since AsciiMark already has its own reader/zen mode
+            // since Markdraw already has its own reader/zen mode
             // (Cmd+. / F11), losing system fullscreen is a fair
             // trade for keeping the traffic lights always visible
             // after a maximize gesture.

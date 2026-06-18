@@ -141,7 +141,7 @@ pub async fn authorize<R: Runtime>(
     let scopes = manager.select_scopes(None, &[]);
     let scope_refs: Vec<&str> = scopes.iter().map(|s| s.as_str()).collect();
     manager
-        .register_client("AsciiMark", &redirect_uri, &scope_refs)
+        .register_client("Markdraw", &redirect_uri, &scope_refs)
         .await
         .map_err(|e| format!("client registration: {e}"))?;
 
@@ -227,14 +227,14 @@ async fn read_request_line<S: AsyncReadExt + Unpin>(stream: &mut S) -> String {
 
 // Neutral wording on purpose: this page is written the moment the redirect
 // arrives, BEFORE the token exchange runs — so it must not claim success the
-// exchange might still deny. The real outcome surfaces back in AsciiMark.
-const AUTHORIZED_PAGE: &str = "<!doctype html><meta charset=utf-8><title>AsciiMark</title>\
+// exchange might still deny. The real outcome surfaces back in Markdraw.
+const AUTHORIZED_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Markdraw</title>\
 <body style=\"font:16px system-ui;text-align:center;padding:3rem\">\
-<h2>Recebido</h2><p>Pode fechar esta aba e voltar ao AsciiMark.</p>";
+<h2>Recebido</h2><p>Pode fechar esta aba e voltar ao Markdraw.</p>";
 
-const FAILED_PAGE: &str = "<!doctype html><meta charset=utf-8><title>AsciiMark</title>\
+const FAILED_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Markdraw</title>\
 <body style=\"font:16px system-ui;text-align:center;padding:3rem\">\
-<h2>Falha na autoriza\u{e7}\u{e3}o</h2><p>Resposta inesperada. Tente de novo no AsciiMark.</p>";
+<h2>Falha na autoriza\u{e7}\u{e3}o</h2><p>Resposta inesperada. Tente de novo no Markdraw.</p>";
 
 /// Best-effort HTTP/1.1 reply on the loopback socket; failures here don't change
 /// the auth result (the token exchange has already succeeded or failed).
