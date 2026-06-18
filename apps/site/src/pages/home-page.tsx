@@ -29,10 +29,12 @@ interface ScreenshotItem {
   path: string;
 }
 
-const RELEASES_BASE_URL =
-  "https://github.com/djalmajr/markdraw/releases/latest/download";
-const RELEASES_LATEST_URL =
-  "https://github.com/djalmajr/markdraw/releases/latest";
+// Public release host: a Cloudflare R2 bucket (markdraw-releases) served at
+// releases.markdraw.app. Fixed keys at the root are always the latest build.
+const RELEASES_BASE_URL = "https://releases.markdraw.app";
+// SSR fallback href (re-resolved client-side by platform detection); there is
+// no GitHub releases page anymore, so point at the site itself.
+const RELEASES_LATEST_URL = "https://markdraw.app";
 
 interface PreferredDownload {
   href: string;

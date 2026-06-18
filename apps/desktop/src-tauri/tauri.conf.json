@@ -79,9 +79,9 @@
       "active": true,
       "dialog": false,
       "endpoints": [
-        "https://github.com/djalmajr/markdraw/releases/latest/download/latest.json"
+        "https://releases.markdraw.app/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdBOUE3MjJGODJCRDJDRkYKUldUL0xMMkNMM0thZXNIcUd3Z2tGMys1ek5CcEtNODhDQjFaRUwzME50alZWOGdLQlNBMHJReFkK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM0QUJENkIxRUFERTE0QTAKUldTZ0ZON3FzZGFyTkhSN0tiSUh5VTNXa0dRa2N6L2ZyOEIyZVVqZUp1Ujk5VlBWWnFPU1lrMjcK"
     }
   }
 }
