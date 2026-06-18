@@ -3,7 +3,7 @@
 // background tab keeps running when you switch away (each store owns its own
 // AbortController). Closed/archived chats live on as metadata in the history
 // until reopened. Mirrors `create-tab-store.ts` conventions (debounced persist,
-// lifecycle methods) and persists through `@asciimark/core/ai-chat-sessions.ts`.
+// lifecycle methods) and persists through `@markdraw/core/ai-chat-sessions.ts`.
 //
 // Reactive ownership (load-bearing): the sidebar chat used to be a SINGLE store
 // created synchronously inside `createAppState` (so it inherited that owner).
@@ -14,7 +14,7 @@
 // warning; freed exactly when the session closes).
 
 import { createEffect, createRoot, createSignal, getOwner, runWithOwner, untrack, type Owner } from "solid-js";
-import type { AIProvider, AITool } from "@asciimark/ai/types.ts";
+import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
 import {
   type PersistedChatMessage,
   type PersistedChatSessionMeta,
@@ -24,7 +24,7 @@ import {
   setChatMessages,
   setChatSessionsIndex,
   toPersistedTool,
-} from "@asciimark/core/ai-chat-sessions.ts";
+} from "@markdraw/core/ai-chat-sessions.ts";
 import { type AiChatStore, type ChatTurn, createAiChatStore } from "./create-ai-chat-store.ts";
 
 /** Public, reactive metadata for a chat session (strip + history). */

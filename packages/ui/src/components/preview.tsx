@@ -1,6 +1,6 @@
 import { Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import mermaid from "mermaid";
 import Prism from "prismjs";
 import "prismjs/components/prism-markup";
@@ -33,8 +33,8 @@ import IconStretch from "~icons/lucide/move-horizontal";
 import IconExpand from "~icons/lucide/expand";
 import { Portal } from "solid-js/web";
 import { FrontmatterPanel } from "./frontmatter-panel.tsx";
-import { renderKroki } from "@asciimark/core/kroki.ts";
-import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
+import { renderKroki } from "@markdraw/core/kroki.ts";
+import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
 import "katex/dist/katex.min.css";
 import "@mdit/plugin-alert/style";
 import "../styles/asciidoc.css";
@@ -620,7 +620,7 @@ export function setupTocScrollTracking(container: HTMLElement, tocEl?: HTMLEleme
   };
 }
 
-import { isSupportedFile, isAdocFile } from "@asciimark/core/utils.ts";
+import { isSupportedFile, isAdocFile } from "@markdraw/core/utils.ts";
 
 /**
  * Check if a link href points to a supported document file.

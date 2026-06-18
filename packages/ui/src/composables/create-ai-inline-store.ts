@@ -4,15 +4,15 @@
 // chat store; shares the provider + the pure action prompts.
 
 import { createSignal } from "solid-js";
-import * as m from "@asciimark/i18n";
-import type { AIProvider } from "@asciimark/ai/types.ts";
+import * as m from "@markdraw/i18n";
+import type { AIProvider } from "@markdraw/ai/types.ts";
 import {
   buildInlineActionPrompt,
   getInlineAction,
   type InlineActionId,
-} from "@asciimark/ai/actions.ts";
-import { extractMermaid } from "@asciimark/ai/extract-mermaid.ts";
-import { diagramSystemPrompt } from "@asciimark/ai/prompts/diagram.ts";
+} from "@markdraw/ai/actions.ts";
+import { extractMermaid } from "@markdraw/ai/extract-mermaid.ts";
+import { diagramSystemPrompt } from "@markdraw/ai/prompts/diagram.ts";
 
 export interface InlineSelection {
   from: number;

@@ -1,6 +1,6 @@
 import type { Accessor } from "solid-js";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import { getPathFromHash } from "./hash.ts";
 import { dirOfUrl, resolveUrl } from "./url-source.ts";
 import { resolveFileByPath } from "./fs.ts";

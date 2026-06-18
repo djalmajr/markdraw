@@ -5,7 +5,7 @@ import type { PolymorphicProps } from "@kobalte/core"
 import * as TextFieldPrimitive from "@kobalte/core/text-field"
 import { cva } from "class-variance-authority"
 
-import { cn } from "@asciimark/core/utils.ts"
+import { cn } from "@markdraw/core/utils.ts"
 
 type TextFieldRootProps<T extends ValidComponent = "div"> =
   TextFieldPrimitive.TextFieldRootProps<T> & {

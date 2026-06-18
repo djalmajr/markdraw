@@ -1,5 +1,5 @@
 import { onCleanup, onMount, type JSX } from "solid-js";
-import * as m from "@asciimark/i18n";
+import * as m from "@markdraw/i18n";
 
 interface CreateRowProps {
   kind: "file" | "folder";

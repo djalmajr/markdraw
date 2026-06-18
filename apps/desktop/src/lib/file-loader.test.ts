@@ -13,9 +13,9 @@
 // "pane 0 has the content, pane 1 doesn't" is the regression locker.
 
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import { installLocalStorageMock } from "@asciimark/core/test-utils.ts";
-import { createPaneManager } from "@asciimark/ui/composables/create-pane-manager.ts";
-import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
+import { installLocalStorageMock } from "@markdraw/core/test-utils.ts";
+import { createPaneManager } from "@markdraw/ui/composables/create-pane-manager.ts";
+import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 
 installLocalStorageMock();
 
@@ -294,7 +294,7 @@ describe("createFileLoader / loadFileContent — binary non-text marks the pane 
     // of the unsupported sentinel — flipping html away from
     // UNSUPPORTED_CONTENT and failing this assertion. read_to_string throws
     // on non-UTF8, which is exactly how the app detects binary junk.
-    const { UNSUPPORTED_CONTENT } = await import("@asciimark/core/utils.ts");
+    const { UNSUPPORTED_CONTENT } = await import("@markdraw/core/utils.ts");
     const paneManager = createPaneManager();
     paneManager.setActivePane(0);
     const pane0 = paneManager.panes()[0]!;

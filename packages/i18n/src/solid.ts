@@ -17,8 +17,8 @@ import {
  * not signals. By themselves they don't trigger Solid reactivity. The
  * convention is to track the locale signal in the same JSX expression:
  *
- *   import * as m from "@asciimark/i18n";
- *   import { useLocale } from "@asciimark/i18n/solid";
+ *   import * as m from "@markdraw/i18n";
+ *   import { useLocale } from "@markdraw/i18n/solid";
  *
  *   <button>{(useLocale(), m.toolbar_open_folder())}</button>
  *

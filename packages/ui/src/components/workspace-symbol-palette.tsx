@@ -1,9 +1,9 @@
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import {
   filterWorkspaceSymbols,
   type WorkspaceSymbol,
-} from "@asciimark/core/workspace-symbols.ts";
+} from "@markdraw/core/workspace-symbols.ts";
 import { Palette } from "./palette.tsx";
 
 export interface WorkspaceSymbolPaletteProps {

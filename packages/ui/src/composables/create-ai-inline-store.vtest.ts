@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AIProvider, AIStreamPart } from "@asciimark/ai/types.ts";
+import type { AIProvider, AIStreamPart } from "@markdraw/ai/types.ts";
 import { createAiInlineStore } from "./create-ai-inline-store.ts";
 
 // The store lazy-imports mermaid only to validate generated DSL — mock it like

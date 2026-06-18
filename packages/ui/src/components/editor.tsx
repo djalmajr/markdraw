@@ -22,7 +22,7 @@ import {
   indentUnit,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { isAdocFile, isMdFile } from "@asciimark/core/utils.ts";
+import { isAdocFile, isMdFile } from "@markdraw/core/utils.ts";
 import { asciidoc } from "../lib/adoc-language.ts";
 
 /** The markdown language config used for .md/.adoc buffers (and as the

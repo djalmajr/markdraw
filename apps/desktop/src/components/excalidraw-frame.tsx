@@ -2,12 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, onCleanup, onMount, untrack } from "solid-js";
 // Registers the <z-frame> custom element (from the published @zomme/frame core).
 import "@zomme/frame";
-import { SHORTCUTS, detectPlatform } from "@asciimark/core/keyboard-shortcuts.ts";
-import { effectiveKeys, matchBinding } from "@asciimark/core/keybindings.ts";
+import { SHORTCUTS, detectPlatform } from "@markdraw/core/keyboard-shortcuts.ts";
+import { effectiveKeys, matchBinding } from "@markdraw/core/keybindings.ts";
 // Canonical `.excalidraw` serializer — shared with the headless generator so the
 // on-disk envelope has a single source of truth (see packages/diagram).
-import { sceneToFile } from "@asciimark/diagram/scene.ts";
-import type { ExcalidrawScene } from "@asciimark/ui/composables/ai-context.ts";
+import { sceneToFile } from "@markdraw/diagram/scene.ts";
+import type { ExcalidrawScene } from "@markdraw/ui/composables/ai-context.ts";
 
 export interface Scene {
   appState?: Record<string, unknown>;

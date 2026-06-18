@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { render } from "@solidjs/testing-library";
 import { Preview, setupTocScrollTracking } from "./preview.tsx";
-import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
+import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
 
 interface BaseProps {
   html?: string;

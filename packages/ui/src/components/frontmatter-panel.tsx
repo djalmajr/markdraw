@@ -11,7 +11,7 @@ import IconActivity from "~icons/lucide/activity";
 import IconUsers from "~icons/lucide/users";
 import IconList from "~icons/lucide/list";
 import { Badge } from "./ui/badge.tsx";
-import { parseWikiLink, type Frontmatter } from "@asciimark/core/frontmatter.ts";
+import { parseWikiLink, type Frontmatter } from "@markdraw/core/frontmatter.ts";
 
 interface FrontmatterPanelProps {
   frontmatter: Frontmatter;

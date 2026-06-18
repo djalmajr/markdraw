@@ -1,9 +1,9 @@
 import type { Accessor } from "solid-js";
-import type { FSEntry, QualifiedPath } from "@asciimark/core/types.ts";
-import { makeTabId } from "@asciimark/core/tabs.ts";
-import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
-import type { TabStore } from "@asciimark/ui/composables/create-tab-store.ts";
-import { showToast } from "@asciimark/ui/components/ui/toast.tsx";
+import type { FSEntry, QualifiedPath } from "@markdraw/core/types.ts";
+import { makeTabId } from "@markdraw/core/tabs.ts";
+import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
+import type { TabStore } from "@markdraw/ui/composables/create-tab-store.ts";
+import { showToast } from "@markdraw/ui/components/ui/toast.tsx";
 import { readFileContent, readTree } from "./fs.ts";
 
 interface NavigationDeps {

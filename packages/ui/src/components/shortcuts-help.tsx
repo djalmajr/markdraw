@@ -8,9 +8,9 @@ import {
   type Platform,
   type ShortcutDescriptor,
   type ShortcutGroup,
-} from "@asciimark/core/keyboard-shortcuts.ts";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+} from "@markdraw/core/keyboard-shortcuts.ts";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 
 const messages = m as unknown as Record<string, () => string>;
 

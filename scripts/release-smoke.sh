@@ -33,7 +33,7 @@ step "5/7 vitest (UI)"
 # the desktop build resolves fine) breaks here, so it's caught pre-merge instead
 # of by the "Deploy Site" CI job afterward. Fast (vite-only, no Rust).
 step "6/7 site frontend build (plugin-less packages/ui consumer)"
-bun run --filter @asciimark/site build
+bun run --filter @markdraw/site build
 
 step "7/7 IPC contract"
 bash scripts/check-ipc-contract.sh

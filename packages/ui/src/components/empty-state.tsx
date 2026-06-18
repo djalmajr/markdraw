@@ -1,16 +1,16 @@
 import { createMemo, For, Show } from "solid-js";
-import type { RecentFile } from "@asciimark/core/recent-files.ts";
-import type { RecentFolder } from "@asciimark/core/recent-folders.ts";
-import type { FavoriteFile } from "@asciimark/core/favorites.ts";
-import { isFavorite } from "@asciimark/core/favorites.ts";
+import type { RecentFile } from "@markdraw/core/recent-files.ts";
+import type { RecentFolder } from "@markdraw/core/recent-folders.ts";
+import type { FavoriteFile } from "@markdraw/core/favorites.ts";
+import { isFavorite } from "@markdraw/core/favorites.ts";
 import IconFolderOpen from "~icons/lucide/folder-open";
 import IconFileText from "~icons/lucide/file-text";
 import IconX from "~icons/lucide/x";
 import IconUpload from "~icons/lucide/upload";
 import IconKeyboard from "~icons/lucide/keyboard";
 import IconStar from "~icons/lucide/star";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import { Button } from "./ui/button.tsx";
 
 interface RecentItem {

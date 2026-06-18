@@ -6,7 +6,7 @@ import IconSearch from "~icons/lucide/search";
 import IconType from "~icons/lucide/type";
 import IconTable from "~icons/lucide/table";
 
-import type { FontPrefs } from "@asciimark/core/font-prefs.ts";
+import type { FontPrefs } from "@markdraw/core/font-prefs.ts";
 import { Toggle } from "./ui/toggle.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
 import { Separator } from "./ui/separator.tsx";

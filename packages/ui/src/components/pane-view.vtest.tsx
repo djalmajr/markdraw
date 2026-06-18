@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { fireEvent, render } from "@solidjs/testing-library";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import { UNSUPPORTED_CONTENT } from "@asciimark/core/utils.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AppState } from "../composables/create-app-state.ts";
 import type { PaneStore } from "../composables/create-pane-store.ts";
 

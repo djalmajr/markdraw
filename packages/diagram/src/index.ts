@@ -1,5 +1,5 @@
-// Public entry for @asciimark/diagram. Consumers may also import the granular
-// subpaths directly (e.g. `@asciimark/diagram/scene.ts`) — the package exports
+// Public entry for @markdraw/diagram. Consumers may also import the granular
+// subpaths directly (e.g. `@markdraw/diagram/scene.ts`) — the package exports
 // `./*` → `./src/*`.
 
 export * from "./types.ts";

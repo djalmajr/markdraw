@@ -1,6 +1,6 @@
 // File System Access API wrapper with <input webkitdirectory> fallback
-import { IGNORED_DIRS } from "@asciimark/core/utils.ts";
-import type { FSEntry } from "@asciimark/core/types.ts";
+import { IGNORED_DIRS } from "@markdraw/core/utils.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
 
 export type { FSEntry };
 

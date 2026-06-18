@@ -4,7 +4,7 @@ import { splitProps } from "solid-js"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import * as PopoverPrimitive from "@kobalte/core/popover"
 
-import { cn } from "@asciimark/core/utils.ts"
+import { cn } from "@markdraw/core/utils.ts"
 
 const PopoverTrigger = PopoverPrimitive.Trigger
 

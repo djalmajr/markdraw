@@ -1,7 +1,7 @@
 import { Show } from "solid-js";
-import type { Heading } from "@asciimark/core/headings.ts";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import type { Heading } from "@markdraw/core/headings.ts";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import { Palette } from "./palette.tsx";
 
 export interface SymbolPaletteProps {

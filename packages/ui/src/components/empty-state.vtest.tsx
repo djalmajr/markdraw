@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@solidjs/testing-library";
-import { switchLocale } from "@asciimark/i18n/solid";
+import { switchLocale } from "@markdraw/i18n/solid";
 import { EmptyState } from "./empty-state.tsx";
 
 describe("EmptyState", () => {

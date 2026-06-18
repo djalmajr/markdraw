@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
-import { restoreSecrets, scrubSecrets } from "@asciimark/ai/secret-scrub.ts";
+import { restoreSecrets, scrubSecrets } from "@markdraw/ai/secret-scrub.ts";
 import {
   buildInProcessTools,
   resolveWorkspacePath,

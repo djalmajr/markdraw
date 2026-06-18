@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 
 export interface FileMatch {
   path: string;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AIMessage, AIProvider, AIStreamPart } from "@asciimark/ai/types.ts";
+import type { AIMessage, AIProvider, AIStreamPart } from "@markdraw/ai/types.ts";
 import { createAiChatStore } from "./create-ai-chat-store.ts";
 
 /** A controllable provider that replays a fixed list of stream parts. */

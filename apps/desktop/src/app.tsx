@@ -1,31 +1,31 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
-import { createConverter } from "@asciimark/core/converter.ts";
-import ConvertWorker from "@asciimark/core/convert-worker.ts?worker";
-import type { IndexedFile } from "@asciimark/core/file-index.ts";
-import type { Command } from "@asciimark/core/command-palette.ts";
-import { getRecentFiles, type RecentFile } from "@asciimark/core/recent-files.ts";
-import { makeTabId, type TabState } from "@asciimark/core/tabs.ts";
+import { createConverter } from "@markdraw/core/converter.ts";
+import ConvertWorker from "@markdraw/core/convert-worker.ts?worker";
+import type { IndexedFile } from "@markdraw/core/file-index.ts";
+import type { Command } from "@markdraw/core/command-palette.ts";
+import { getRecentFiles, type RecentFile } from "@markdraw/core/recent-files.ts";
+import { makeTabId, type TabState } from "@markdraw/core/tabs.ts";
 import { getVersion } from "@tauri-apps/api/app";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "./lib/chaos-invoke.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { createAppState } from "@asciimark/ui/composables/create-app-state.ts";
+import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
 import { exportChatArtifact, savePlanArtifact } from "./lib/ai-artifacts.ts";
-import { createMockProvider } from "@asciimark/ai/mock-provider.ts";
-import type { AIConfig, MCPServerConfig } from "@asciimark/ai/config-schema.ts";
-import type { AIProvider, AITool } from "@asciimark/ai/types.ts";
-import { createApprovalGate } from "@asciimark/ai/approval-policy.ts";
-import { resolveModel } from "@asciimark/ai/resolve-model.ts";
-import { resolveCredential } from "@asciimark/ai/resolve-credential.ts";
-import { createProvider as createAiProvider } from "@asciimark/ai/adapter.ts";
+import { createMockProvider } from "@markdraw/ai/mock-provider.ts";
+import type { AIConfig, MCPServerConfig } from "@markdraw/ai/config-schema.ts";
+import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
+import { createApprovalGate } from "@markdraw/ai/approval-policy.ts";
+import { resolveModel } from "@markdraw/ai/resolve-model.ts";
+import { resolveCredential } from "@markdraw/ai/resolve-credential.ts";
+import { createProvider as createAiProvider } from "@markdraw/ai/adapter.ts";
 import {
   replaceUnrestoredPlaceholders,
   restoreSecrets,
   scrubSecrets,
-} from "@asciimark/ai/secret-scrub.ts";
-import { withBuiltins } from "@asciimark/ai/builtin-providers.ts";
-import { isCliProviderKind } from "@asciimark/ai/cli-providers.ts";
+} from "@markdraw/ai/secret-scrub.ts";
+import { withBuiltins } from "@markdraw/ai/builtin-providers.ts";
+import { isCliProviderKind } from "@markdraw/ai/cli-providers.ts";
 import { createCliHost, probeCliSubscription } from "./lib/cli-agent.ts";
 import {
   getStoredAiEngine,
@@ -45,9 +45,9 @@ import {
   getStoredIndexingTier,
   setStoredIndexingTier,
   type IndexingTier,
-} from "@asciimark/core/ai-prefs.ts";
-import { providerCanEmbed } from "@asciimark/ai/config-schema.ts";
-import { createWorkspaceIndexer } from "@asciimark/ui/composables/create-workspace-indexer.ts";
+} from "@markdraw/core/ai-prefs.ts";
+import { providerCanEmbed } from "@markdraw/ai/config-schema.ts";
+import { createWorkspaceIndexer } from "@markdraw/ui/composables/create-workspace-indexer.ts";
 import {
   aiIndexDelete,
   aiIndexSearch,
@@ -55,9 +55,9 @@ import {
   aiIndexSync,
   type EmbeddingMeta,
 } from "./lib/ai-index.ts";
-import { fetchModels } from "@asciimark/ai/model-catalog.ts";
+import { fetchModels } from "@markdraw/ai/model-catalog.ts";
 import { loadAIConfig, loadUserAIConfig, saveAIConfig } from "./lib/ai-config.ts";
-import { buildMcpTools } from "@asciimark/ai/mcp-tools.ts";
+import { buildMcpTools } from "@markdraw/ai/mcp-tools.ts";
 import {
   createMcpBridge,
   authorizeMcpServer,
@@ -90,9 +90,9 @@ import {
 } from "./lib/ai-tools.ts";
 // Spec-based diagram generation (host-side, DOM-free): build + validate + merge
 // into the open project's .excalidraw files.
-import { composeBelow } from "@asciimark/diagram/compose.ts";
-import { generate } from "@asciimark/diagram/generate.ts";
-import { sceneToFile } from "@asciimark/diagram/scene.ts";
+import { composeBelow } from "@markdraw/diagram/compose.ts";
+import { generate } from "@markdraw/diagram/generate.ts";
+import { sceneToFile } from "@markdraw/diagram/scene.ts";
 import { loadCustomInstructions, loadSlashCommands } from "./lib/ai-commands.ts";
 import {
   buildMemoryScopesInstruction,
@@ -100,17 +100,17 @@ import {
   type MemoryScope,
 } from "./lib/ai-memory-scopes.ts";
 import { createGenerationGuard } from "./lib/generation-guard.ts";
-import type { CustomInstructions, SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
+import type { CustomInstructions, SlashCommandDef } from "@markdraw/ai/slash-commands.ts";
 import { deleteApiKey, getApiKey, setApiKey } from "./lib/ai-credentials.ts";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { streamingFetch } from "./lib/ai-sse-fetch.ts";
-import type { TabStore } from "@asciimark/ui/composables/create-tab-store.ts";
-import { AppShell } from "@asciimark/ui/components/app-shell.tsx";
-import type { EditorApi } from "@asciimark/ui/components/editor.tsx";
-import { SHORTCUTS } from "@asciimark/core/keyboard-shortcuts.ts";
-import { effectiveKeys, getStoredKeybindings, matchBinding } from "@asciimark/core/keybindings.ts";
-import * as m from "@asciimark/i18n";
-import { switchLocale, useLocale, locales as i18nLocales } from "@asciimark/i18n/solid";
+import type { TabStore } from "@markdraw/ui/composables/create-tab-store.ts";
+import { AppShell } from "@markdraw/ui/components/app-shell.tsx";
+import type { EditorApi } from "@markdraw/ui/components/editor.tsx";
+import { SHORTCUTS } from "@markdraw/core/keyboard-shortcuts.ts";
+import { effectiveKeys, getStoredKeybindings, matchBinding } from "@markdraw/core/keybindings.ts";
+import * as m from "@markdraw/i18n";
+import { switchLocale, useLocale, locales as i18nLocales } from "@markdraw/i18n/solid";
 import { getStoredTheme, applyTheme } from "./main.tsx";
 import { FileWatcher } from "./lib/watcher.ts";
 import { createFileLoader } from "./lib/file-loader.ts";
@@ -122,17 +122,17 @@ import {
   type ExcalidrawWriteInput,
   type Scene as ExcalidrawSceneData,
 } from "./components/excalidraw-frame.tsx";
-import { fileKind, isSupportedFile } from "@asciimark/core/utils.ts";
-import { dedupeTokenLabel, excalidrawSceneToOutline, excalidrawSelectionToContext } from "@asciimark/ui/composables/ai-context.ts";
-import { buildBacklinkIndex } from "@asciimark/core/backlinks.ts";
-import { flattenWorkspace } from "@asciimark/core/file-index.ts";
+import { fileKind, isSupportedFile } from "@markdraw/core/utils.ts";
+import { dedupeTokenLabel, excalidrawSceneToOutline, excalidrawSelectionToContext } from "@markdraw/ui/composables/ai-context.ts";
+import { buildBacklinkIndex } from "@markdraw/core/backlinks.ts";
+import { flattenWorkspace } from "@markdraw/core/file-index.ts";
 import { createDir, createFile, readFileByPath, readFileContent, writeFile } from "./lib/fs.ts";
 import { extractPdfText } from "./lib/pdf-text.ts";
 import {
   buildWorkspaceSymbols,
   type WorkspaceSymbol,
-} from "@asciimark/core/workspace-symbols.ts";
-import { confirm, confirmThree } from "@asciimark/ui/components/confirm-dialog.tsx";
+} from "@markdraw/core/workspace-symbols.ts";
+import { confirm, confirmThree } from "@markdraw/ui/components/confirm-dialog.tsx";
 import { SCRATCH_ROOT_ID, isScratchPath, makeScratchEntry, type ScratchKind } from "./lib/scratch.ts";
 import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
@@ -151,8 +151,8 @@ import { fetchReleaseHistory, type ReleaseHistoryEntry } from "./lib/release-not
 
 const RELEASES_INDEX_URL =
   "https://github.com/djalmajr/asciimark/releases";
-import { UpdateAvailableDialog } from "@asciimark/ui/components/update-available-dialog.tsx";
-import { ReleaseNotesDialog } from "@asciimark/ui/components/release-notes-dialog.tsx";
+import { UpdateAvailableDialog } from "@markdraw/ui/components/update-available-dialog.tsx";
+import { ReleaseNotesDialog } from "@markdraw/ui/components/release-notes-dialog.tsx";
 import { findInFiles } from "./lib/fs.ts";
 import { WindowControls } from "./components/window-controls.tsx";
 // Capture-to-Figma button is hidden for now (per request). Re-enable by
@@ -1935,7 +1935,7 @@ export function App() {
     return { ...result, file: { created, opened, path: target.absPath } };
   }
 
-  /** Build a diagram from a declarative spec (the @asciimark/diagram format) and
+  /** Build a diagram from a declarative spec (the @markdraw/diagram format) and
    *  write it into a workspace `.excalidraw` file. Generation is DOM-free and
    *  runs here on the host; the file on disk is the source of truth, so we never
    *  touch the guest's converter. The validation gate blocks broken diagrams
@@ -2159,7 +2159,7 @@ export function App() {
 
     // Restore all tabs synchronously (no file loading), mark as needsLoad.
     // Only the active tab gets its content loaded immediately.
-    let activeEntry: import("@asciimark/core/types.ts").FSEntry | null = null;
+    let activeEntry: import("@markdraw/core/types.ts").FSEntry | null = null;
     let activeRootId: string | null = null;
 
     for (const persisted of restorable) {
@@ -2214,7 +2214,7 @@ export function App() {
   // ── Tab handlers ────────────────────────────────────────────────────────
 
   /** Single click: load file in the active tab (replacing its content). */
-  async function handleLoadFileWithTab(entry: import("@asciimark/core/types.ts").FSEntry, rootId: string) {
+  async function handleLoadFileWithTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
     tabStore().loadInActiveTab(entry, rootId);
     await loader.loadFileContent(entry, true, false, rootId);
     tabStore().updateActiveTabContent({
@@ -2271,7 +2271,7 @@ export function App() {
    *  this around" gestures. If the file is already open in this
    *  pane, activate + pin in place rather than duplicating (VSCode
    *  semantics). */
-  async function handleOpenInNewTab(entry: import("@asciimark/core/types.ts").FSEntry, rootId: string) {
+  async function handleOpenInNewTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
     const store = tabStore();
     const existing = store.findTabByFile(entry.path, rootId);
     if (existing) {
@@ -2297,7 +2297,7 @@ export function App() {
    *  when the root/subtree is gone (stale entry). */
   function buildFolderListing(rootId: string, path: string, label: string): string | null {
     const FOLDER_MENTION_CAP = 200;
-    type Entry = import("@asciimark/core/types.ts").FSEntry;
+    type Entry = import("@markdraw/core/types.ts").FSEntry;
     const collect = (entries: Entry[], out: string[]): void => {
       for (const entry of entries) {
         if (entry.kind === "file") out.push(entry.path);
@@ -2919,7 +2919,7 @@ export function App() {
     tabStore().snapshotActiveTab();
 
     // Create a minimal empty tab
-    const emptyEntry: import("@asciimark/core/types.ts").FSEntry = {
+    const emptyEntry: import("@markdraw/core/types.ts").FSEntry = {
       name: "New Tab",
       kind: "file",
       path: "",

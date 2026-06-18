@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { restoreSecrets, scrubSecrets } from "@asciimark/ai/secret-scrub.ts";
+import { restoreSecrets, scrubSecrets } from "@markdraw/ai/secret-scrub.ts";
 import { exportChatArtifact, savePlanArtifact } from "./ai-artifacts.ts";
 
 const SECRET = "sk-w7a4JDfGvnZklepfHyg1unjtehDPpY0b";

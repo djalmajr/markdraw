@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { createRoot } from "solid-js";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import { installLocalStorageMock } from "@asciimark/core/test-utils.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import { installLocalStorageMock } from "@markdraw/core/test-utils.ts";
 import { createTabStore } from "./create-tab-store.ts";
 import { createPaneStore } from "./create-pane-store.ts";
 

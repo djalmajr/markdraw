@@ -1,7 +1,7 @@
 import IconX from "~icons/lucide/x";
 import IconDot from "~icons/lucide/dot";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import {
   AlertDialog,
   AlertDialogContent,

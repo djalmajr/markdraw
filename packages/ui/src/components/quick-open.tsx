@@ -1,8 +1,8 @@
 import { For, Show } from "solid-js";
-import type { IndexedFile } from "@asciimark/core/file-index.ts";
-import { fuzzyFilter, type RankedResult } from "@asciimark/core/fuzzy.ts";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import type { IndexedFile } from "@markdraw/core/file-index.ts";
+import { fuzzyFilter, type RankedResult } from "@markdraw/core/fuzzy.ts";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import { Palette } from "./palette.tsx";
 
 export interface QuickOpenProps {

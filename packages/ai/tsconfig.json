@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "paths": {
-      "@asciimark/core/*": ["../../packages/core/src/*"]
+      "@markdraw/core/*": ["../../packages/core/src/*"]
     }
   },
   "include": ["src"]

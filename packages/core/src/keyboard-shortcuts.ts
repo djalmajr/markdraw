@@ -15,7 +15,7 @@ export interface ShortcutDescriptor {
   id: string;
   group: ShortcutGroup;
   /** Message key resolved by the consumer against the i18n catalog. Kept
-   *  as a plain string so `core` stays decoupled from `@asciimark/i18n`. */
+   *  as a plain string so `core` stays decoupled from `@markdraw/i18n`. */
   descriptionKey: string;
   /** Modifier + key tokens. Modifiers come first; the LAST token is the
    *  bare key (single letter, "Tab", "Enter", etc). The display layer

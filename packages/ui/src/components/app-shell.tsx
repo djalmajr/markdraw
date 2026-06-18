@@ -1,11 +1,11 @@
 import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import { DragDropProvider, DragOverlay } from "@dnd-kit/solid";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
-import type { RecentFile } from "@asciimark/core/recent-files.ts";
-import { flattenWorkspace, type IndexedFile } from "@asciimark/core/file-index.ts";
-import { fileKind } from "@asciimark/core/utils.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
+import type { RecentFile } from "@markdraw/core/recent-files.ts";
+import { flattenWorkspace, type IndexedFile } from "@markdraw/core/file-index.ts";
+import { fileKind } from "@markdraw/core/utils.ts";
 import type { AppState } from "../composables/create-app-state.ts";
 import type { PaneStore } from "../composables/create-pane-store.ts";
 import type { TabStore } from "../composables/create-tab-store.ts";
@@ -22,7 +22,7 @@ import { fromTabDndId } from "./tab-bar.tsx";
 import { TocPanel } from "./toc-panel.tsx";
 import { fromRpTabDndId } from "./right-panel-tabs.tsx";
 import { BacklinksList, type BacklinkEntry } from "./backlinks-list.tsx";
-import type { SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
+import type { SlashCommandDef } from "@markdraw/ai/slash-commands.ts";
 import { AiPanel, type AiMentionEntry } from "./ai-panel.tsx";
 import { ChatHistoryMenu } from "./chat-history-menu.tsx";
 import { SelectionPopover } from "./selection-popover.tsx";
@@ -35,10 +35,10 @@ import {
 import { QuickOpen } from "./quick-open.tsx";
 import { ShortcutsHelp } from "./shortcuts-help.tsx";
 import { CommandPalette } from "./command-palette.tsx";
-import type { Command } from "@asciimark/core/command-palette.ts";
+import type { Command } from "@markdraw/core/command-palette.ts";
 import { SymbolPalette } from "./symbol-palette.tsx";
 import { WorkspaceSymbolPalette } from "./workspace-symbol-palette.tsx";
-import { extractHeadings, type Heading } from "@asciimark/core/headings.ts";
+import { extractHeadings, type Heading } from "@markdraw/core/headings.ts";
 import { FindInFiles, type FileMatch, type MatchSelection } from "./find-in-files.tsx";
 
 interface AppShellProps {
@@ -283,7 +283,7 @@ interface AppShellProps {
    *  symbol list (reading every doc's content) and AppShell renders
    *  + handles the navigation hop. Open/close toggle owned by host. */
   workspaceSymbolPaletteOpen?: boolean;
-  workspaceSymbols?: ReadonlyArray<import("@asciimark/core/workspace-symbols.ts").WorkspaceSymbol>;
+  workspaceSymbols?: ReadonlyArray<import("@markdraw/core/workspace-symbols.ts").WorkspaceSymbol>;
   onWorkspaceSymbolPaletteClose?: () => void;
 
   /** Find in Files (Cmd/Ctrl+Shift+F). AppShell renders the modal; the

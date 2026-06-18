@@ -1,8 +1,8 @@
 import { createEffect, createMemo, Show, For, onMount, onCleanup, type JSX } from "solid-js";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import { fileKind, fileManagerKind } from "@asciimark/core/utils.ts";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import { fileKind, fileManagerKind } from "@markdraw/core/utils.ts";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import type { ExpandAction } from "./file-tree.tsx";
 import IconChevronRight from "~icons/lucide/chevron-right";
 import IconFolder from "~icons/lucide/folder";

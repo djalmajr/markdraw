@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
-import { switchLocale } from "@asciimark/i18n/solid";
+import { switchLocale } from "@markdraw/i18n/solid";
 
 // The viewer's labels are i18n'd; pin English so the text assertions below
 // match regardless of the host's detected locale.

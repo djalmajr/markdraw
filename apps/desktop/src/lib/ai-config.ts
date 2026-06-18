@@ -3,9 +3,9 @@
 // WITHOUT keys (keys live in the keychain — see ai-credentials.ts).
 
 import { invoke } from "./chaos-invoke.ts";
-import type { AIConfig, UserAIConfig } from "@asciimark/ai/config-schema.ts";
-import { parseUserConfig } from "@asciimark/ai/config-schema.ts";
-import { withBuiltins } from "@asciimark/ai/builtin-providers.ts";
+import type { AIConfig, UserAIConfig } from "@markdraw/ai/config-schema.ts";
+import { parseUserConfig } from "@markdraw/ai/config-schema.ts";
+import { withBuiltins } from "@markdraw/ai/builtin-providers.ts";
 
 /** Load the fully-resolved config: ai.json (if any) merged over the builtins. */
 export async function loadAIConfig(): Promise<AIConfig> {

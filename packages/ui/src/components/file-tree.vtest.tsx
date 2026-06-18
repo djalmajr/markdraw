@@ -3,7 +3,7 @@ import { createSignal } from "solid-js";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 
 afterEach(cleanup);
-import type { WorkspaceRoot, FSEntry } from "@asciimark/core/types.ts";
+import type { WorkspaceRoot, FSEntry } from "@markdraw/core/types.ts";
 import { AppProvider } from "../context/app-context.tsx";
 import type { AppState } from "../composables/create-app-state.ts";
 import { FileTree } from "./file-tree.tsx";

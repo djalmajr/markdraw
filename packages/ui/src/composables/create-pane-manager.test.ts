@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { installLocalStorageMock } from "@asciimark/core/test-utils.ts";
+import { installLocalStorageMock } from "@markdraw/core/test-utils.ts";
 import { createPaneManager } from "./create-pane-manager.ts";
 
 installLocalStorageMock();

@@ -5,9 +5,9 @@
 import { invoke } from "./chaos-invoke.ts";
 import { getApiKey } from "./ai-credentials.ts";
 import { createReconnectBreaker } from "./reconnect-breaker.ts";
-import type { MCPBridge, MCPToolDescriptor } from "@asciimark/ai/mcp-tools.ts";
-import type { MCPServerConfig } from "@asciimark/ai/config-schema.ts";
-import { expandRecord, type HostResolvers } from "@asciimark/ai/resolve-credential.ts";
+import type { MCPBridge, MCPToolDescriptor } from "@markdraw/ai/mcp-tools.ts";
+import type { MCPServerConfig } from "@markdraw/ai/config-schema.ts";
+import { expandRecord, type HostResolvers } from "@markdraw/ai/resolve-credential.ts";
 
 export interface McpServerStatus {
   id: string;

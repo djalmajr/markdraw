@@ -4,7 +4,7 @@ import { splitProps } from "solid-js"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import * as TabsPrimitive from "@kobalte/core/tabs"
 
-import { cn } from "@asciimark/core/utils.ts"
+import { cn } from "@markdraw/core/utils.ts"
 
 const Tabs = TabsPrimitive.Root
 

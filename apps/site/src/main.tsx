@@ -2,7 +2,7 @@
 import { render } from "solid-js/web";
 import { RouterProvider } from "@tanstack/solid-router";
 import { router } from "./router.tsx";
-import "@asciimark/ui/styles/index.css";
+import "@markdraw/ui/styles/index.css";
 import "./styles.css";
 
 const root = document.getElementById("root");

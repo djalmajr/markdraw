@@ -5,7 +5,7 @@
 // unresolvable after restart. So anything leaving the session for a REAL
 // file is restored here, at the write site.
 
-import { slugifyTitle } from "@asciimark/ui/lib/chat-export.ts";
+import { slugifyTitle } from "@markdraw/ui/lib/chat-export.ts";
 
 export interface PlanArtifactDeps {
   /** Map session `[secret-N]` placeholders back to their real values. */

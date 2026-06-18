@@ -3,7 +3,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { message } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
-import * as m from "@asciimark/i18n";
+import * as m from "@markdraw/i18n";
 import {
   initialProgressState,
   reduceDownloadEvent,

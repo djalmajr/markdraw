@@ -17,17 +17,17 @@ import {
   writeHtml as tauriWriteHtml,
 } from "@tauri-apps/plugin-clipboard-manager";
 
-import { Button } from "@asciimark/ui/components/ui/button.tsx";
+import { Button } from "@markdraw/ui/components/ui/button.tsx";
 import {
   TextField,
   TextFieldInput,
-} from "@asciimark/ui/components/ui/text-field.tsx";
+} from "@markdraw/ui/components/ui/text-field.tsx";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@asciimark/ui/components/ui/popover.tsx";
-import { cn } from "@asciimark/core/utils.ts";
+} from "@markdraw/ui/components/ui/popover.tsx";
+import { cn } from "@markdraw/core/utils.ts";
 
 const STORAGE_KEY = "asciimark.figma-capture-key";
 const SCRIPT_ID = "figma-capture-script";

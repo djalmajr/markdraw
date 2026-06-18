@@ -5,9 +5,9 @@
     "jsxImportSource": "solid-js",
     "paths": {
       "~/*": ["./src/*"],
-      "@asciimark/ai/*": ["../../packages/ai/src/*"],
-      "@asciimark/core/*": ["../../packages/core/src/*"],
-      "@asciimark/ui/*": ["../../packages/ui/src/*"]
+      "@markdraw/ai/*": ["../../packages/ai/src/*"],
+      "@markdraw/core/*": ["../../packages/core/src/*"],
+      "@markdraw/ui/*": ["../../packages/ui/src/*"]
     }
   },
   "include": [

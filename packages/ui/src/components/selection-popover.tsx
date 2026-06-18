@@ -1,7 +1,7 @@
 import { Show, type JSX } from "solid-js";
 import IconSparkles from "~icons/lucide/sparkles";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 
 // Platform-correct hint for the ⌘I/Ctrl+I binding (same detection style as
 // editor-diff's MOD_LABEL — a hardcoded ⌘ read wrong on Windows).

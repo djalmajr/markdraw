@@ -3,8 +3,8 @@ import IconSearch from "~icons/lucide/search";
 import IconSlidersHorizontal from "~icons/lucide/sliders-horizontal";
 import IconCheck from "~icons/lucide/check";
 import IconChevronDown from "~icons/lucide/chevron-down";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 
 export interface ModelOption {

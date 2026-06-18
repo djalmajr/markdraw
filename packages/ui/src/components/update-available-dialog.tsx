@@ -1,8 +1,8 @@
 import { Show, createMemo } from "solid-js";
 import MarkdownIt from "markdown-it";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
-import { formatBytes } from "@asciimark/core/format-bytes.ts";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
+import { formatBytes } from "@markdraw/core/format-bytes.ts";
 import {
   AlertDialog,
   AlertDialogContent,

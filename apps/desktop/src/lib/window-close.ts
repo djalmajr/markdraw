@@ -3,7 +3,7 @@
 // exercised in unit tests — the Tauri runtime would otherwise be
 // untestable from bun without a full app shell.
 
-import type { CloseBehavior } from "@asciimark/core/window-prefs.ts";
+import type { CloseBehavior } from "@markdraw/core/window-prefs.ts";
 
 /**
  * Three outcomes — chosen because letting the Tauri default close

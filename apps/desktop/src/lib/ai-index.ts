@@ -13,7 +13,7 @@ export interface EmbeddingMeta {
   dim: number;
 }
 
-/** A heading-aware chunk to index (from @asciimark/core chunkDocument). */
+/** A heading-aware chunk to index (from @markdraw/core chunkDocument). */
 export interface IndexChunkInput {
   ord: number;
   heading: string;

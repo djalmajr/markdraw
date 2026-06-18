@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import type { Heading } from "@asciimark/core/headings.ts";
+import type { Heading } from "@markdraw/core/headings.ts";
 import { SymbolPalette } from "./symbol-palette.tsx";
 
 afterEach(cleanup);

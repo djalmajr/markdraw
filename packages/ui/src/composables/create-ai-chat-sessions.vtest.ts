@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createRoot } from "solid-js";
-import type { AIProvider } from "@asciimark/ai/types.ts";
-import { getChatMessages, setChatMessages } from "@asciimark/core/ai-chat-sessions.ts";
+import type { AIProvider } from "@markdraw/ai/types.ts";
+import { getChatMessages, setChatMessages } from "@markdraw/core/ai-chat-sessions.ts";
 import { createAiChatSessions, deriveAiChatTitle } from "./create-ai-chat-sessions.ts";
 
 /** Replays a fixed stream. */

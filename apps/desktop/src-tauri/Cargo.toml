@@ -1,11 +1,11 @@
 [package]
-name = "asciimark"
+name = "markdraw"
 version = "0.21.2"
 description = "Markdraw Desktop - AsciiDoc & Markdown viewer"
 edition = "2021"
 
 [lib]
-name = "asciimark_lib"
+name = "markdraw_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

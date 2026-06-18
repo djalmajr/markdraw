@@ -1,5 +1,5 @@
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 
 // The Privacy page mixes prose with inline <code> / <strong> / <a>
 // tags. The catalog ships those tags as part of the translated

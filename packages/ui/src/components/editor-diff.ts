@@ -9,8 +9,8 @@
 
 import { type EditorState, type Range, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
-import { diffLines, type DiffOp } from "@asciimark/core/line-diff.ts";
-import * as m from "@asciimark/i18n";
+import { diffLines, type DiffOp } from "@markdraw/core/line-diff.ts";
+import * as m from "@markdraw/i18n";
 
 /** A live diff region: the applied (new) span plus the old text to restore. */
 export interface AiDiffRegion {

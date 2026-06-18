@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import type { FSEntry } from "@asciimark/core/types.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
 
 // Shared file-tree drag & drop helpers, in their own module so file-tree.tsx
 // and file-tree-item.tsx can both use them without an import cycle (they

@@ -1,8 +1,8 @@
 import type { Accessor, Setter } from "solid-js";
 import { writeText as clipboardWriteText } from "@tauri-apps/plugin-clipboard-manager";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import { copyPath, createDir, createFile, movePath, openDirectory, readTree, renameFile, trashPath, writeFile } from "./fs.ts";
 import { joinRelative, nextAvailableName, withDefaultExtension } from "./fs-paths.ts";
 import type { FileWatcher } from "./watcher.ts";

@@ -6,7 +6,7 @@ import * as SelectPrimitive from "@kobalte/core/select"
 import IconCheck from "~icons/lucide/check"
 import IconChevronDown from "~icons/lucide/chevron-down"
 
-import { cn } from "@asciimark/core/utils.ts"
+import { cn } from "@markdraw/core/utils.ts"
 
 const Select = SelectPrimitive.Root
 const SelectValue = SelectPrimitive.Value

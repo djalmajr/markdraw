@@ -5,10 +5,10 @@ import {
   getRecentCommandIds,
   recordCommandUse,
   type Command,
-} from "@asciimark/core/command-palette.ts";
-import { detectPlatform } from "@asciimark/core/keyboard-shortcuts.ts";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+} from "@markdraw/core/command-palette.ts";
+import { detectPlatform } from "@markdraw/core/keyboard-shortcuts.ts";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import { Palette } from "./palette.tsx";
 
 export interface CommandPaletteProps {

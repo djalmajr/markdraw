@@ -5,7 +5,7 @@
 // servers behind explicit approval (remembered per root + config hash, TOFU).
 
 import { invoke } from "./chaos-invoke.ts";
-import type { MCPServerConfig } from "@asciimark/ai/config-schema.ts";
+import type { MCPServerConfig } from "@markdraw/ai/config-schema.ts";
 
 /** One server as normalized by the Rust `mcp_discover` command. */
 export interface DiscoveredMcpServer {

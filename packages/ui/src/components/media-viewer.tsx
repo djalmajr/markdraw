@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import { createPanZoom } from "../composables/create-pan-zoom.ts";
 import { ZoomControls } from "./zoom-controls.tsx";
 

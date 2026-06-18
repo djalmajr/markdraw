@@ -1,8 +1,8 @@
 import { onCleanup, onMount } from "solid-js";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import { isSupportedFile } from "@asciimark/core/utils.ts";
-import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import { isSupportedFile } from "@markdraw/core/utils.ts";
+import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import { readTree } from "./fs.ts";
 
 interface TauriDndDeps {

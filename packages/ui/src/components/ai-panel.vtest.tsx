@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
-import { createMockProvider } from "@asciimark/ai/mock-provider.ts";
-import type { SlashCommandDef } from "@asciimark/ai/slash-commands.ts";
-import type { AIMessage, AIProvider } from "@asciimark/ai/types.ts";
+import { createMockProvider } from "@markdraw/ai/mock-provider.ts";
+import type { SlashCommandDef } from "@markdraw/ai/slash-commands.ts";
+import type { AIMessage, AIProvider } from "@markdraw/ai/types.ts";
 import { createAiChatStore, type AiChatStore } from "../composables/create-ai-chat-store.ts";
 import {
   buildContextPreamble,

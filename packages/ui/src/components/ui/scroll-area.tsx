@@ -8,7 +8,7 @@ import {
   splitProps,
 } from "solid-js";
 
-import { cn } from "@asciimark/core/utils.ts";
+import { cn } from "@markdraw/core/utils.ts";
 
 /**
  * ScrollArea — a cross-platform overlay scrollbar (shadcn/Radix-style), built

@@ -1,7 +1,7 @@
 import { For, Show } from "solid-js";
 import MarkdownIt from "markdown-it";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import {
   AlertDialog,
   AlertDialogContent,

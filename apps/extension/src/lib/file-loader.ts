@@ -1,9 +1,9 @@
 import type { Accessor } from "solid-js";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import { getIncludePaths } from "@asciimark/core/asciidoc.ts";
-import { getMarkdownIncludePaths } from "@asciimark/core/markdown.ts";
-import { isMdFile, isSupportedFile } from "@asciimark/core/utils.ts";
-import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import { getIncludePaths } from "@markdraw/core/asciidoc.ts";
+import { getMarkdownIncludePaths } from "@markdraw/core/markdown.ts";
+import { isMdFile, isSupportedFile } from "@markdraw/core/utils.ts";
+import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import { setHashFromPath } from "./hash.ts";
 import {
   readFileContent,

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "solid-js";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import { UNSUPPORTED_CONTENT } from "@asciimark/core/utils.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import { createAppState, type ThemeMode } from "./create-app-state.ts";
 
 // Storage helpers — happy-dom ships localStorage, but we still clear

@@ -32,7 +32,7 @@ step "4/10 vitest (UI components)"
 # NO unplugin-icons, so a stray `~icons/*` import in a shared component is caught
 # here rather than in the post-merge "Deploy Site" CI job. (smoke runs this too.)
 step "5/10 site frontend build (plugin-less packages/ui consumer)"
-bun run --filter @asciimark/site build
+bun run --filter @markdraw/site build
 
 step "6/10 cargo coverage (Rust)"
 (cd apps/desktop/src-tauri && ASCIIMARK_EMBED_TEST_MANIFEST=1 cargo llvm-cov --lib --summary-only)

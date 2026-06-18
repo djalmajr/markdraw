@@ -4,7 +4,7 @@
 // stays Tauri-free and the whole thing is unit-testable; the extension, which
 // has no real filesystem, simply never constructs it.
 
-import { chunkDocument } from "@asciimark/core/index-chunking.ts";
+import { chunkDocument } from "@markdraw/core/index-chunking.ts";
 
 export type IndexingTier = "off" | "lite" | "full";
 

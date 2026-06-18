@@ -1,8 +1,8 @@
 import { For, Show, createSignal, onMount } from "solid-js";
-import { Button } from "@asciimark/ui/components/ui/button.tsx";
+import { Button } from "@markdraw/ui/components/ui/button.tsx";
 import { Link } from "@tanstack/solid-router";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 
 // Features and downloads carry locale-resolving thunks instead of
 // dynamic key lookups so Vite + Rollup can tree-shake the i18n

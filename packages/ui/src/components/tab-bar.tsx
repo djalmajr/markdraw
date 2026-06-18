@@ -1,7 +1,7 @@
 import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
 import { useDraggable, useDroppable } from "@dnd-kit/solid";
 import type { TabStore } from "../composables/create-tab-store.ts";
-import type { TabState } from "@asciimark/core/tabs.ts";
+import type { TabState } from "@markdraw/core/tabs.ts";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -10,8 +10,8 @@ import {
   ContextMenuTrigger,
 } from "./ui/context-menu.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import IconX from "~icons/lucide/x";
 import IconPlus from "~icons/lucide/plus";
 import IconChevronLeft from "~icons/lucide/chevron-left";

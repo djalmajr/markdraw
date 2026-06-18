@@ -4,7 +4,7 @@
 // boundary, `safeJsonParse` + `tryParse`, normalize-on-write, lenient-on-read
 // (a single bad entry is filtered, never session-fatal).
 //
-// Core has NO dependency on `@asciimark/ai`/SolidJS (it is the base package the
+// Core has NO dependency on `@markdraw/ai`/SolidJS (it is the base package the
 // others build on), so the chat message/tool shapes are redeclared structurally
 // here — the same precedent as `AIEngineId` in `ai-prefs.ts`. The UI's
 // `ChatTurn`/`ToolActivity` map onto `PersistedChatMessage`/`PersistedToolActivity`.

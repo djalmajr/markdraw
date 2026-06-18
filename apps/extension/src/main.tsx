@@ -1,9 +1,9 @@
 /* @refresh reload */
 import { render } from "solid-js/web";
 import { App } from "./app.tsx";
-import "@asciimark/ui/styles/index.css";
-import { applyCodeTheme, getStoredCodeTheme } from "@asciimark/core/code-theme.ts";
-import { applyFontPrefs, getStoredFontPrefs } from "@asciimark/core/font-prefs.ts";
+import "@markdraw/ui/styles/index.css";
+import { applyCodeTheme, getStoredCodeTheme } from "@markdraw/core/code-theme.ts";
+import { applyFontPrefs, getStoredFontPrefs } from "@markdraw/core/font-prefs.ts";
 
 export type ThemeMode = "system" | "light" | "dark";
 

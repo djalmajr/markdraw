@@ -6,9 +6,9 @@ import IconArchive from "~icons/lucide/archive";
 import IconArchiveRestore from "~icons/lucide/archive-restore";
 import IconTrash from "~icons/lucide/trash-2";
 import IconEllipsis from "~icons/lucide/ellipsis";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
-import { groupChatSessions, searchChatSessions } from "@asciimark/core/ai-chat-sessions.ts";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
+import { groupChatSessions, searchChatSessions } from "@markdraw/core/ai-chat-sessions.ts";
 import type { AiChatSessionMeta } from "../composables/create-ai-chat-sessions.ts";
 import {
   DropdownMenu,
@@ -40,7 +40,7 @@ export interface ChatHistoryMenuProps {
  * The chat-history dropdown: a searchable list grouped into Today / Earlier /
  * Archived, with per-row archive·restore·delete. Uses a kobalte `Popover` (not
  * a menu) so it can host a focusable search input. Pure presentational — the
- * grouping/search logic comes from `@asciimark/core`.
+ * grouping/search logic comes from `@markdraw/core`.
  */
 export function ChatHistoryMenu(props: ChatHistoryMenuProps): JSX.Element {
   const [open, setOpen] = createSignal(false);

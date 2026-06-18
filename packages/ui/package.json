@@ -1,5 +1,5 @@
 {
-  "name": "@asciimark/ui",
+  "name": "@markdraw/ui",
   "version": "1.0.0",
   "type": "module",
   "private": true,
@@ -14,9 +14,9 @@
     "test:coverage": "bun test --coverage && vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
-    "@asciimark/ai": "workspace:*",
-    "@asciimark/core": "workspace:*",
-    "@asciimark/i18n": "workspace:*",
+    "@markdraw/ai": "workspace:*",
+    "@markdraw/core": "workspace:*",
+    "@markdraw/i18n": "workspace:*",
     "@codemirror/commands": "^6.8.1",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language": "^6.12.1",

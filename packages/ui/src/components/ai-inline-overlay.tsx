@@ -8,10 +8,10 @@ import {
   onCleanup,
   type JSX,
 } from "solid-js";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import IconSparkles from "~icons/lucide/sparkles";
-import { INLINE_ACTIONS } from "@asciimark/ai/actions.ts";
+import { INLINE_ACTIONS } from "@markdraw/ai/actions.ts";
 import type { AiInlineStore } from "../composables/create-ai-inline-store.ts";
 import { Button } from "./ui/button.tsx";
 

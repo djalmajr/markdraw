@@ -1,9 +1,9 @@
 import { createSignal, createEffect, onCleanup, Show } from "solid-js";
-import { createConverter } from "@asciimark/core/converter.ts";
-import ConvertWorker from "@asciimark/core/convert-worker.ts?worker";
-import { createAppState } from "@asciimark/ui/composables/create-app-state.ts";
-import { AppShell } from "@asciimark/ui/components/app-shell.tsx";
-import { FileAccessWarning } from "@asciimark/ui/components/file-access-warning.tsx";
+import { createConverter } from "@markdraw/core/converter.ts";
+import ConvertWorker from "@markdraw/core/convert-worker.ts?worker";
+import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
+import { AppShell } from "@markdraw/ui/components/app-shell.tsx";
+import { FileAccessWarning } from "@markdraw/ui/components/file-access-warning.tsx";
 import { getStoredTheme, applyTheme } from "./main.tsx";
 import { displayPathFromUrl } from "./lib/url-source.ts";
 import { FileWatcher } from "./lib/watcher.ts";

@@ -4,7 +4,7 @@ import { splitProps } from "solid-js"
 import * as AlertDialogPrimitive from "@kobalte/core/alert-dialog"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 
-import { cn } from "@asciimark/core/utils.ts"
+import { cn } from "@markdraw/core/utils.ts"
 
 const AlertDialog = AlertDialogPrimitive.Root
 const AlertDialogTrigger = AlertDialogPrimitive.Trigger

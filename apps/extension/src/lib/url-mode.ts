@@ -1,5 +1,5 @@
 import type { Setter } from "solid-js";
-import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
+import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import { simpleHash } from "./hash.ts";
 import {
   fetchFileByUrl,

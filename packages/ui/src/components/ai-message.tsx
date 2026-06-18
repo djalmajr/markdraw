@@ -1,6 +1,6 @@
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import IconCheck from "~icons/lucide/check";
 import IconCopy from "~icons/lucide/copy";
 import IconPencil from "~icons/lucide/pencil";

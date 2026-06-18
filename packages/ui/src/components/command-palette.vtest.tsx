@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import type { Command } from "@asciimark/core/command-palette.ts";
+import type { Command } from "@markdraw/core/command-palette.ts";
 import { CommandPalette } from "./command-palette.tsx";
 
 afterEach(cleanup);

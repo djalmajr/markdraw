@@ -33,7 +33,7 @@ jobs:
         run: bun install
 
       - name: Build site
-        run: bun run --filter @asciimark/site build
+        run: bun run --filter @markdraw/site build
 
       - name: Publish site to GitHub Pages branch
         env:

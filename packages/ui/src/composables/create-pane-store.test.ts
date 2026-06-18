@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import { installLocalStorageMock } from "@asciimark/core/test-utils.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import { installLocalStorageMock } from "@markdraw/core/test-utils.ts";
 import { createPaneStore } from "./create-pane-store.ts";
 
 // createPaneStore now seeds tableWrap from the stored default, so it

@@ -24,21 +24,21 @@ import IconKeyboard from "~icons/lucide/keyboard";
 import IconRotate from "~icons/lucide/rotate-ccw";
 import IconShield from "~icons/lucide/shield";
 import IconInfo from "~icons/lucide/info";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import {
   SHORTCUTS,
   detectPlatform,
   groupShortcuts,
   type Platform,
-} from "@asciimark/core/keyboard-shortcuts.ts";
+} from "@markdraw/core/keyboard-shortcuts.ts";
 import {
   effectiveKeys,
   formatBinding,
   getStoredKeybindings,
   resetStoredKeybinding,
   setStoredKeybinding,
-} from "@asciimark/core/keybindings.ts";
+} from "@markdraw/core/keybindings.ts";
 import {
   AlertDialog,
   AlertDialogContent,

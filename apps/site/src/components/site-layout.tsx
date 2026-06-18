@@ -1,13 +1,13 @@
 import { For } from "solid-js";
 import { Link, Outlet } from "@tanstack/solid-router";
-import { Button } from "@asciimark/ui/components/ui/button.tsx";
+import { Button } from "@markdraw/ui/components/ui/button.tsx";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@asciimark/ui/components/ui/popover.tsx";
-import * as m from "@asciimark/i18n";
-import { locales, switchLocale, useLocale } from "@asciimark/i18n/solid";
+} from "@markdraw/ui/components/ui/popover.tsx";
+import * as m from "@markdraw/i18n";
+import { locales, switchLocale, useLocale } from "@markdraw/i18n/solid";
 
 function GithubIcon() {
   return (

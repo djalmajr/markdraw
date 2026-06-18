@@ -4,7 +4,7 @@ import { splitProps } from "solid-js"
 import type { PolymorphicProps } from "@kobalte/core"
 import * as SwitchPrimitive from "@kobalte/core/switch"
 
-import { cn } from "@asciimark/core/utils.ts"
+import { cn } from "@markdraw/core/utils.ts"
 
 type SwitchRootProps = SwitchPrimitive.SwitchRootProps & {
   class?: string | undefined

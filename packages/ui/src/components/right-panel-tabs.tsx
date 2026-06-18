@@ -7,8 +7,8 @@ import IconX from "~icons/lucide/x";
 import IconCheck from "~icons/lucide/check";
 import IconChevronLeft from "~icons/lucide/chevron-left";
 import IconChevronRight from "~icons/lucide/chevron-right";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import {
   DropdownMenu,
   DropdownMenuContent,

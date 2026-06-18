@@ -8,7 +8,7 @@
 /** Indexing tier (ADR-002). Logic is M2; M1 only persists/shows the choice. */
 type IndexingTier = "off" | "lite" | "full";
 
-/** Which SDK speaks to providers. Mirrors `AIEngineId` in `@asciimark/ai`
+/** Which SDK speaks to providers. Mirrors `AIEngineId` in `@markdraw/ai`
  *  (duplicated here so core stays free of an ai dependency — core is the base
  *  package that ai itself depends on). */
 type AIEngineId = "ai-sdk" | "tanstack";

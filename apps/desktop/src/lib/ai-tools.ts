@@ -11,7 +11,7 @@ import type {
   ExcalidrawWriteInput,
   ExcalidrawWriteResult,
 } from "../components/excalidraw-frame.tsx";
-import type { AITool } from "@asciimark/ai/types.ts";
+import type { AITool } from "@markdraw/ai/types.ts";
 
 /** Filesystem bridge for the creation/read tools. Paths are workspace-relative
  *  and validated by the Rust side (rejects `..`/absolute paths, creates parent
@@ -70,10 +70,10 @@ export interface ExcalidrawMermaidOutcome extends ExcalidrawWriteResult {
 export type ExcalidrawGenerateMode = "replace-all" | "append";
 
 /** Input of the generateExcalidrawDiagram dep: a declarative DiagramSpec (the
- *  @asciimark/diagram format, validated host-side), a placement mode, and the
+ *  @markdraw/diagram format, validated host-side), a placement mode, and the
  *  resolved target file the diagram is written into. */
 export interface ExcalidrawGenerateRequest {
-  /** A DiagramSpec object — shape-validated and laid out by @asciimark/diagram. */
+  /** A DiagramSpec object — shape-validated and laid out by @markdraw/diagram. */
   spec: unknown;
   mode: ExcalidrawGenerateMode;
   target: ExcalidrawWriteTarget;

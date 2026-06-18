@@ -10,7 +10,7 @@
 // Excalidraw scene is held in host memory (see `scratchScenes` in app.tsx). Disk
 // is touched only on an explicit Save (save-as).
 
-import type { FSEntry } from "@asciimark/core/types.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
 
 export type ScratchKind = "markdown" | "asciidoc" | "excalidraw";
 

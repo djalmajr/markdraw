@@ -6,7 +6,7 @@ import {
   onMount,
   type Setter,
 } from "solid-js";
-import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@asciimark/core/types.ts";
+import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@markdraw/core/types.ts";
 import { createPaneManager, type PaneManager } from "./create-pane-manager.ts";
 import { createAiChatSessions } from "./create-ai-chat-sessions.ts";
 import { createAiInlineStore } from "./create-ai-inline-store.ts";
@@ -16,49 +16,49 @@ import {
   buildContextPreamble,
   dedupeTokenLabel,
 } from "./ai-context.ts";
-import { getChatSessionsIndex } from "@asciimark/core/ai-chat-sessions.ts";
+import { getChatSessionsIndex } from "@markdraw/core/ai-chat-sessions.ts";
 import {
   getRightPanelTabsState,
   setRightPanelTabsState,
   type SpecialTabState,
-} from "@asciimark/core/right-panel-tabs.ts";
-import { getStoredAiMode, setStoredAiMode, type AIChatMode } from "@asciimark/core/ai-prefs.ts";
+} from "@markdraw/core/right-panel-tabs.ts";
+import { getStoredAiMode, setStoredAiMode, type AIChatMode } from "@markdraw/core/ai-prefs.ts";
 import { formatChatTranscript } from "../lib/chat-export.ts";
-import type { AIProvider, AITool } from "@asciimark/ai/types.ts";
-import type { CustomInstructions } from "@asciimark/ai/slash-commands.ts";
-import type { ConvertOptions, ConvertResult } from "@asciimark/core/converter.ts";
-import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
+import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
+import type { CustomInstructions } from "@markdraw/ai/slash-commands.ts";
+import type { ConvertOptions, ConvertResult } from "@markdraw/core/converter.ts";
+import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
 import {
   applyCodeTheme,
-} from "@asciimark/core/code-theme.ts";
+} from "@markdraw/core/code-theme.ts";
 import {
   computeReadingMetrics,
   computeReadingMetricsFromHtml,
   formatReadingTime,
   type ReadingMetrics,
-} from "@asciimark/core/reading-metrics.ts";
+} from "@markdraw/core/reading-metrics.ts";
 import {
   getReaderMode,
   setReaderMode as persistReaderMode,
-} from "@asciimark/core/reader-mode.ts";
+} from "@markdraw/core/reader-mode.ts";
 import {
   type BacklinkIndex,
   findBacklinks,
-} from "@asciimark/core/backlinks.ts";
+} from "@markdraw/core/backlinks.ts";
 import {
   type RecentFile,
   addRecentFile,
   clearRecentFiles,
   getRecentFiles,
   removeRecentFile,
-} from "@asciimark/core/recent-files.ts";
+} from "@markdraw/core/recent-files.ts";
 import {
   type RecentFolder,
   addRecentFolder,
   clearRecentFolders,
   getRecentFolders,
   removeRecentFolder,
-} from "@asciimark/core/recent-folders.ts";
+} from "@markdraw/core/recent-folders.ts";
 import {
   type FontPrefs,
   FontFamilies,
@@ -66,7 +66,7 @@ import {
   applyFontPrefs,
   getStoredFontPrefs,
   setStoredFontPrefs,
-} from "@asciimark/core/font-prefs.ts";
+} from "@markdraw/core/font-prefs.ts";
 import {
   type IndentMode,
   getStoredIndentMode,
@@ -81,7 +81,7 @@ import {
   setStoredShowInvisibles,
   setStoredSyncScroll,
   setStoredWrapText,
-} from "@asciimark/core/editor-prefs.ts";
+} from "@markdraw/core/editor-prefs.ts";
 import {
   getStoredRespectGitignore,
   getStoredShowAllDirs,
@@ -91,20 +91,20 @@ import {
   setStoredShowAllDirs,
   setStoredShowAllFiles,
   setStoredShowHiddenEntries,
-} from "@asciimark/core/file-tree-prefs.ts";
+} from "@markdraw/core/file-tree-prefs.ts";
 import {
   type CloseBehavior,
   getStoredCloseBehavior,
   setStoredCloseBehavior,
-} from "@asciimark/core/window-prefs.ts";
+} from "@markdraw/core/window-prefs.ts";
 import {
   type FavoriteFile,
   addFavorite,
   getFavorites,
   isFavorite,
   removeFavorite,
-} from "@asciimark/core/favorites.ts";
-import { fileKind, isMdFile, UNSUPPORTED_CONTENT } from "@asciimark/core/utils.ts";
+} from "@markdraw/core/favorites.ts";
+import { fileKind, isMdFile, UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 
 export type ThemeMode = "system" | "light" | "dark";
 

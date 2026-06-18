@@ -1,7 +1,7 @@
 import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/solid";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import { FileTreeItem } from "./file-tree-item.tsx";
 import { type ItemDndData, isItemDndId, setSiblingDropParent, siblingDropParent } from "./tree-dnd.ts";
 import { CreateRow } from "./create-row.tsx";
@@ -29,8 +29,8 @@ import IconClipboard from "~icons/lucide/clipboard-copy";
 import IconClipboardPaste from "~icons/lucide/clipboard-paste";
 import IconSparkles from "~icons/lucide/sparkles";
 import IconFolderX from "~icons/lucide/folder-x";
-import { fileKind, isSupportedFile } from "@asciimark/core/utils.ts";
-import type { FSEntry, WorkspaceRoot } from "@asciimark/core/types.ts";
+import { fileKind, isSupportedFile } from "@markdraw/core/utils.ts";
+import type { FSEntry, WorkspaceRoot } from "@markdraw/core/types.ts";
 
 export interface ExpandAction {
   action: "expand" | "collapse";

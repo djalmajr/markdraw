@@ -1,5 +1,5 @@
 import { invoke } from "./chaos-invoke.ts";
-import type { FSEntry } from "@asciimark/core/types.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
 
 export type { FSEntry };
 

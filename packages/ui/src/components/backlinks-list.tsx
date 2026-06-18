@@ -1,6 +1,6 @@
 import { For, Show } from "solid-js";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 
 export interface BacklinkEntry {
   /** Workspace path of the linking source file. */

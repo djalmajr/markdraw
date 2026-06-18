@@ -1,7 +1,7 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
-import { Button } from "@asciimark/ui/components/ui/button.tsx";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import { Button } from "@markdraw/ui/components/ui/button.tsx";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 
 interface GuideImage {
   alt: string;

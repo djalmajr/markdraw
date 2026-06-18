@@ -1,8 +1,8 @@
 import { createSignal, type Setter } from "solid-js";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import type { Frontmatter } from "@asciimark/core/frontmatter.ts";
-import { getStoredTableWrap } from "@asciimark/core/editor-prefs.ts";
-import { migrateLegacyTabSession } from "@asciimark/core/tabs.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
+import { getStoredTableWrap } from "@markdraw/core/editor-prefs.ts";
+import { migrateLegacyTabSession } from "@markdraw/core/tabs.ts";
 import { createTabStore, type TabStore } from "./create-tab-store.ts";
 
 export type EditorMode = "edit" | "split" | "preview";

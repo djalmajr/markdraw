@@ -9,9 +9,9 @@
 // regression-locks the same fix on `folder.ts` handlers.
 
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { installLocalStorageMock } from "@asciimark/core/test-utils.ts";
-import { createPaneManager } from "@asciimark/ui/composables/create-pane-manager.ts";
-import type { AppState } from "@asciimark/ui/composables/create-app-state.ts";
+import { installLocalStorageMock } from "@markdraw/core/test-utils.ts";
+import { createPaneManager } from "@markdraw/ui/composables/create-pane-manager.ts";
+import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 
 installLocalStorageMock();
 

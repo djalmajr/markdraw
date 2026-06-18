@@ -23,8 +23,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fc from "fast-check";
 import { createRoot } from "solid-js";
-import type { FSEntry } from "@asciimark/core/types.ts";
-import { installLocalStorageMock } from "@asciimark/core/test-utils.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
+import { installLocalStorageMock } from "@markdraw/core/test-utils.ts";
 import { createPaneManager, type PaneManager } from "../create-pane-manager.ts";
 
 installLocalStorageMock();

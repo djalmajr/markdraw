@@ -1,9 +1,9 @@
 // Tauri IPC bridge for CLI subscription providers (cli_agent.rs).
 
 import { Channel } from "@tauri-apps/api/core";
-import type { AIMessage } from "@asciimark/ai/types.ts";
-import type { CliHost, CliStreamEvent } from "@asciimark/ai/engine.ts";
-import type { CliProviderKind } from "@asciimark/ai/cli-providers.ts";
+import type { AIMessage } from "@markdraw/ai/types.ts";
+import type { CliHost, CliStreamEvent } from "@markdraw/ai/engine.ts";
+import type { CliProviderKind } from "@markdraw/ai/cli-providers.ts";
 import { invoke } from "./chaos-invoke.ts";
 
 export interface CliDetectResult {

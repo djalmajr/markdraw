@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import type { IndexedFile } from "@asciimark/core/file-index.ts";
+import type { IndexedFile } from "@markdraw/core/file-index.ts";
 import { QuickOpen } from "./quick-open.tsx";
 
 // QuickOpen mounts its content via <Portal> (default target: document.body),

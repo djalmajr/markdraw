@@ -1,5 +1,5 @@
 {
-  "name": "@asciimark/site",
+  "name": "@markdraw/site",
   "version": "1.0.0",
   "type": "module",
   "private": true,
@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@asciimark/i18n": "workspace:*",
-    "@asciimark/ui": "workspace:*",
+    "@markdraw/i18n": "workspace:*",
+    "@markdraw/ui": "workspace:*",
     "@tanstack/history": "^1.132.31",
     "@tanstack/solid-router": "^1.132.31",
     "solid-js": "^1.9.11"

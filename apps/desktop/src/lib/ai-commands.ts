@@ -13,7 +13,7 @@ import {
   parseSlashCommandFile,
   type CustomInstructions,
   type SlashCommandDef,
-} from "@asciimark/ai/slash-commands.ts";
+} from "@markdraw/ai/slash-commands.ts";
 import { invoke } from "./chaos-invoke.ts";
 import { readFileContent } from "./fs.ts";
 

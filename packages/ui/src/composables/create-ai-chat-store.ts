@@ -8,8 +8,8 @@
 // streaming buffer, and the message list.
 
 import { createSignal } from "solid-js";
-import * as m from "@asciimark/i18n";
-import type { AIErrorCode, AIMessage, AIProvider, AITool } from "@asciimark/ai/types.ts";
+import * as m from "@markdraw/i18n";
+import type { AIErrorCode, AIMessage, AIProvider, AITool } from "@markdraw/ai/types.ts";
 
 /** One tool invocation surfaced during a turn (MCP server or in-process app
  *  tool). With the non-streaming engine these arrive after the loop resolves,

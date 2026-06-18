@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use asciimark_lib::read_dir_recursive;
+use markdraw_lib::read_dir_recursive;
 use criterion::{
     criterion_group, criterion_main, BenchmarkId, Criterion, Throughput,
 };

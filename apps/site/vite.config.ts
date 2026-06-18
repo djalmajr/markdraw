@@ -15,8 +15,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "~": path.resolve(__dirname, "./src"),
-      "@asciimark/core": path.resolve(__dirname, "../../packages/core/src"),
-      "@asciimark/ui": path.resolve(__dirname, "../../packages/ui/src"),
+      "@markdraw/core": path.resolve(__dirname, "../../packages/core/src"),
+      "@markdraw/ui": path.resolve(__dirname, "../../packages/ui/src"),
     },
   },
   build: {

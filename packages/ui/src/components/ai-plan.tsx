@@ -1,6 +1,6 @@
 import { For, Show, createSignal, type JSX } from "solid-js";
-import * as m from "@asciimark/i18n";
-import { useLocale } from "@asciimark/i18n/solid";
+import * as m from "@markdraw/i18n";
+import { useLocale } from "@markdraw/i18n/solid";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconX from "~icons/lucide/x";
 

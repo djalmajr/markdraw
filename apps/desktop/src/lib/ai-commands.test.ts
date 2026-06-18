@@ -3,7 +3,7 @@
 // merge/parse semantics they delegate to are covered in packages/ai).
 
 import { describe, expect, it } from "bun:test";
-import { expandSlashCommand, parseSlashCommandFile } from "@asciimark/ai/slash-commands.ts";
+import { expandSlashCommand, parseSlashCommandFile } from "@markdraw/ai/slash-commands.ts";
 import { BUILTIN_COMMANDS, commandNameFromFile, joinDir } from "./ai-commands.ts";
 
 describe("BUILTIN_COMMANDS", () => {

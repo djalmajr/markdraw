@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import type { FSEntry } from "@asciimark/core/types.ts";
+import type { FSEntry } from "@markdraw/core/types.ts";
 import {
   type TabId,
   type TabState,
@@ -7,7 +7,7 @@ import {
   makeTabId,
   getTabSession,
   setTabSession,
-} from "@asciimark/core/tabs.ts";
+} from "@markdraw/core/tabs.ts";
 import type { PaneViewSlice } from "./create-pane-store.ts";
 
 export interface TabStore {

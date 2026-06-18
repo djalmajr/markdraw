@@ -11,7 +11,7 @@
 // resolve-credential.ts.
 
 import * as v from "valibot";
-import { safeJsonParse } from "@asciimark/core/schemas.ts";
+import { safeJsonParse } from "@markdraw/core/schemas.ts";
 
 /** API family a provider speaks — engines map this to their concrete SDK. */
 const ProviderKindSchema = v.picklist([
