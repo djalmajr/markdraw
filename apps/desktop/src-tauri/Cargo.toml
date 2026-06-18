@@ -44,7 +44,7 @@ ignore = "0.4"
 # work — the system SQLite (notably older macOS) may ship without it, so
 # `bundled` is mandatory, not an optimization. (The rusqlite `fts5` feature is
 # only the Rust-level custom-tokenizer API, which we don't use.)
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # MCP (Model Context Protocol) client — connects to any number of MCP servers
 # over stdio (spawned child process) or Streamable HTTP. Lives in Rust because
