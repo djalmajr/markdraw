@@ -1,6 +1,6 @@
 {
   "name": "@asciimark/desktop",
-  "version": "0.21.1",
+  "version": "0.21.2",
   "type": "module",
   "private": true,
   "scripts": {
@@ -8,7 +8,7 @@
     "macos:dev-signing": "bash scripts/macos-dev-signing-setup.sh",
     "dev:frontend": "bun run prepare:excalidraw && vite",
     "build": "tauri build",
-    "build:frontend": "bun run prepare:excalidraw && vite build",
+    "build:frontend": "bun run prepare:excalidraw --force && vite build",
     "prepare:excalidraw": "node scripts/prepare-excalidraw-guest.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bun test e2e/specs",
