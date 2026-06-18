@@ -50,7 +50,7 @@ use ai_index::{
     IndexManager,
 };
 
-// `asciimark-preview://` custom scheme — serves an HTML file's directory as an
+// `markdraw-preview://` custom scheme — serves an HTML file's directory as an
 // isolated web origin so multi-file pages / SPAs preview with full fidelity
 // (root-absolute paths, ES modules, importmaps, hash routing). Commands
 // imported by simple name so the IPC-contract check sees them registered.
@@ -230,7 +230,7 @@ async fn save_file_dialog(
     let mut builder = app.dialog().file().set_file_name(&default_name);
     if let Some(dir) = default_dir {
         // Ensure the suggested directory exists so the dialog opens into it
-        // (e.g. a not-yet-created `.asciimark/chats`). Best-effort.
+        // (e.g. a not-yet-created `.markdraw/chats`). Best-effort.
         let _ = std::fs::create_dir_all(&dir);
         builder = builder.set_directory(std::path::PathBuf::from(&dir));
     }
@@ -304,7 +304,7 @@ async fn read_files_relative(root: String, paths: Vec<String>) -> Result<std::co
 #[tauri::command]
 async fn write_file(path: String, content: String) -> Result<(), String> {
     // Create parent dirs first so callers can write into not-yet-existing
-    // folders (e.g. `.asciimark/plans/`) without a separate mkdir round-trip.
+    // folders (e.g. `.markdraw/plans/`) without a separate mkdir round-trip.
     if let Some(parent) = std::path::Path::new(&path).parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -1145,7 +1145,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
-        // Serve `asciimark-preview://<token>/<path>` from a registered HTML
+        // Serve `markdraw-preview://<token>/<path>` from a registered HTML
         // file's directory (isolated origin; path-traversal guarded). See
         // html_preview.rs for the isolation model.
         .register_uri_scheme_protocol(html_preview::SCHEME, |ctx, request| {
@@ -2534,12 +2534,12 @@ mod tests {
         let dir = tempdir().unwrap();
         let root = dir.path();
         let file_path = root.join("hello.txt");
-        write_file(&file_path, "asciimark-mutation-guard\n");
+        write_file(&file_path, "markdraw-mutation-guard\n");
 
         let content = super::read_file(file_path.to_string_lossy().to_string())
             .await
             .unwrap();
-        assert_eq!(content, "asciimark-mutation-guard\n");
+        assert_eq!(content, "markdraw-mutation-guard\n");
         assert!(!content.is_empty(), "Ok(String::new()) mutation must not pass");
         assert_ne!(content, "xyzzy", "Ok(\"xyzzy\".into()) mutation must not pass");
     }
@@ -2566,7 +2566,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let root = dir.path();
         let file_path = root.join("out.txt");
-        let payload = "asciimark-write-guard\n";
+        let payload = "markdraw-write-guard\n";
 
         super::write_file(
             file_path.to_string_lossy().to_string(),

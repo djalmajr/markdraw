@@ -105,7 +105,7 @@ export function SiteLayout() {
       <header class="site-header">
         <div class="site-header-inner">
           <Link class="site-logo" to="/">
-            <img alt="Markdraw logo" class="site-logo-mark" src="/asciimark-logo.svg" />
+            <img alt="Markdraw logo" class="site-logo-mark" src="/markdraw-logo.svg" />
             <span>Markdraw</span>
           </Link>
           <nav class="site-nav" aria-label="Main navigation">
@@ -163,7 +163,7 @@ export function SiteLayout() {
             <Button
               as="a"
               class="site-header-button"
-              href="https://github.com/djalmajr/asciimark/issues"
+              href="https://github.com/djalmajr/markdraw/issues"
               rel="noreferrer"
               target="_blank"
               variant="ghost"

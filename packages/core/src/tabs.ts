@@ -51,10 +51,10 @@ export function parseTabId(tabId: TabId): { rootId: string; filePath: string } {
 }
 
 /** Legacy single-pane session storage key. New code writes pane-scoped
- *  keys (`asciimark-tab-session-pane-N`) and falls back to this when
+ *  keys (`markdraw-tab-session-pane-N`) and falls back to this when
  *  upgrading from a single-pane install. The legacy key is removed
  *  after a successful migration so subsequent loads don't double-read. */
-export const LEGACY_STORAGE_KEY = "asciimark-tab-session";
+export const LEGACY_STORAGE_KEY = "markdraw-tab-session";
 
 const DEFAULT_STORAGE_KEY = LEGACY_STORAGE_KEY;
 
@@ -105,7 +105,7 @@ export function clearTabSession(storageKey: string = DEFAULT_STORAGE_KEY): void 
 
 /**
  * Move a session blob from the legacy single-pane key to the new
- * pane-scoped key (typically `asciimark-tab-session-pane-0`). Idempotent
+ * pane-scoped key (typically `markdraw-tab-session-pane-0`). Idempotent
  * and harmless when no legacy data exists. Returns true when a migration
  * actually happened so the caller can log it once.
  */

@@ -150,7 +150,7 @@ import {
 import { fetchReleaseHistory, type ReleaseHistoryEntry } from "./lib/release-notes.ts";
 
 const RELEASES_INDEX_URL =
-  "https://github.com/djalmajr/asciimark/releases";
+  "https://github.com/djalmajr/markdraw/releases";
 import { UpdateAvailableDialog } from "@markdraw/ui/components/update-available-dialog.tsx";
 import { ReleaseNotesDialog } from "@markdraw/ui/components/release-notes-dialog.tsx";
 import { findInFiles } from "./lib/fs.ts";
@@ -173,7 +173,7 @@ const cliHost = createCliHost();
 // JSON.parse catch), but a 0-byte file isn't a valid .excalidraw — the
 // skeleton keeps the file well-formed even if the guest never saves.
 const EMPTY_EXCALIDRAW_SCENE =
-  '{"type":"excalidraw","version":2,"source":"asciimark","elements":[]}';
+  '{"type":"excalidraw","version":2,"source":"markdraw","elements":[]}';
 
 export function App() {
   // AI provider catalog (ai.json merged over builtins). Starts with builtins so
@@ -328,7 +328,7 @@ export function App() {
     createAIProvider: () => buildAIProvider(),
     // Tools for the chat tool-calling loop: in-process app tools + MCP servers.
     getAITools,
-    // Workspace custom instructions (.asciimark/instructions.md) plus, when an
+    // Workspace custom instructions (.markdraw/instructions.md) plus, when an
     // MCP server is connected, the ai-memory scopes from the open roots'
     // `.ai-memory.toml` — appended so the model queries the right project(s).
     getCustomInstructions: () => {
@@ -344,9 +344,9 @@ export function App() {
     // Engine-enforced Accept/Reject for prompt-tier tools (arrow defers the
     // read — the gate is defined further down in this component).
     onToolApprovalRequest: (req) => requestToolApproval(req),
-    // Plan mode persists each produced plan under the workspace's .asciimark/plans.
+    // Plan mode persists each produced plan under the workspace's .markdraw/plans.
     onPlanComplete: handlePlanComplete,
-    // Chat tab "Export" → native Save As, defaulting to .asciimark/chats.
+    // Chat tab "Export" → native Save As, defaulting to .markdraw/chats.
     onExportChat: handleExportChat,
   });
 
@@ -893,7 +893,7 @@ export function App() {
     return [...inProcess, ...mcp];
   }
 
-  /** Persist a Plan-mode result to `<root>/.asciimark/plans/plan-<stamp>.md`.
+  /** Persist a Plan-mode result to `<root>/.markdraw/plans/plan-<stamp>.md`.
    *  Plan turns quote scrubbed `[secret-N]` placeholders, so the artifact
    *  writer restores them before disk. No-op (logged) when no folder is open. */
   async function handlePlanComplete(content: string): Promise<void> {
@@ -915,7 +915,7 @@ export function App() {
   }
 
   /** Export a chat transcript via a native Save As dialog, defaulting to
-   *  `<root>/.asciimark/chats/<slug>-<stamp>.md` (the dir is created on demand).
+   *  `<root>/.markdraw/chats/<slug>-<stamp>.md` (the dir is created on demand).
    *  Store turns keep `[secret-N]` placeholders by design — the artifact
    *  writer restores them so the file matches the displayed transcript. */
   async function handleExportChat(payload: { title: string; markdown: string }): Promise<void> {
@@ -1230,7 +1230,7 @@ export function App() {
 
   // File-backed slash commands + custom instructions (omp#1). Reloaded
   // whenever the primary workspace root changes — the project-level files
-  // live under <root>/.asciimark; builtin + global commands survive with no
+  // live under <root>/.markdraw; builtin + global commands survive with no
   // root open. Both loaders are best-effort and never throw. The guard makes
   // resolutions latest-wins: rapid root switches (or popover-open refreshes)
   // may settle out of order, and a stale load must not clobber a fresh one.
@@ -1518,7 +1518,7 @@ export function App() {
         : decideCloseAction({
             closeBehavior: state.closeBehavior(),
             isUpdating:
-              (window as unknown as { __asciimark_updating?: boolean }).__asciimark_updating ??
+              (window as unknown as { __markdraw_updating?: boolean }).__markdraw_updating ??
               false,
           });
       if (action === "let-close") {
@@ -1723,7 +1723,7 @@ export function App() {
   }
 
   // Folder-rooted HTML preview host: registers the previewed file's directory
-  // with the Rust `asciimark-preview://` scheme (isolated origin → real SPA
+  // with the Rust `markdraw-preview://` scheme (isolated origin → real SPA
   // rendering) and pushes the live editor buffer as an overlay. See
   // src-tauri/src/html_preview.rs for the isolation model.
   const htmlPreviewHost = {
@@ -1734,8 +1734,8 @@ export function App() {
     // routers match their root route.
     docOrigin: (token: string) =>
       navigator.platform.startsWith("Win")
-        ? "http://asciimark-preview.localhost"
-        : `asciimark-preview://${token}`,
+        ? "http://markdraw-preview.localhost"
+        : `markdraw-preview://${token}`,
     async register(rootId: string, fileRelPath: string) {
       const rootPath = rootPaths().get(rootId);
       if (!rootPath) return null;

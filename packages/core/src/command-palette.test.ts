@@ -191,10 +191,10 @@ describe("recordCommandUse / getRecentCommandIds", () => {
     const empty = memoryStorage();
     expect(getRecentCommandIds(empty)).toEqual([]);
 
-    const corrupt = memoryStorage({ "asciimark-recent-commands": "{not json" });
+    const corrupt = memoryStorage({ "markdraw-recent-commands": "{not json" });
     expect(getRecentCommandIds(corrupt)).toEqual([]);
 
-    const wrongShape = memoryStorage({ "asciimark-recent-commands": JSON.stringify({}) });
+    const wrongShape = memoryStorage({ "markdraw-recent-commands": JSON.stringify({}) });
     expect(getRecentCommandIds(wrongShape)).toEqual([]);
   });
 });

@@ -29,7 +29,7 @@ function artifactStamp(d: Date): string {
   );
 }
 
-/** Persist a Plan-mode result to `<root>/.asciimark/plans/plan-<stamp>.md`,
+/** Persist a Plan-mode result to `<root>/.markdraw/plans/plan-<stamp>.md`,
  *  restoring scrubbed placeholders first. Returns the written path. */
 export async function savePlanArtifact(
   deps: PlanArtifactDeps,
@@ -37,13 +37,13 @@ export async function savePlanArtifact(
   content: string,
   now: Date = new Date(),
 ): Promise<string> {
-  const path = `${root}/.asciimark/plans/plan-${artifactStamp(now)}.md`;
+  const path = `${root}/.markdraw/plans/plan-${artifactStamp(now)}.md`;
   await deps.writeFile(path, deps.restoreSecrets(content));
   return path;
 }
 
 /** Export a chat transcript via Save As, defaulting to
- *  `<root>/.asciimark/chats/<slug>-<stamp>.md`, restoring scrubbed
+ *  `<root>/.markdraw/chats/<slug>-<stamp>.md`, restoring scrubbed
  *  placeholders first. Returns the written path, or null on cancel. */
 export async function exportChatArtifact(
   deps: ChatExportDeps,
@@ -52,7 +52,7 @@ export async function exportChatArtifact(
   now: Date = new Date(),
 ): Promise<string | null> {
   const defaultName = `${slugifyTitle(payload.title)}-${artifactStamp(now)}.md`;
-  const path = await deps.saveFileDialog(root ? `${root}/.asciimark/chats` : null, defaultName);
+  const path = await deps.saveFileDialog(root ? `${root}/.markdraw/chats` : null, defaultName);
   if (!path) return null; // user cancelled
   await deps.writeFile(path, deps.restoreSecrets(payload.markdown));
   return path;

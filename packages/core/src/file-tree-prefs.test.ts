@@ -106,11 +106,11 @@ describe("file-tree preferences invalid stored values", () => {
     // strings as truthy and report `true` for nonsense input
     // — masking storage corruption instead of returning the
     // configured default cleanly.
-    localStorage.setItem("asciimark-file-tree-respect-gitignore", "yes");
+    localStorage.setItem("markdraw-file-tree-respect-gitignore", "yes");
     expect(getStoredRespectGitignore()).toBe(true);
-    localStorage.setItem("asciimark-file-tree-respect-gitignore", "1");
+    localStorage.setItem("markdraw-file-tree-respect-gitignore", "1");
     expect(getStoredRespectGitignore()).toBe(true);
-    localStorage.setItem("asciimark-file-tree-respect-gitignore", "");
+    localStorage.setItem("markdraw-file-tree-respect-gitignore", "");
     expect(getStoredRespectGitignore()).toBe(true);
   });
 
@@ -118,11 +118,11 @@ describe("file-tree preferences invalid stored values", () => {
     // Mutation captured: same relaxed-parse hazard as above — only
     // the literal strings "true"/"false" may be honored; anything
     // else must resolve to the configured default of `true`.
-    localStorage.setItem("asciimark-file-tree-show-hidden", "yes");
+    localStorage.setItem("markdraw-file-tree-show-hidden", "yes");
     expect(getStoredShowHiddenEntries()).toBe(true);
-    localStorage.setItem("asciimark-file-tree-show-hidden", "1");
+    localStorage.setItem("markdraw-file-tree-show-hidden", "1");
     expect(getStoredShowHiddenEntries()).toBe(true);
-    localStorage.setItem("asciimark-file-tree-show-hidden", "");
+    localStorage.setItem("markdraw-file-tree-show-hidden", "");
     expect(getStoredShowHiddenEntries()).toBe(true);
   });
 
@@ -130,11 +130,11 @@ describe("file-tree preferences invalid stored values", () => {
     // Mutation captured: same relaxed-parse hazard as above — only
     // the literal strings "true"/"false" may be honored; anything
     // else must resolve to the configured default of `true`.
-    localStorage.setItem("asciimark-file-tree-show-all-dirs", "yes");
+    localStorage.setItem("markdraw-file-tree-show-all-dirs", "yes");
     expect(getStoredShowAllDirs()).toBe(true);
-    localStorage.setItem("asciimark-file-tree-show-all-dirs", "1");
+    localStorage.setItem("markdraw-file-tree-show-all-dirs", "1");
     expect(getStoredShowAllDirs()).toBe(true);
-    localStorage.setItem("asciimark-file-tree-show-all-dirs", "");
+    localStorage.setItem("markdraw-file-tree-show-all-dirs", "");
     expect(getStoredShowAllDirs()).toBe(true);
   });
 
@@ -142,11 +142,11 @@ describe("file-tree preferences invalid stored values", () => {
     // Mutation captured: same relaxed-parse hazard as above — only
     // the literal strings "true"/"false" may be honored; anything
     // else must resolve to the configured default of `true`.
-    localStorage.setItem("asciimark-file-tree-show-all-files", "yes");
+    localStorage.setItem("markdraw-file-tree-show-all-files", "yes");
     expect(getStoredShowAllFiles()).toBe(true);
-    localStorage.setItem("asciimark-file-tree-show-all-files", "1");
+    localStorage.setItem("markdraw-file-tree-show-all-files", "1");
     expect(getStoredShowAllFiles()).toBe(true);
-    localStorage.setItem("asciimark-file-tree-show-all-files", "");
+    localStorage.setItem("markdraw-file-tree-show-all-files", "");
     expect(getStoredShowAllFiles()).toBe(true);
   });
 });

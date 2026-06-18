@@ -53,7 +53,7 @@ export function AboutDialog(props: AboutDialogProps) {
           <img
             alt="Markdraw"
             class="h-12 w-12"
-            src="/asciimark-logo.svg"
+            src="/markdraw-logo.svg"
             onError={(e) => {
               // Logo asset isn't shipped with the desktop bundle today;
               // hide the broken-image icon if so.
@@ -87,7 +87,7 @@ export function AboutDialog(props: AboutDialogProps) {
         <div class="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <a
             class="text-primary underline-offset-2 hover:underline"
-            href="https://asciimark.djalmajr.dev/"
+            href="https://markdraw.app/"
             rel="noreferrer"
             target="_blank"
           >
@@ -101,7 +101,7 @@ export function AboutDialog(props: AboutDialogProps) {
           />
           <a
             class="text-primary underline-offset-2 hover:underline"
-            href="https://github.com/djalmajr/asciimark/releases"
+            href="https://github.com/djalmajr/markdraw/releases"
             rel="noreferrer"
             target="_blank"
           >
@@ -115,7 +115,7 @@ export function AboutDialog(props: AboutDialogProps) {
           />
           <a
             class="text-primary underline-offset-2 hover:underline"
-            href="https://github.com/djalmajr/asciimark/issues"
+            href="https://github.com/djalmajr/markdraw/issues"
             rel="noreferrer"
             target="_blank"
           >

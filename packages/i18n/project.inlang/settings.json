@@ -10,6 +10,6 @@
   },
   "@inlang/paraglide-js": {
     "strategy": ["localStorage", "preferredLanguage", "baseLocale"],
-    "localStorageKey": "asciimark-locale"
+    "localStorageKey": "markdraw-locale"
   }
 }

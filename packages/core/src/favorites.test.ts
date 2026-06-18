@@ -60,13 +60,13 @@ describe("favorites", () => {
   });
 
   it("ignores corrupted storage gracefully", () => {
-    localStorage.setItem("asciimark-favorites", "{not json");
+    localStorage.setItem("markdraw-favorites", "{not json");
     expect(getFavorites()).toEqual([]);
   });
 
   it("filters non-conforming items from a tampered list", () => {
     localStorage.setItem(
-      "asciimark-favorites",
+      "markdraw-favorites",
       JSON.stringify([
         { name: "Good", path: "g.md", rootName: "r", rootPath: "/r" },
         { name: "Missing rootPath", path: "x.md", rootName: "r" },

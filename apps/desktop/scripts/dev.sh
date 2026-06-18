@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Dev launcher for AsciiMark (`bun run dev:app` → this).
+# Dev launcher for Markdraw (`bun run dev:app` → this).
 #
 # On macOS, if the stable dev code-signing identity exists (created once by
 # scripts/macos-dev-signing-setup.sh), wire a cargo `runner` that re-signs the
@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-IDENTITY="AsciiMark Dev Signing"
+IDENTITY="Markdraw Dev Signing"
 here="$(cd "$(dirname "$0")" && pwd)"
 
 # NOTE: -p codesigning WITHOUT -v — a self-signed cert is reported untrusted but

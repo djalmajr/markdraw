@@ -42,22 +42,22 @@ describe("ai preferences defaults", () => {
   });
 
   it("falls back to build for an unknown/garbage mode value", () => {
-    localStorage.setItem("asciimark-ai-mode", "garbage");
+    localStorage.setItem("markdraw-ai-mode", "garbage");
     expect(getStoredAiMode()).toBe("build");
   });
 
   it("falls back to lite for a corrupted tier value", () => {
-    localStorage.setItem("asciimark-ai-indexing-tier", "garbage");
+    localStorage.setItem("markdraw-ai-indexing-tier", "garbage");
     expect(getStoredIndexingTier()).toBe("lite");
   });
 
   it("falls back to ai-sdk for an unknown engine value", () => {
-    localStorage.setItem("asciimark-ai-engine", "nope");
+    localStorage.setItem("markdraw-ai-engine", "nope");
     expect(getStoredAiEngine()).toBe("ai-sdk");
   });
 
   it("falls back to off for an unknown reasoning value", () => {
-    localStorage.setItem("asciimark-ai-reasoning", "ultra");
+    localStorage.setItem("markdraw-ai-reasoning", "ultra");
     expect(getStoredAiReasoning()).toBe("off");
   });
 });
@@ -130,9 +130,9 @@ describe("ai preferences round-trip", () => {
   });
 
   it("hidden models tolerate a corrupt blob (returns empty)", () => {
-    localStorage.setItem("asciimark-ai-hidden-models", "{not json");
+    localStorage.setItem("markdraw-ai-hidden-models", "{not json");
     expect(getStoredHiddenModels()).toEqual([]);
-    localStorage.setItem("asciimark-ai-hidden-models", JSON.stringify([1, "ok", null]));
+    localStorage.setItem("markdraw-ai-hidden-models", JSON.stringify([1, "ok", null]));
     expect(getStoredHiddenModels()).toEqual(["ok"]);
   });
 });

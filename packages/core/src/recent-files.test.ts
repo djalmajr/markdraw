@@ -118,7 +118,7 @@ describe("recent-files", () => {
 
   it("should discard legacy storage key", () => {
     localStorage.setItem(
-      "asciimark-recent-files",
+      "markdraw-recent-files",
       JSON.stringify([
         {
           name: "Legacy",
@@ -130,6 +130,6 @@ describe("recent-files", () => {
 
     const files = getRecentFiles();
     expect(files).toEqual([]);
-    expect(localStorage.getItem("asciimark-recent-files")).toBeNull();
+    expect(localStorage.getItem("markdraw-recent-files")).toBeNull();
   });
 });

@@ -11,8 +11,8 @@ import { createPaneStore, type PaneStore } from "./create-pane-store.ts";
 const MAX_PANES = 2;
 
 const DEFAULT_SPLIT_RATIO = 0.5;
-const SPLIT_RATIO_STORAGE_KEY = "asciimark-pane-split-ratio";
-const PANE_LAYOUT_STORAGE_KEY = "asciimark-pane-layout";
+const SPLIT_RATIO_STORAGE_KEY = "markdraw-pane-split-ratio";
+const PANE_LAYOUT_STORAGE_KEY = "markdraw-pane-layout";
 /** Constrain the splitter so neither pane collapses to 0px (the user
  *  could still close the pane via Cmd/Ctrl+W to dismiss it). */
 const MIN_SPLIT_RATIO = 0.1;
@@ -123,7 +123,7 @@ export function createPaneManager(config: PaneManagerConfig = {}): PaneManager {
     // next reload as a phantom pane.
     try {
       if (typeof localStorage !== "undefined") {
-        localStorage.removeItem(`asciimark-tab-session-pane-${list.length - 1}`);
+        localStorage.removeItem(`markdraw-tab-session-pane-${list.length - 1}`);
       }
     } catch {
       // ignore — non-essential

@@ -172,10 +172,10 @@ interface AppStateConfig {
    *  free of Tauri. Resolved lazily per send. */
   getAITools?: () => AITool[] | Promise<AITool[]>;
   /** Custom instructions merged into the chat system prompt (omp#1 — e.g. the
-   *  workspace's `.asciimark/instructions.md`). Read fresh per send. */
+   *  workspace's `.markdraw/instructions.md`). Read fresh per send. */
   getCustomInstructions?: () => CustomInstructions | undefined;
   /** Persist a plan produced in Plan mode (the host writes it to
-   *  `.asciimark/plans`). Called with the assistant's plan text. */
+   *  `.markdraw/plans`). Called with the assistant's plan text. */
   onPlanComplete?: (content: string) => void;
   /** Export a chat transcript (the host shows a Save dialog + writes the file). */
   onExportChat?: (payload: { title: string; markdown: string }) => void;
@@ -679,7 +679,7 @@ export function createAppState(config: AppStateConfig) {
   }
 
   // Chat mode: "build" (full tools) vs "plan" (no editing tools — produce a
-  // plan that the host saves to .asciimark/plans).
+  // plan that the host saves to .markdraw/plans).
   const [aiMode, setAiModeSig] = createSignal<AIChatMode>(getStoredAiMode());
   function setAiMode(mode: AIChatMode): void {
     setAiModeSig(mode);

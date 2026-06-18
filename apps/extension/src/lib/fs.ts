@@ -238,7 +238,7 @@ export async function readFileByPathFallback(
 }
 
 // IndexedDB persistence for directory handle
-const DB_NAME = "asciimark";
+const DB_NAME = "markdraw";
 const STORE_NAME = "handles";
 
 function openDB(): Promise<IDBDatabase> {

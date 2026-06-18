@@ -22,12 +22,12 @@ describe("font preferences", () => {
   });
 
   it("merges stored partial values onto defaults so adding new keys later won't break older clients", () => {
-    localStorage.setItem("asciimark-font-prefs", JSON.stringify({ fontSize: 18 }));
+    localStorage.setItem("markdraw-font-prefs", JSON.stringify({ fontSize: 18 }));
     expect(getStoredFontPrefs()).toEqual({ fontSize: 18, fontFamily: "sans-serif" });
   });
 
   it("falls back to defaults when storage is corrupted", () => {
-    localStorage.setItem("asciimark-font-prefs", "{not json");
+    localStorage.setItem("markdraw-font-prefs", "{not json");
     expect(getStoredFontPrefs()).toEqual({ fontSize: 15, fontFamily: "sans-serif" });
   });
 

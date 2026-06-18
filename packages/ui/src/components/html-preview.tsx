@@ -10,16 +10,16 @@ import {
 } from "solid-js";
 
 /** Desktop folder-rooted preview host. When provided, the file's directory is
- *  served as an isolated `asciimark-preview://<token>` origin so root-absolute
+ *  served as an isolated `markdraw-preview://<token>` origin so root-absolute
  *  paths, ES modules, importmaps and hash routing work (full SPA support). The
  *  live editor buffer is pushed as an overlay so unsaved edits preview too. */
 export interface HtmlPreviewFolderRoot {
   /** Platform-correct origin the entry DOCUMENT is served from — no path:
    *  the doc loads at `/` (entry + token travel in the query) so SPAs whose
    *  router matches `location.pathname` see their root route. WKWebView/
-   *  WebKitGTK navigate the bare scheme (`asciimark-preview://<token>` — the
+   *  WebKitGTK navigate the bare scheme (`markdraw-preview://<token>` — the
    *  token IS the host), but WebView2 can't — on Windows Tauri serves the
-   *  scheme as `http://asciimark-preview.localhost` and the token rides the
+   *  scheme as `http://markdraw-preview.localhost` and the token rides the
    *  query alone. */
   docOrigin: (token: string) => string;
   /** Register the current file's directory; resolves to its token + the entry
@@ -57,7 +57,7 @@ function withBase(html: string, baseHref?: string): string {
  * Live, SANDBOXED preview of an HTML file. Two modes:
  *
  * - **folderRoot (desktop):** the file's directory is served as a dedicated,
- *   isolated origin (`asciimark-preview://<token>`); the iframe loads the entry
+ *   isolated origin (`markdraw-preview://<token>`); the iframe loads the entry
  *   via `src` so root-absolute URLs, ES modules and importmaps resolve — real
  *   SPAs render. The live buffer is pushed as an overlay and the frame reloads
  *   (debounced) so unsaved edits preview. The origin is distinct from the app's
@@ -138,7 +138,7 @@ export function HtmlPreview(props: HtmlPreviewProps): JSX.Element {
     // The doc is served at path `/` (entry resolved server-side from
     // `am-entry`) so SPA path routers match their root route; `am-token`
     // identifies the preview on Windows, where the fixed
-    // `asciimark-preview.localhost` host can't carry it.
+    // `markdraw-preview.localhost` host can't carry it.
     const q = `am-token=${encodeURIComponent(t.token)}&am-entry=${encodeURIComponent(t.entryRel)}`;
     return `${fr.docOrigin(t.token)}/?${q}&v=${v}`;
   };

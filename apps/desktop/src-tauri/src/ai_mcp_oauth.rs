@@ -18,14 +18,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 /// Keychain service for stored MCP OAuth credentials. Distinct from the AI
-/// provider API-key service (`dev.djalmajr.asciimark`) so the two never collide;
+/// provider API-key service (`app.markdraw`) so the two never collide;
 /// the account is the MCP server id. Like that service, the dev build uses a
 /// `-dev` namespace so dev/prod keychain items don't collide across signatures
 /// (see the SERVICE doc in ai_keychain.rs).
 #[cfg(debug_assertions)]
-const OAUTH_SERVICE: &str = "dev.djalmajr.asciimark-dev.mcp-oauth";
+const OAUTH_SERVICE: &str = "app.markdraw-dev.mcp-oauth";
 #[cfg(not(debug_assertions))]
-const OAUTH_SERVICE: &str = "dev.djalmajr.asciimark.mcp-oauth";
+const OAUTH_SERVICE: &str = "app.markdraw.mcp-oauth";
 
 /// Persists one MCP server's OAuth credentials (access/refresh tokens + the
 /// DCR-registered client id) in the OS keychain, keyed by the server id.

@@ -430,7 +430,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
         if (storageKey) {
           localStorage.removeItem(storageKey);
         } else {
-          localStorage.removeItem("asciimark-tab-session");
+          localStorage.removeItem("markdraw-tab-session");
         }
         return;
       }

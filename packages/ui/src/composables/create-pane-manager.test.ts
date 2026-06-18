@@ -99,7 +99,7 @@ describe("createPaneManager", () => {
   });
 
   it("explicit initialSplitRatio in config overrides the persisted value", () => {
-    localStorage.setItem("asciimark-pane-split-ratio", "0.32");
+    localStorage.setItem("markdraw-pane-split-ratio", "0.32");
     const m = createPaneManager({ initialSplitRatio: 0.7 });
     expect(m.splitRatio()).toBe(0.7);
   });
@@ -157,7 +157,7 @@ describe("createPaneManager", () => {
 
   it("invalid persisted layout (paneCount=99) is ignored — falls back to single pane", () => {
     localStorage.setItem(
-      "asciimark-pane-layout",
+      "markdraw-pane-layout",
       JSON.stringify({ paneCount: 99, activePaneIndex: 5 }),
     );
     const m = createPaneManager();

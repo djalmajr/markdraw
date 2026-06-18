@@ -39,7 +39,7 @@ const GROUP_RANK: Record<CommandGroup, number> = {
 
 /** Maximum number of recently-used command ids retained in storage. */
 export const RECENT_COMMANDS_CAP = 5;
-const RECENT_COMMANDS_STORAGE_KEY = "asciimark-recent-commands";
+const RECENT_COMMANDS_STORAGE_KEY = "markdraw-recent-commands";
 
 /** Minimal storage surface so tests can inject a fake without touching
  *  `globalThis.localStorage` and so the function works in non-DOM

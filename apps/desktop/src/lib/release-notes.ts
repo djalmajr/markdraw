@@ -1,5 +1,5 @@
 // Fetches the release notes for a given Markdraw version from the
-// public release repo (`djalmajr/asciimark`). The result is
+// public release repo (`djalmajr/markdraw`). The result is
 // cached in-memory per version so reopening the dialog never refetches.
 //
 // The GitHub REST endpoint for a release-by-tag returns `body` as
@@ -12,7 +12,7 @@
 // transport failure is surfaced as a thrown Error whose message reaches
 // the dialog's error fallback (and the "Open on GitHub" button).
 
-const RELEASES_REPO = "djalmajr/asciimark";
+const RELEASES_REPO = "djalmajr/markdraw";
 
 /** Default number of historical releases the dialog asks for. The
  *  GitHub API caps `per_page` at 100; 10 is enough to cover the

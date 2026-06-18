@@ -28,9 +28,9 @@ beforeAll(async () => {
     // English placeholders / aria-labels; a leftover `pt-BR` from a
     // previous manual run would silently break them all. The reload
     // ensures the Solid adapter re-reads the pinned locale.
-    const current = await bridge.evalJs(`localStorage.getItem("asciimark-locale")`);
+    const current = await bridge.evalJs(`localStorage.getItem("markdraw-locale")`);
     if (current !== "en") {
-      await bridge.evalJs(`localStorage.setItem("asciimark-locale", "en"); window.location.reload();`);
+      await bridge.evalJs(`localStorage.setItem("markdraw-locale", "en"); window.location.reload();`);
       // Reconnect after the reload tears down the WebSocket.
       bridge.close();
       await new Promise((r) => setTimeout(r, 4000));
@@ -435,8 +435,8 @@ describe("desktop palettes (Cmd/Ctrl+P family)", () => {
 
     const persisted = (await bridge.evalJs(
       `({
-        layout: localStorage.getItem("asciimark-pane-layout"),
-        pane0: localStorage.getItem("asciimark-tab-session-pane-0"),
+        layout: localStorage.getItem("markdraw-pane-layout"),
+        pane0: localStorage.getItem("markdraw-tab-session-pane-0"),
       })`,
     )) as { layout: string | null; pane0: string | null };
     expect(persisted.layout).not.toBeNull();

@@ -15,7 +15,7 @@ export interface SceneInput {
 }
 
 export interface SerializeOpts {
-  /** `source` field stamped into the file. Defaults to "asciimark" so the
+  /** `source` field stamped into the file. Defaults to "markdraw" so the
    *  desktop host keeps writing byte-identical files. */
   source?: string;
   /** Pretty-print with 2-space indent (used for committed doc artifacts);
@@ -27,7 +27,7 @@ export function buildScene(input: SceneInput, opts: SerializeOpts = {}): Excalid
   return {
     type: "excalidraw",
     version: 2,
-    source: opts.source ?? "asciimark",
+    source: opts.source ?? "markdraw",
     elements: (input.elements ?? []) as ExcalidrawElement[],
     appState: input.appState ?? {},
     files: input.files ?? {},

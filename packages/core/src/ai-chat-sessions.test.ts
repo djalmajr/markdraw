@@ -26,8 +26,8 @@ import { installLocalStorageMock } from "./test-utils.ts";
 
 installLocalStorageMock();
 
-const INDEX_KEY = "asciimark-ai-chat-sessions";
-const msgsKey = (id: string) => `asciimark-ai-chat-msgs-${id}`;
+const INDEX_KEY = "markdraw-ai-chat-sessions";
+const msgsKey = (id: string) => `markdraw-ai-chat-msgs-${id}`;
 
 function meta(over: Partial<PersistedChatSessionMeta> = {}): PersistedChatSessionMeta {
   return {

@@ -5,7 +5,7 @@
 
 import { SHORTCUTS, type Platform } from "./keyboard-shortcuts.ts";
 
-const STORAGE_KEY = "asciimark-keybindings";
+const STORAGE_KEY = "markdraw-keybindings";
 
 /** Normalized binding: LITERAL modifier flags + the bare key (lower-cased).
  *  Modifiers are literal (not a platform "mod" abstraction) because the catalog

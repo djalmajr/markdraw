@@ -10,7 +10,7 @@
 import * as v from "valibot";
 import { safeJsonParse } from "./schemas.ts";
 
-const STORAGE_KEY = "asciimark-right-panel-tabs";
+const STORAGE_KEY = "markdraw-right-panel-tabs";
 
 /** A special (non-chat) right-panel tab: the Outline or the References pane. */
 const SpecialTabStateSchema = v.object({

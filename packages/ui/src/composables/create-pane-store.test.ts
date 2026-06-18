@@ -56,7 +56,7 @@ describe("createPaneStore", () => {
     // pane must not move the other. Mutation captured: reading the wrap
     // flag from a shared AppState signal (the old global) would make
     // `right` flip when `left` does.
-    localStorage.setItem("asciimark-preview-table-wrap", "true");
+    localStorage.setItem("markdraw-preview-table-wrap", "true");
     const left = createPaneStore("p0");
     const right = createPaneStore("p1");
     expect(left.tableWrap()).toBe(true); // both seed from the saved default

@@ -9,9 +9,7 @@
 use tauri::{AppHandle, Manager};
 
 /// Keychain service name; the account is the provider id (e.g. "anthropic").
-/// Uses the app's own reverse-DNS identifier — a namespace we actually control
-/// (`dev.djalmajr.asciimark`) — instead of `com.asciimark` (we don't own
-/// asciimark.com).
+/// Uses the app's own reverse-DNS identifier (`app.markdraw`).
 ///
 /// The dev build uses a distinct service so its items are isolated from the
 /// installed release's. macOS grants "Always Allow" per code signature, and dev
@@ -20,20 +18,12 @@ use tauri::{AppHandle, Manager};
 /// same items and re-prompt for a password forever. This mirrors the dev
 /// bundle-identifier split (tauri.dev.conf.json).
 #[cfg(debug_assertions)]
-const SERVICE: &str = "dev.djalmajr.asciimark-dev";
+const SERVICE: &str = "app.markdraw-dev";
 #[cfg(not(debug_assertions))]
-const SERVICE: &str = "dev.djalmajr.asciimark";
-
-/// Pre-rename service name. Read once for a lazy migration so users who stored
-/// keys under the old service don't have to re-enter them (see ai_get_api_key).
-const LEGACY_SERVICE: &str = "com.asciimark.ai";
+const SERVICE: &str = "app.markdraw";
 
 fn entry(provider_id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(SERVICE, provider_id).map_err(|e| e.to_string())
-}
-
-fn legacy_entry(provider_id: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(LEGACY_SERVICE, provider_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -47,33 +37,18 @@ pub async fn ai_set_api_key(provider_id: String, key: String) -> Result<(), Stri
 pub async fn ai_get_api_key(provider_id: String) -> Result<Option<String>, String> {
     match entry(&provider_id)?.get_password() {
         Ok(password) => Ok(Some(password)),
-        // Not under the current service — try the pre-rename one and migrate the
-        // key forward, so the old `com.asciimark.ai` item is read at most once.
-        Err(keyring::Error::NoEntry) => match legacy_entry(&provider_id)?.get_password() {
-            Ok(password) => {
-                // Best-effort migration: copy into the new service, drop the old.
-                let _ = entry(&provider_id)?.set_password(&password);
-                let _ = legacy_entry(&provider_id)?.delete_credential();
-                Ok(Some(password))
-            }
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(e.to_string()),
-        },
+        Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(e.to_string()),
     }
 }
 
 #[tauri::command]
 pub async fn ai_delete_api_key(provider_id: String) -> Result<(), String> {
-    // Deleting a key that isn't there is a no-op, not an error. Clear both the
-    // current and legacy services so a migrated-but-not-yet-read key can't linger.
-    let del = |e: keyring::Entry| match e.delete_credential() {
+    // Deleting a key that isn't there is a no-op, not an error.
+    match entry(&provider_id)?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(err) => Err(err.to_string()),
-    };
-    del(entry(&provider_id)?)?;
-    del(legacy_entry(&provider_id)?)?;
-    Ok(())
+    }
 }
 
 /// `<app_config_dir>/ai.json` — the provider catalog (never the keys).
@@ -111,7 +86,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn set_get_delete_round_trip() {
-        let id = "asciimark-test-provider".to_string();
+        let id = "markdraw-test-provider".to_string();
         ai_set_api_key(id.clone(), "secret-123".to_string())
             .await
             .unwrap();

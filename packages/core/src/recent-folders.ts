@@ -1,7 +1,7 @@
 import * as v from "valibot";
 import { RecentFolderSchema, type RecentFolder, safeJsonParse, tryParse } from "./schemas.ts";
 
-const STORAGE_KEY = "asciimark-recent-folders-v1";
+const STORAGE_KEY = "markdraw-recent-folders-v1";
 const MAX_RECENT = 10;
 
 function readRecentFolders(): RecentFolder[] {

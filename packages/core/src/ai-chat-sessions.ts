@@ -13,8 +13,8 @@ import * as v from "valibot";
 import { safeJsonParse, tryParse } from "./schemas.ts";
 
 // ── Storage keys ────────────────────────────────────────────────────────────
-const SESSIONS_INDEX_KEY = "asciimark-ai-chat-sessions";
-const MESSAGES_KEY_PREFIX = "asciimark-ai-chat-msgs-";
+const SESSIONS_INDEX_KEY = "markdraw-ai-chat-sessions";
+const MESSAGES_KEY_PREFIX = "markdraw-ai-chat-msgs-";
 
 function messagesKey(sessionId: string): string {
   return `${MESSAGES_KEY_PREFIX}${sessionId}`;

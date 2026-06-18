@@ -4,7 +4,7 @@
 
 type CloseBehavior = "tray" | "quit";
 
-const CLOSE_BEHAVIOR_KEY = "asciimark-window-close-behavior";
+const CLOSE_BEHAVIOR_KEY = "markdraw-window-close-behavior";
 
 function getStoredCloseBehavior(): CloseBehavior {
   const stored = localStorage.getItem(CLOSE_BEHAVIOR_KEY);

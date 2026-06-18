@@ -177,8 +177,8 @@ export function toMcpServerConfig(e: DiscoveredEntry): MCPServerConfig {
 
 // ── Trust store (localStorage): per-machine approvals + the OpenCode toggle ──
 
-const APPROVALS_KEY = "asciimark-mcp-approvals";
-const IMPORT_OPENCODE_KEY = "asciimark-import-opencode-mcps";
+const APPROVALS_KEY = "markdraw-mcp-approvals";
+const IMPORT_OPENCODE_KEY = "markdraw-import-opencode-mcps";
 
 function loadApprovals(): Record<string, true> {
   try {

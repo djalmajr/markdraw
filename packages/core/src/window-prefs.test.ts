@@ -50,9 +50,9 @@ describe("window preferences invalid stored values", () => {
     // The decision function would then hit an unhandled branch
     // and likely default to `"hide"` regardless, but explicit
     // fallback here keeps the contract local.
-    localStorage.setItem("asciimark-window-close-behavior", "minimize");
+    localStorage.setItem("markdraw-window-close-behavior", "minimize");
     expect(getStoredCloseBehavior()).toBe("tray");
-    localStorage.setItem("asciimark-window-close-behavior", "");
+    localStorage.setItem("markdraw-window-close-behavior", "");
     expect(getStoredCloseBehavior()).toBe("tray");
   });
 });

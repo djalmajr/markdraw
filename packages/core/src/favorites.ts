@@ -1,7 +1,7 @@
 import * as v from "valibot";
 import { FavoriteFileSchema, type FavoriteFile, safeJsonParse, tryParse } from "./schemas.ts";
 
-const STORAGE_KEY = "asciimark-favorites";
+const STORAGE_KEY = "markdraw-favorites";
 
 function readFavorites(): FavoriteFile[] {
   const list = safeJsonParse(localStorage.getItem(STORAGE_KEY), v.array(v.unknown()));

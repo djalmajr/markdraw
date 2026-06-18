@@ -9,7 +9,7 @@ import { generateToFile } from "../generate.ts";
 import { formatReport } from "../validate.ts";
 import { trapioSpec } from "./trapio.spec.ts";
 
-const result = generateToFile(trapioSpec, { gate: true, serialize: { source: "asciimark/diagram", pretty: true } });
+const result = generateToFile(trapioSpec, { gate: true, serialize: { source: "markdraw/diagram", pretty: true } });
 
 if (!result.ok) {
   console.error("✗ diagram failed the gate:\n" + result.issues.join("\n"));

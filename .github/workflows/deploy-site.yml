@@ -10,11 +10,11 @@ on:
       - "packages/core/src/**"
 
 # After the Phase A migration the site deploys to the source repo's
-# gh-pages branch (djalmajr/asciimark). asciimark-releases is left
+# gh-pages branch (djalmajr/markdraw). markdraw-releases is left
 # untouched until Phase C archives it. See
 # wiki/process/operations-followups.md.
 env:
-  DEPLOY_REPO: djalmajr/asciimark
+  DEPLOY_REPO: djalmajr/markdraw
 
 jobs:
   deploy:
@@ -42,7 +42,7 @@ jobs:
           set -euo pipefail
           DEPLOY_DIR="apps/site/dist"
           DEPLOY_BRANCH="gh-pages"
-          CNAME="asciimark.djalmajr.dev"
+          CNAME="markdraw.app"
 
           # Set up a temp dir with the deploy content
           WORK=$(mktemp -d)

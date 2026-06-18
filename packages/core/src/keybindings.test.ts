@@ -98,7 +98,7 @@ describe("persistence + effectiveKeys", () => {
   });
 
   it("ignores malformed stored entries", () => {
-    localStorage.setItem("asciimark-keybindings", JSON.stringify({ "ai.openChat": { mac: "nope" } }));
+    localStorage.setItem("markdraw-keybindings", JSON.stringify({ "ai.openChat": { mac: "nope" } }));
     expect(getStoredKeybindings()).toEqual({});
     expect(effectiveKeys("ai.openChat", "mac")).toEqual(["⌘", "L"]);
   });

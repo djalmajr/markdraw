@@ -1,6 +1,6 @@
 import { PartialFontPrefsSchema, safeJsonParse, type FontPrefs as PersistedFontPrefs } from "./schemas.ts";
 
-const STORAGE_KEY = "asciimark-font-prefs";
+const STORAGE_KEY = "markdraw-font-prefs";
 
 // Local alias — keeps the public type name (`FontPrefs`) stable for
 // downstream imports while the schema-inferred type lives in

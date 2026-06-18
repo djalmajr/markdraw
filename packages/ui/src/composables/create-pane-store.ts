@@ -98,7 +98,7 @@ export function createPaneStore(paneId: string): PaneStore {
   // absorbs any session left by an older single-pane build via
   // `migrateLegacyTabSession` — idempotent and harmless when there
   // is nothing to migrate.
-  const storageKey = `asciimark-tab-session-${paneId}`;
+  const storageKey = `markdraw-tab-session-${paneId}`;
   if (paneId === "pane-0") {
     migrateLegacyTabSession(storageKey);
   }

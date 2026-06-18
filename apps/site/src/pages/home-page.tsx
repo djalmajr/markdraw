@@ -30,9 +30,9 @@ interface ScreenshotItem {
 }
 
 const RELEASES_BASE_URL =
-  "https://github.com/djalmajr/asciimark/releases/latest/download";
+  "https://github.com/djalmajr/markdraw/releases/latest/download";
 const RELEASES_LATEST_URL =
-  "https://github.com/djalmajr/asciimark/releases/latest";
+  "https://github.com/djalmajr/markdraw/releases/latest";
 
 interface PreferredDownload {
   href: string;
@@ -58,32 +58,32 @@ const downloadItems: DownloadItem[] = [
   {
     platform: m.site_platform_mac_arm64,
     helper: m.site_download_helper_dmg,
-    asset: "AsciiMark-macos-arm64.dmg",
+    asset: "Markdraw-macos-arm64.dmg",
   },
   {
     platform: m.site_platform_mac_x64,
     helper: m.site_download_helper_dmg,
-    asset: "AsciiMark-macos-x64.dmg",
+    asset: "Markdraw-macos-x64.dmg",
   },
   {
     platform: m.site_platform_linux,
     helper: m.site_download_helper_appimage,
-    asset: "AsciiMark-linux-x64.AppImage",
+    asset: "Markdraw-linux-x64.AppImage",
   },
   {
     platform: m.site_platform_linux_deb,
     helper: m.site_download_helper_deb,
-    asset: "AsciiMark-linux-x64.deb",
+    asset: "Markdraw-linux-x64.deb",
   },
   {
     platform: m.site_platform_windows,
     helper: m.site_download_helper_msi,
-    asset: "AsciiMark-windows-x64.msi",
+    asset: "Markdraw-windows-x64.msi",
   },
   {
     platform: m.site_platform_windows_alt,
     helper: m.site_download_helper_exe,
-    asset: "AsciiMark-windows-x64.exe",
+    asset: "Markdraw-windows-x64.exe",
   },
 ];
 

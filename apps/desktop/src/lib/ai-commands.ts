@@ -1,6 +1,6 @@
 // Loader for file-backed slash commands + custom instructions (omp#1).
 // Commands are *.md files in two directories — global (<appConfigDir>/commands)
-// and project (<workspace root>/.asciimark/commands) — merged over the inline
+// and project (<workspace root>/.markdraw/commands) — merged over the inline
 // builtins with precedence builtin < global < project (encoded by merge order
 // in mergeSlashCommands). Loading is strictly best-effort: a missing dir or an
 // unreadable file is skipped, never thrown, so the composer always gets a
@@ -90,19 +90,19 @@ export async function loadSlashCommands(rootPath: string | null): Promise<SlashC
     // no resolvable config dir — builtins/project still serve
   }
   const project = rootPath
-    ? await loadCommandsFromDir(`${rootPath}/.asciimark/commands`, "project")
+    ? await loadCommandsFromDir(`${rootPath}/.markdraw/commands`, "project")
     : [];
   return mergeSlashCommands(BUILTIN_COMMANDS, global, project);
 }
 
-/** The workspace's custom instructions (`<root>/.asciimark/instructions.md`),
+/** The workspace's custom instructions (`<root>/.markdraw/instructions.md`),
  *  or null when no root is open / the file is missing or empty. */
 export async function loadCustomInstructions(
   rootPath: string | null,
 ): Promise<CustomInstructions | null> {
   if (!rootPath) return null;
   try {
-    return parseInstructionsFile(await readFileContent(`${rootPath}/.asciimark/instructions.md`));
+    return parseInstructionsFile(await readFileContent(`${rootPath}/.markdraw/instructions.md`));
   } catch {
     return null;
   }

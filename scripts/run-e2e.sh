@@ -17,7 +17,7 @@ BRIDGE_PORT="${TAURI_MCP_BRIDGE_PORT:-9223}"
 # falls back to bridge.ts's default and can target a port nothing is bound to.
 export TAURI_MCP_BRIDGE_HOST="$BRIDGE_HOST"
 export TAURI_MCP_BRIDGE_PORT="$BRIDGE_PORT"
-LOG_DIR="$(mktemp -d -t asciimark-e2e-XXXXXX)"
+LOG_DIR="$(mktemp -d -t markdraw-e2e-XXXXXX)"
 DEV_LOG="$LOG_DIR/dev.log"
 DEV_PID=""
 

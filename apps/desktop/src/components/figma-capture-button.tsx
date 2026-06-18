@@ -29,7 +29,7 @@ import {
 } from "@markdraw/ui/components/ui/popover.tsx";
 import { cn } from "@markdraw/core/utils.ts";
 
-const STORAGE_KEY = "asciimark.figma-capture-key";
+const STORAGE_KEY = "markdraw.figma-capture-key";
 const SCRIPT_ID = "figma-capture-script";
 const SCRIPT_SRC = "https://mcp.figma.com/mcp/html-to-design/capture.js";
 

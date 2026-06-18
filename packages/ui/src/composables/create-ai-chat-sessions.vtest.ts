@@ -159,7 +159,7 @@ describe("createAiChatSessions — lifecycle", () => {
       release();
       await pending.catch(() => {});
       expect(mgr.allSessions().find((s) => s.id === a)).toBeUndefined();
-      expect(localStorage.getItem("asciimark-ai-chat-msgs-" + a)).toBeNull();
+      expect(localStorage.getItem("markdraw-ai-chat-msgs-" + a)).toBeNull();
     });
   });
 });

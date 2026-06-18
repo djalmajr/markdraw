@@ -12,12 +12,12 @@
 
 set -euo pipefail
 
-IDENTITY="AsciiMark Dev Signing"
+IDENTITY="Markdraw Dev Signing"
 bin="$1"
 shift || true
 
-if [[ "$(basename "$bin")" == "asciimark" ]]; then
-  codesign --force --sign "$IDENTITY" --identifier "dev.djalmajr.asciimark" "$bin" >/dev/null 2>&1 \
+if [[ "$(basename "$bin")" == "markdraw" ]]; then
+  codesign --force --sign "$IDENTITY" --identifier "app.markdraw" "$bin" >/dev/null 2>&1 \
     || echo "[dev] warning: codesign failed; launching unsigned (keychain may prompt)" >&2
 fi
 

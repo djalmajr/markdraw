@@ -4,7 +4,7 @@
  * the value lives in localStorage so it survives reloads.
  */
 
-export const READER_MODE_STORAGE_KEY = "asciimark-reader-mode";
+export const READER_MODE_STORAGE_KEY = "markdraw-reader-mode";
 
 export function getReaderMode(): boolean {
   try {

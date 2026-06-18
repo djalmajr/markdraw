@@ -116,10 +116,10 @@ describe("AppState — editor preferences slice (DJA-42)", () => {
   it("wrap, line numbers, invisibles, sync-scroll defaults come from localStorage", () => {
     // Mutation captured: hardcoding the seed (e.g. `false`) would
     // ignore the persisted preference and surface "false" here.
-    localStorage.setItem("asciimark-editor-wrap-text", "true");
-    localStorage.setItem("asciimark-editor-show-line-numbers", "true");
-    localStorage.setItem("asciimark-editor-show-invisibles", "true");
-    localStorage.setItem("asciimark-editor-sync-scroll", "true");
+    localStorage.setItem("markdraw-editor-wrap-text", "true");
+    localStorage.setItem("markdraw-editor-show-line-numbers", "true");
+    localStorage.setItem("markdraw-editor-show-invisibles", "true");
+    localStorage.setItem("markdraw-editor-sync-scroll", "true");
     withState((state) => {
       expect(state.wrapText()).toBe(true);
       expect(state.showLineNumbers()).toBe(true);
@@ -137,10 +137,10 @@ describe("AppState — editor preferences slice (DJA-42)", () => {
       state.handleLineNumbersChange(true);
       state.handleShowInvisiblesChange(true);
       state.handleSyncScrollChange(true);
-      expect(localStorage.getItem("asciimark-editor-wrap-text")).toBe("true");
-      expect(localStorage.getItem("asciimark-editor-show-line-numbers")).toBe("true");
-      expect(localStorage.getItem("asciimark-editor-show-invisibles")).toBe("true");
-      expect(localStorage.getItem("asciimark-editor-sync-scroll")).toBe("true");
+      expect(localStorage.getItem("markdraw-editor-wrap-text")).toBe("true");
+      expect(localStorage.getItem("markdraw-editor-show-line-numbers")).toBe("true");
+      expect(localStorage.getItem("markdraw-editor-show-invisibles")).toBe("true");
+      expect(localStorage.getItem("markdraw-editor-sync-scroll")).toBe("true");
     });
   });
 
@@ -735,7 +735,7 @@ describe("AppState — right-panel manual reorder (drag-and-drop)", () => {
     },
   };
   const aiConfig = { createAIProvider: () => stubProvider };
-  const RP_KEY = "asciimark-right-panel-tabs";
+  const RP_KEY = "markdraw-right-panel-tabs";
 
   function persistedOrder(): string[] | undefined {
     const raw = localStorage.getItem(RP_KEY);
@@ -927,9 +927,9 @@ describe("AppState — AI Plan/Build mode", () => {
     withState((state) => {
       state.setAiMode("plan");
       expect(state.aiMode()).toBe("plan");
-      expect(localStorage.getItem("asciimark-ai-mode")).toBe("plan");
+      expect(localStorage.getItem("markdraw-ai-mode")).toBe("plan");
       state.setAiMode("build");
-      expect(localStorage.getItem("asciimark-ai-mode")).toBe("build");
+      expect(localStorage.getItem("markdraw-ai-mode")).toBe("build");
     });
   });
 

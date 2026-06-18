@@ -1,8 +1,8 @@
 import * as v from "valibot";
 import { RecentFileSchema, type RecentFile, safeJsonParse, tryParse } from "./schemas.ts";
 
-const LEGACY_STORAGE_KEY = "asciimark-recent-files";
-const STORAGE_KEY = "asciimark-recent-files-v2";
+const LEGACY_STORAGE_KEY = "markdraw-recent-files";
+const STORAGE_KEY = "markdraw-recent-files-v2";
 const MAX_RECENT = 10;
 
 const RecentFileListSchema = v.array(RecentFileSchema);

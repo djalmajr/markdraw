@@ -28,12 +28,12 @@ import {
  * every JSX node that read it.
  *
  * Persistence: the chosen locale is stored in localStorage under
- * `asciimark-locale`. On first load we hydrate from storage, falling
+ * `markdraw-locale`. On first load we hydrate from storage, falling
  * back to the browser's `navigator.language` (mapped to a supported
  * locale) and finally to `baseLocale` ("en").
  */
 
-const STORAGE_KEY = "asciimark-locale";
+const STORAGE_KEY = "markdraw-locale";
 
 function detectInitialLocale(): Locale {
   if (typeof localStorage !== "undefined") {

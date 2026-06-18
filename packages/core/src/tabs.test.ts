@@ -77,13 +77,13 @@ describe("tab session persistence", () => {
       ],
     };
     setTabSession(session as unknown as PersistedTabSession);
-    const raw = JSON.parse(localStorage.getItem("asciimark-tab-session")!);
+    const raw = JSON.parse(localStorage.getItem("markdraw-tab-session")!);
     expect(raw.tabs[0]).not.toHaveProperty("editorContent");
   });
 
   it("filters out malformed tab entries on read", () => {
     localStorage.setItem(
-      "asciimark-tab-session",
+      "markdraw-tab-session",
       JSON.stringify({
         activeTabId: "r::a",
         tabs: [
@@ -100,12 +100,12 @@ describe("tab session persistence", () => {
   });
 
   it("returns null when stored payload has no valid tabs", () => {
-    localStorage.setItem("asciimark-tab-session", JSON.stringify({ tabs: [], activeTabId: null }));
+    localStorage.setItem("markdraw-tab-session", JSON.stringify({ tabs: [], activeTabId: null }));
     expect(getTabSession()).toBeNull();
   });
 
   it("returns null on malformed JSON instead of throwing", () => {
-    localStorage.setItem("asciimark-tab-session", "{not json");
+    localStorage.setItem("markdraw-tab-session", "{not json");
     expect(getTabSession()).toBeNull();
   });
 
@@ -124,7 +124,7 @@ describe("tab session persistence", () => {
       ],
     });
     clearTabSession();
-    expect(localStorage.getItem("asciimark-tab-session")).toBeNull();
+    expect(localStorage.getItem("markdraw-tab-session")).toBeNull();
   });
 
   it("get/setTabSession respect a custom storage key (per-pane scope)", () => {
@@ -136,11 +136,11 @@ describe("tab session persistence", () => {
         { editorMode: "edit", fileName: "a", filePath: "a", id: "r::a", isPinned: true, rootId: "r" },
       ],
     };
-    setTabSession(session, "asciimark-tab-session-pane-0");
-    setTabSession({ ...session, activeTabId: "r::b", tabs: [{ ...session.tabs[0]!, id: "r::b", filePath: "b", fileName: "b" }] }, "asciimark-tab-session-pane-1");
+    setTabSession(session, "markdraw-tab-session-pane-0");
+    setTabSession({ ...session, activeTabId: "r::b", tabs: [{ ...session.tabs[0]!, id: "r::b", filePath: "b", fileName: "b" }] }, "markdraw-tab-session-pane-1");
 
-    expect(getTabSession("asciimark-tab-session-pane-0")?.activeTabId).toBe("r::a");
-    expect(getTabSession("asciimark-tab-session-pane-1")?.activeTabId).toBe("r::b");
+    expect(getTabSession("markdraw-tab-session-pane-0")?.activeTabId).toBe("r::a");
+    expect(getTabSession("markdraw-tab-session-pane-1")?.activeTabId).toBe("r::b");
     // Default key (legacy) untouched.
     expect(localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
   });
@@ -162,24 +162,24 @@ describe("migrateLegacyTabSession", () => {
     setTabSession(session); // writes to legacy
     expect(localStorage.getItem(LEGACY_STORAGE_KEY)).not.toBeNull();
 
-    const moved = migrateLegacyTabSession("asciimark-tab-session-pane-0");
+    const moved = migrateLegacyTabSession("markdraw-tab-session-pane-0");
     expect(moved).toBe(true);
-    expect(localStorage.getItem("asciimark-tab-session-pane-0")).not.toBeNull();
+    expect(localStorage.getItem("markdraw-tab-session-pane-0")).not.toBeNull();
     expect(localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
   });
 
   it("is a no-op when the target slot already has data", () => {
     setTabSession({ activeTabId: null, tabs: [{ editorMode: "edit", fileName: "x", filePath: "x", id: "r::x", isPinned: true, rootId: "r" }] }); // legacy
-    setTabSession({ activeTabId: null, tabs: [{ editorMode: "edit", fileName: "y", filePath: "y", id: "r::y", isPinned: true, rootId: "r" }] }, "asciimark-tab-session-pane-0");
+    setTabSession({ activeTabId: null, tabs: [{ editorMode: "edit", fileName: "y", filePath: "y", id: "r::y", isPinned: true, rootId: "r" }] }, "markdraw-tab-session-pane-0");
 
-    const moved = migrateLegacyTabSession("asciimark-tab-session-pane-0");
+    const moved = migrateLegacyTabSession("markdraw-tab-session-pane-0");
     expect(moved).toBe(false);
-    expect(getTabSession("asciimark-tab-session-pane-0")?.activeTabId).toBeNull();
-    expect(getTabSession("asciimark-tab-session-pane-0")?.tabs[0]?.id).toBe("r::y");
+    expect(getTabSession("markdraw-tab-session-pane-0")?.activeTabId).toBeNull();
+    expect(getTabSession("markdraw-tab-session-pane-0")?.tabs[0]?.id).toBe("r::y");
   });
 
   it("returns false when there is nothing to migrate", () => {
-    expect(migrateLegacyTabSession("asciimark-tab-session-pane-0")).toBe(false);
+    expect(migrateLegacyTabSession("markdraw-tab-session-pane-0")).toBe(false);
   });
 
   it("refuses to migrate to the legacy key (no self-loop)", () => {

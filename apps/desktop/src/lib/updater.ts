@@ -143,7 +143,7 @@ export async function checkForAppUpdates(silent: boolean): Promise<void> {
         // Signal the close-to-tray handler to allow the window to
         // actually close instead of hiding. Without this, relaunch
         // gets stuck because onCloseRequested prevents the exit.
-        (window as unknown as { __asciimark_updating?: boolean }).__asciimark_updating = true;
+        (window as unknown as { __markdraw_updating?: boolean }).__markdraw_updating = true;
         let state = initialProgressState();
         await update.downloadAndInstall((event) => {
           state = reduceDownloadEvent(state, event);

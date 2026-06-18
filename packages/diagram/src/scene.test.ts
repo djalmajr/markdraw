@@ -9,7 +9,7 @@ describe("scene serializer", () => {
     const scene = buildScene({ elements: [r] });
     expect(scene.type).toBe("excalidraw");
     expect(scene.version).toBe(2);
-    expect(scene.source).toBe("asciimark");
+    expect(scene.source).toBe("markdraw");
     expect(scene.elements).toHaveLength(1);
     expect(scene.appState).toEqual({});
     expect(scene.files).toEqual({});
@@ -26,13 +26,13 @@ describe("scene serializer", () => {
 
   test("default sceneToFile is compact and matches the desktop host envelope", () => {
     // Mirrors apps/desktop/src/components/excalidraw-frame.tsx sceneToFile:
-    // compact JSON, source "asciimark", appState/elements/files passthrough.
+    // compact JSON, source "markdraw", appState/elements/files passthrough.
     const out = sceneToFile({ appState: { foo: 1 }, elements: [], files: { a: 1 } });
     expect(out).toBe(
       JSON.stringify({
         type: "excalidraw",
         version: 2,
-        source: "asciimark",
+        source: "markdraw",
         elements: [],
         appState: { foo: 1 },
         files: { a: 1 },

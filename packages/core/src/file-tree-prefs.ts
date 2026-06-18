@@ -10,10 +10,10 @@
 // default to `true`, so we need the stricter parse to keep
 // "corrupt input → default" honest.
 
-const RESPECT_GITIGNORE_KEY = "asciimark-file-tree-respect-gitignore";
-const SHOW_ALL_DIRS_KEY = "asciimark-file-tree-show-all-dirs";
-const SHOW_ALL_FILES_KEY = "asciimark-file-tree-show-all-files";
-const SHOW_HIDDEN_KEY = "asciimark-file-tree-show-hidden";
+const RESPECT_GITIGNORE_KEY = "markdraw-file-tree-respect-gitignore";
+const SHOW_ALL_DIRS_KEY = "markdraw-file-tree-show-all-dirs";
+const SHOW_ALL_FILES_KEY = "markdraw-file-tree-show-all-files";
+const SHOW_HIDDEN_KEY = "markdraw-file-tree-show-hidden";
 
 function getStoredStrictBoolean(key: string, defaultValue: boolean): boolean {
   const stored = localStorage.getItem(key);

@@ -1,12 +1,12 @@
 type IndentMode = "tabs" | "spaces";
 
-const WRAP_TEXT_KEY = "asciimark-editor-wrap-text";
-const SHOW_LINE_NUMBERS_KEY = "asciimark-editor-show-line-numbers";
-const SHOW_INVISIBLES_KEY = "asciimark-editor-show-invisibles";
-const SYNC_SCROLL_KEY = "asciimark-editor-sync-scroll";
-const INDENT_MODE_KEY = "asciimark-editor-indent-mode";
-const INDENT_SIZE_KEY = "asciimark-editor-indent-size";
-const TABLE_WRAP_KEY = "asciimark-preview-table-wrap";
+const WRAP_TEXT_KEY = "markdraw-editor-wrap-text";
+const SHOW_LINE_NUMBERS_KEY = "markdraw-editor-show-line-numbers";
+const SHOW_INVISIBLES_KEY = "markdraw-editor-show-invisibles";
+const SYNC_SCROLL_KEY = "markdraw-editor-sync-scroll";
+const INDENT_MODE_KEY = "markdraw-editor-indent-mode";
+const INDENT_SIZE_KEY = "markdraw-editor-indent-size";
+const TABLE_WRAP_KEY = "markdraw-preview-table-wrap";
 
 function getStoredBoolean(key: string, defaultValue: boolean): boolean {
   const stored = localStorage.getItem(key);

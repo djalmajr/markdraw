@@ -8,7 +8,7 @@ on:
 
 # Source repo IS the public repo now (Phase B of the distribution
 # migration, see wiki/process/operations-followups.md). The legacy
-# asciimark-releases repo is archived after this change ships.
+# markdraw-releases repo is archived after this change ships.
 jobs:
   build:
     permissions:
@@ -131,7 +131,7 @@ jobs:
     if: always() && startsWith(github.ref, 'refs/tags/v') && !cancelled()
     permissions:
       # `contents: write` so GITHUB_TOKEN can publish releases to
-      # the source repo (djalmajr/asciimark).
+      # the source repo (djalmajr/markdraw).
       contents: write
     steps:
       - name: Checkout source repository
@@ -144,7 +144,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: artifacts
-          # Don't merge — macOS arm64 and x64 generate `AsciiMark.app.tar.gz`
+          # Don't merge — macOS arm64 and x64 generate `Markdraw.app.tar.gz`
           # with the same filename and would overwrite each other. Keep them
           # in their per-matrix subdirs so the python script can disambiguate
           # by full path (`aarch64-apple-darwin` vs `x86_64-apple-darwin`).
@@ -240,7 +240,7 @@ jobs:
 
       - name: Normalize assets and generate latest.json
         env:
-          PUBLIC_REPO: djalmajr/asciimark
+          PUBLIC_REPO: djalmajr/markdraw
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
@@ -259,7 +259,7 @@ jobs:
           files = [path for path in source_dir.rglob("*") if path.is_file()]
           # Predicates now receive the FULL path (as a lowercased POSIX
           # string) so they can disambiguate by directory — e.g. macOS arm64
-          # vs x64 generate the same file name (`AsciiMark.app.tar.gz`) but
+          # vs x64 generate the same file name (`Markdraw.app.tar.gz`) but
           # live under different per-target subdirs.
           file_keys = {path: str(path).lower().replace("\\", "/") for path in files}
 
@@ -275,13 +275,13 @@ jobs:
               return True
 
           # Normal installers (first install)
-          pick("AsciiMark-macos-arm64.dmg", lambda key: key.endswith(".dmg") and ("arm64" in key or "aarch64" in key))
-          pick("AsciiMark-macos-x64.dmg", lambda key: key.endswith(".dmg") and "arm64" not in key and "aarch64" not in key)
-          pick("AsciiMark-linux-x64.AppImage", lambda key: key.endswith(".appimage"))
-          pick("AsciiMark-linux-x64.deb", lambda key: key.endswith(".deb"))
-          pick("AsciiMark-windows-x64.msi", lambda key: key.endswith(".msi"))
+          pick("Markdraw-macos-arm64.dmg", lambda key: key.endswith(".dmg") and ("arm64" in key or "aarch64" in key))
+          pick("Markdraw-macos-x64.dmg", lambda key: key.endswith(".dmg") and "arm64" not in key and "aarch64" not in key)
+          pick("Markdraw-linux-x64.AppImage", lambda key: key.endswith(".appimage"))
+          pick("Markdraw-linux-x64.deb", lambda key: key.endswith(".deb"))
+          pick("Markdraw-windows-x64.msi", lambda key: key.endswith(".msi"))
           pick(
-              "AsciiMark-windows-x64.exe",
+              "Markdraw-windows-x64.exe",
               lambda key: key.endswith(".exe") and ("installer" in key or "setup" in key),
           )
 
@@ -329,19 +329,19 @@ jobs:
 
           # macOS: disambiguate by per-target subdir in the path (set by --target)
           pick_update(
-              "AsciiMark-macos-arm64.app.tar.gz",
+              "Markdraw-macos-arm64.app.tar.gz",
               "darwin-aarch64",
               lambda key: key.endswith(".app.tar.gz") and ("aarch64" in key or "arm64" in key),
           )
           pick_update(
-              "AsciiMark-macos-x64.app.tar.gz",
+              "Markdraw-macos-x64.app.tar.gz",
               "darwin-x86_64",
               lambda key: key.endswith(".app.tar.gz") and "aarch64" not in key and "arm64" not in key,
           )
           # Linux: the AppImage installer IS the update asset. We only
           # need to attach its .sig under the same release name.
           pick_update(
-              "AsciiMark-linux-x64.AppImage",
+              "Markdraw-linux-x64.AppImage",
               "linux-x86_64",
               lambda key: key.endswith(".appimage"),
               copy_asset=False,
@@ -349,7 +349,7 @@ jobs:
           # Windows: the *-setup.exe installer IS the update asset. Same
           # treatment — only the .sig needs to be added.
           pick_update(
-              "AsciiMark-windows-x64.exe",
+              "Markdraw-windows-x64.exe",
               "windows-x86_64",
               lambda key: key.endswith("-setup.exe"),
               copy_asset=False,
@@ -401,17 +401,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          REPO="djalmajr/asciimark"
+          REPO="djalmajr/markdraw"
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "Release $TAG already exists in $REPO. Updating release notes."
             gh release edit "$TAG" \
               --repo "$REPO" \
-              --title "AsciiMark $TAG" \
+              --title "Markdraw $TAG" \
               --notes-file release-notes.md
           else
             gh release create "$TAG" \
               --repo "$REPO" \
-              --title "AsciiMark $TAG" \
+              --title "Markdraw $TAG" \
               --notes-file release-notes.md
           fi
 
@@ -420,4 +420,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          gh release upload "$TAG" release-assets/* --clobber --repo "djalmajr/asciimark"
+          gh release upload "$TAG" release-assets/* --clobber --repo "djalmajr/markdraw"

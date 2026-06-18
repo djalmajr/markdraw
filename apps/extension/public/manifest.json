@@ -3,7 +3,7 @@
   "name": "Markdraw",
   "version": "1.3.0",
   "description": "Preview AsciiDoc and Markdown files with diagrams, math, TOC, search, and auto-refresh",
-  "homepage_url": "https://asciimark.djalmajr.dev/",
+  "homepage_url": "https://markdraw.app/",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

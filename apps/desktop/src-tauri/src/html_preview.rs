@@ -1,4 +1,4 @@
-//! `asciimark-preview://` — a custom URI scheme that serves a single HTML
+//! `markdraw-preview://` — a custom URI scheme that serves a single HTML
 //! file's DIRECTORY as an isolated web origin, so multi-file pages and SPAs
 //! preview with full fidelity. The scheme is app-namespaced (not a generic
 //! `htmlpreview`) to avoid colliding with other apps' custom schemes.
@@ -7,12 +7,12 @@
 //! encodes the whole path as one opaque segment, so a page's **root-absolute**
 //! URLs (`/index.js`, `/assets/app.css`, importmap `~/` → `/`) resolve against
 //! the asset origin root (the filesystem root), not the project folder — they
-//! 404. Here every preview gets its own origin `asciimark-preview://<token>`,
+//! 404. Here every preview gets its own origin `markdraw-preview://<token>`,
 //! whose root maps to the file's directory, so `/index.js` → `<dir>/index.js`
 //! and ES modules / importmaps / hash routing all work.
 //!
 //! ## Isolation
-//! The previewed page lives in the `asciimark-preview://<token>` origin,
+//! The previewed page lives in the `markdraw-preview://<token>` origin,
 //! distinct from the app's `tauri://localhost`. The frontend frames it sandboxed
 //! (`allow-scripts allow-same-origin`, where "same-origin" means the preview's
 //! OWN origin, not the app's). Tauri injects its IPC bridge per top-level
@@ -32,13 +32,13 @@ use tauri::http::{Request, Response};
 use tauri::{AppHandle, Manager, Runtime};
 
 /// The custom URI scheme. App-namespaced to avoid collisions; the frontend
-/// builds `asciimark-preview://<token>/<file>` URLs against this.
-pub const SCHEME: &str = "asciimark-preview";
+/// builds `markdraw-preview://<token>/<file>` URLs against this.
+pub const SCHEME: &str = "markdraw-preview";
 
 /// Query marker the CSS-module transform appends to a rewritten import so the
 /// handler serves that `.css` as a constructable-stylesheet JS module instead
 /// of a raw stylesheet. See `rewrite_css_module_imports` / `css_module_js`.
-const CSS_MODULE_MARKER: &str = "asciimark-css-module";
+const CSS_MODULE_MARKER: &str = "markdraw-css-module";
 
 /// Maps preview tokens to the directory they serve, plus an optional in-memory
 /// overlay so the file currently open in the editor previews its UNSAVED buffer
@@ -114,7 +114,7 @@ pub fn html_preview_clear_overlay(state: tauri::State<'_, HtmlPreviewState>, tok
 
 /// Split a cleaned path into (first segment, rest) — the Windows/WebView2
 /// request shape, where the custom scheme folds into a fixed host
-/// (`http://asciimark-preview.localhost/...` or plain `localhost`) and the
+/// (`http://markdraw-preview.localhost/...` or plain `localhost`) and the
 /// preview token travels as the FIRST path segment instead of the host.
 fn token_from_path(cleaned: &str) -> (String, String) {
     match cleaned.split_once('/') {
@@ -314,7 +314,7 @@ fn is_html(rel: &str) -> bool {
 /// fattens on hover/scroll) and makes WebKit ignore `::-webkit-scrollbar`. So
 /// the standard props are intentionally absent — they'd reintroduce the thick
 /// native bar this fix removes.
-const PREVIEW_SCROLLBAR_CSS: &str = "<style data-asciimark-preview>\
+const PREVIEW_SCROLLBAR_CSS: &str = "<style data-markdraw-preview>\
 ::-webkit-scrollbar{width:8px;height:8px}\
 ::-webkit-scrollbar-track{background:transparent}\
 ::-webkit-scrollbar-thumb{background-color:rgba(128,128,128,.45);border:1px solid transparent;background-clip:padding-box;border-radius:9999px}\
@@ -342,7 +342,7 @@ fn is_js_module(rel: &str) -> bool {
 }
 
 /// Rewrite `import x from "y.css" with { type: "css" }` (and the legacy
-/// `assert { type: "css" }`) into `import x from "y.css?asciimark-css-module"`,
+/// `assert { type: "css" }`) into `import x from "y.css?markdraw-css-module"`,
 /// dropping the unsupported import attribute. The marked URL is served by
 /// `serve` as a JS module (see `css_module_js`). Best-effort and conservative:
 /// it only touches imports that carry a `type: "css"` attribute, so ordinary
@@ -457,7 +457,7 @@ mod tests {
         // Root-served document: empty path, token in the query. The path stays
         // `/` so SPA path routers match their root route.
         assert_eq!(
-            resolve_request(&is_reg, "asciimark-preview.localhost", "", Some("r0"), &[], None),
+            resolve_request(&is_reg, "markdraw-preview.localhost", "", Some("r0"), &[], None),
             ("r0".to_string(), String::new())
         );
         // An UNREGISTERED query token must not hijack resolution.
@@ -469,7 +469,7 @@ mod tests {
         assert_eq!(
             resolve_request(
                 &is_reg,
-                "asciimark-preview.localhost",
+                "markdraw-preview.localhost",
                 "r0/assets/app.js",
                 None,
                 &[],
@@ -482,10 +482,10 @@ mod tests {
         assert_eq!(
             resolve_request(
                 &is_reg,
-                "asciimark-preview.localhost",
+                "markdraw-preview.localhost",
                 "index.css",
                 None,
-                &["asciimark-preview.localhost".to_string(), "r1".to_string()],
+                &["markdraw-preview.localhost".to_string(), "r1".to_string()],
                 None,
             ),
             ("r1".to_string(), "index.css".to_string())
@@ -501,10 +501,10 @@ mod tests {
         assert_eq!(
             resolve_request(
                 &is_reg,
-                "asciimark-preview.localhost",
+                "markdraw-preview.localhost",
                 "pages/user-edit.js",
                 None,
-                &["asciimark-preview.localhost".to_string(), "index.js".to_string()],
+                &["markdraw-preview.localhost".to_string(), "index.js".to_string()],
                 Some("r1"),
             ),
             ("r1".to_string(), "pages/user-edit.js".to_string())
@@ -552,7 +552,7 @@ mod tests {
         let mut headers = tauri::http::HeaderMap::new();
         headers.insert(
             "referer",
-            "http://asciimark-preview.localhost/?am-token=r7&am-entry=index.html&v=2"
+            "http://markdraw-preview.localhost/?am-token=r7&am-entry=index.html&v=2"
                 .parse()
                 .unwrap(),
         );
@@ -560,7 +560,7 @@ mod tests {
         // The explicit am-token is the most precise source — it must come
         // before the host/path-head guesses.
         assert_eq!(candidates.first().map(String::as_str), Some("r7"));
-        assert!(candidates.contains(&"asciimark-preview.localhost".to_string()));
+        assert!(candidates.contains(&"markdraw-preview.localhost".to_string()));
     }
 
     #[test]
@@ -617,7 +617,7 @@ mod tests {
         );
         assert_eq!(
             out,
-            r#"import sheet from "./z-proto.css?asciimark-css-module";"#
+            r#"import sheet from "./z-proto.css?markdraw-css-module";"#
         );
         assert!(!out.contains("type"));
     }
@@ -627,7 +627,7 @@ mod tests {
         let out = rewrite_css_module_imports(
             "import s from './a/b.css' assert { type: 'css' }\n",
         );
-        assert_eq!(out, "import s from \"./a/b.css?asciimark-css-module\"\n");
+        assert_eq!(out, "import s from \"./a/b.css?markdraw-css-module\"\n");
     }
 
     #[test]
@@ -635,7 +635,7 @@ mod tests {
         let out = rewrite_css_module_imports(
             r#"import s from "./x.css?v=2" with { type: "css" };"#,
         );
-        assert!(out.contains(r#""./x.css?v=2&asciimark-css-module""#), "{out}");
+        assert!(out.contains(r#""./x.css?v=2&markdraw-css-module""#), "{out}");
     }
 
     #[test]
@@ -670,8 +670,8 @@ mod tests {
         let out = inject_preview_chrome("<html><head><title>x</title></head><body>y</body></html>");
         // Lands right after <head>, before the page's own head content, so the
         // page can still override it.
-        assert!(out.contains("<head><style data-asciimark-preview>"), "{out}");
-        assert!(out.find("data-asciimark-preview").unwrap() < out.find("<title>").unwrap());
+        assert!(out.contains("<head><style data-markdraw-preview>"), "{out}");
+        assert!(out.find("data-markdraw-preview").unwrap() < out.find("<title>").unwrap());
         assert!(out.contains("::-webkit-scrollbar-thumb"));
     }
 
@@ -680,7 +680,7 @@ mod tests {
         // Mutation: skipping the prepend would leave a head-less fragment with
         // WKWebView's thick default scrollbar.
         let out = inject_preview_chrome("<p>fragment</p>");
-        assert!(out.starts_with("<style data-asciimark-preview>"));
+        assert!(out.starts_with("<style data-markdraw-preview>"));
         assert!(out.ends_with("<p>fragment</p>"));
     }
 

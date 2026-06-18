@@ -21,16 +21,16 @@ type AIChatMode = "build" | "plan";
  *  per provider kind). "off" (the default) leaves requests unchanged. */
 type AIReasoningEffort = "off" | "low" | "medium" | "high";
 
-const MODE_KEY = "asciimark-ai-mode";
-const ENGINE_KEY = "asciimark-ai-engine";
-const MODEL_KEY = "asciimark-ai-model";
-const SMALL_MODEL_KEY = "asciimark-ai-small-model";
-const EMBEDDING_MODEL_KEY = "asciimark-ai-embedding-model";
-const TIER_KEY = "asciimark-ai-indexing-tier";
-const STREAMING_KEY = "asciimark-ai-streaming";
-const REASONING_KEY = "asciimark-ai-reasoning";
-const HIDDEN_MODELS_KEY = "asciimark-ai-hidden-models";
-const CONNECTED_SUBS_KEY = "asciimark-ai-connected-subscriptions";
+const MODE_KEY = "markdraw-ai-mode";
+const ENGINE_KEY = "markdraw-ai-engine";
+const MODEL_KEY = "markdraw-ai-model";
+const SMALL_MODEL_KEY = "markdraw-ai-small-model";
+const EMBEDDING_MODEL_KEY = "markdraw-ai-embedding-model";
+const TIER_KEY = "markdraw-ai-indexing-tier";
+const STREAMING_KEY = "markdraw-ai-streaming";
+const REASONING_KEY = "markdraw-ai-reasoning";
+const HIDDEN_MODELS_KEY = "markdraw-ai-hidden-models";
+const CONNECTED_SUBS_KEY = "markdraw-ai-connected-subscriptions";
 
 function getStoredAiMode(): AIChatMode {
   return localStorage.getItem(MODE_KEY) === "plan" ? "plan" : "build";

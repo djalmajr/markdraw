@@ -75,7 +75,7 @@ describe("HtmlPreview", () => {
   describe("folderRoot (SPA) mode", () => {
     function makeHost(over: Partial<HtmlPreviewFolderRoot> = {}): HtmlPreviewFolderRoot {
       return {
-        docOrigin: (token: string) => `asciimark-preview://${token}`,
+        docOrigin: (token: string) => `markdraw-preview://${token}`,
         register: vi.fn(async () => ({ token: "r0", entryRel: "index.html" })),
         setOverlay: vi.fn(),
         clearOverlay: vi.fn(),
@@ -98,7 +98,7 @@ describe("HtmlPreview", () => {
       // src points at the registered origin's ROOT — path `/` so SPA path
       // routers match; the entry + token travel in the query. No srcdoc.
       expect(iframe.getAttribute("src")).toBe(
-        "asciimark-preview://r0/?am-token=r0&am-entry=index.html&v=0",
+        "markdraw-preview://r0/?am-token=r0&am-entry=index.html&v=0",
       );
       expect(iframe.getAttribute("srcdoc")).toBeNull();
     });
@@ -118,14 +118,14 @@ describe("HtmlPreview", () => {
       ));
       await tick();
       expect(frame(container).getAttribute("src")).toBe(
-        "asciimark-preview://r0/?am-token=r0&am-entry=index.html&v=0",
+        "markdraw-preview://r0/?am-token=r0&am-entry=index.html&v=0",
       );
 
       setContent("<p>v2</p>");
       await tick(450);
       expect(host.setOverlay).toHaveBeenLastCalledWith("r0", "index.html", "<p>v2</p>");
       expect(frame(container).getAttribute("src")).toBe(
-        "asciimark-preview://r0/?am-token=r0&am-entry=index.html&v=1",
+        "markdraw-preview://r0/?am-token=r0&am-entry=index.html&v=1",
       );
     });
 
@@ -174,7 +174,7 @@ describe("HtmlPreview", () => {
       resolveB({ token: "r9", entryRel: "other.html" });
       await tick();
       expect(frame(container).getAttribute("src")).toBe(
-        "asciimark-preview://r9/?am-token=r9&am-entry=other.html&v=0",
+        "markdraw-preview://r9/?am-token=r9&am-entry=other.html&v=0",
       );
     });
   });

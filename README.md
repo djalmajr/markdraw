@@ -9,12 +9,12 @@ navigation layer; everything renders locally without telemetry.
 
 * **Desktop** — pre-built signed installers for macOS (arm64 + x64),
   Linux (AppImage + .deb), and Windows (MSI + EXE) at
-  [github.com/djalmajr/asciimark](https://github.com/djalmajr/asciimark/releases/latest).
+  [github.com/djalmajr/markdraw](https://github.com/djalmajr/markdraw/releases/latest).
   Auto-update wired in via the Tauri updater.
 * **Chrome extension** —
   [Chrome Web Store listing](https://chromewebstore.google.com/detail/asciimark/dmcihjkjbeckainfkaddpkeghlllmkbk).
   Renders `.adoc` and `.md` URLs directly in the tab.
-* **Website** — [djalmajr.github.io/asciimark](https://djalmajr.github.io/asciimark/)
+* **Website** — [markdraw.app](https://markdraw.app/)
   (downloads, guide, privacy).
 
 ## What's inside
@@ -41,7 +41,7 @@ integration tracked openly.
 
 ## Privacy
 
-See [privacy policy](https://djalmajr.github.io/asciimark/privacy.html).
+See [privacy policy](https://markdraw.app/privacy.html).
 TL;DR: no data leaves your machine except (1) the document URL you
 explicitly point the viewer at, (2) Kroki diagram blocks sent as
 plain text to `kroki.io` for SVG rendering, (3) the GitHub Releases
@@ -63,11 +63,11 @@ poll done by the desktop auto-updater.
 ## Repo layout
 
 ```
-asciimark/
+markdraw/
 ├── apps/
 │   ├── desktop/       # Tauri desktop app (the primary target)
 │   ├── extension/     # Chrome extension
-│   └── site/          # djalmajr.github.io/asciimark (SolidJS)
+│   └── site/          # markdraw.app (SolidJS)
 ├── packages/
 │   ├── core/          # AsciiDoc/Markdown conversion + schemas
 │   ├── ui/            # Shared SolidJS components + styles

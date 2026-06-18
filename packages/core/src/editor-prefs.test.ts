@@ -82,19 +82,19 @@ describe("editor preferences invalid stored values", () => {
   });
 
   it("falls back to default when boolean string is malformed", () => {
-    localStorage.setItem("asciimark-editor-wrap-text", "yes");
+    localStorage.setItem("markdraw-editor-wrap-text", "yes");
     expect(getStoredWrapText()).toBe(false);
   });
 
   it("falls back to 'spaces' when stored indent mode is invalid", () => {
-    localStorage.setItem("asciimark-editor-indent-mode", "tab");
+    localStorage.setItem("markdraw-editor-indent-mode", "tab");
     expect(getStoredIndentMode()).toBe("spaces");
   });
 
   it("falls back to 2 when stored indent size is not 2 or 4", () => {
-    localStorage.setItem("asciimark-editor-indent-size", "8");
+    localStorage.setItem("markdraw-editor-indent-size", "8");
     expect(getStoredIndentSize()).toBe(2);
-    localStorage.setItem("asciimark-editor-indent-size", "garbage");
+    localStorage.setItem("markdraw-editor-indent-size", "garbage");
     expect(getStoredIndentSize()).toBe(2);
   });
 });

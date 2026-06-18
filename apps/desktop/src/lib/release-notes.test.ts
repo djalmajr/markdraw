@@ -19,13 +19,13 @@ afterEach(() => {
 });
 
 describe("releaseHtmlUrl", () => {
-  it("points to the djalmajr/asciimark tag URL", () => {
+  it("points to the djalmajr/markdraw tag URL", () => {
     // Domain rule: the public release page is the canonical fallback
     // surfaced to the user when the API call fails. After the Phase A
     // migration (2026-05-12) the source repo IS the public repo, so the
-    // tag URL points at djalmajr/asciimark, not the legacy releases repo.
+    // tag URL points at djalmajr/markdraw, not the legacy releases repo.
     expect(releaseHtmlUrl("0.10.0")).toBe(
-      "https://github.com/djalmajr/asciimark/releases/tag/v0.10.0",
+      "https://github.com/djalmajr/markdraw/releases/tag/v0.10.0",
     );
   });
 });
@@ -116,14 +116,14 @@ describe("fetchReleaseHistory", () => {
           tag_name: "v0.10.0",
           name: "Markdraw v0.10.0",
           body: "## Features\n\n- thing",
-          html_url: "https://github.com/djalmajr/asciimark/releases/tag/v0.10.0",
+          html_url: "https://github.com/djalmajr/markdraw/releases/tag/v0.10.0",
           published_at: "2026-05-06T23:46:24Z",
         },
         {
           tag_name: "v0.9.1",
           name: "Markdraw v0.9.1",
           body: "## Fixes\n\n- crash",
-          html_url: "https://github.com/djalmajr/asciimark/releases/tag/v0.9.1",
+          html_url: "https://github.com/djalmajr/markdraw/releases/tag/v0.9.1",
           published_at: "2026-05-06T01:36:30Z",
         },
       ]),

@@ -10,7 +10,7 @@ or competing products.
 If you want to use Markdraw, install the binary from one of the
 official channels:
 
-* Desktop: [github.com/djalmajr/asciimark](https://github.com/djalmajr/asciimark/releases/latest)
+* Desktop: [github.com/djalmajr/markdraw](https://github.com/djalmajr/markdraw/releases/latest)
 * Browser: [Chrome Web Store](https://chromewebstore.google.com/detail/asciimark/dmcihjkjbeckainfkaddpkeghlllmkbk)
 
 That's it — the binary is free to use forever.

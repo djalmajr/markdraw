@@ -21,7 +21,7 @@
 
 set -euo pipefail
 
-NAME="AsciiMark Dev Signing"
+NAME="Markdraw Dev Signing"
 
 if [[ "$(uname)" != "Darwin" ]]; then
   echo "macOS only — nothing to do."
@@ -55,7 +55,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
 # `-legacy` makes OpenSSL 3 emit a MAC/PBE that macOS's importer accepts
 # (without it the import fails with "MAC verification failed").
 openssl pkcs12 -export -legacy -out "$tmp/id.p12" -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
-  -name "$NAME" -passout pass:asciimark >/dev/null 2>&1
+  -name "$NAME" -passout pass:markdraw >/dev/null 2>&1
 
 # Ask for the keychain password ONCE up front, unlock with it, then run the
 # import + partition-list non-interactively — so macOS doesn't pop a dialog
@@ -71,7 +71,7 @@ if ! security unlock-keychain -p "$KPW" "$KEYCHAIN" >/dev/null 2>&1; then
   exit 1
 fi
 echo "→ Importing the identity (codesign-only access)…"
-security import "$tmp/id.p12" -k "$KEYCHAIN" -P asciimark -T /usr/bin/codesign >/dev/null
+security import "$tmp/id.p12" -k "$KEYCHAIN" -P markdraw -T /usr/bin/codesign >/dev/null
 if ! security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KPW" "$KEYCHAIN" >/dev/null 2>&1; then
   echo "  ⚠ set-key-partition-list failed. Re-run this script."
   exit 1

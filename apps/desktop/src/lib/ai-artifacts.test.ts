@@ -30,7 +30,7 @@ describe("savePlanArtifact", () => {
     // to disk would be permanently unresolvable after restart.
     const { deps, placeholder, writes } = artifactDeps();
     const path = await savePlanArtifact(deps, "/ws", `Call the API with key: ${placeholder}`, NOW);
-    expect(path).toBe("/ws/.asciimark/plans/plan-20260611-080910.md");
+    expect(path).toBe("/ws/.markdraw/plans/plan-20260611-080910.md");
     expect(writes).toEqual([{ content: `Call the API with key: ${SECRET}`, path }]);
   });
 });
@@ -52,7 +52,7 @@ describe("exportChatArtifact", () => {
       NOW,
     );
     expect(dialogCalls).toEqual([
-      { defaultDir: "/ws/.asciimark/chats", defaultName: "my-chat-20260611-080910.md" },
+      { defaultDir: "/ws/.markdraw/chats", defaultName: "my-chat-20260611-080910.md" },
     ]);
     expect(path).toBe("/picked/my-chat-20260611-080910.md");
     expect(writes).toEqual([
