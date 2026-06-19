@@ -1795,6 +1795,25 @@ export function App() {
     else excalidrawFrames.delete(filePath);
   }
 
+  // Surface a failed Excalidraw disk save. Persistence is fire-and-forget, so a
+  // rejected `write_file` (a locked file, missing permissions, a path the OS
+  // refuses) would otherwise drop the user's edits with no error anywhere — the
+  // "I drew on a new file but nothing saved" report. De-duped per path so a
+  // persistently-failing file alerts once per session, not on every write.
+  const excalidrawSaveErrorsAlerted = new Set<string>();
+  function handleExcalidrawSaveError(filePath: string, message: string): void {
+    if (excalidrawSaveErrorsAlerted.has(filePath)) return;
+    excalidrawSaveErrorsAlerted.add(filePath);
+    void confirm({
+      title: "Não foi possível salvar o diagrama",
+      description:
+        `As alterações em "${filePath}" não puderam ser gravadas no disco:\n\n${message}\n\n` +
+        "Verifique as permissões da pasta e se o arquivo não está bloqueado por " +
+        "outro programa (ex.: OneDrive, antivírus).",
+      confirmLabel: "OK",
+    });
+  }
+
   /** Absolute path of the `.excalidraw` shown in the ACTIVE pane, or null when
    *  the active view isn't a `.excalidraw`. */
   function activeExcalidrawAbsPath(): string | null {
@@ -3477,6 +3496,7 @@ export function App() {
             suppressSave={suppressedExcalidrawSaves().has(filePath)}
             reloadToken={excalidrawReloadTokens().get(filePath) ?? 0}
             onFrameApi={registerExcalidrawFrame}
+            onSaveError={handleExcalidrawSaveError}
           />
         ) : null;
       }}

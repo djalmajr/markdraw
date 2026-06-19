@@ -68,6 +68,11 @@ interface ExcalidrawFrameProps {
    *  diagram). Called with the API while mounted and `null` on cleanup; re-keyed
    *  if `filePath` changes on a reused instance. */
   onFrameApi?: (filePath: string, api: ExcalidrawFrameApi | null) => void;
+  /** Notified when a disk write (`write_file`) for `filePath` fails. Persistence
+   *  is fire-and-forget (debounced), so without this a rejected write — e.g. a
+   *  Windows file lock (OneDrive/antivirus) or a permissions error — vanishes
+   *  silently and the user's edits appear to never save, with no error. */
+  onSaveError?: (filePath: string, message: string) => void;
 }
 
 const RESERVED = new Set([
@@ -153,7 +158,25 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
 
   const writeNow = (path: string, s: Scene) => {
     if (props.suppressSave) return;
-    void invoke("write_file", { path, content: sceneToFile(s) });
+    const content = sceneToFile(s);
+    // Don't swallow the rejection: a failed `write_file` (locked file, missing
+    // permissions, a path the OS refuses) otherwise looks exactly like "my edits
+    // never saved" with no error anywhere. Retry once — the common Windows cause
+    // is a transient lock (antivirus/OneDrive scanning a freshly-created file),
+    // which clears in well under a second — then surface the error so the host
+    // can tell the user instead of silently dropping their work.
+    const attempt = (retriesLeft: number) => {
+      void invoke("write_file", { path, content }).catch((e: unknown) => {
+        if (retriesLeft > 0) {
+          setTimeout(() => attempt(retriesLeft - 1), 400);
+          return;
+        }
+        const message = e instanceof Error ? e.message : String(e);
+        console.error(`[excalidraw] failed to save ${path}: ${message}`);
+        props.onSaveError?.(path, message);
+      });
+    };
+    attempt(1);
   };
 
   createEffect(() => {
