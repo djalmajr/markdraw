@@ -11,7 +11,7 @@
     },
     "apps/desktop": {
       "name": "@markdraw/desktop",
-      "version": "0.21.2",
+      "version": "0.22.0-1",
       "dependencies": {
         "@markdraw/ai": "workspace:*",
         "@markdraw/core": "workspace:*",
@@ -36,29 +36,6 @@
         "@types/bun": "latest",
         "@types/node": "^25.3.0",
         "memlab": "^2.0.2",
-        "tailwindcss": "^4",
-        "typescript": "^5.9.3",
-        "unplugin-icons": "^23.0.1",
-        "vite": "^8.0.14",
-        "vite-plugin-solid": "^2.11.10",
-      },
-    },
-    "apps/extension": {
-      "name": "@markdraw/extension",
-      "version": "1.3.0",
-      "dependencies": {
-        "@markdraw/ai": "workspace:*",
-        "@markdraw/core": "workspace:*",
-        "@markdraw/i18n": "workspace:*",
-        "@markdraw/ui": "workspace:*",
-        "solid-js": "^1.9.11",
-      },
-      "devDependencies": {
-        "@iconify/json": "^2.2.441",
-        "@tailwindcss/vite": "^4",
-        "@types/bun": "latest",
-        "@types/node": "^25.3.0",
-        "chrome-types": "^0.1.415",
         "tailwindcss": "^4",
         "typescript": "^5.9.3",
         "unplugin-icons": "^23.0.1",
@@ -568,8 +545,6 @@
     "@markdraw/desktop": ["@markdraw/desktop@workspace:apps/desktop"],
 
     "@markdraw/diagram": ["@markdraw/diagram@workspace:packages/diagram"],
-
-    "@markdraw/extension": ["@markdraw/extension@workspace:apps/extension"],
 
     "@markdraw/i18n": ["@markdraw/i18n@workspace:packages/i18n"],
 
@@ -1122,8 +1097,6 @@
     "chokidar": ["chokidar@3.6.0", "", { "dependencies": { "anymatch": "~3.1.2", "braces": "~3.0.2", "glob-parent": "~5.1.2", "is-binary-path": "~2.1.0", "is-glob": "~4.0.1", "normalize-path": "~3.0.0", "readdirp": "~3.6.0" }, "optionalDependencies": { "fsevents": "~2.3.2" } }, "sha512-7VT13fmjotKpGipCW9JEQAusEPE+Ei8nl6/g4FBAmIm0GOOLMua9NDDo/DWp0ZAxCr3cPq5ZpBqmPAQgDda2Pw=="],
 
     "chownr": ["chownr@2.0.0", "", {}, "sha512-bIomtDF5KGpdogkLd9VspvFzk9KfpyyGlS8YFVZl7TGPBHL5snIOnxeshwVgPteQ9b4Eydl+pVbIyE1DcvCWgQ=="],
-
-    "chrome-types": ["chrome-types@0.1.415", "", {}, "sha512-8xoikSoWsppCbGTKsJ6n8V6sJIMNBCIWcnmomrpfLNuZ3MOFZ9Zk2RFtGaKc7MCV+ct82jPJuPYSbfwbbyzuLw=="],
 
     "chromium-bidi": ["chromium-bidi@14.0.0", "", { "dependencies": { "mitt": "^3.0.1", "zod": "^3.24.1" }, "peerDependencies": { "devtools-protocol": "*" } }, "sha512-9gYlLtS6tStdRWzrtXaTMnqcM4dudNegMXJxkR0I/CXObHalYeYcAMPrL19eroNZHtJ8DQmu1E+ZNOYu/IXMXw=="],
 

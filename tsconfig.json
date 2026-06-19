@@ -1,9 +1,14 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/core" },
-    { "path": "packages/ui" },
-    { "path": "apps/extension" },
-    { "path": "apps/desktop" }
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/ui"
+    },
+    {
+      "path": "apps/desktop"
+    }
   ]
 }
