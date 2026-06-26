@@ -185,6 +185,18 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
+      # Apple notarization uses an App Store Connect API key (.p8). notarytool
+      # reads it from a FILE, so we decode the base64 secret onto the runner and
+      # export its absolute path for the build step below. macOS only; if the
+      # secret is unset the file is empty and Tauri simply builds unsigned.
+      - name: Prepare Apple notarization key (macOS)
+        if: matrix.kind == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "${{ secrets.APPLE_API_KEY_P8_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+
       # Direct `tauri build` (not tauri-action): the action's release logic
       # assumes a single-target asset layout that doesn't fit our multi-target
       # macOS matrix. We rename + upload to the GitHub Release ourselves below.
@@ -196,6 +208,15 @@ jobs:
           # needs). If missing, the build still succeeds but finalize warns.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Apple Developer ID signing + notarization (macOS). Tauri auto-signs,
+          # notarizes and staples the .app when these are set; unset → unsigned
+          # build (so the var stays harmless on the Linux/Windows matrix legs).
+          # APPLE_API_KEY_PATH comes from the "Prepare Apple notarization key" step.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: bunx tauri build ${{ matrix.args }}
 
       # Each matrix entry builds exactly one target, so its bundle dir holds a
