@@ -6,13 +6,127 @@ on:
     tags:
       - "v*"
 
-# Releases are published to a public Cloudflare R2 bucket (served at
-# https://releases.markdraw.app); the source repo itself is private. The
-# Tauri updater + the marketing-site download links both read from R2.
+# Public repo → releases ship as GitHub Releases (free storage + bandwidth +
+# CDN; no Cloudflare/R2 dependency). The Tauri updater and the marketing site
+# read the stable "latest" URLs:
+#   https://github.com/djalmajr/markdraw/releases/latest/download/<asset>
+#
+# IMPORTANT: GitHub's /releases/latest/ EXCLUDES prereleases, so the updater
+# feed only resolves for STABLE releases (e.g. v0.22.0, not v0.22.0-1). Tag
+# stable versions; a tag with a "-N" suffix is published as a prerelease and
+# will NOT be served by the updater.
+#
+# Flow: create-release (draft + notes) → build (matrix, uploads renamed assets
+# to the draft) → finalize-release (latest.json, then publishes the draft). The
+# draft keeps /latest/ pointing at the PREVIOUS release until everything is in.
+
+permissions:
+  contents: write
+
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Generate release notes from commits
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          export TAG PREVIOUS_TAG
+          python <<'PY'
+          import os
+          import re
+          import subprocess
+
+          tag = os.environ["TAG"]
+          previous_tag = os.environ.get("PREVIOUS_TAG", "").strip()
+          revision_range = f"{previous_tag}..{tag}" if previous_tag else tag
+
+          commits = subprocess.check_output(
+              ["git", "log", revision_range, "--pretty=format:%h%x09%s", "--reverse"],
+              text=True,
+          ).splitlines()
+
+          grouped_commits = {
+              "build": [], "chore": [], "ci": [], "docs": [], "feat": [],
+              "fix": [], "perf": [], "refactor": [], "revert": [], "test": [],
+          }
+          conventional_commit = re.compile(
+              r"^(?P<type>[a-zA-Z]+)(?:\([^)]*\))?(?:!)?:\s*(?P<description>.+)$"
+          )
+          other_changes = []
+
+          for line in commits:
+              if "\t" not in line:
+                  continue
+              short_hash, subject = line.split("\t", 1)
+              normalized_subject = subject.strip()
+              entry = f"- {normalized_subject}"
+              match = conventional_commit.match(normalized_subject)
+              if not match:
+                  other_changes.append(entry)
+                  continue
+              commit_type = match.group("type").lower()
+              if commit_type in grouped_commits:
+                  grouped_commits[commit_type].append(entry)
+              else:
+                  other_changes.append(entry)
+
+          ordered_sections = [
+              ("feat", "Features"), ("fix", "Fixes"), ("perf", "Performance"),
+              ("refactor", "Refactors"), ("docs", "Documentation"), ("test", "Tests"),
+              ("build", "Build"), ("ci", "CI"), ("chore", "Chores"), ("revert", "Reverts"),
+          ]
+
+          lines = []
+          if not commits:
+              lines.append("No commits found for this tag range.")
+          else:
+              for key, title in ordered_sections:
+                  if not grouped_commits[key]:
+                      continue
+                  lines.append(f"## {title}")
+                  lines.extend(grouped_commits[key])
+                  lines.append("")
+              if other_changes:
+                  lines.append("## Other Changes")
+                  lines.extend(other_changes)
+                  lines.append("")
+
+          with open("release-notes.md", "w", encoding="utf-8") as notes_file:
+              notes_file.write("\n".join(lines).rstrip() + "\n")
+
+          print("Generated release notes:")
+          print(open("release-notes.md", encoding="utf-8").read())
+          PY
+
+      - name: Create the GitHub Release (draft)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          # Re-runnable: update notes if the release already exists, else create
+          # it as a DRAFT so /latest/ keeps pointing at the previous release
+          # until finalize-release publishes it with all assets in place.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
+              --title "Markdraw $TAG" --notes-file release-notes.md
+          fi
+
   build:
+    needs: create-release
     permissions:
-      contents: read
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -20,15 +134,23 @@ jobs:
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
             rust_targets: "aarch64-apple-darwin"
+            kind: macos
+            asset_prefix: "Markdraw-macos-arm64"
           - platform: macos-latest
             args: "--target x86_64-apple-darwin"
             rust_targets: "x86_64-apple-darwin"
+            kind: macos
+            asset_prefix: "Markdraw-macos-x64"
           - platform: ubuntu-22.04
             args: ""
             rust_targets: ""
+            kind: linux
+            asset_prefix: "Markdraw-linux-x64"
           - platform: windows-latest
             args: ""
             rust_targets: ""
+            kind: windows
+            asset_prefix: "Markdraw-windows-x64"
 
     runs-on: ${{ matrix.platform }}
 
@@ -63,351 +185,141 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
-      # We invoke `tauri build` directly via bunx instead of using
-      # `tauri-apps/tauri-action`. The action wraps the same call with
-      # extra release-creation logic that we don't need (we publish to a
-      # separate public repo via gh CLI in the publish-public-release job
-      # below) and its assumptions about asset layout don't match our
-      # multi-target macOS matrix. Direct invocation keeps the artifact
-      # tree intact for the Stage step to consume.
+      # Direct `tauri build` (not tauri-action): the action's release logic
+      # assumes a single-target asset layout that doesn't fit our multi-target
+      # macOS matrix. We rename + upload to the GitHub Release ourselves below.
       - name: Build Tauri app
         shell: bash
         working-directory: apps/desktop
         env:
-          # Used by `tauri build` to sign the updater artifacts. When these
-          # secrets are missing the build still succeeds, but the .sig files
-          # won't be generated and the latest.json step will fail later.
+          # Signs the updater artifacts (produces the .sig files latest.json
+          # needs). If missing, the build still succeeds but finalize warns.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: bunx tauri build ${{ matrix.args }}
 
-      # `@actions/glob` (used by upload-artifact's path matching) silently
-      # drops multi-dot extensions like `.app.tar.gz`. We work around it by
-      # listing files via `find -name` (which DOES handle multi-dot suffixes
-      # correctly) into a `stage/` tree that mirrors `target/`'s structure,
-      # then uploading the stage with a plain `**`. Path structure is
-      # preserved so the publish step can still disambiguate macOS arm64 vs
-      # x64 by their target subdir.
+      # Each matrix entry builds exactly one target, so its bundle dir holds a
+      # single asset per kind — no arm64-vs-x64 disambiguation needed. We rename
+      # to the public release name and upload straight to the GitHub Release
+      # (no actions/upload-artifact → no account-wide artifact-storage quota).
       #
-      # Tauri 2.x with `createUpdaterArtifacts: true` produces v2-format
-      # updater bundles (the installer is its own update asset; only the
-      # signature is separate):
-      #   macOS:   *.app.tar.gz + *.app.tar.gz.sig
-      #   Linux:   *.AppImage   + *.AppImage.sig
-      #   Windows: *-setup.exe  + *-setup.exe.sig (and *.msi + *.msi.sig)
-      - name: Stage release artifacts
+      # Tauri 2.x v2 updater bundles: macOS *.app.tar.gz(+.sig); Linux the
+      # *.AppImage IS the update asset (+.sig); Windows the *-setup.exe IS the
+      # update asset (+.sig), plus the *.msi for first install.
+      - name: Collect, rename, and upload release assets
         shell: bash
+        working-directory: apps/desktop/src-tauri
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cd apps/desktop/src-tauri
-          while IFS= read -r f; do
-            mkdir -p "stage/$(dirname "${f#target/}")"
-            cp -p "$f" "stage/${f#target/}"
-          done < <(find target -type f \( \
-            -name "*.dmg" -o \
-            -name "*.app.tar.gz" -o \
-            -name "*.app.tar.gz.sig" -o \
-            -name "*.deb" -o \
-            -name "*.AppImage" -o \
-            -name "*.AppImage.sig" -o \
-            -name "*.msi" -o \
-            -name "*.msi.sig" -o \
-            -name "*-setup.exe" -o \
-            -name "*-setup.exe.sig" \
-          \))
-          echo "── stage contents ──"
-          find stage -type f | sort
+          TAG="${GITHUB_REF_NAME}"
+          PREFIX="${{ matrix.asset_prefix }}"
+          mkdir -p out
+          first() { find target -type f -name "$1" 2>/dev/null | head -1; }
+          take() {
+            local src dst="$2"
+            src="$(first "$1")"
+            if [ -n "$src" ] && [ -f "$src" ]; then
+              cp -p "$src" "out/$dst"
+              echo "  $src -> $dst"
+            else
+              echo "  (none) for pattern $1"
+            fi
+          }
+          case "${{ matrix.kind }}" in
+            macos)
+              take '*.dmg'            "$PREFIX.dmg"
+              take '*.app.tar.gz'     "$PREFIX.app.tar.gz"
+              take '*.app.tar.gz.sig' "$PREFIX.app.tar.gz.sig"
+              ;;
+            linux)
+              take '*.AppImage'       "$PREFIX.AppImage"
+              take '*.AppImage.sig'   "$PREFIX.AppImage.sig"
+              take '*.deb'            "$PREFIX.deb"
+              ;;
+            windows)
+              take '*.msi'            "$PREFIX.msi"
+              take '*-setup.exe'      "$PREFIX.exe"
+              take '*-setup.exe.sig'  "$PREFIX.exe.sig"
+              ;;
+          esac
+          echo "── uploading to $TAG ──"; ls -1 out
+          gh release upload "$TAG" out/* --repo "$GITHUB_REPOSITORY" --clobber
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: binaries-${{ matrix.platform }}-${{ matrix.rust_targets || 'default' }}
-          path: apps/desktop/src-tauri/stage/**
-          if-no-files-found: ignore
-
-  publish-public-release:
+  finalize-release:
     needs: build
     runs-on: ubuntu-latest
     if: always() && startsWith(github.ref, 'refs/tags/v') && !cancelled()
     permissions:
-      # Read-only: assets go to R2 (not a GitHub release); checkout +
-      # `git log` for the release notes only need read access.
-      contents: read
+      contents: write
     steps:
-      - name: Checkout source repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-          # Don't merge — macOS arm64 and x64 generate `Markdraw.app.tar.gz`
-          # with the same filename and would overwrite each other. Keep them
-          # in their per-matrix subdirs so the python script can disambiguate
-          # by full path (`aarch64-apple-darwin` vs `x86_64-apple-darwin`).
-
-      - name: Generate release notes from commits
+      - name: Generate latest.json from the uploaded signatures
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
-          export TAG PREVIOUS_TAG
+          REPO="$GITHUB_REPOSITORY"
+          mkdir -p sigs
+          # Pull just the small .sig files back from the (draft) release.
+          gh release download "$TAG" --repo "$REPO" --pattern '*.sig' --dir sigs --clobber || true
+          NOTES="$(gh release view "$TAG" --repo "$REPO" --json body --jq .body 2>/dev/null || true)"
+          export TAG REPO NOTES
           python <<'PY'
-          import os
-          import re
-          import subprocess
+          import json, os
+          from datetime import datetime, timezone
 
           tag = os.environ["TAG"]
-          previous_tag = os.environ.get("PREVIOUS_TAG", "").strip()
-          revision_range = f"{previous_tag}..{tag}" if previous_tag else tag
+          repo = os.environ["REPO"]
+          version = tag.lstrip("v")
+          base = f"https://github.com/{repo}/releases/download/{tag}"
 
-          commits = subprocess.check_output(
-              ["git", "log", revision_range, "--pretty=format:%h%x09%s", "--reverse"],
-              text=True,
-          ).splitlines()
-
-          grouped_commits = {
-              "build": [],
-              "chore": [],
-              "ci": [],
-              "docs": [],
-              "feat": [],
-              "fix": [],
-              "perf": [],
-              "refactor": [],
-              "revert": [],
-              "test": [],
-          }
-          conventional_commit = re.compile(
-              r"^(?P<type>[a-zA-Z]+)(?:\([^)]*\))?(?:!)?:\s*(?P<description>.+)$"
-          )
-          other_changes = []
-
-          for line in commits:
-              if "\t" not in line:
-                  continue
-              short_hash, subject = line.split("\t", 1)
-              normalized_subject = subject.strip()
-              entry = f"- {normalized_subject}"
-              match = conventional_commit.match(normalized_subject)
-              if not match:
-                  other_changes.append(entry)
-                  continue
-              commit_type = match.group("type").lower()
-              if commit_type in grouped_commits:
-                  grouped_commits[commit_type].append(entry)
-              else:
-                  other_changes.append(entry)
-
-          ordered_sections = [
-              ("feat", "Features"),
-              ("fix", "Fixes"),
-              ("perf", "Performance"),
-              ("refactor", "Refactors"),
-              ("docs", "Documentation"),
-              ("test", "Tests"),
-              ("build", "Build"),
-              ("ci", "CI"),
-              ("chore", "Chores"),
-              ("revert", "Reverts"),
+          # (update-asset name, signature file, updater platform key)
+          targets = [
+              ("Markdraw-macos-arm64.app.tar.gz", "Markdraw-macos-arm64.app.tar.gz.sig", "darwin-aarch64"),
+              ("Markdraw-macos-x64.app.tar.gz",   "Markdraw-macos-x64.app.tar.gz.sig",   "darwin-x86_64"),
+              ("Markdraw-linux-x64.AppImage",     "Markdraw-linux-x64.AppImage.sig",     "linux-x86_64"),
+              ("Markdraw-windows-x64.exe",        "Markdraw-windows-x64.exe.sig",        "windows-x86_64"),
           ]
 
-          lines = []
-
-          if not commits:
-              lines.append("No commits found for this tag range.")
-          else:
-              for key, title in ordered_sections:
-                  if not grouped_commits[key]:
-                      continue
-                  lines.append(f"## {title}")
-                  lines.extend(grouped_commits[key])
-                  lines.append("")
-              if other_changes:
-                  lines.append("## Other Changes")
-                  lines.extend(other_changes)
-                  lines.append("")
-
-          with open("release-notes.md", "w", encoding="utf-8") as notes_file:
-              notes_file.write("\n".join(lines).rstrip() + "\n")
-
-          print("Generated release notes:")
-          print(open("release-notes.md", encoding="utf-8").read())
-          PY
-
-      - name: Normalize assets and generate latest.json
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          export TAG
-          python <<'PY'
-          import json
-          import os
-          import shutil
-          from datetime import datetime, timezone
-          from pathlib import Path
-
-          source_dir = Path("artifacts")
-          output_dir = Path("release-assets")
-          output_dir.mkdir(parents=True, exist_ok=True)
-
-          files = [path for path in source_dir.rglob("*") if path.is_file()]
-          # Predicates now receive the FULL path (as a lowercased POSIX
-          # string) so they can disambiguate by directory — e.g. macOS arm64
-          # vs x64 generate the same file name (`Markdraw.app.tar.gz`) but
-          # live under different per-target subdirs.
-          file_keys = {path: str(path).lower().replace("\\", "/") for path in files}
-
-          def pick(target_name, predicate):
-              candidates = [path for path in files if predicate(file_keys[path])]
-              if not candidates:
-                  return False
-              candidates.sort(key=lambda p: len(p.name))
-              source = candidates[0]
-              destination = output_dir / target_name
-              shutil.copy2(source, destination)
-              print(f"Mapped {source.name} -> {destination.name}")
-              return True
-
-          # Normal installers (first install)
-          pick("Markdraw-macos-arm64.dmg", lambda key: key.endswith(".dmg") and ("arm64" in key or "aarch64" in key))
-          pick("Markdraw-macos-x64.dmg", lambda key: key.endswith(".dmg") and "arm64" not in key and "aarch64" not in key)
-          pick("Markdraw-linux-x64.AppImage", lambda key: key.endswith(".appimage"))
-          pick("Markdraw-linux-x64.deb", lambda key: key.endswith(".deb"))
-          pick("Markdraw-windows-x64.msi", lambda key: key.endswith(".msi"))
-          pick(
-              "Markdraw-windows-x64.exe",
-              lambda key: key.endswith(".exe") and ("installer" in key or "setup" in key),
-          )
-
-          # ── Updater artifacts (Tauri 2.x v2 format) ──
-          # macOS still ships a separate update bundle (.app.tar.gz). On
-          # Linux and Windows the *installer itself* is the update asset
-          # — we just need to ship the matching .sig alongside the asset
-          # we already copied above. So `pick_update` covers two shapes:
-          #   1. macOS: copy the .app.tar.gz under a release-friendly name,
-          #      then its .sig.
-          #   2. Linux/Windows: the installer was already copied by the
-          #      "Normal installers" block above; here we only add the .sig
-          #      with a name that matches the installer's release name.
-          update_targets = []  # [(asset_name, sig_name, platform_key)]
-
-          def pick_update(asset_name, platform_key, predicate, *, copy_asset=True):
-              candidates = [path for path in files if predicate(file_keys[path])]
-              if not candidates:
-                  print(f"WARN: no updater asset for {platform_key} ({asset_name})")
-                  return
-              candidates.sort(key=lambda p: len(p.name))
-              source = candidates[0]
-              if copy_asset:
-                  destination = output_dir / asset_name
-                  shutil.copy2(source, destination)
-                  print(f"Mapped (update) {source} -> {destination.name}")
-              else:
-                  # Asset was already copied by the installer block; we just
-                  # need to ensure it's present and locate its .sig.
-                  if not (output_dir / asset_name).exists():
-                      print(f"ERROR: expected installer {asset_name} not found in output_dir")
-                      return
-
-              sig_source = source.with_name(source.name + ".sig")
-              if not sig_source.exists():
-                  sig_candidates = [p for p in files if p.name == source.name + ".sig"]
-                  if not sig_candidates:
-                      print(f"ERROR: missing signature for {source.name} — TAURI_SIGNING_PRIVATE_KEY may not be set")
-                      return
-                  sig_source = sig_candidates[0]
-
-              sig_name = asset_name + ".sig"
-              shutil.copy2(sig_source, output_dir / sig_name)
-              update_targets.append((asset_name, sig_name, platform_key))
-
-          # macOS: disambiguate by per-target subdir in the path (set by --target)
-          pick_update(
-              "Markdraw-macos-arm64.app.tar.gz",
-              "darwin-aarch64",
-              lambda key: key.endswith(".app.tar.gz") and ("aarch64" in key or "arm64" in key),
-          )
-          pick_update(
-              "Markdraw-macos-x64.app.tar.gz",
-              "darwin-x86_64",
-              lambda key: key.endswith(".app.tar.gz") and "aarch64" not in key and "arm64" not in key,
-          )
-          # Linux: the AppImage installer IS the update asset. We only
-          # need to attach its .sig under the same release name.
-          pick_update(
-              "Markdraw-linux-x64.AppImage",
-              "linux-x86_64",
-              lambda key: key.endswith(".appimage"),
-              copy_asset=False,
-          )
-          # Windows: the *-setup.exe installer IS the update asset. Same
-          # treatment — only the .sig needs to be added.
-          pick_update(
-              "Markdraw-windows-x64.exe",
-              "windows-x86_64",
-              lambda key: key.endswith("-setup.exe"),
-              copy_asset=False,
-          )
-
-          # ── Generate latest.json ──
-          tag = os.environ["TAG"]
-          version = tag.lstrip("v")
-          release_url_base = "https://releases.markdraw.app"
-
-          notes = ""
-          notes_path = Path("release-notes.md")
-          if notes_path.exists():
-              notes = notes_path.read_text(encoding="utf-8").strip()
-
           platforms = {}
-          for asset_name, sig_name, platform_key in update_targets:
-              sig_content = (output_dir / sig_name).read_text(encoding="utf-8").strip()
-              platforms[platform_key] = {
-                  "signature": sig_content,
-                  "url": f"{release_url_base}/{asset_name}",
+          for asset, sig, key in targets:
+              path = os.path.join("sigs", sig)
+              if not os.path.exists(path):
+                  print(f"WARN: missing {sig} — skipping {key} (its build may have failed)")
+                  continue
+              platforms[key] = {
+                  "signature": open(path, encoding="utf-8").read().strip(),
+                  "url": f"{base}/{asset}",
               }
 
           if not platforms:
-              print("WARN: latest.json has no platforms — auto-update will not work for this release.")
-          else:
-              latest_json = {
-                  "version": version,
-                  "notes": notes,
-                  "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                  "platforms": platforms,
-              }
-              (output_dir / "latest.json").write_text(json.dumps(latest_json, indent=2))
-              print("Generated latest.json:")
-              print(json.dumps(latest_json, indent=2))
+              raise SystemExit("ERROR: no signatures found — latest.json would be empty")
 
-          generated_assets = list(output_dir.iterdir())
-          if not generated_assets:
-              raise SystemExit("No release assets were generated.")
-
-          print("Generated assets:")
-          for asset in sorted(generated_assets):
-              print(asset.name)
+          latest = {
+              "version": version,
+              "notes": os.environ.get("NOTES", "") or "",
+              "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms,
+          }
+          with open("latest.json", "w", encoding="utf-8") as f:
+              f.write(json.dumps(latest, indent=2))
+          print(json.dumps(latest, indent=2))
           PY
+          gh release upload "$TAG" latest.json --repo "$REPO" --clobber
 
-      - name: Publish release assets to R2
+      - name: Publish the release
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          npm install -g wrangler@4
-          # Fixed keys at the bucket root → https://releases.markdraw.app/<name>.
-          # Each release overwrites "latest"; the Tauri updater reads /latest.json.
-          # latest.json gets a JSON content-type so the updater parses it.
-          for f in release-assets/*; do
-            key="$(basename "$f")"
-            ct="application/octet-stream"
-            [ "$key" = "latest.json" ] && ct="application/json"
-            echo "→ R2 put $key ($ct)"
-            wrangler r2 object put "markdraw-releases/$key" --file "$f" --content-type "$ct" --remote
-          done
-          echo "Published $(ls release-assets | wc -l) objects to https://releases.markdraw.app/"
+          TAG="${GITHUB_REF_NAME}"
+          # A "-N" pre-release identifier → GitHub prerelease (NOT served by
+          # /releases/latest/). No suffix → stable, marked --latest.
+          if [[ "$TAG" == *-* ]]; then
+            echo "::warning::$TAG is a prerelease — the updater feed (/latest/) will NOT serve it."
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          else
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          fi
