@@ -38,7 +38,7 @@ function setup(overrides: Record<string, unknown> = {}) {
 describe("SettingsDialog", () => {
   it("renders the vertical nav and opens on the AI section (Manage models)", () => {
     const { baseElement } = setup();
-    expect(baseElement.querySelectorAll('[role="tab"]').length).toBe(8);
+    expect(baseElement.querySelectorAll('[role="tab"]').length).toBe(7);
     // The AI section opens on the OpenCode-style Manage models view.
     expect(baseElement.querySelector(".settings-models-search")).not.toBeNull();
     expect(baseElement.querySelector(".settings-provider-list")).toBeNull();

@@ -147,12 +147,9 @@ import {
   useDownloadProgress,
   useUpdate,
 } from "./lib/updater.ts";
-import { fetchReleaseHistory, type ReleaseHistoryEntry } from "./lib/release-notes.ts";
-
 const RELEASES_INDEX_URL =
   "https://github.com/djalmajr/markdraw/releases";
 import { UpdateAvailableDialog } from "@markdraw/ui/components/update-available-dialog.tsx";
-import { ReleaseNotesDialog } from "@markdraw/ui/components/release-notes-dialog.tsx";
 import { findInFiles } from "./lib/fs.ts";
 import { WindowControls } from "./components/window-controls.tsx";
 // Capture-to-Figma button is hidden for now (per request). Re-enable by
@@ -1266,18 +1263,6 @@ export function App() {
   const [shortcutsHelpVisible, setShortcutsHelpVisible] = createSignal(false);
   const [aboutOpen, setAboutOpen] = createSignal(false);
   const [appVersion, setAppVersion] = createSignal<string>("");
-  // Release notes dialog state — driven by the "Release notes" menu
-  // item / Command Palette command. `entries` is null while loading
-  // or on error; `error` flips to a localized message on failure.
-  // `currentVersion` is the locally installed app version so the
-  // dialog can mark the matching row.
-  const [releaseNotesState, setReleaseNotesState] = createSignal<{
-    open: boolean;
-    currentVersion: string;
-    entries: ReleaseHistoryEntry[] | null;
-    loading: boolean;
-    error: string | null;
-  }>({ open: false, currentVersion: "", entries: null, loading: false, error: null });
   // Command palette (Cmd/Ctrl+Shift+P).
   const [commandPaletteVisible, setCommandPaletteVisible] = createSignal(false);
   // Symbol palette (Cmd/Ctrl+Shift+O).
@@ -1604,37 +1589,10 @@ export function App() {
     void getVersion().then(setAppVersion).catch(() => {});
   });
 
-  // Opens the Release Notes dialog with the recent release history,
-  // fetching the list from GitHub the first time (cache hit afterwards).
-  // The error fallback inside the dialog surfaces the message and the
-  // "Open on GitHub" button remains available either way.
-  async function openReleaseNotes(): Promise<void> {
-    const currentVersion = appVersion() || (await getVersion().catch(() => ""));
-    setReleaseNotesState({
-      open: true,
-      currentVersion,
-      entries: null,
-      loading: true,
-      error: null,
-    });
-    try {
-      const entries = await fetchReleaseHistory();
-      setReleaseNotesState({
-        open: true,
-        currentVersion,
-        entries,
-        loading: false,
-        error: null,
-      });
-    } catch (e) {
-      setReleaseNotesState({
-        open: true,
-        currentVersion,
-        entries: null,
-        loading: false,
-        error: (e as Error)?.message ?? String(e),
-      });
-    }
+  // Release notes open the public GitHub Releases page in the browser — that's
+  // the single source of truth (the former in-app history dialog was removed).
+  function openReleaseNotes(): void {
+    void openUrl(RELEASES_INDEX_URL);
   }
 
   // In production, block the native WebView context menu (Reload / Inspect
@@ -3516,19 +3474,6 @@ export function App() {
         const update = useUpdate();
         if (!update) return;
         void update.install();
-      }}
-    />
-    <ReleaseNotesDialog
-      open={releaseNotesState().open}
-      currentVersion={releaseNotesState().currentVersion}
-      loading={releaseNotesState().loading}
-      entries={releaseNotesState().entries}
-      error={releaseNotesState().error}
-      onClose={() => setReleaseNotesState((s) => ({ ...s, open: false }))}
-      onOpenInBrowser={() => {
-        // Always link to the public releases index — the dialog now
-        // surfaces history, not a single version.
-        void openUrl(RELEASES_INDEX_URL);
       }}
     />
     {/* Capture-to-Figma button hidden for now (per request).

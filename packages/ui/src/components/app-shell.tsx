@@ -627,6 +627,7 @@ export function AppShell(props: AppShellProps) {
           themeMode={s.themeMode()}
           onThemeChange={s.handleThemeChange}
           onShowReleaseNotes={props.onReleaseNotes}
+          onOpenExternal={props.onOpenExternal}
         />
       </Show>
       <Show when={props.aboutVersion}>

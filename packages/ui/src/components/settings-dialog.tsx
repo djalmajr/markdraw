@@ -22,7 +22,6 @@ import IconPencil from "~icons/lucide/pencil";
 import IconPalette from "~icons/lucide/palette";
 import IconKeyboard from "~icons/lucide/keyboard";
 import IconRotate from "~icons/lucide/rotate-ccw";
-import IconShield from "~icons/lucide/shield";
 import IconInfo from "~icons/lucide/info";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -72,7 +71,6 @@ export type SettingsSection =
   | "editor"
   | "appearance"
   | "keybindings"
-  | "privacy"
   | "about";
 
 export type McpTransport = "stdio" | "http";
@@ -215,14 +213,22 @@ export interface SettingsDialogProps {
    *  Appearance section's theme picker (moved here from the toolbar menu). */
   themeMode?: string;
   onThemeChange?: (mode: string) => void;
-  /** Open the release-notes dialog from Settings → About. */
+  /** Open the release-notes page (GitHub Releases) from Settings → About. */
   onShowReleaseNotes?: () => void;
+  /** Open an external URL in the user's browser — used by the About section's
+   *  privacy-policy link (the full policy lives on the marketing site). */
+  onOpenExternal?: (url: string) => void;
 }
 
 const THEME_MODES = ["system", "light", "dark"] as const;
 
 /** Rendered raw (same style as the MCP transport Select) — not translated. */
 const REASONING_EFFORTS = ["off", "low", "medium", "high"] as const;
+
+/** Canonical privacy policy. The full text is a single source of truth on the
+ *  marketing site; the About section shows a short guarantee + this link rather
+ *  than duplicating (and risking divergence from) the site copy. */
+const PRIVACY_POLICY_URL = "https://markdraw.app/privacy";
 
 const NAV: ReadonlyArray<{ id: SettingsSection; key: string; icon: () => JSX.Element }> = [
   { id: "ai", key: "settings_nav_ai", icon: () => <IconSparkles width={15} height={15} /> },
@@ -231,7 +237,6 @@ const NAV: ReadonlyArray<{ id: SettingsSection; key: string; icon: () => JSX.Ele
   { id: "editor", key: "settings_nav_editor", icon: () => <IconPencil width={15} height={15} /> },
   { id: "appearance", key: "settings_nav_appearance", icon: () => <IconPalette width={15} height={15} /> },
   { id: "keybindings", key: "settings_nav_keybindings", icon: () => <IconKeyboard width={15} height={15} /> },
-  { id: "privacy", key: "settings_nav_privacy", icon: () => <IconShield width={15} height={15} /> },
   { id: "about", key: "settings_nav_about", icon: () => <IconInfo width={15} height={15} /> },
 ];
 
@@ -298,23 +303,35 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                   }
                 />
               </Match>
-              <Match when={section() === "privacy"}>
-                <p class="settings-prose">{(useLocale(), label("settings_privacy_body"))}</p>
-              </Match>
               <Match when={section() === "about"}>
                 <div class="settings-prose">
                   <p class="font-semibold">Markdraw{props.appVersion ? ` v${props.appVersion}` : ""}</p>
                   <p>{(useLocale(), label("about_tagline"))}</p>
-                  <Show when={props.onShowReleaseNotes}>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      style={{ "margin-top": "12px" }}
-                      onClick={() => props.onShowReleaseNotes?.()}
-                    >
-                      {(useLocale(), label("menu_release_notes"))}
-                    </Button>
-                  </Show>
+                  {/* Privacy lives here rather than in its own tab: a short
+                      guarantee plus a link to the canonical policy on the site. */}
+                  <p style={{ "margin-top": "12px" }}>
+                    {(useLocale(), label("settings_privacy_body"))}
+                  </p>
+                  <div class="settings-row" style={{ gap: "8px", "margin-top": "12px" }}>
+                    <Show when={props.onOpenExternal}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => props.onOpenExternal?.(PRIVACY_POLICY_URL)}
+                      >
+                        {(useLocale(), label("settings_privacy_policy_link"))}
+                      </Button>
+                    </Show>
+                    <Show when={props.onShowReleaseNotes}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => props.onShowReleaseNotes?.()}
+                      >
+                        {(useLocale(), label("menu_release_notes"))}
+                      </Button>
+                    </Show>
+                  </div>
                 </div>
               </Match>
               <Match when={section() === "editor"}>
