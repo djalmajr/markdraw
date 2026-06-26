@@ -1,0 +1,26 @@
+diff --git a/utilities.js b/utilities.js
+index 4993da6d1d00877c7adb089e1143641da091567a..d5ce482b205a9d583efd24673e1ac91e294c512c 100644
+--- a/utilities.js
++++ b/utilities.js
+@@ -219,6 +219,21 @@ function getDocuments(rootDoc = document, seen = /* @__PURE__ */ new Set()) {
+     rootDoc.querySelectorAll("iframe, frame")
+   )) {
+     try {
++      // Skip cross-origin frames: reading `contentDocument` on them logs a
++      // "Blocked a frame... Protocols must match" security warning in WebKit
++      // (even though it just returns null), and DnD can't reach into them
++      // anyway. Detect via the element's `src` origin — that's a same-document
++      // attribute read, so it never triggers the cross-origin access warning.
++      const frameSrc = frame.getAttribute("src");
++      if (frameSrc && !frameSrc.startsWith("about:") && !frameSrc.startsWith("#")) {
++        let sameOrigin = false;
++        try {
++          const base = rootDoc.defaultView || window;
++          sameOrigin = new URL(frameSrc, rootDoc.baseURI).origin === base.location.origin;
++        } catch (e) {
++        }
++        if (!sameOrigin) continue;
++      }
+       const childDoc = frame.contentDocument;
+       if (childDoc && !seen.has(childDoc)) {
+         docs.push(...getDocuments(childDoc, seen));
