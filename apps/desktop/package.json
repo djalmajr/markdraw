@@ -1,6 +1,6 @@
 {
   "name": "@markdraw/desktop",
-  "version": "0.22.0-2",
+  "version": "0.22.0",
   "type": "module",
   "private": true,
   "scripts": {
