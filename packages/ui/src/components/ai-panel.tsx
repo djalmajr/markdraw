@@ -67,6 +67,11 @@ export interface AiPanelProps {
   onSelectModel?: (modelRef: string) => void;
   /** "⚙" in the picker — open Settings → AI (manage models / connect providers). */
   onManageModels?: () => void;
+  /** Reasoning effort for the chosen model ("off"|"low"|"medium"|"high") +
+   *  handler. Rendered next to the model picker — it only applies to the
+   *  selected model, so it lives by the model, not in global Settings. */
+  reasoningEffort?: string;
+  onReasoningEffortChange?: (value: string) => void;
   /** Explicit context items (attached files / selections) shown as chips. */
   contextItems?: AiContextItem[];
   /** The active-document chip (read via tool, shown for awareness), or null. */
@@ -1102,6 +1107,29 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
               onSelect={(v) => props.onSelectModel?.(v)}
               onManage={props.onManageModels}
             />
+          </Show>
+          {/* Reasoning effort sits next to the model picker — it's per-model
+              context, not a global preference. Only shown once a model exists. */}
+          <Show when={props.onReasoningEffortChange && hasModels()}>
+            <Select
+              value={props.reasoningEffort ?? "off"}
+              onChange={(v) => {
+                if (v) props.onReasoningEffortChange?.(v);
+              }}
+              options={["off", "low", "medium", "high"]}
+              gutter={4}
+              sameWidth={false}
+              itemComponent={(ip) => <SelectItem item={ip.item}>{ip.item.rawValue}</SelectItem>}
+            >
+              <SelectTrigger
+                class={PILL_SELECT}
+                aria-label={(useLocale(), m.settings_ai_reasoning_label())}
+                title={(useLocale(), m.settings_ai_reasoning_label())}
+              >
+                <span class="truncate">{props.reasoningEffort ?? "off"}</span>
+              </SelectTrigger>
+              <SelectContent class="min-w-[6rem]" />
+            </Select>
           </Show>
           <div class="ai-composer-tools">
             <ContextUsage store={props.store} contextLimit={props.contextLimit} />

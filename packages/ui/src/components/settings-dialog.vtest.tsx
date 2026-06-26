@@ -237,32 +237,6 @@ describe("SettingsDialog", () => {
     );
   });
 
-  it("AI section: the reasoning effort select renders raw options and fires onAiReasoningChange", async () => {
-    const onAiReasoningChange = vi.fn();
-    const { baseElement } = setup({ aiReasoning: "off", onAiReasoningChange });
-    // The Manage models view carries exactly one listbox trigger — the
-    // reasoning effort Select, labelled with the existing i18n key.
-    const trigger = baseElement.querySelector(
-      '[aria-haspopup="listbox"][aria-label="Reasoning effort"]',
-    ) as HTMLElement;
-    expect(trigger).not.toBeNull();
-    expect(trigger.textContent).toContain("off");
-    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 });
-    const highOption = await waitFor(() => {
-      const found = [...baseElement.querySelectorAll('[role="option"]')].find(
-        (o) => (o.textContent ?? "").trim() === "high",
-      );
-      expect(found).toBeTruthy();
-      return found as HTMLElement;
-    });
-    fireEvent.pointerDown(highOption, { pointerType: "mouse", button: 0 });
-    fireEvent.pointerUp(highOption, { pointerType: "mouse", button: 0 });
-    fireEvent.click(highOption);
-    await waitFor(() => {
-      expect(onAiReasoningChange).toHaveBeenCalledWith("high");
-    });
-  });
-
   it("selecting a tier calls onTierChange", () => {
     const { baseElement, onTierChange } = setup();
     const indexingTab = [...baseElement.querySelectorAll('[role="tab"]')].find((t) =>
@@ -274,6 +248,25 @@ describe("SettingsDialog", () => {
     );
     fireEvent.click(offCard!);
     expect(onTierChange).toHaveBeenCalledWith("off");
+  });
+
+  it("Editor section: renders the editor toggles and fires their change handlers", () => {
+    const onWrapTextChange = vi.fn();
+    const { baseElement } = setup({ wrapText: true, onWrapTextChange });
+    const editorTab = [...baseElement.querySelectorAll('[role="tab"]')].find((t) =>
+      /^Editor/.test(t.textContent ?? ""),
+    );
+    fireEvent.click(editorTab!);
+    // The placeholder is gone — the section now carries the mirrored toolbar
+    // toggles. Find the "Wrap text" row and flip its switch (currently on) →
+    // the handler fires with false.
+    const wrapRow = [...baseElement.querySelectorAll(".settings-row")].find((r) =>
+      /Wrap text/.test(r.textContent ?? ""),
+    );
+    expect(wrapRow).not.toBeUndefined();
+    const wrapSwitch = wrapRow!.querySelector('[role="switch"]') as HTMLElement;
+    fireEvent.click(wrapSwitch);
+    expect(onWrapTextChange).toHaveBeenCalledWith(false);
   });
 
   function openMcpSection(baseElement: HTMLElement) {

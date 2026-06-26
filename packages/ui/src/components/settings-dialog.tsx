@@ -38,6 +38,7 @@ import {
   resetStoredKeybinding,
   setStoredKeybinding,
 } from "@markdraw/core/keybindings.ts";
+import { FontFamilies, FontSizes } from "@markdraw/core/font-prefs.ts";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -203,9 +204,6 @@ export interface SettingsDialogProps {
   /** Whether to import MCP servers from the OpenCode CLI's config. */
   importOpenCodeMcps?: boolean;
   onImportOpenCodeMcpsChange?: (enabled: boolean) => void;
-  /** Reasoning effort forwarded to the engine ("off" | "low" | "medium" | "high"). */
-  aiReasoning?: string;
-  onAiReasoningChange?: (value: string) => void;
   /** Streaming-responses beta toggle (real incremental deltas). */
   aiStreaming?: boolean;
   onAiStreamingChange?: (enabled: boolean) => void;
@@ -213,6 +211,25 @@ export interface SettingsDialogProps {
    *  Appearance section's theme picker (moved here from the toolbar menu). */
   themeMode?: string;
   onThemeChange?: (mode: string) => void;
+  /** Preview document font (family + size) — Appearance section. Already applied
+   *  app-wide via the font-prefs store; Settings just exposes the controls. */
+  fontFamily?: string;
+  fontSize?: number;
+  onFontPrefsChange?: (partial: { fontFamily?: string; fontSize?: number }) => void;
+  /** Editor preferences (Editor section) — mirror the editor toolbar toggles so
+   *  they're discoverable/configurable from Settings too. */
+  wrapText?: boolean;
+  onWrapTextChange?: (enabled: boolean) => void;
+  showLineNumbers?: boolean;
+  onLineNumbersChange?: (enabled: boolean) => void;
+  showInvisibles?: boolean;
+  onShowInvisiblesChange?: (enabled: boolean) => void;
+  syncScroll?: boolean;
+  onSyncScrollChange?: (enabled: boolean) => void;
+  indentMode?: "spaces" | "tabs";
+  onIndentModeChange?: (mode: "spaces" | "tabs") => void;
+  indentSize?: number;
+  onIndentSizeChange?: (size: number) => void;
   /** Open the release-notes page (GitHub Releases) from Settings → About. */
   onShowReleaseNotes?: () => void;
   /** Open an external URL in the user's browser — used by the About section's
@@ -221,9 +238,6 @@ export interface SettingsDialogProps {
 }
 
 const THEME_MODES = ["system", "light", "dark"] as const;
-
-/** Rendered raw (same style as the MCP transport Select) — not translated. */
-const REASONING_EFFORTS = ["off", "low", "medium", "high"] as const;
 
 /** Canonical privacy policy. The full text is a single source of truth on the
  *  marketing site; the About section shows a short guarantee + this link rather
@@ -335,7 +349,60 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                 </div>
               </Match>
               <Match when={section() === "editor"}>
-                <p class="settings-prose">{(useLocale(), label("settings_placeholder"))}</p>
+                <h3 class="settings-h3">{(useLocale(), label("settings_nav_editor"))}</h3>
+                <For
+                  each={[
+                    { key: "settings_editor_wrap_text", value: props.wrapText ?? true, onChange: props.onWrapTextChange },
+                    { key: "settings_editor_line_numbers", value: props.showLineNumbers ?? true, onChange: props.onLineNumbersChange },
+                    { key: "settings_editor_invisibles", value: props.showInvisibles ?? false, onChange: props.onShowInvisiblesChange },
+                    { key: "settings_editor_sync_scroll", value: props.syncScroll ?? true, onChange: props.onSyncScrollChange },
+                  ]}
+                >
+                  {(row) => (
+                    <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
+                      <label class="settings-label" style={{ margin: "0" }}>{(useLocale(), label(row.key))}</label>
+                      <ToggleSwitch checked={row.value} onChange={(c) => row.onChange?.(c)} aria-label={label(row.key)}>
+                        <SwitchControl size="sm"><SwitchThumb size="sm" /></SwitchControl>
+                      </ToggleSwitch>
+                    </div>
+                  )}
+                </For>
+                <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
+                  <label class="settings-label" style={{ margin: "0" }}>{(useLocale(), label("settings_editor_indent_mode"))}</label>
+                  <Select<string>
+                    value={props.indentMode ?? "spaces"}
+                    onChange={(value) => value && props.onIndentModeChange?.(value as "spaces" | "tabs")}
+                    options={["spaces", "tabs"]}
+                    itemComponent={(itemProps) => (
+                      <SelectItem item={itemProps.item}>
+                        {(useLocale(), label(`settings_editor_indent_${itemProps.item.rawValue}`))}
+                      </SelectItem>
+                    )}
+                  >
+                    <SelectTrigger class="w-40">
+                      <SelectValue<string>>
+                        {(state) => (useLocale(), label(`settings_editor_indent_${state.selectedOption()}`))}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent />
+                  </Select>
+                </div>
+                <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
+                  <label class="settings-label" style={{ margin: "0" }}>{(useLocale(), label("settings_editor_indent_size"))}</label>
+                  <Select<number>
+                    value={props.indentSize ?? 2}
+                    onChange={(value) => value != null && props.onIndentSizeChange?.(value)}
+                    options={[2, 4]}
+                    itemComponent={(itemProps) => (
+                      <SelectItem item={itemProps.item}>{itemProps.item.rawValue}</SelectItem>
+                    )}
+                  >
+                    <SelectTrigger class="w-40">
+                      <SelectValue<number>>{(state) => state.selectedOption()}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent />
+                  </Select>
+                </div>
               </Match>
               <Match when={section() === "appearance"}>
                 <h3 class="settings-h3">{(useLocale(), label("settings_nav_appearance"))}</h3>
@@ -357,6 +424,48 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                       <SelectValue<string>>
                         {(state) => (useLocale(), label(`menu_theme_${state.selectedOption()}`))}
                       </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent />
+                  </Select>
+                </div>
+                {/* Document font (family + size) — applies to the rendered
+                    preview; already wired into the font-prefs store. */}
+                <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
+                  <label class="settings-label" style={{ margin: "0" }}>
+                    {(useLocale(), label("settings_appearance_font_family"))}
+                  </label>
+                  <Select<string>
+                    value={props.fontFamily ?? "sans-serif"}
+                    onChange={(value) => value && props.onFontPrefsChange?.({ fontFamily: value })}
+                    options={FontFamilies.map((f) => f.id)}
+                    itemComponent={(itemProps) => (
+                      <SelectItem item={itemProps.item}>
+                        {FontFamilies.find((f) => f.id === itemProps.item.rawValue)?.label ?? itemProps.item.rawValue}
+                      </SelectItem>
+                    )}
+                  >
+                    <SelectTrigger class="w-40">
+                      <SelectValue<string>>
+                        {(state) => FontFamilies.find((f) => f.id === state.selectedOption())?.label ?? state.selectedOption()}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent />
+                  </Select>
+                </div>
+                <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
+                  <label class="settings-label" style={{ margin: "0" }}>
+                    {(useLocale(), label("settings_appearance_font_size"))}
+                  </label>
+                  <Select<number>
+                    value={props.fontSize ?? 15}
+                    onChange={(value) => value != null && props.onFontPrefsChange?.({ fontSize: value })}
+                    options={[...FontSizes]}
+                    itemComponent={(itemProps) => (
+                      <SelectItem item={itemProps.item}>{itemProps.item.rawValue}px</SelectItem>
+                    )}
+                  >
+                    <SelectTrigger class="w-40">
+                      <SelectValue<number>>{(state) => `${state.selectedOption()}px`}</SelectValue>
                     </SelectTrigger>
                     <SelectContent />
                   </Select>
@@ -933,24 +1042,6 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
             </div>
           </div>
 
-          <div class="settings-row" style={{ "align-items": "center", gap: "10px", "justify-content": "space-between", "margin-top": "12px" }}>
-            <label class="settings-label" style={{ margin: "0" }}>
-              {(useLocale(), label("settings_ai_reasoning_label"))}
-            </label>
-            <Select<string>
-              itemComponent={(itemProps) => (
-                <SelectItem item={itemProps.item}>{itemProps.item.rawValue}</SelectItem>
-              )}
-              options={[...REASONING_EFFORTS]}
-              value={props.aiReasoning ?? "off"}
-              onChange={(value) => value && props.onAiReasoningChange?.(value)}
-            >
-              <SelectTrigger aria-label={label("settings_ai_reasoning_label")} class="w-40">
-                <SelectValue<string>>{(state) => state.selectedOption()}</SelectValue>
-              </SelectTrigger>
-              <SelectContent />
-            </Select>
-          </div>
         </Match>
       </Switch>
     </div>

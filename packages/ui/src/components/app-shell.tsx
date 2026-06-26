@@ -619,13 +619,26 @@ export function AppShell(props: AppShellProps) {
           onApproveMcpServer={(id) => props.onApproveMcpServer?.(id)}
           importOpenCodeMcps={props.importOpenCodeMcps}
           onImportOpenCodeMcpsChange={(on) => props.onImportOpenCodeMcpsChange?.(on)}
-          aiReasoning={props.aiReasoning}
-          onAiReasoningChange={(v) => props.onAiReasoningChange?.(v)}
           aiStreaming={props.aiStreaming ?? false}
           onAiStreamingChange={(v) => props.onAiStreamingChange?.(v)}
           appVersion={props.aboutVersion}
           themeMode={s.themeMode()}
           onThemeChange={s.handleThemeChange}
+          fontFamily={s.fontPrefs().fontFamily}
+          fontSize={s.fontPrefs().fontSize}
+          onFontPrefsChange={(p) => s.handleFontPrefsChange(p)}
+          wrapText={s.wrapText()}
+          onWrapTextChange={(v) => s.handleWrapTextChange(v)}
+          showLineNumbers={s.showLineNumbers()}
+          onLineNumbersChange={(v) => s.handleLineNumbersChange(v)}
+          showInvisibles={s.showInvisibles()}
+          onShowInvisiblesChange={(v) => s.handleShowInvisiblesChange(v)}
+          syncScroll={s.syncScroll()}
+          onSyncScrollChange={(v) => s.handleSyncScrollChange(v)}
+          indentMode={s.indentMode()}
+          onIndentModeChange={(v) => s.handleIndentModeChange(v)}
+          indentSize={s.indentSize()}
+          onIndentSizeChange={(v) => s.handleIndentSizeChange(v)}
           onShowReleaseNotes={props.onReleaseNotes}
           onOpenExternal={props.onOpenExternal}
         />
@@ -986,6 +999,8 @@ export function AppShell(props: AppShellProps) {
                   onInlineReferenceHandled={s.clearAiInlineReference}
                   onModeChange={s.setAiMode}
                   onTogglePlanItem={s.toggleAiPlanItem}
+                  reasoningEffort={props.aiReasoning}
+                  onReasoningEffortChange={(v) => props.onAiReasoningChange?.(v)}
                 />
               }
               backlinksSlot={
