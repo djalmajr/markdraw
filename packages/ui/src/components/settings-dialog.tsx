@@ -350,125 +350,123 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
               </Match>
               <Match when={section() === "editor"}>
                 <h3 class="settings-h3">{(useLocale(), label("settings_nav_editor"))}</h3>
-                <For
-                  each={[
-                    { key: "settings_editor_wrap_text", value: props.wrapText ?? true, onChange: props.onWrapTextChange },
-                    { key: "settings_editor_line_numbers", value: props.showLineNumbers ?? true, onChange: props.onLineNumbersChange },
-                    { key: "settings_editor_invisibles", value: props.showInvisibles ?? false, onChange: props.onShowInvisiblesChange },
-                    { key: "settings_editor_sync_scroll", value: props.syncScroll ?? true, onChange: props.onSyncScrollChange },
-                  ]}
-                >
-                  {(row) => (
-                    <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
-                      <label class="settings-label" style={{ margin: "0" }}>{(useLocale(), label(row.key))}</label>
-                      <ToggleSwitch checked={row.value} onChange={(c) => row.onChange?.(c)} aria-label={label(row.key)}>
-                        <SwitchControl size="sm"><SwitchThumb size="sm" /></SwitchControl>
-                      </ToggleSwitch>
-                    </div>
-                  )}
-                </For>
-                <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
-                  <label class="settings-label" style={{ margin: "0" }}>{(useLocale(), label("settings_editor_indent_mode"))}</label>
-                  <Select<string>
-                    value={props.indentMode ?? "spaces"}
-                    onChange={(value) => value && props.onIndentModeChange?.(value as "spaces" | "tabs")}
-                    options={["spaces", "tabs"]}
-                    itemComponent={(itemProps) => (
-                      <SelectItem item={itemProps.item}>
-                        {(useLocale(), label(`settings_editor_indent_${itemProps.item.rawValue}`))}
-                      </SelectItem>
-                    )}
+                <div class="settings-fields">
+                  <For
+                    each={[
+                      { key: "settings_editor_wrap_text", value: props.wrapText ?? true, onChange: props.onWrapTextChange },
+                      { key: "settings_editor_line_numbers", value: props.showLineNumbers ?? true, onChange: props.onLineNumbersChange },
+                      { key: "settings_editor_invisibles", value: props.showInvisibles ?? false, onChange: props.onShowInvisiblesChange },
+                      { key: "settings_editor_sync_scroll", value: props.syncScroll ?? true, onChange: props.onSyncScrollChange },
+                    ]}
                   >
-                    <SelectTrigger class="w-40">
-                      <SelectValue<string>>
-                        {(state) => (useLocale(), label(`settings_editor_indent_${state.selectedOption()}`))}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent />
-                  </Select>
-                </div>
-                <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
-                  <label class="settings-label" style={{ margin: "0" }}>{(useLocale(), label("settings_editor_indent_size"))}</label>
-                  <Select<number>
-                    value={props.indentSize ?? 2}
-                    onChange={(value) => value != null && props.onIndentSizeChange?.(value)}
-                    options={[2, 4]}
-                    itemComponent={(itemProps) => (
-                      <SelectItem item={itemProps.item}>{itemProps.item.rawValue}</SelectItem>
+                    {(row) => (
+                      <div class="settings-row">
+                        <label class="settings-label">{(useLocale(), label(row.key))}</label>
+                        <ToggleSwitch checked={row.value} onChange={(c) => row.onChange?.(c)} aria-label={label(row.key)}>
+                          <SwitchControl size="sm"><SwitchThumb size="sm" /></SwitchControl>
+                        </ToggleSwitch>
+                      </div>
                     )}
-                  >
-                    <SelectTrigger class="w-40">
-                      <SelectValue<number>>{(state) => state.selectedOption()}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent />
-                  </Select>
+                  </For>
+                  <div class="settings-row">
+                    <label class="settings-label">{(useLocale(), label("settings_editor_indent_mode"))}</label>
+                    <Select<string>
+                      value={props.indentMode ?? "spaces"}
+                      onChange={(value) => value && props.onIndentModeChange?.(value as "spaces" | "tabs")}
+                      options={["spaces", "tabs"]}
+                      itemComponent={(itemProps) => (
+                        <SelectItem item={itemProps.item}>
+                          {(useLocale(), label(`settings_editor_indent_${itemProps.item.rawValue}`))}
+                        </SelectItem>
+                      )}
+                    >
+                      <SelectTrigger class="w-40 h-8">
+                        <SelectValue<string>>
+                          {(state) => (useLocale(), label(`settings_editor_indent_${state.selectedOption()}`))}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent />
+                    </Select>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label">{(useLocale(), label("settings_editor_indent_size"))}</label>
+                    <Select<number>
+                      value={props.indentSize ?? 2}
+                      onChange={(value) => value != null && props.onIndentSizeChange?.(value)}
+                      options={[2, 4]}
+                      itemComponent={(itemProps) => (
+                        <SelectItem item={itemProps.item}>{itemProps.item.rawValue}</SelectItem>
+                      )}
+                    >
+                      <SelectTrigger class="w-40 h-8">
+                        <SelectValue<number>>{(state) => state.selectedOption()}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent />
+                    </Select>
+                  </div>
                 </div>
               </Match>
               <Match when={section() === "appearance"}>
                 <h3 class="settings-h3">{(useLocale(), label("settings_nav_appearance"))}</h3>
-                <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
-                  <label class="settings-label" style={{ margin: "0" }}>
-                    {(useLocale(), label("menu_theme"))}
-                  </label>
-                  <Select<string>
-                    value={props.themeMode ?? "system"}
-                    onChange={(value) => value && props.onThemeChange?.(value)}
-                    options={[...THEME_MODES]}
-                    itemComponent={(itemProps) => (
-                      <SelectItem item={itemProps.item}>
-                        {(useLocale(), label(`menu_theme_${itemProps.item.rawValue}`))}
-                      </SelectItem>
-                    )}
-                  >
-                    <SelectTrigger class="w-40">
-                      <SelectValue<string>>
-                        {(state) => (useLocale(), label(`menu_theme_${state.selectedOption()}`))}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent />
-                  </Select>
-                </div>
-                {/* Document font (family + size) — applies to the rendered
-                    preview; already wired into the font-prefs store. */}
-                <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
-                  <label class="settings-label" style={{ margin: "0" }}>
-                    {(useLocale(), label("settings_appearance_font_family"))}
-                  </label>
-                  <Select<string>
-                    value={props.fontFamily ?? "sans-serif"}
-                    onChange={(value) => value && props.onFontPrefsChange?.({ fontFamily: value })}
-                    options={FontFamilies.map((f) => f.id)}
-                    itemComponent={(itemProps) => (
-                      <SelectItem item={itemProps.item}>
-                        {FontFamilies.find((f) => f.id === itemProps.item.rawValue)?.label ?? itemProps.item.rawValue}
-                      </SelectItem>
-                    )}
-                  >
-                    <SelectTrigger class="w-40">
-                      <SelectValue<string>>
-                        {(state) => FontFamilies.find((f) => f.id === state.selectedOption())?.label ?? state.selectedOption()}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent />
-                  </Select>
-                </div>
-                <div class="settings-row" style={{ "align-items": "center", "justify-content": "space-between", gap: "10px" }}>
-                  <label class="settings-label" style={{ margin: "0" }}>
-                    {(useLocale(), label("settings_appearance_font_size"))}
-                  </label>
-                  <Select<number>
-                    value={props.fontSize ?? 15}
-                    onChange={(value) => value != null && props.onFontPrefsChange?.({ fontSize: value })}
-                    options={[...FontSizes]}
-                    itemComponent={(itemProps) => (
-                      <SelectItem item={itemProps.item}>{itemProps.item.rawValue}px</SelectItem>
-                    )}
-                  >
-                    <SelectTrigger class="w-40">
-                      <SelectValue<number>>{(state) => `${state.selectedOption()}px`}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent />
-                  </Select>
+                <div class="settings-fields">
+                  <div class="settings-row">
+                    <label class="settings-label">{(useLocale(), label("menu_theme"))}</label>
+                    <Select<string>
+                      value={props.themeMode ?? "system"}
+                      onChange={(value) => value && props.onThemeChange?.(value)}
+                      options={[...THEME_MODES]}
+                      itemComponent={(itemProps) => (
+                        <SelectItem item={itemProps.item}>
+                          {(useLocale(), label(`menu_theme_${itemProps.item.rawValue}`))}
+                        </SelectItem>
+                      )}
+                    >
+                      <SelectTrigger class="w-40 h-8">
+                        <SelectValue<string>>
+                          {(state) => (useLocale(), label(`menu_theme_${state.selectedOption()}`))}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent />
+                    </Select>
+                  </div>
+                  {/* Document font (family + size) — applies to the rendered
+                      preview; already wired into the font-prefs store. */}
+                  <div class="settings-row">
+                    <label class="settings-label">{(useLocale(), label("settings_appearance_font_family"))}</label>
+                    <Select<string>
+                      value={props.fontFamily ?? "sans-serif"}
+                      onChange={(value) => value && props.onFontPrefsChange?.({ fontFamily: value })}
+                      options={FontFamilies.map((f) => f.id)}
+                      itemComponent={(itemProps) => (
+                        <SelectItem item={itemProps.item}>
+                          {FontFamilies.find((f) => f.id === itemProps.item.rawValue)?.label ?? itemProps.item.rawValue}
+                        </SelectItem>
+                      )}
+                    >
+                      <SelectTrigger class="w-40 h-8">
+                        <SelectValue<string>>
+                          {(state) => FontFamilies.find((f) => f.id === state.selectedOption())?.label ?? state.selectedOption()}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent />
+                    </Select>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label">{(useLocale(), label("settings_appearance_font_size"))}</label>
+                    <Select<number>
+                      value={props.fontSize ?? 15}
+                      onChange={(value) => value != null && props.onFontPrefsChange?.({ fontSize: value })}
+                      options={[...FontSizes]}
+                      itemComponent={(itemProps) => (
+                        <SelectItem item={itemProps.item}>{itemProps.item.rawValue}px</SelectItem>
+                      )}
+                    >
+                      <SelectTrigger class="w-40 h-8">
+                        <SelectValue<number>>{(state) => `${state.selectedOption()}px`}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent />
+                    </Select>
+                  </div>
                 </div>
               </Match>
             </Switch>

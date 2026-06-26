@@ -1034,103 +1034,35 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
             metrics, so each tracked token's pill sits exactly behind the
             textarea's own glyphs (the textarea text renders above the pill —
             the backdrop's token text stays hidden behind it). */}
-        <div class="ai-composer-input-wrap">
-          <div aria-hidden="true" class="ai-composer-highlight" ref={(el) => (highlightEl = el)}>
-            <For each={highlightSegments()}>
-              {(seg) =>
-                seg.token ? <span class="ai-inline-mention">{seg.text}</span> : seg.text
-              }
-            </For>
-          </div>
-          <textarea
-            ref={(el) => (textarea = el)}
-            class="ai-composer-input"
-            rows={2}
-            placeholder={(useLocale(), m.ai_composer_placeholder())}
-            value={input()}
-            onInput={(e) => {
-              setInput(e.currentTarget.value);
-              reconcileTokens(e.currentTarget.value);
-              syncMention(e.currentTarget);
-              syncSlash(e.currentTarget);
-            }}
-            onKeyDown={onKeyDown}
-            onScroll={(e) => {
-              if (highlightEl) highlightEl.scrollTop = e.currentTarget.scrollTop;
-            }}
-          />
-        </div>
-        <div class="ai-composer-footer">
-          <Show when={props.onModeChange}>
-            <Select
-              value={props.mode ?? "build"}
-              onChange={(v) => {
-                if (v) props.onModeChange?.(v as AIChatMode);
+        {/* OpenCode-style: the bordered box holds ONLY the input + send; the
+            mode/model/reasoning selects live on a dedicated bar below it. */}
+        <div class="ai-composer-box">
+          <div class="ai-composer-input-wrap">
+            <div aria-hidden="true" class="ai-composer-highlight" ref={(el) => (highlightEl = el)}>
+              <For each={highlightSegments()}>
+                {(seg) =>
+                  seg.token ? <span class="ai-inline-mention">{seg.text}</span> : seg.text
+                }
+              </For>
+            </div>
+            <textarea
+              ref={(el) => (textarea = el)}
+              class="ai-composer-input"
+              rows={2}
+              placeholder={(useLocale(), m.ai_composer_placeholder())}
+              value={input()}
+              onInput={(e) => {
+                setInput(e.currentTarget.value);
+                reconcileTokens(e.currentTarget.value);
+                syncMention(e.currentTarget);
+                syncSlash(e.currentTarget);
               }}
-              options={["build", "plan"]}
-              gutter={4}
-              sameWidth={false}
-              itemComponent={(ip) => (
-                <SelectItem item={ip.item}>
-                  {ip.item.rawValue === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
-                </SelectItem>
-              )}
-            >
-              <SelectTrigger
-                class={PILL_SELECT}
-                aria-label={(useLocale(), m.ai_mode_label())}
-                title={(useLocale(), props.mode === "plan" ? m.ai_mode_plan_hint() : m.ai_mode_build_hint())}
-              >
-                <span class="truncate">
-                  {props.mode === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
-                </span>
-              </SelectTrigger>
-              <SelectContent class="min-w-[7rem]" />
-            </Select>
-          </Show>
-          <Show
-            when={hasModels()}
-            fallback={
-              <span
-                class="ai-provider-chip"
-                classList={{ "ai-provider-chip-active": !!props.providerLabel }}
-              >
-                <span class="ai-provider-dot" aria-hidden="true" />
-                {props.providerLabel ?? (useLocale(), m.ai_provider_none())}
-              </span>
-            }
-          >
-            <ModelPicker
-              groups={props.modelGroups ?? []}
-              current={props.currentModel}
-              currentLabel={currentModelLabel()}
-              onSelect={(v) => props.onSelectModel?.(v)}
-              onManage={props.onManageModels}
+              onKeyDown={onKeyDown}
+              onScroll={(e) => {
+                if (highlightEl) highlightEl.scrollTop = e.currentTarget.scrollTop;
+              }}
             />
-          </Show>
-          {/* Reasoning effort sits next to the model picker — it's per-model
-              context, not a global preference. Only shown once a model exists. */}
-          <Show when={props.onReasoningEffortChange && hasModels()}>
-            <Select
-              value={props.reasoningEffort ?? "off"}
-              onChange={(v) => {
-                if (v) props.onReasoningEffortChange?.(v);
-              }}
-              options={["off", "low", "medium", "high"]}
-              gutter={4}
-              sameWidth={false}
-              itemComponent={(ip) => <SelectItem item={ip.item}>{ip.item.rawValue}</SelectItem>}
-            >
-              <SelectTrigger
-                class={PILL_SELECT}
-                aria-label={(useLocale(), m.settings_ai_reasoning_label())}
-                title={(useLocale(), m.settings_ai_reasoning_label())}
-              >
-                <span class="truncate">{props.reasoningEffort ?? "off"}</span>
-              </SelectTrigger>
-              <SelectContent class="min-w-[6rem]" />
-            </Select>
-          </Show>
+          </div>
           <div class="ai-composer-tools">
             <ContextUsage store={props.store} contextLimit={props.contextLimit} />
             <Show
@@ -1159,6 +1091,69 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
               </button>
             </Show>
           </div>
+        </div>
+        <div class="ai-composer-bar">
+          <Show when={props.onModeChange}>
+            <Select
+              value={props.mode ?? "build"}
+              onChange={(v) => {
+                if (v) props.onModeChange?.(v as AIChatMode);
+              }}
+              options={["build", "plan"]}
+              gutter={4}
+              sameWidth={false}
+              itemComponent={(ip) => (
+                <SelectItem item={ip.item}>
+                  {ip.item.rawValue === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
+                </SelectItem>
+              )}
+            >
+              <SelectTrigger
+                class={PILL_SELECT}
+                aria-label={(useLocale(), m.ai_mode_label())}
+                title={(useLocale(), props.mode === "plan" ? m.ai_mode_plan_hint() : m.ai_mode_build_hint())}
+              >
+                <span class="truncate">
+                  {props.mode === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
+                </span>
+              </SelectTrigger>
+              <SelectContent class="min-w-[7rem]" />
+            </Select>
+          </Show>
+          {/* Always the model-picker pill (even with no models yet) so the bar
+              stays visually consistent — clicking it opens the popover whose ⚙
+              leads to Settings → AI to connect a provider. The label falls back
+              to the active provider (e.g. "Mock (dev)") or a placeholder. */}
+          <ModelPicker
+            groups={props.modelGroups ?? []}
+            current={props.currentModel}
+            currentLabel={hasModels() ? currentModelLabel() : (props.providerLabel ?? (useLocale(), m.ai_model_select()))}
+            onSelect={(v) => props.onSelectModel?.(v)}
+            onManage={props.onManageModels}
+          />
+          {/* Reasoning effort — per-model context, only shown once a specific
+              model is selected (not merely when a provider is connected). */}
+          <Show when={props.onReasoningEffortChange && !!props.currentModel}>
+            <Select
+              value={props.reasoningEffort ?? "off"}
+              onChange={(v) => {
+                if (v) props.onReasoningEffortChange?.(v);
+              }}
+              options={["off", "low", "medium", "high"]}
+              gutter={4}
+              sameWidth={false}
+              itemComponent={(ip) => <SelectItem item={ip.item}>{ip.item.rawValue}</SelectItem>}
+            >
+              <SelectTrigger
+                class={PILL_SELECT}
+                aria-label={(useLocale(), m.settings_ai_reasoning_label())}
+                title={(useLocale(), m.settings_ai_reasoning_label())}
+              >
+                <span class="truncate">{props.reasoningEffort ?? "off"}</span>
+              </SelectTrigger>
+              <SelectContent class="min-w-[6rem]" />
+            </Select>
+          </Show>
         </div>
       </div>
     </div>

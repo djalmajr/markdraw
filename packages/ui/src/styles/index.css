@@ -2438,6 +2438,15 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   margin: 8px 12px 12px;
   display: flex;
   flex-direction: column;
+  gap: 6px;
+  min-width: 200px;
+}
+
+/* OpenCode-style: the bordered box wraps only the input + send. The
+   mode/model/reasoning selects live on a separate bar below it. */
+.ai-composer-box {
+  display: flex;
+  flex-direction: column;
   border: 1px solid hsl(var(--input));
   border-radius: 7px;
   background: hsl(var(--background));
@@ -2519,7 +2528,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   border-color: hsl(var(--ring));
   box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25);
 }
-.ai-composer-dragover {
+.ai-composer-dragover .ai-composer-box {
   border-color: hsl(var(--primary));
   box-shadow: 0 0 0 2px hsl(var(--primary) / 0.3);
 }
@@ -2632,19 +2641,21 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   color: hsl(var(--primary));
 }
 
-.ai-composer-footer {
+.ai-composer-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 6px 6px 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
 }
 
+/* Send + context usage, bottom-right INSIDE the bordered box. */
 .ai-composer-tools {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-shrink: 0;
-  margin-left: auto;
+  align-self: flex-end;
+  padding: 0 6px 6px;
 }
 
 .ai-send-btn {
@@ -2939,6 +2950,28 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .settings-row-end {
   justify-content: flex-end;
   margin-top: 12px;
+}
+
+/* Editor / Appearance / Indexing: a vertical stack of "label ↔ control" rows
+   with uniform spacing and a shared min-height, so toggles and selects don't
+   look cramped or uneven next to each other. */
+.settings-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.settings-fields .settings-row,
+.settings-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+}
+.settings-fields .settings-label,
+.settings-field .settings-label {
+  margin: 0;
 }
 
 .settings-input {

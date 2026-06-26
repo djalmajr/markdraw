@@ -27,14 +27,14 @@ describe("AiPanel", () => {
     const { baseElement } = render(() => <AiPanel store={store} providerLabel={null} />);
     expect(baseElement.querySelector(".ai-empty")).not.toBeNull();
     expect(baseElement.querySelector(".ai-message")).toBeNull();
-    // chip shows the inactive (no-provider) state
-    expect(baseElement.querySelector(".ai-provider-chip-active")).toBeNull();
+    // no provider/model yet → the model-picker pill shows the placeholder
+    expect(baseElement.querySelector(".ai-mp-trigger")?.textContent).toContain("Select a model");
   });
 
-  it("marks the provider chip active when a label is given", () => {
+  it("shows the active provider label on the model-picker pill when no model is selected", () => {
     const store = readyStore();
     const { baseElement } = render(() => <AiPanel store={store} providerLabel="Ollama" />);
-    expect(baseElement.querySelector(".ai-provider-chip-active")).not.toBeNull();
+    expect(baseElement.querySelector(".ai-mp-trigger")?.textContent).toContain("Ollama");
   });
 
   it("disables the embedded send button while the composer is empty", () => {
