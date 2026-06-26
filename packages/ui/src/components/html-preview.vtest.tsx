@@ -76,7 +76,7 @@ describe("HtmlPreview", () => {
     function makeHost(over: Partial<HtmlPreviewFolderRoot> = {}): HtmlPreviewFolderRoot {
       return {
         docOrigin: (token: string) => `markdraw-preview://${token}`,
-        register: vi.fn(async () => ({ token: "r0", entryRel: "index.html" })),
+        register: vi.fn(async () => ({ token: "r0", entryRel: "index.html", ownRoot: true })),
         setOverlay: vi.fn(),
         clearOverlay: vi.fn(),
         ...over,
@@ -134,7 +134,28 @@ describe("HtmlPreview", () => {
       const { unmount } = render(() => <HtmlPreview content="<p>x</p>" folderRoot={host} />);
       await tick();
       unmount();
-      expect(host.clearOverlay).toHaveBeenCalledWith("r0");
+      expect(host.clearOverlay).toHaveBeenCalledWith("r0", "index.html");
+    });
+
+    it("relative-document mode loads the entry at its TRUE path (no am-entry)", async () => {
+      // ownRoot:false → served from the workspace folder at the file's real
+      // path, so the browser resolves `../` against the file's actual location.
+      const host = makeHost({
+        register: vi.fn(async () => ({
+          token: "r3",
+          entryRel: "course/lessons/0001.html",
+          ownRoot: false,
+        })),
+      });
+      const { container } = render(() => (
+        <HtmlPreview content="<p>doc</p>" folderRoot={host} />
+      ));
+      await tick();
+      expect(frame(container).getAttribute("src")).toBe(
+        "markdraw-preview://r3/course/lessons/0001.html?am-token=r3&v=0",
+      );
+      // The overlay is keyed by the FULL relative path in document mode.
+      expect(host.setOverlay).toHaveBeenCalledWith("r3", "course/lessons/0001.html", "<p>doc</p>");
     });
 
     it("renders nothing when registration fails (null target)", async () => {
@@ -151,9 +172,9 @@ describe("HtmlPreview", () => {
 
     it("unmounts the previous document the moment the file switches", async () => {
       const hostA = makeHost();
-      let resolveB!: (v: { token: string; entryRel: string }) => void;
+      let resolveB!: (v: { token: string; entryRel: string; ownRoot: boolean }) => void;
       const hostB = makeHost({
-        register: vi.fn(() => new Promise<{ token: string; entryRel: string }>((r) => {
+        register: vi.fn(() => new Promise<{ token: string; entryRel: string; ownRoot: boolean }>((r) => {
           resolveB = r;
         })),
       });
@@ -171,7 +192,7 @@ describe("HtmlPreview", () => {
       await tick(0);
       expect(container.querySelector("iframe.html-preview-frame")).toBeNull();
 
-      resolveB({ token: "r9", entryRel: "other.html" });
+      resolveB({ token: "r9", entryRel: "other.html", ownRoot: true });
       await tick();
       expect(frame(container).getAttribute("src")).toBe(
         "markdraw-preview://r9/?am-token=r9&am-entry=other.html&v=0",

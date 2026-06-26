@@ -1739,21 +1739,22 @@ export function App() {
     async register(rootId: string, fileRelPath: string) {
       const rootPath = rootPaths().get(rootId);
       if (!rootPath) return null;
-      const full = `${rootPath}/${fileRelPath}`;
-      const slash = full.lastIndexOf("/");
-      const dir = slash >= 0 ? full.slice(0, slash) : full;
-      const entryRel = slash >= 0 ? full.slice(slash + 1) : full;
+      // The Rust side picks the serving directory (the file's own dir for a
+      // self-rooted SPA, the workspace folder for a relative document) by
+      // inspecting the entry on disk, and returns the entry path relative to it.
       try {
-        const token = await invoke<string>("html_preview_register", { dir });
-        return { token, entryRel };
+        return await invoke<{ token: string; entryRel: string; ownRoot: boolean }>(
+          "html_preview_register",
+          { root: rootPath, rel: fileRelPath },
+        );
       } catch {
         return null;
       }
     },
     setOverlay: (token: string, relPath: string, content: string) =>
       invoke("html_preview_set_overlay", { token, relPath, content }) as Promise<void>,
-    clearOverlay: (token: string) =>
-      invoke("html_preview_clear_overlay", { token }) as Promise<void>,
+    clearOverlay: (token: string, relPath: string) =>
+      invoke("html_preview_clear_overlay", { token, relPath }) as Promise<void>,
   };
 
   // Live host handles for mounted Excalidraw frames, keyed by absolute file path

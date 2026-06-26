@@ -222,9 +222,9 @@ interface AppShellProps {
    *  straight through to each PaneView. */
   htmlPreviewHost?: {
     docOrigin: (token: string) => string;
-    register: (rootId: string, fileRelPath: string) => Promise<{ token: string; entryRel: string } | null>;
+    register: (rootId: string, fileRelPath: string) => Promise<{ token: string; entryRel: string; ownRoot: boolean } | null>;
     setOverlay: (token: string, relPath: string, content: string) => void | Promise<void>;
-    clearOverlay: (token: string) => void | Promise<void>;
+    clearOverlay: (token: string, relPath: string) => void | Promise<void>;
   };
   onToggleShowHiddenEntries?: (enabled: boolean) => void | Promise<void>;
   /** Desktop-only: paired with the new file-tree dropdown toggle that

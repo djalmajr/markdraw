@@ -9,10 +9,13 @@ import {
   type JSX,
 } from "solid-js";
 
-/** Desktop folder-rooted preview host. When provided, the file's directory is
- *  served as an isolated `markdraw-preview://<token>` origin so root-absolute
- *  paths, ES modules, importmaps and hash routing work (full SPA support). The
- *  live editor buffer is pushed as an overlay so unsaved edits preview too. */
+/** Desktop folder-rooted preview host. When provided, a directory is served as
+ *  an isolated `markdraw-preview://<token>` origin. The Rust side picks WHICH
+ *  directory from the entry on disk: a self-rooted SPA (importmap / root-
+ *  absolute paths) serves from its OWN dir at `/` so ES modules, importmaps and
+ *  path routers work; a relative document serves from the WORKSPACE folder at
+ *  the entry's true path so `../shared` climbs to sibling dirs like `file://`.
+ *  The live editor buffer is pushed as an overlay so unsaved edits preview. */
 export interface HtmlPreviewFolderRoot {
   /** Platform-correct origin the entry DOCUMENT is served from — no path:
    *  the doc loads at `/` (entry + token travel in the query) so SPAs whose
@@ -22,13 +25,16 @@ export interface HtmlPreviewFolderRoot {
    *  scheme as `http://markdraw-preview.localhost` and the token rides the
    *  query alone. */
   docOrigin: (token: string) => string;
-  /** Register the current file's directory; resolves to its token + the entry
-   *  file's path relative to that directory. Null when registration fails. */
-  register: () => Promise<{ token: string; entryRel: string } | null>;
+  /** Register the previewed file; resolves to its token, the entry path
+   *  relative to the SERVED directory, and `ownRoot` — true when the file is a
+   *  self-rooted SPA served from its own dir at `/`, false when it's a relative
+   *  document served from the workspace folder at its true path. Null on
+   *  failure. */
+  register: () => Promise<{ token: string; entryRel: string; ownRoot: boolean } | null>;
   /** Serve `content` for `relPath` instead of the disk file (live buffer). */
   setOverlay: (token: string, relPath: string, content: string) => void | Promise<void>;
-  /** Drop the overlay so requests fall back to disk. */
-  clearOverlay: (token: string) => void | Promise<void>;
+  /** Drop this file's overlay so requests for it fall back to disk. */
+  clearOverlay: (token: string, relPath: string) => void | Promise<void>;
 }
 
 export interface HtmlPreviewProps {
@@ -127,7 +133,7 @@ export function HtmlPreview(props: HtmlPreviewProps): JSX.Element {
     clearTimeout(overlayTimer);
     const t = untrack(target);
     const fr = props.folderRoot;
-    if (t && fr) void fr.clearOverlay(t.token);
+    if (t && fr) void fr.clearOverlay(t.token, t.entryRel);
   });
 
   const src = (): string | undefined => {
@@ -135,12 +141,21 @@ export function HtmlPreview(props: HtmlPreviewProps): JSX.Element {
     const fr = props.folderRoot;
     const v = version();
     if (!t || !fr || v < 0) return undefined;
-    // The doc is served at path `/` (entry resolved server-side from
-    // `am-entry`) so SPA path routers match their root route; `am-token`
-    // identifies the preview on Windows, where the fixed
-    // `markdraw-preview.localhost` host can't carry it.
-    const q = `am-token=${encodeURIComponent(t.token)}&am-entry=${encodeURIComponent(t.entryRel)}`;
-    return `${fr.docOrigin(t.token)}/?${q}&v=${v}`;
+    const origin = fr.docOrigin(t.token);
+    const token = encodeURIComponent(t.token);
+    if (t.ownRoot) {
+      // Self-rooted SPA: load at path `/` (entry resolved server-side from
+      // `am-entry`) so path routers match their root route. `am-token`
+      // identifies the preview on Windows, where the fixed
+      // `markdraw-preview.localhost` host can't carry it.
+      const q = `am-token=${token}&am-entry=${encodeURIComponent(t.entryRel)}`;
+      return `${origin}/?${q}&v=${v}`;
+    }
+    // Relative document: load at the entry's TRUE path so the browser resolves
+    // relative URLs (`./`, `../`) against the file's real location within the
+    // workspace origin — exactly like opening the file via `file://`.
+    const path = t.entryRel.split("/").map(encodeURIComponent).join("/");
+    return `${origin}/${path}?am-token=${token}&v=${v}`;
   };
 
   return (

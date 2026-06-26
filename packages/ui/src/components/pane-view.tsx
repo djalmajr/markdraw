@@ -69,17 +69,17 @@ export interface PaneViewProps {
   /** Desktop-only: render the embedded Excalidraw editor for a `.excalidraw`
    *  file. The extension leaves this undefined, so it never shows the editor. */
   renderExcalidraw?: (file: FSEntry, rootId: string) => JSX.Element;
-  /** Desktop-only: serve an HTML file's directory as an isolated origin so the
-   *  preview renders real SPAs (root-absolute paths, ES modules, importmaps).
+  /** Desktop-only: serve an HTML file's directory (SPA) or its workspace folder
+   *  (relative document) as an isolated origin — see HtmlPreviewFolderRoot.
    *  Undefined (web/extension) → the srcdoc fallback (relative paths only). */
   htmlPreviewHost?: {
     /** Platform-correct origin the entry document is served from (WebView2
      *  serves custom schemes as http://<scheme>.localhost — see
      *  HtmlPreviewFolderRoot). */
     docOrigin: (token: string) => string;
-    register: (rootId: string, fileRelPath: string) => Promise<{ token: string; entryRel: string } | null>;
+    register: (rootId: string, fileRelPath: string) => Promise<{ token: string; entryRel: string; ownRoot: boolean } | null>;
     setOverlay: (token: string, relPath: string, content: string) => void | Promise<void>;
-    clearOverlay: (token: string) => void | Promise<void>;
+    clearOverlay: (token: string, relPath: string) => void | Promise<void>;
   };
   onLoadFile?: (entry: FSEntry, rootId: string) => void;
   onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;

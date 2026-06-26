@@ -53,8 +53,12 @@ struct Inner {
     next_id: u64,
     by_token: HashMap<String, PathBuf>,
     by_dir: HashMap<PathBuf, String>,
-    /// token → (normalized rel path, live content) for the open file.
-    overlay: HashMap<String, (String, String)>,
+    /// token → (normalized rel path → live content). Nested by rel so two
+    /// documents that share a token — which happens in relative-document mode,
+    /// where every file in a workspace folder serves from the SAME workspace
+    /// root — can each carry their own unsaved buffer (split-pane previews) and
+    /// dropping one preview's overlay never clobbers the other's.
+    overlay: HashMap<String, HashMap<String, String>>,
     /// Most recently registered/refreshed preview — the LAST fallback for
     /// Windows requests that carry no token anywhere. A module loaded via
     /// referer recovery (`/index.js`) refers its own imports without a token
@@ -64,29 +68,108 @@ struct Inner {
     active_token: Option<String>,
 }
 
-/// Register `dir` for previewing and return its (stable, per-session) token.
-/// Idempotent: the same canonical directory always yields the same token, so
-/// the iframe URL stays cache-friendly across re-previews.
+/// What `html_preview_register` hands back to the frontend: the directory's
+/// token, the entry file's path RELATIVE TO THE SERVED ROOT, and whether the
+/// page is served from its own directory (`own_root`).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTarget {
+    token: String,
+    entry_rel: String,
+    own_root: bool,
+}
+
+/// Whether an HTML entry should be served from its OWN directory at `/` (the
+/// self-contained SPA / prototype case) rather than from the workspace folder.
+///
+/// True when the page declares an `importmap` or references a ROOT-ABSOLUTE
+/// (`/…`, but not protocol-relative `//…`) script/stylesheet — both mean the
+/// page treats `/` as the prototype root (root-absolute URLs, `~/ → /`
+/// importmaps, `location.pathname` routers). Such a page MUST keep `/` mapped
+/// to its own directory and load at `/` so its router matches the root route.
+///
+/// False for relative-only documents (`../assets/styles.css`, `other.html`):
+/// those want the WORKSPACE folder as the origin so `../` climbs to shared
+/// sibling directories, with the entry served at its true relative path so the
+/// browser resolves relatives exactly like a `file://` open.
+fn html_is_self_rooted(html: &str) -> bool {
+    static IMPORTMAP: OnceLock<Regex> = OnceLock::new();
+    static ROOT_ABS: OnceLock<Regex> = OnceLock::new();
+    let importmap = IMPORTMAP.get_or_init(|| {
+        Regex::new(r#"(?i)<script[^>]*\btype\s*=\s*["']importmap["']"#)
+            .expect("valid importmap regex")
+    });
+    // A quote, then a single `/`, then a non-`/` (or a closing quote for the
+    // bare-root `href="/"` case). The non-`/` lookahead excludes
+    // protocol-relative `//cdn…` URLs, which are absolute, not root-rooted.
+    let root_abs = ROOT_ABS.get_or_init(|| {
+        Regex::new(r#"(?i)\b(?:src|href)\s*=\s*["']/(?:[^/]|["'])"#)
+            .expect("valid root-absolute regex")
+    });
+    importmap.is_match(html) || root_abs.is_match(html)
+}
+
+/// Register the previewed file and return its (stable, per-session) token plus
+/// the entry path relative to whatever directory ended up serving it.
+///
+/// `root` is the workspace folder the file was opened under; `rel` is the
+/// file's path relative to it. The serving directory is chosen by inspecting
+/// the entry file ON DISK (see `html_is_self_rooted`): a self-rooted SPA serves
+/// from its own directory; a relative document serves from the workspace folder
+/// so `../` works. Reading disk here — rather than the editor buffer in JS —
+/// sidesteps a registration race where the new file's buffer hasn't loaded yet;
+/// the live buffer is still applied as an overlay at serve time.
+///
+/// Idempotent per serving directory: the same canonical directory always yields
+/// the same token, so the iframe URL stays cache-friendly across re-previews.
 #[tauri::command]
 pub fn html_preview_register(
     state: tauri::State<'_, HtmlPreviewState>,
-    dir: String,
-) -> Result<String, String> {
-    let canon = std::fs::canonicalize(&dir).map_err(|e| e.to_string())?;
-    if !canon.is_dir() {
-        return Err("html_preview_register: not a directory".into());
+    root: String,
+    rel: String,
+) -> Result<PreviewTarget, String> {
+    let root_canon = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
+    if !root_canon.is_dir() {
+        return Err("html_preview_register: root is not a directory".into());
     }
+    let rel_clean = clean_rel(&rel);
+    let entry_abs = root_canon.join(&rel_clean);
+    // Best-effort: an unreadable / not-yet-saved entry reads as empty, which is
+    // not self-rooted → relative-document mode (the safe `file://`-like default).
+    let content = std::fs::read_to_string(&entry_abs).unwrap_or_default();
+    let own_root = html_is_self_rooted(&content);
+
+    let (serve_dir, entry_rel) = if own_root {
+        let dir = entry_abs
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| root_canon.clone());
+        let name = entry_abs
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| rel_clean.clone());
+        (dir, name)
+    } else {
+        (root_canon.clone(), rel_clean.clone())
+    };
+    let serve_dir = std::fs::canonicalize(&serve_dir).map_err(|e| e.to_string())?;
+
     let mut inner = state.inner.lock().unwrap();
-    if let Some(token) = inner.by_dir.get(&canon).cloned() {
-        inner.active_token = Some(token.clone());
-        return Ok(token);
-    }
-    let token = format!("r{}", inner.next_id);
-    inner.next_id += 1;
-    inner.by_token.insert(token.clone(), canon.clone());
-    inner.by_dir.insert(canon, token.clone());
+    let token = if let Some(token) = inner.by_dir.get(&serve_dir).cloned() {
+        token
+    } else {
+        let token = format!("r{}", inner.next_id);
+        inner.next_id += 1;
+        inner.by_token.insert(token.clone(), serve_dir.clone());
+        inner.by_dir.insert(serve_dir, token.clone());
+        token
+    };
     inner.active_token = Some(token.clone());
-    Ok(token)
+    Ok(PreviewTarget {
+        token,
+        entry_rel,
+        own_root,
+    })
 }
 
 /// Set the live overlay for `token`: requests for `rel_path` serve `content`
@@ -101,15 +184,31 @@ pub fn html_preview_set_overlay(
     let mut inner = state.inner.lock().unwrap();
     if inner.by_token.contains_key(&token) {
         inner.active_token = Some(token.clone());
-        inner.overlay.insert(token, (clean_rel(&rel_path), content));
+        inner
+            .overlay
+            .entry(token)
+            .or_default()
+            .insert(clean_rel(&rel_path), content);
     }
 }
 
-/// Drop the live overlay for `token` (e.g. when the preview closes), so future
-/// requests fall back to disk.
+/// Drop the live overlay for one file under `token` (e.g. when its preview
+/// closes), so future requests for it fall back to disk. Only that file's
+/// buffer is removed — sibling previews sharing the token (relative-document
+/// mode) keep theirs. The token's map is dropped once its last file leaves.
 #[tauri::command]
-pub fn html_preview_clear_overlay(state: tauri::State<'_, HtmlPreviewState>, token: String) {
-    state.inner.lock().unwrap().overlay.remove(&token);
+pub fn html_preview_clear_overlay(
+    state: tauri::State<'_, HtmlPreviewState>,
+    token: String,
+    rel_path: String,
+) {
+    let mut inner = state.inner.lock().unwrap();
+    if let Some(map) = inner.overlay.get_mut(&token) {
+        map.remove(&clean_rel(&rel_path));
+        if map.is_empty() {
+            inner.overlay.remove(&token);
+        }
+    }
 }
 
 /// Split a cleaned path into (first segment, rest) — the Windows/WebView2
@@ -253,10 +352,11 @@ pub fn serve<R: Runtime>(app: &AppHandle<R>, request: Request<Vec<u8>>) -> Respo
     };
     // Live overlay wins for the open file (shows unsaved edits). The entry doc
     // is HTML, never a CSS module or JS, so serve it verbatim.
-    if let Some((orel, content)) = inner.overlay.get(&token) {
-        if *orel == rel {
-            return ok(inject_preview_chrome(content).into_bytes(), content_type_for("page.html"));
-        }
+    if let Some(content) = inner.overlay.get(&token).and_then(|m| m.get(&rel)) {
+        return ok(
+            inject_preview_chrome(content).into_bytes(),
+            content_type_for("page.html"),
+        );
     }
     drop(inner);
 
@@ -682,6 +782,41 @@ mod tests {
         let out = inject_preview_chrome("<p>fragment</p>");
         assert!(out.starts_with("<style data-markdraw-preview>"));
         assert!(out.ends_with("<p>fragment</p>"));
+    }
+
+    #[test]
+    fn self_rooted_detects_importmap_and_root_absolute() {
+        // importmap → the page treats `/` as its prototype root.
+        assert!(html_is_self_rooted(
+            r#"<script type="importmap">{"imports":{"~/":"/"}}</script>"#
+        ));
+        // root-absolute script / stylesheet → same.
+        assert!(html_is_self_rooted(
+            r#"<script type="module" src="/index.js"></script>"#
+        ));
+        assert!(html_is_self_rooted(
+            r#"<link rel="stylesheet" href="/index.css">"#
+        ));
+        // bare root href still counts.
+        assert!(html_is_self_rooted(r#"<a href="/">home</a>"#));
+    }
+
+    #[test]
+    fn self_rooted_false_for_relative_documents() {
+        // Mutation: classifying these as self-rooted would keep `/` mapped to
+        // the file's own dir, so `../assets` could never climb to siblings.
+        assert!(!html_is_self_rooted(
+            r#"<link rel="stylesheet" href="../assets/styles.css">"#
+        ));
+        assert!(!html_is_self_rooted(r#"<a href="0002-lesson.html">next</a>"#));
+        assert!(!html_is_self_rooted(r#"<img src="./pic.png">"#));
+        // Absolute & protocol-relative URLs are NOT root-absolute paths.
+        assert!(!html_is_self_rooted(
+            r#"<script src="//cdn.example.com/x.js"></script>"#
+        ));
+        assert!(!html_is_self_rooted(
+            r#"<link href="https://fonts.example/x.css">"#
+        ));
     }
 
     #[test]
