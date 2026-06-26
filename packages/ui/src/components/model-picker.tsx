@@ -71,7 +71,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     <Popover open={open()} onOpenChange={setOpen} placement="bottom-start" gutter={4}>
       <PopoverTrigger
         as="button"
-        class="ai-mp-trigger"
+        class="ai-mp-trigger ai-mp-trigger-grow"
         title={props.currentLabel}
         aria-label={props.currentLabel}
       >

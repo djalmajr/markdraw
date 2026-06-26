@@ -1392,7 +1392,7 @@ export function createAppState(config: AppStateConfig) {
       if (!tocResizing) return;
       cancelAnimationFrame(tocRafId);
       tocRafId = requestAnimationFrame(() => {
-        setTocWidth(Math.max(200, Math.min(700, window.innerWidth - ev.clientX)));
+        setTocWidth(Math.max(300, Math.min(700, window.innerWidth - ev.clientX)));
       });
     };
 

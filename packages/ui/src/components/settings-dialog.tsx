@@ -254,6 +254,27 @@ const NAV: ReadonlyArray<{ id: SettingsSection; key: string; icon: () => JSX.Ele
   { id: "about", key: "settings_nav_about", icon: () => <IconInfo width={15} height={15} /> },
 ];
 
+/** Discreet, informational breadcrumb shown ABOVE an AI sub-page's title — the
+ *  ancestor trail that led here (e.g. "Manage models › Connect provider"), so
+ *  you can see where you are. Plain text, not clickable: the back button (and
+ *  the title below it) own the navigation. */
+function SettingsBreadcrumb(props: { segments: string[] }): JSX.Element {
+  return (
+    <nav class="settings-breadcrumb" aria-label="Breadcrumb">
+      <For each={props.segments}>
+        {(seg, i) => (
+          <>
+            <Show when={i() > 0}>
+              <IconChevronRight width={11} height={11} class="settings-breadcrumb-sep" aria-hidden="true" />
+            </Show>
+            <span class="settings-breadcrumb-item">{seg}</span>
+          </>
+        )}
+      </For>
+    </nav>
+  );
+}
+
 export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
   const [section, setSection] = createSignal<SettingsSection>(
     props.initialSection ?? "ai",
@@ -742,6 +763,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
       <Switch>
         {/* ── Connect provider: catalog of providers + Custom ── */}
         <Match when={view().kind === "catalog"}>
+          <SettingsBreadcrumb segments={[(useLocale(), label("ai_manage_models"))]} />
           <div class="settings-subpage-header">
             <button
               type="button"
@@ -773,6 +795,13 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
 
         {/* ── Per-provider connect: API key or CLI subscription ── */}
         <Match when={view().kind === "provider"}>
+          <SettingsBreadcrumb
+            segments={
+              providerViewData()?.from === "catalog"
+                ? [(useLocale(), label("ai_manage_models")), (useLocale(), label("ai_connect_provider"))]
+                : [(useLocale(), label("ai_manage_models"))]
+            }
+          />
           <div class="settings-subpage-header">
             <button
               type="button"
@@ -876,6 +905,9 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
 
         {/* ── Custom provider form ── */}
         <Match when={view().kind === "custom"}>
+          <SettingsBreadcrumb
+            segments={[(useLocale(), label("ai_manage_models")), (useLocale(), label("ai_connect_provider"))]}
+          />
           <div class="settings-subpage-header">
             <button
               type="button"

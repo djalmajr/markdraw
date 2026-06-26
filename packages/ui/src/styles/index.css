@@ -1522,6 +1522,9 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 /* === TOC Panel (flex sibling of .content) === */
 .toc-panel {
   width: var(--toc-width, 260px);
+  /* Floor that keeps the chat composer's pill bar on one line (below ~300px
+     the mode/model/reasoning pills wrap). The resize drag clamps to the same. */
+  min-width: 300px;
   flex-shrink: 0;
   /* See `.main` above — without `min-height: 0`, a TOC tree taller
      than the viewport leaks the gutter past `.app`'s 100vh and
@@ -2044,7 +2047,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   align-items: center;
   gap: 4px;
   height: 22px;
-  max-width: 88px;
+  max-width: 130px;
   padding: 0 5px 0 7px;
   border: none;
   border-radius: 6px;
@@ -2055,6 +2058,14 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   cursor: pointer;
   outline: none;
   transition: background 0.1s;
+}
+/* The model pill is sized to its content (the model name) — never padded out
+   with empty space — capped at the name's intrinsic width, and shrinks/truncates
+   on a narrow panel instead of wrapping the bar to a new line. */
+.ai-mp-trigger-grow {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: max-content;
 }
 .ai-mp-trigger:hover,
 .ai-mp-trigger[data-expanded] {
@@ -2130,10 +2141,17 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   padding: 4px;
 }
 .ai-mp-group-label {
-  padding: 6px 8px 2px;
+  margin: 4px -4px 0;
+  padding: 5px 12px;
   font-size: 11px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
   color: hsl(var(--muted-foreground));
+  background: hsl(var(--secondary));
+}
+.ai-mp-group-label:first-child {
+  margin-top: -4px;
 }
 .ai-mp-row {
   display: flex;
@@ -2562,9 +2580,9 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   max-width: 180px;
   padding: 2px 4px 2px 7px;
   border-radius: 6px;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--bg-hover));
-  color: hsl(var(--muted-foreground));
+  border: 1px solid hsl(var(--primary) / 0.3);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
   font-size: 11px;
 }
 .ai-context-chip-active {
@@ -2574,7 +2592,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: hsl(var(--foreground));
+  color: hsl(var(--primary));
 }
 .ai-context-chip-x {
   display: inline-flex;
@@ -2585,12 +2603,12 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   border: none;
   background: none;
   border-radius: 3px;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--primary) / 0.6);
   cursor: pointer;
 }
 .ai-context-chip-x:hover {
-  color: hsl(var(--foreground));
-  background: hsl(var(--bg-hover));
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.15);
 }
 
 /* Inline @-mention tokens (Cursor-style): a backdrop div mirrors the textarea
@@ -2662,9 +2680,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
+  /* One line, never wrapping: the model pill (flex + min-width:0) shrinks to
+     absorb a narrow panel instead of pushing a pill to a second row. */
+  flex-wrap: nowrap;
   gap: 10px;
-  width: 90%;
+  width: 95%;
   margin: -8px auto 0;
   padding: 9px 8px 1px;
   background: hsl(var(--bg-hover));
@@ -3108,6 +3128,25 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
+}
+/* Discreet, informational breadcrumb ABOVE an AI sub-page title — small, muted,
+   not clickable (the back button + title own navigation). */
+.settings-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+.settings-breadcrumb-item {
+  white-space: nowrap;
+}
+.settings-breadcrumb-sep {
+  flex-shrink: 0;
+  opacity: 0.55;
 }
 .settings-back {
   display: inline-flex;
@@ -4856,6 +4895,11 @@ kbd.shortcuts-help-key {
    pre-existing rules above stay untouched.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+.settings-mcp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 .settings-mcp-card {
   display: flex;
   flex-direction: column;
