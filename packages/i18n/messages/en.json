@@ -211,7 +211,7 @@
   "ai_tab_rename": "Rename",
   "ai_tab_export": "Export…",
   "ai_model_search": "Search models…",
-  "ai_model_select": "Select a model",
+  "ai_model_select": "Select…",
   "ai_connect_provider": "Connect provider",
   "ai_manage_models": "Manage models",
   "ai_model_none": "No models — connect a provider",

@@ -28,13 +28,16 @@ describe("AiPanel", () => {
     expect(baseElement.querySelector(".ai-empty")).not.toBeNull();
     expect(baseElement.querySelector(".ai-message")).toBeNull();
     // no provider/model yet → the model-picker pill shows the placeholder
-    expect(baseElement.querySelector(".ai-mp-trigger")?.textContent).toContain("Select a model");
+    expect(baseElement.querySelector(".ai-mp-trigger")?.textContent).toContain("Select…");
   });
 
-  it("shows the active provider label on the model-picker pill when no model is selected", () => {
+  it("shows the neutral select placeholder (never the provider name) when no model is selected", () => {
     const store = readyStore();
     const { baseElement } = render(() => <AiPanel store={store} providerLabel="Ollama" />);
-    expect(baseElement.querySelector(".ai-mp-trigger")?.textContent).toContain("Ollama");
+    // No model chosen → a neutral "Select…" placeholder, never the dev/provider name.
+    const label = baseElement.querySelector(".ai-mp-trigger")?.textContent;
+    expect(label).toContain("Select…");
+    expect(label).not.toContain("Ollama");
   });
 
   it("disables the embedded send button while the composer is empty", () => {
@@ -476,17 +479,12 @@ describe("AiPanel", () => {
     const store = readyStore();
     const onModeChange = vi.fn();
     render(() => <AiPanel store={store} providerLabel="Mock" mode="plan" onModeChange={onModeChange} />);
-    // The SolidUI Select trigger shows the current mode's label.
+    // The pill trigger shows the current mode's label.
     const trigger = screen.getByLabelText("Chat mode");
     expect(trigger.textContent).toContain("Plan");
-    // Open the listbox (kobalte opens on the pointer sequence) and pick Build.
-    fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
-    fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });
+    // Open the popover and pick Build.
     fireEvent.click(trigger);
-    const build = screen.getByText("Build");
-    fireEvent.pointerDown(build, { button: 0, pointerType: "mouse" });
-    fireEvent.pointerUp(build, { button: 0, pointerType: "mouse" });
-    fireEvent.click(build);
+    fireEvent.click(screen.getByText("Build"));
     expect(onModeChange).toHaveBeenCalledWith("build");
   });
 

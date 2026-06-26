@@ -14,18 +14,11 @@ import type { AiChatStore } from "../composables/create-ai-chat-store.ts";
 import type { AiContextItem, AiInlineReference } from "../composables/ai-context.ts";
 import { Button } from "./ui/button.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "./ui/select.tsx";
 import { ScrollArea } from "./ui/scroll-area.tsx";
 import { ModelPicker, type ModelGroup } from "./model-picker.tsx";
 import { AiMessage } from "./ai-message.tsx";
 import { AiPlan, type AiPlanItemModel } from "./ai-plan.tsx";
-
-/** Compact pill styling for the composer's Select triggers (mode + model),
- *  overriding the SolidUI Select's full-width default. The base ring is dropped
- *  (a click ring inside the composer reads as noise) — only keyboard focus shows
- *  a thin teal ring (the primary, never the UA blue). */
-const PILL_SELECT =
-  "h-7 w-auto justify-start gap-1.5 rounded-md border-transparent bg-secondary px-2 py-0 text-xs font-medium text-foreground hover:bg-accent focus:ring-0 focus:ring-offset-0 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1";
+import { PillPicker } from "./pill-picker.tsx";
 
 /** A workspace entry offered by the @-mention autocomplete. `kind: "dir"`
  *  marks a folder (or a workspace root — `path: ""`) whose mention attaches a
@@ -796,7 +789,9 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   const hasModels = (): boolean => allModels().length > 0;
   const currentModelLabel = (): string => {
     const cur = allModels().find((mdl) => mdl.value === props.currentModel);
-    return cur?.label ?? props.providerLabel ?? (useLocale(), m.ai_provider_none());
+    // No real model resolved → a neutral "select…" placeholder (never the dev
+    // provider name like "Mock (dev)").
+    return cur?.label ?? (useLocale(), m.ai_model_select());
   };
 
   // Chat replies must never navigate the webview: a reply link is untrusted
@@ -1094,65 +1089,46 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
         </div>
         <div class="ai-composer-bar">
           <Show when={props.onModeChange}>
-            <Select
-              value={props.mode ?? "build"}
-              onChange={(v) => {
-                if (v) props.onModeChange?.(v as AIChatMode);
-              }}
-              options={["build", "plan"]}
-              gutter={4}
-              sameWidth={false}
-              itemComponent={(ip) => (
-                <SelectItem item={ip.item}>
-                  {ip.item.rawValue === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
-                </SelectItem>
-              )}
-            >
-              <SelectTrigger
-                class={PILL_SELECT}
-                aria-label={(useLocale(), m.ai_mode_label())}
-                title={(useLocale(), props.mode === "plan" ? m.ai_mode_plan_hint() : m.ai_mode_build_hint())}
-              >
-                <span class="truncate">
-                  {props.mode === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
-                </span>
-              </SelectTrigger>
-              <SelectContent class="min-w-[7rem]" />
-            </Select>
+            <PillPicker
+              options={[
+                { value: "build", label: (useLocale(), m.ai_mode_build()) },
+                { value: "plan", label: (useLocale(), m.ai_mode_plan()) },
+              ]}
+              current={props.mode ?? "build"}
+              currentLabel={props.mode === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
+              onSelect={(v) => props.onModeChange?.(v as AIChatMode)}
+              ariaLabel={(useLocale(), m.ai_mode_label())}
+              title={(useLocale(), props.mode === "plan" ? m.ai_mode_plan_hint() : m.ai_mode_build_hint())}
+            />
           </Show>
           {/* Always the model-picker pill (even with no models yet) so the bar
               stays visually consistent — clicking it opens the popover whose ⚙
-              leads to Settings → AI to connect a provider. The label falls back
-              to the active provider (e.g. "Mock (dev)") or a placeholder. */}
+              leads to Settings → AI to connect a provider. With no model chosen
+              it shows a "select…" placeholder (never the dev provider name). */}
           <ModelPicker
             groups={props.modelGroups ?? []}
             current={props.currentModel}
-            currentLabel={hasModels() ? currentModelLabel() : (props.providerLabel ?? (useLocale(), m.ai_model_select()))}
+            currentLabel={currentModelLabel()}
             onSelect={(v) => props.onSelectModel?.(v)}
             onManage={props.onManageModels}
           />
           {/* Reasoning effort — per-model context, only shown once a specific
               model is selected (not merely when a provider is connected). */}
           <Show when={props.onReasoningEffortChange && !!props.currentModel}>
-            <Select
-              value={props.reasoningEffort ?? "off"}
-              onChange={(v) => {
-                if (v) props.onReasoningEffortChange?.(v);
-              }}
-              options={["off", "low", "medium", "high"]}
-              gutter={4}
-              sameWidth={false}
-              itemComponent={(ip) => <SelectItem item={ip.item}>{ip.item.rawValue}</SelectItem>}
-            >
-              <SelectTrigger
-                class={PILL_SELECT}
-                aria-label={(useLocale(), m.settings_ai_reasoning_label())}
-                title={(useLocale(), m.settings_ai_reasoning_label())}
-              >
-                <span class="truncate">{props.reasoningEffort ?? "off"}</span>
-              </SelectTrigger>
-              <SelectContent class="min-w-[6rem]" />
-            </Select>
+            <PillPicker
+              options={[
+                { value: "off", label: "off" },
+                { value: "low", label: "low" },
+                { value: "medium", label: "medium" },
+                { value: "high", label: "high" },
+              ]}
+              current={props.reasoningEffort ?? "off"}
+              currentLabel={props.reasoningEffort ?? "off"}
+              onSelect={(v) => props.onReasoningEffortChange?.(v)}
+              ariaLabel={(useLocale(), m.settings_ai_reasoning_label())}
+              title={(useLocale(), m.settings_ai_reasoning_label())}
+              capitalize
+            />
           </Show>
         </div>
       </div>
