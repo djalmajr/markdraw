@@ -67,6 +67,23 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     setOpen(false);
   }
 
+  // On open, bring the selected model into view (catalogs run long — the active
+  // row is often below the fold). Runs once when the list mounts (the search
+  // input re-filters the rows but keeps the same list element, so re-typing
+  // doesn't re-scroll). Scrolls only the list (a relative delta, not
+  // scrollIntoView) so the surrounding page never moves.
+  function scrollActiveIntoView(list: HTMLDivElement): void {
+    requestAnimationFrame(() => {
+      const active = list.querySelector<HTMLElement>(".ai-mp-row-active");
+      if (!active || list.clientHeight === 0) return;
+      const delta =
+        active.getBoundingClientRect().top -
+        list.getBoundingClientRect().top -
+        (list.clientHeight - active.clientHeight) / 2;
+      list.scrollTop += delta;
+    });
+  }
+
   return (
     <Popover open={open()} onOpenChange={setOpen} placement="bottom-start" gutter={4}>
       <PopoverTrigger
@@ -104,7 +121,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
             </button>
           </Show>
         </div>
-        <div class="ai-mp-list">
+        <div class="ai-mp-list" ref={scrollActiveIntoView}>
           <For each={filtered()}>
             {(group) => (
               <>
