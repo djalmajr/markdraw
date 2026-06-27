@@ -148,6 +148,8 @@ interface AppShellProps {
   onSelectAiEmbeddingModel?: (ref: string) => void;
   aiEmbeddingCapable?: boolean;
   aiReasoning?: string;
+  /** Reasoning-effort levels the active model exposes (empty ⇒ hide the picker). */
+  aiReasoningLevels?: string[];
   onAiReasoningChange?: (value: string) => void;
   aiStreaming?: boolean;
   onAiStreamingChange?: (enabled: boolean) => void;
@@ -640,6 +642,7 @@ export function AppShell(props: AppShellProps) {
           onModeChange={s.setAiMode}
           onTogglePlanItem={s.toggleAiPlanItem}
           reasoningEffort={props.aiReasoning}
+          reasoningLevels={props.aiReasoningLevels}
           onReasoningEffortChange={(v) => props.onAiReasoningChange?.(v)}
         />
       }

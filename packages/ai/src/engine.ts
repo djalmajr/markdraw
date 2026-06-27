@@ -12,6 +12,7 @@
 //
 // Concrete engines live in engines/ and are loaded lazily by adapter.ts.
 
+import type { ReasoningLabel } from "./reasoning.ts";
 import type { ResolvedModel } from "./resolve-model.ts";
 import type { AIMessage, AIProvider } from "./types.ts";
 
@@ -63,12 +64,13 @@ export interface AIEngineOptions {
   /** Desktop injects this for the CLI subscription engines (claude/codex/grok/agy). */
   cliHost?: CliHost;
   cliPathOverride?: string;
-  /** Ask the model to spend reasoning/thinking effort. Omit = off (request
-   *  unchanged). Each engine maps it onto the provider family's native option
-   *  (see engines/ai-sdk.ts: anthropic → `thinking` budget, openai →
+  /** Ask the model to spend reasoning/thinking effort, as an OpenCode-style
+   *  label (see reasoning.ts). Omit or `"default"` = unchanged (the model's own
+   *  default). Each engine maps it onto the provider family's native option
+   *  (see engines/ai-sdk.ts: anthropic → `thinking` budget/toggle, openai →
    *  `reasoningEffort`, openai-compatible → `reasoning_effort` passthrough)
    *  and silently ignores it where the SDK has no matching option. */
-  reasoningEffort?: "low" | "medium" | "high";
+  reasoningEffort?: ReasoningLabel;
   /** Use `streamText` (real incremental deltas) instead of the buffered
    *  `generateText` + fake-typing path. Default false: whether the injected
    *  fetch surfaces SSE incrementally in the WKWebView is unverified (the A0
