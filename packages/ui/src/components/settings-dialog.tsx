@@ -1238,6 +1238,22 @@ function McpServerCard(props: {
   );
 }
 
+type McpGroupKey = "connected" | "available" | "disabled";
+
+/** Which display group a server belongs to in the settings list:
+ *  - `connected`: actively running (covers both discovered and user-configured);
+ *  - `available`: not running yet but actionable — needs Approve/Authorize, is a
+ *    discovered server still settling, or is enabled but not connected (errored);
+ *  - `disabled`: a user-configured server toggled off. Discovered servers have no
+ *    toggle, so a non-connected discovered server is always `available`, never
+ *    `disabled`. */
+function mcpGroupOf(s: SettingsMcpServer): McpGroupKey {
+  if (s.connected) return "connected";
+  if (s.pendingApproval || s.requiresAuth || s.discovered) return "available";
+  if (!s.enabled) return "disabled";
+  return "available";
+}
+
 function McpSection(props: SettingsDialogProps): JSX.Element {
   // Same sub-page pattern as the AI section: a dedicated form view entered from
   // the "New MCP Server" row (add) or a card's pencil (edit), with a back arrow
@@ -1251,6 +1267,24 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
   const [args, setArgs] = createSignal("");
   const [url, setUrl] = createSignal("");
   const [headers, setHeaders] = createSignal("");
+
+  // Partition the flat server list into the connected / available / disabled
+  // groups, dropping empties so a header only shows when it has cards.
+  const mcpGroups = createMemo(() => {
+    const servers = props.mcpServers ?? [];
+    return (
+      [
+        { key: "connected", titleKey: "settings_mcp_group_connected" },
+        { key: "available", titleKey: "settings_mcp_group_available" },
+        { key: "disabled", titleKey: "settings_mcp_group_disabled" },
+      ] as const
+    )
+      .map((g) => ({
+        titleKey: g.titleKey,
+        servers: servers.filter((s) => mcpGroupOf(s) === g.key),
+      }))
+      .filter((g) => g.servers.length > 0);
+  });
 
   function resetForm(): void {
     setEditingId(null);
@@ -1371,17 +1405,28 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
               <p class="settings-prose">{(useLocale(), label("settings_mcp_empty"))}</p>
             }
           >
-            <div class="settings-mcp-list">
-              <For each={props.mcpServers}>
-                {(server) => (
-                  <McpServerCard
-                    server={server}
-                    onRemove={() => void props.onRemoveMcpServer?.(server.id)}
-                    onToggle={(checked) => void props.onToggleMcpServer?.(server.id, checked)}
-                    onAuthorize={() => props.onAuthorizeMcpServer?.(server.id)}
-                    onApprove={() => props.onApproveMcpServer?.(server.id)}
-                    onEdit={() => openEdit(server)}
-                  />
+            <div class="settings-mcp-groups">
+              <For each={mcpGroups()}>
+                {(group) => (
+                  <div class="settings-mcp-group">
+                    <h4 class="settings-mcp-group-title">
+                      {(useLocale(), label(group.titleKey))}
+                    </h4>
+                    <div class="settings-mcp-list">
+                      <For each={group.servers}>
+                        {(server) => (
+                          <McpServerCard
+                            server={server}
+                            onRemove={() => void props.onRemoveMcpServer?.(server.id)}
+                            onToggle={(checked) => void props.onToggleMcpServer?.(server.id, checked)}
+                            onAuthorize={() => props.onAuthorizeMcpServer?.(server.id)}
+                            onApprove={() => props.onApproveMcpServer?.(server.id)}
+                            onEdit={() => openEdit(server)}
+                          />
+                        )}
+                      </For>
+                    </div>
+                  </div>
                 )}
               </For>
             </div>

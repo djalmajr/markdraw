@@ -4899,6 +4899,24 @@ kbd.shortcuts-help-key {
    pre-existing rules above stay untouched.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+.settings-mcp-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.settings-mcp-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-mcp-group-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
+}
 .settings-mcp-list {
   display: flex;
   flex-direction: column;
