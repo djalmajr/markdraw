@@ -2672,6 +2672,7 @@ dependencies = [
  "http",
  "ignore",
  "keyring",
+ "libc",
  "notify",
  "notify-debouncer-mini",
  "objc2 0.6.4",

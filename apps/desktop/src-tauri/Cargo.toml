@@ -126,6 +126,11 @@ keyring = { version = "3", features = ["windows-native"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service"] }
 
+[target.'cfg(unix)'.dependencies]
+# Process-group kill (killpg) so the login-shell PATH probe can terminate the
+# whole shell tree on timeout — see cli_agent.rs `run_path_query`.
+libc = "0.2"
+
 [profile.release]
 strip = true
 lto = true
