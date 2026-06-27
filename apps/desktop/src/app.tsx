@@ -244,8 +244,17 @@ export function App() {
   // keys); release returns null so the panel shows the honest no-provider
   // state instead of a "Mock (dev)" model answering with fake text.
   function buildAIProvider(): AIProvider | null {
+    // Read aiConfig() UNCONDITIONALLY so providerReady() (which calls this inside
+    // the empty-state <Show>) subscribes to config changes even when no model is
+    // stored yet. With the `modelId ? … : null` short-circuit below, a null
+    // modelId on first render would skip the aiConfig() read entirely — the Show
+    // then captures NO reactive dependency and freezes on the no-provider state
+    // until a fresh component re-evaluates (the "only on first open, a new tab
+    // fixes it" bug). Every model-selection path bumps aiConfig, so depending on
+    // it keeps the empty state in sync.
+    const config = aiConfig();
     const modelId = getStoredAiModel();
-    const resolved = modelId ? resolveModel(aiConfig(), modelId) : null;
+    const resolved = modelId ? resolveModel(config, modelId) : null;
     if (!resolved) return import.meta.env.DEV ? createMockProvider() : null;
     // If the user put the key in ai.json (config), use it directly and skip the
     // keychain — avoids touching the OS keychain when it isn't the source.
@@ -312,8 +321,11 @@ export function App() {
   /** Provider chip label: real "Provider · model" when configured; the mock
    *  only ever shows in DEV — release renders the localized "no provider". */
   const aiProviderLabel = (): string | null => {
+    // aiConfig() read unconditionally for the same reactivity reason as
+    // buildAIProvider — a null modelId must not skip the dependency.
+    const config = aiConfig();
     const modelId = getStoredAiModel();
-    const resolved = modelId ? resolveModel(aiConfig(), modelId) : null;
+    const resolved = modelId ? resolveModel(config, modelId) : null;
     // The picker trigger shows the selected MODEL's friendly name — resolved from
     // the full config, so it stays correct even when that model's provider isn't
     // currently connected (it just won't appear in the popover until it is).
