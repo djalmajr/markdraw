@@ -48,6 +48,6 @@
     "@types/markdown-it": "^14.1.2",
     "fast-check": "^4.8.0",
     "marked": "^18.0.3",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.3"
   }
 }
