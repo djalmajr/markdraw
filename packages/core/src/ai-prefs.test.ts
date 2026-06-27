@@ -30,7 +30,7 @@ describe("ai preferences defaults", () => {
     localStorage.clear();
   });
 
-  it("defaults: no model, lite tier, ai-sdk engine, streaming off, reasoning off", () => {
+  it("defaults: no model, lite tier, ai-sdk engine, streaming off, reasoning default", () => {
     expect(getStoredAiModel()).toBeNull();
     expect(getStoredAiSmallModel()).toBeNull();
     expect(getStoredAiEmbeddingModel()).toBeNull();
@@ -38,7 +38,7 @@ describe("ai preferences defaults", () => {
     expect(getStoredAiEngine()).toBe("ai-sdk");
     expect(getStoredAiStreaming()).toBe(false);
     expect(getStoredAiMode()).toBe("build");
-    expect(getStoredAiReasoning()).toBe("off");
+    expect(getStoredAiReasoning()).toBe("default");
   });
 
   it("falls back to build for an unknown/garbage mode value", () => {
@@ -56,9 +56,21 @@ describe("ai preferences defaults", () => {
     expect(getStoredAiEngine()).toBe("ai-sdk");
   });
 
-  it("falls back to off for an unknown reasoning value", () => {
+  it("falls back to default for an unknown reasoning value", () => {
     localStorage.setItem("markdraw-ai-reasoning", "ultra");
-    expect(getStoredAiReasoning()).toBe("off");
+    expect(getStoredAiReasoning()).toBe("default");
+  });
+
+  it("migrates the legacy \"off\" reasoning value to \"default\"", () => {
+    localStorage.setItem("markdraw-ai-reasoning", "off");
+    expect(getStoredAiReasoning()).toBe("default");
+  });
+
+  it("reads back the new effort labels (none / thinking / xhigh / max)", () => {
+    for (const effort of ["none", "thinking", "minimal", "xhigh", "max"] as const) {
+      localStorage.setItem("markdraw-ai-reasoning", effort);
+      expect(getStoredAiReasoning()).toBe(effort);
+    }
   });
 });
 
@@ -104,7 +116,7 @@ describe("ai preferences round-trip", () => {
   });
 
   it("persists the reasoning effort across every level", () => {
-    for (const effort of ["low", "medium", "high", "off"] as const) {
+    for (const effort of ["default", "low", "medium", "high", "max"] as const) {
       setStoredAiReasoning(effort);
       expect(getStoredAiReasoning()).toBe(effort);
     }

@@ -60,10 +60,15 @@ export interface AiPanelProps {
   onSelectModel?: (modelRef: string) => void;
   /** "⚙" in the picker — open Settings → AI (manage models / connect providers). */
   onManageModels?: () => void;
-  /** Reasoning effort for the chosen model ("off"|"low"|"medium"|"high") +
-   *  handler. Rendered next to the model picker — it only applies to the
-   *  selected model, so it lives by the model, not in global Settings. */
+  /** Reasoning effort for the chosen model (an OpenCode-style label, e.g.
+   *  "default"|"low"|"high"|"max") + handler. Rendered next to the model picker
+   *  — it only applies to the selected model, so it lives by the model, not in
+   *  global Settings. */
   reasoningEffort?: string;
+  /** The effort levels the active model actually exposes, in display order.
+   *  Empty/undefined ⇒ the model has no reasoning control and the picker hides
+   *  (e.g. a model that bakes the level into its name). */
+  reasoningLevels?: string[];
   onReasoningEffortChange?: (value: string) => void;
   /** Explicit context items (attached files / selections) shown as chips. */
   contextItems?: AiContextItem[];
@@ -1118,18 +1123,21 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
             onSelect={(v) => props.onSelectModel?.(v)}
             onManage={props.onManageModels}
           />
-          {/* Reasoning effort — per-model context, only shown once a specific
-              model is selected (not merely when a provider is connected). */}
-          <Show when={props.onReasoningEffortChange && !!props.currentModel}>
+          {/* Reasoning effort — per-model: shown only once a specific model is
+              selected AND that model actually exposes effort levels. The level
+              set comes from the model (e.g. Antigravity bakes the level into the
+              name, so it offers none and the picker stays hidden). */}
+          <Show
+            when={
+              props.onReasoningEffortChange &&
+              !!props.currentModel &&
+              (props.reasoningLevels?.length ?? 0) > 0
+            }
+          >
             <PillPicker
-              options={[
-                { value: "off", label: "off" },
-                { value: "low", label: "low" },
-                { value: "medium", label: "medium" },
-                { value: "high", label: "high" },
-              ]}
-              current={props.reasoningEffort ?? "off"}
-              currentLabel={props.reasoningEffort ?? "off"}
+              options={(props.reasoningLevels ?? []).map((level) => ({ value: level, label: level }))}
+              current={props.reasoningEffort ?? "default"}
+              currentLabel={props.reasoningEffort ?? "default"}
               onSelect={(v) => props.onReasoningEffortChange?.(v)}
               ariaLabel={(useLocale(), m.settings_ai_reasoning_label())}
               title={(useLocale(), m.settings_ai_reasoning_label())}

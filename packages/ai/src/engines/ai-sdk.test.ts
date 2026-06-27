@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { MAX_CONTEXT_MESSAGES, aiSdkEngine, mapFullStream } from "./ai-sdk.ts";
+import {
+  MAX_CONTEXT_MESSAGES,
+  aiSdkEngine,
+  mapFullStream,
+  reasoningProviderOptions,
+} from "./ai-sdk.ts";
 import type { FetchImpl } from "../engine.ts";
 import type { ResolvedModel } from "../resolve-model.ts";
 import type { AIMessage, AITool, AIStreamPart, ToolApprovalRequest } from "../types.ts";
@@ -469,5 +474,38 @@ describe("ai-sdk engine-level tool approval", () => {
     expect(executed).toEqual([{ x: 2 }]);
     const result = parts.find((p) => p.type === "tool-result");
     expect(result).toMatchObject({ toolName: "danger", result: { ok: true } });
+  });
+});
+
+describe("reasoningProviderOptions", () => {
+  it('omits the option for unset / "default" effort', () => {
+    expect(reasoningProviderOptions("anthropic", undefined)).toBeUndefined();
+    expect(reasoningProviderOptions("anthropic", "default")).toBeUndefined();
+    expect(reasoningProviderOptions("openai-compatible", "default")).toBeUndefined();
+  });
+
+  it("maps anthropic effort to a thinking budget, and 'none' to disabled", () => {
+    expect(reasoningProviderOptions("anthropic", "high")).toEqual({
+      anthropic: { thinking: { budgetTokens: 24576, type: "enabled" } },
+    });
+    expect(reasoningProviderOptions("anthropic", "max")).toEqual({
+      anthropic: { thinking: { budgetTokens: 49152, type: "enabled" } },
+    });
+    expect(reasoningProviderOptions("anthropic", "none")).toEqual({
+      anthropic: { thinking: { type: "disabled" } },
+    });
+    // The generic on-toggle ("thinking", e.g. MiniMax) falls back to the medium budget.
+    expect(reasoningProviderOptions("anthropic", "thinking")).toEqual({
+      anthropic: { thinking: { budgetTokens: 12288, type: "enabled" } },
+    });
+  });
+
+  it("forwards the label verbatim for openai and openai-compatible", () => {
+    expect(reasoningProviderOptions("openai", "xhigh")).toEqual({
+      openai: { reasoningEffort: "xhigh" },
+    });
+    expect(reasoningProviderOptions("openai-compatible", "max")).toEqual({
+      openaiCompatible: { reasoningEffort: "max" },
+    });
   });
 });

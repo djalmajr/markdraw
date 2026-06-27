@@ -18,8 +18,34 @@ type AIEngineId = "ai-sdk" | "tanstack";
 type AIChatMode = "build" | "plan";
 
 /** Reasoning effort forwarded to providers that support it (the engine maps it
- *  per provider kind). "off" (the default) leaves requests unchanged. */
-type AIReasoningEffort = "off" | "low" | "medium" | "high";
+ *  per provider kind). Labels mirror OpenCode's per-model effort menu (see
+ *  `@markdraw/ai/reasoning.ts`); the available subset depends on the model.
+ *  "default" (the default) leaves the request unchanged — the model uses its own
+ *  default effort. "none" explicitly disables thinking; "thinking" enables it. */
+type AIReasoningEffort =
+  | "default"
+  | "none"
+  | "thinking"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
+
+/** Every valid stored effort — anything else (incl. the legacy "off") reads back
+ *  as "default". */
+const REASONING_EFFORTS: ReadonlySet<string> = new Set([
+  "default",
+  "none",
+  "thinking",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
 
 const MODE_KEY = "markdraw-ai-mode";
 const ENGINE_KEY = "markdraw-ai-engine";
@@ -103,12 +129,12 @@ function setStoredAiStreaming(enabled: boolean): void {
   localStorage.setItem(STREAMING_KEY, enabled ? "true" : "false");
 }
 
-/** Reasoning effort. Default "off"; lenient read falls back to "off" for any
- *  unknown/garbage stored value. */
+/** Reasoning effort. Default "default"; lenient read falls back to "default" for
+ *  any unknown/garbage stored value (including the legacy "off"). */
 function getStoredAiReasoning(): AIReasoningEffort {
   const stored = localStorage.getItem(REASONING_KEY);
-  if (stored === "low" || stored === "medium" || stored === "high") return stored;
-  return "off";
+  if (stored && REASONING_EFFORTS.has(stored)) return stored as AIReasoningEffort;
+  return "default";
 }
 
 function setStoredAiReasoning(effort: AIReasoningEffort): void {

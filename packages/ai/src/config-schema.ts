@@ -12,6 +12,7 @@
 
 import * as v from "valibot";
 import { safeJsonParse } from "@markdraw/core/schemas.ts";
+import { REASONING_LABELS } from "./reasoning.ts";
 
 /** API family a provider speaks — engines map this to their concrete SDK. */
 const ProviderKindSchema = v.picklist([
@@ -29,9 +30,20 @@ const ModelLimitSchema = v.object({
   output: v.number(),
 });
 
+/** Reasoning-effort labels a model exposes in the composer's effort picker.
+ *  Shared with `@markdraw/ai/reasoning.ts` (the OpenCode-ported source of truth)
+ *  so the schema and the picker can never drift. */
+const ReasoningLevelSchema = v.picklist(REASONING_LABELS);
+
 const ModelConfigSchema = v.object({
   name: v.string(),
   limit: v.optional(ModelLimitSchema),
+  /** Reasoning-effort labels this model accepts, in display order. Omitted ⇒
+   *  the OpenCode-derived default applies (see `reasoningLevelsFor` in
+   *  reasoning.ts). An explicit empty array means NO reasoning control — the
+   *  composer hides the effort picker (e.g. providers that bake the level into
+   *  the model name). An explicit list is used VERBATIM (overrides the table). */
+  reasoning: v.optional(v.array(ReasoningLevelSchema)),
 });
 
 /** An embedding model a provider exposes. `dim` (vector dimension) is load-bearing:
@@ -176,6 +188,7 @@ const UserAIConfigSchema = v.object({
 
 type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
 type ModelLimit = v.InferOutput<typeof ModelLimitSchema>;
+type ReasoningLevel = v.InferOutput<typeof ReasoningLevelSchema>;
 type ModelConfig = v.InferOutput<typeof ModelConfigSchema>;
 type EmbeddingModelConfig = v.InferOutput<typeof EmbeddingModelConfigSchema>;
 type ProviderOptions = v.InferOutput<typeof ProviderOptionsSchema>;
@@ -293,6 +306,7 @@ export {
   type ModelLimit,
   type ProviderConfig,
   type ProviderKind,
+  type ReasoningLevel,
   type ProviderOptions,
   type UserAIConfig,
   type UserProviderConfig,

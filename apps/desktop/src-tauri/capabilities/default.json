@@ -37,6 +37,7 @@
         { "url": "https://api.openai.com/*" },
         { "url": "https://openrouter.ai/*" },
         { "url": "https://opencode.ai/*" },
+        { "url": "https://models.dev/*" },
         { "url": "http://localhost:11434/*" },
         { "url": "http://127.0.0.1:11434/*" }
       ]

@@ -141,34 +141,45 @@ type ProviderOptions = NonNullable<
 >;
 
 /** Anthropic has no enum effort — extended thinking takes an explicit token
- *  budget (API minimum 1024). These map the three effort levels onto budgets. */
-const ANTHROPIC_THINKING_BUDGETS = { low: 4096, medium: 12288, high: 24576 } as const;
+ *  budget (API minimum 1024). These map each effort label onto a budget. "max"
+ *  stays under a 64k output cap (the built-in Claude models' output limit); the
+ *  generic "thinking" label (MiniMax-style on/off) maps to the medium budget. */
+const ANTHROPIC_THINKING_BUDGETS: Record<string, number> = {
+  minimal: 2048,
+  low: 4096,
+  medium: 12288,
+  high: 24576,
+  xhigh: 32768,
+  max: 49152,
+};
 
 /**
- * Map `AIEngineOptions.reasoningEffort` onto each provider family's native
- * option, verified against the INSTALLED SDK option schemas:
+ * Map `AIEngineOptions.reasoningEffort` (an OpenCode-style label) onto each
+ * provider family's native option, verified against the INSTALLED SDK schemas:
  *   - anthropic (@ai-sdk/anthropic 3.0.81): `providerOptions.anthropic.thinking`
- *     accepts `{ type: "enabled", budgetTokens }` — effort becomes a budget via
- *     ANTHROPIC_THINKING_BUDGETS.
+ *     takes `{ type: "enabled", budgetTokens }` — effort becomes a budget via
+ *     ANTHROPIC_THINKING_BUDGETS; "none" disables thinking (`{ type: "disabled" }`).
  *   - openai (@ai-sdk/openai 3.0.68): `providerOptions.openai.reasoningEffort`
- *     ("low" | "medium" | "high" are valid for both the chat and responses
- *     option schemas).
- *   - openai-compatible (@ai-sdk/openai-compatible 2.0.48): the canonical
- *     `providerOptions.openaiCompatible.reasoningEffort` (zod string) is
- *     serialized by the SDK as `reasoning_effort` in the request body —
- *     backends that don't support it simply ignore the field.
- * Returns undefined when effort is unset (off): the request is unchanged.
+ *     — the label is forwarded verbatim (GPT-5.x accepts none/minimal/.../xhigh;
+ *     the per-model picker only offers labels that model supports).
+ *   - openai-compatible (@ai-sdk/openai-compatible 2.0.48): the label is
+ *     serialized as `reasoning_effort`; backends ignore values they don't support.
+ * Returns undefined when effort is unset or "default": the request is unchanged.
  */
 export function reasoningProviderOptions(
   kind: ResolvedModel["provider"]["kind"],
   effort: AIEngineOptions["reasoningEffort"],
 ): ProviderOptions | undefined {
-  if (!effort) return undefined;
+  if (!effort || effort === "default") return undefined;
   switch (kind) {
     case "anthropic":
+      if (effort === "none") return { anthropic: { thinking: { type: "disabled" } } };
       return {
         anthropic: {
-          thinking: { budgetTokens: ANTHROPIC_THINKING_BUDGETS[effort], type: "enabled" },
+          thinking: {
+            budgetTokens: ANTHROPIC_THINKING_BUDGETS[effort] ?? ANTHROPIC_THINKING_BUDGETS.medium,
+            type: "enabled",
+          },
         },
       };
     case "openai":

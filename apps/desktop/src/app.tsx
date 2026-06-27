@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
 import { createConverter } from "@markdraw/core/converter.ts";
 import ConvertWorker from "@markdraw/core/convert-worker.ts?worker";
 import type { IndexedFile } from "@markdraw/core/file-index.ts";
@@ -17,6 +17,12 @@ import type { AIConfig, MCPServerConfig } from "@markdraw/ai/config-schema.ts";
 import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
 import { createApprovalGate } from "@markdraw/ai/approval-policy.ts";
 import { resolveModel } from "@markdraw/ai/resolve-model.ts";
+import { reasoningLevelsFor } from "@markdraw/ai/reasoning.ts";
+import {
+  fetchModelsDevReasoning,
+  modelsDevReasoningFor,
+  type ModelsDevReasoningIndex,
+} from "@markdraw/ai/models-dev.ts";
 import { resolveCredential } from "@markdraw/ai/resolve-credential.ts";
 import { createProvider as createAiProvider } from "@markdraw/ai/adapter.ts";
 import {
@@ -216,8 +222,8 @@ export function App() {
   } | null>(null);
 
   /** Engine options read fresh per provider build: streaming picks the Rust
-   *  SSE transport (tauri-plugin-http buffers whole bodies); reasoning "off"
-   *  omits the option entirely (engines map low/medium/high only). */
+   *  SSE transport (tauri-plugin-http buffers whole bodies); reasoning "default"
+   *  omits the option entirely (the model uses its own default effort). */
   function buildEngineOptions(
     kind?: string,
   ): Parameters<typeof createAiProvider>[3] {
@@ -225,7 +231,7 @@ export function App() {
     const base = {
       fetch: getStoredAiStreaming() ? streamingFetch : tauriFetch,
       streaming: getStoredAiStreaming(),
-      ...(reasoning !== "off" ? { reasoningEffort: reasoning } : {}),
+      ...(reasoning !== "default" ? { reasoningEffort: reasoning } : {}),
     };
     if (kind && isCliProviderKind(kind as never)) {
       return { ...base, cliHost };
@@ -382,6 +388,24 @@ export function App() {
   const [aiStreaming, setAiStreaming] = createSignal(getStoredAiStreaming());
   // Reasoning effort — same read-fresh pattern (buildEngineOptions).
   const [aiReasoning, setAiReasoning] = createSignal<AIReasoningEffort>(getStoredAiReasoning());
+  // models.dev reasoning catalog — the SECONDARY source for the effort picker
+  // (its `reasoning` boolean) when a model isn't in the ported OpenCode table
+  // (reasoning.ts). Fetched once in the background via the Tauri HTTP plugin
+  // (dodges webview CORS); a failure is non-fatal — the table covers every
+  // built-in model on its own.
+  const [modelsDevIndex, setModelsDevIndex] = createSignal<ModelsDevReasoningIndex | null>(null);
+  onMount(() => {
+    void fetchModelsDevReasoning(tauriFetch)
+      .then(setModelsDevIndex)
+      .catch((err: unknown) => {
+        // Non-fatal: the OpenCode table covers every built-in model on its own;
+        // only models OUTSIDE it (the fallback) lose their picker. Log rather
+        // than swallow, so a blocked request (e.g. an HTTP-scope regression —
+        // models.dev must be allow-listed in capabilities/default.json) is
+        // observable instead of silently disabling the fallback forever.
+        console.warn("[markdraw] models.dev reasoning catalog unavailable:", err);
+      });
+  });
 
   const aiProviders = createMemo(() =>
     Object.entries(aiConfig().provider).map(([id, p]) => ({
@@ -468,6 +492,43 @@ export function App() {
   const aiCurrentModel = createMemo<string>(() => {
     aiConfig();
     return getStoredAiModel() ?? "";
+  });
+  // Reasoning-effort levels the ACTIVE model exposes — drives the composer's
+  // effort picker (empty ⇒ no picker, e.g. Qwen/Grok/Antigravity expose none).
+  // Sourced from the ported OpenCode table (reasoning.ts), with an explicit
+  // `model.reasoning` from ai.json overriding it and models.dev as the boolean
+  // fallback for models the table doesn't recognise. Empty when the model can't
+  // be resolved (no picker until the live catalog has it).
+  const aiReasoningLevels = createMemo<AIReasoningEffort[]>(() => {
+    const resolved = resolveModel(aiConfig(), aiCurrentModel());
+    if (!resolved) return [];
+    // CLI subscription engines (claude/codex/grok/antigravity) don't forward the
+    // effort to their binary, so hide the picker there even when the model would
+    // expose levels — showing a control that does nothing would mislead. (It also
+    // suppresses Antigravity models that already bake the level into their name.)
+    if (isCliProviderKind(resolved.provider.kind)) return [];
+    const index = modelsDevIndex();
+    const modelsDev = index
+      ? modelsDevReasoningFor(index, resolved.providerId, resolved.modelId)
+      : null;
+    return reasoningLevelsFor(resolved.modelId, {
+      modelsDev,
+      override: resolved.model.reasoning,
+    });
+  });
+  // The stored effort is global; clamp it to the active model. If the model
+  // doesn't offer the current level — including when it exposes NO picker (empty
+  // levels) — snap to "default" so a stale effort isn't sent to a model that
+  // doesn't support it; otherwise keep the current level.
+  createEffect(() => {
+    const levels = aiReasoningLevels();
+    const current = untrack(aiReasoning);
+    if (levels.includes(current)) return;
+    const next: AIReasoningEffort =
+      levels.length === 0 || levels.includes("default") ? "default" : levels[0]!;
+    if (next === current) return;
+    setAiReasoning(next);
+    setStoredAiReasoning(next);
   });
   // Every CONNECTED provider's models grouped by provider (drives Settings →
   // Manage models and the chat picker). Providers whose display name shares a base — e.g.
@@ -3303,11 +3364,13 @@ export function App() {
       onSelectAiEmbeddingModel={selectEmbeddingModel}
       aiEmbeddingCapable={embeddingCapable()}
       aiReasoning={aiReasoning()}
+      aiReasoningLevels={aiReasoningLevels()}
       onAiReasoningChange={(v) => {
-        // The Select hands back a plain string; the prefs setter narrows it
-        // through its lenient parse (unknown values fall back to "off").
-        const next: AIReasoningEffort =
-          v === "low" || v === "medium" || v === "high" ? v : "off";
+        // The picker hands back a plain string; accept it only if the active
+        // model actually offers it (else fall back to "default" — model decides).
+        const next: AIReasoningEffort = (aiReasoningLevels() as readonly string[]).includes(v)
+          ? (v as AIReasoningEffort)
+          : "default";
         setAiReasoning(next);
         setStoredAiReasoning(next);
       }}
