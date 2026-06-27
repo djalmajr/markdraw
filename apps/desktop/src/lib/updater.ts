@@ -8,6 +8,7 @@ import {
   initialProgressState,
   reduceDownloadEvent,
   type DownloadProgress,
+  type ProgressReducerState,
 } from "./updater-progress.ts";
 
 // Best-effort handle drain before relaunch. The Rust side has two
@@ -67,6 +68,23 @@ export interface PendingUpdate {
 const [pendingUpdate, setPendingUpdate] = createSignal<PendingUpdate | null>(null);
 const [downloadProgress, setDownloadProgress] = createSignal<DownloadProgress | null>(null);
 
+interface InstallUpdateOptions {
+  downloadTimeoutMs?: number;
+}
+
+// Tauri's DownloadOptions.timeout is the total HTTP request timeout: it has no
+// separate first-byte/idle timeout, and the download is not cancellable. Use 1h
+// so ~30MB still fits on very slow ~8 KB/s links, while a true infinite stall
+// remains a finite rejection into the normal catch path.
+const UPDATE_DOWNLOAD_TIMEOUT_MS = 3_600_000;
+
+// Guards against a second `downloadAndInstall` running concurrently — e.g. a
+// double-click on Install before the first event swaps the buttons for the
+// progress bar. Two in-flight downloads would write the SAME progress signal
+// from two independent reducer states, making `downloaded` oscillate.
+let downloadInFlight = false;
+let installOperationId = 0;
+
 export const useUpdate = pendingUpdate;
 export const useDownloadProgress = downloadProgress;
 export const dismissUpdate = () => {
@@ -87,6 +105,84 @@ export function _devSetPendingUpdate(value: PendingUpdate | null): void {
 // the in-app Tauri MCP validation harness for DJA-34.
 export function _devSetDownloadProgress(value: DownloadProgress | null): void {
   setDownloadProgress(value);
+}
+
+/**
+ * Download + install a pending update, driving the progress signal. Exported so
+ * the failure-recovery path is unit-testable.
+ *
+ * Reentrancy guarded (`downloadInFlight`): the dialog keeps the Install button
+ * visible until the first event swaps it for the bar, so a double-click would
+ * otherwise start a SECOND download — two reducer states writing one signal make
+ * `downloaded` oscillate.
+ *
+ * A post-progress rejection (download, signature check, install, drain, or
+ * relaunch) MUST restore the UI: the dialog hides Install/Later and blocks
+ * dismissal while `downloadProgress` is set, so a stale bar would strand the user
+ * with no retry. The catch clears progress, undoes the close-to-tray override
+ * (no relaunch is happening), and surfaces the error.
+ */
+export async function installUpdate(
+  update: Pick<Update, "downloadAndInstall">,
+  options: InstallUpdateOptions = {},
+): Promise<void> {
+  if (downloadInFlight) return;
+  downloadInFlight = true;
+  const operationId = ++installOperationId;
+  const downloadTimeoutMs = options.downloadTimeoutMs ?? UPDATE_DOWNLOAD_TIMEOUT_MS;
+  const isOperationActive = () => downloadInFlight && operationId === installOperationId;
+  const markUpdating = (v: boolean) => {
+    (window as unknown as { __markdraw_updating?: boolean }).__markdraw_updating = v;
+  };
+  // Let the close-to-tray handler actually close the window so relaunch works.
+  markUpdating(true);
+  // Lock the dialog SYNCHRONOUSLY, before any await: it blocks dismissal and
+  // hides Later only while `downloadProgress` is non-null, and the updater's
+  // first event can lag behind a slow CDN handshake. Without seeding a 0%
+  // downloading state here, clicking Install then Later/Esc in that gap clears
+  // the pending update while the install keeps running in the background.
+  let state: ProgressReducerState = {
+    ...initialProgressState(),
+    progress: { phase: "downloading" as const, downloaded: 0, total: null, speed: 0 },
+  };
+  setDownloadProgress(state.progress);
+  let installed = false;
+  try {
+    await update.downloadAndInstall(
+      (event) => {
+        if (!isOperationActive()) return;
+        state = reduceDownloadEvent(state, event);
+        setDownloadProgress(state.progress);
+      },
+      { timeout: downloadTimeoutMs },
+    );
+    installed = true;
+    if (!isOperationActive()) return;
+    await drainBeforeRelaunch();
+    await relaunch();
+  } catch (e) {
+    if (!isOperationActive()) return;
+    setDownloadProgress(null);
+    markUpdating(false);
+    if (installed) {
+      setPendingUpdate(null);
+      console.error("Update installed but restart failed:", e);
+      await message(m.update_installed_restart_manually(), {
+        title: "Markdraw",
+        kind: "info",
+      });
+      return;
+    }
+    console.error("Update install failed:", e);
+    await message(m.update_install_failed({ message: (e as Error)?.message ?? String(e) }), {
+      title: "Markdraw",
+      kind: "error",
+    });
+  } finally {
+    if (operationId === installOperationId) {
+      downloadInFlight = false;
+    }
+  }
 }
 
 /**
@@ -139,19 +235,7 @@ export async function checkForAppUpdates(silent: boolean): Promise<void> {
       version: update.version,
       currentVersion: update.currentVersion,
       notes: update.body?.trim() ?? "",
-      install: async () => {
-        // Signal the close-to-tray handler to allow the window to
-        // actually close instead of hiding. Without this, relaunch
-        // gets stuck because onCloseRequested prevents the exit.
-        (window as unknown as { __markdraw_updating?: boolean }).__markdraw_updating = true;
-        let state = initialProgressState();
-        await update.downloadAndInstall((event) => {
-          state = reduceDownloadEvent(state, event);
-          setDownloadProgress(state.progress);
-        });
-        await drainBeforeRelaunch();
-        await relaunch();
-      },
+      install: () => installUpdate(update),
     });
   } catch (e) {
     if (silent) return;
