@@ -1098,6 +1098,32 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     expect(ta.selectionStart).toBe("@doc.md:3-7 ".length);
   });
 
+  it("a detached (zombie) panel ignores the inline reference so the visible one wins", () => {
+    // Two AiPanel instances can be transiently alive — a detached one whose
+    // effects still run. If the zombie consumed (and acked) the reference, the
+    // visible panel would never insert the token (the chip would linger). The
+    // isConnected guard makes a detached instance skip it.
+    const store = readyStore();
+    const onInlineReferenceHandled = vi.fn();
+    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const { container } = render(() => (
+      <AiPanel
+        contextItems={[SEL_ITEM]}
+        inlineReference={ref()}
+        store={store}
+        onInlineReferenceHandled={onInlineReferenceHandled}
+      />
+    ));
+    const ta = container.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
+    container.remove(); // the zombie's DOM is detached; its effects stay alive
+    expect(ta.isConnected).toBe(false);
+    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    // A detached instance neither inserts nor acks — it leaves the reference
+    // pending for the connected panel.
+    expect(ta.value).toBe("");
+    expect(onInlineReferenceHandled).not.toHaveBeenCalled();
+  });
+
   it("inserts a separating space after non-whitespace (focused caret and unfocused append)", () => {
     const store = readyStore();
     const [ref, setRef] = createSignal<AiInlineReference | null>(null);

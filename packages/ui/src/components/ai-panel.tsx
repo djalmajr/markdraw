@@ -608,6 +608,12 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       (seq) => {
         const ref = props.inlineReference;
         if (!ref || seq === undefined) return;
+        // A transient detached AiPanel instance (mounted, DOM removed, but its
+        // effects still alive) would otherwise consume this reference first —
+        // inserting the token into its orphaned textarea and acking it — so the
+        // visible panel never gets it (the chip stays, the token never appears).
+        // Only the instance actually in the document should handle it.
+        if (!textarea || !textarea.isConnected) return;
         insertItemToken(ref.itemId, ref.token);
         props.onInlineReferenceHandled?.();
       },
