@@ -2171,7 +2171,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   background: hsl(var(--bg-hover));
 }
 .ai-mp-row-active {
-  background: hsl(var(--secondary));
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+}
+.ai-mp-row-active:hover {
+  background: hsl(var(--primary) / 0.15);
 }
 .ai-mp-row-label {
   flex: 1;
@@ -2181,7 +2185,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 .ai-mp-row-check {
   flex-shrink: 0;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--primary));
 }
 .ai-mp-empty {
   padding: 16px 8px;
@@ -2679,7 +2683,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   z-index: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   /* One line, never wrapping: the model pill (flex + min-width:0) shrinks to
      absorb a narrow panel instead of pushing a pill to a second row. */
   flex-wrap: nowrap;
