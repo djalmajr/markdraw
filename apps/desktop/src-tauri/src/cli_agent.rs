@@ -426,7 +426,12 @@ fn build_probe_command(provider: &str, binary: &str) -> Result<Command, String> 
             ]);
         }
         "codex-cli" => {
-            cmd.args(["exec", "reply with exactly: ok", "--json"]);
+            // `exec` refuses to run outside a trusted Git repo ("Not inside a
+            // trusted directory and --skip-git-repo-check was not specified"),
+            // and a GUI launch's cwd rarely is one — so the subscription probe
+            // failed for every user not sitting in a trusted repo. We use Codex
+            // purely as a chat backend (no repo edits), so opt out of the gate.
+            cmd.args(["exec", "--skip-git-repo-check", "reply with exactly: ok", "--json"]);
         }
         "grok-cli" => {
             cmd.args([
@@ -482,7 +487,9 @@ fn build_chat_command(request: &CliChatRequest, binary: &str) -> Result<Command,
             }
         }
         "codex-cli" => {
-            cmd.arg("exec").arg(&prompt).arg("--json");
+            // See build_probe_command: opt out of the Git-repo trust gate so a
+            // GUI launch (cwd not a trusted repo) doesn't abort every turn.
+            cmd.arg("exec").arg("--skip-git-repo-check").arg(&prompt).arg("--json");
             cmd.arg("-m").arg(&request.model);
         }
         "grok-cli" => {
