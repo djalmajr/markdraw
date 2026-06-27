@@ -3,6 +3,22 @@
 Tauri 2 + SolidJS monorepo — desktop app, browser extension, and marketing
 site under `apps/*`, with shared logic in `packages/*`.
 
+## Commit & release conventions
+
+The release CI (`.github/workflows/build-desktop.yml`) builds the GitHub
+Release notes by copying commit **subjects verbatim** into the body, grouped
+by Conventional-Commit type — so commit subjects ARE the user-facing
+changelog. Therefore:
+
+- **Never put a bare `@name` in a commit message (subject or body).** GitHub
+  autolinks `@name` as a user/org mention, so a subject like
+  `"… so @dnd-kit doesn't double-mount it"` both turns the lib into a
+  clickable mention in the notes AND lists it under the release's
+  auto-generated **Contributors**. Wrap package names in backticks
+  (`` `@dnd-kit/solid` ``) or drop the `@` (`dnd-kit`).
+- Keep subjects as Conventional Commits (`type(scope): summary`) and
+  reader-facing; they ship straight into the release notes.
+
 <!-- ai-memory:start -->
 ## Long-term memory (ai-memory)
 
