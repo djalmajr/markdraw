@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { DownloadEvent } from "@tauri-apps/plugin-updater";
-import { initialProgressState, reduceDownloadEvent } from "./updater-progress.ts";
+import {
+  initialProgressState,
+  reduceDownloadEvent,
+  type ProgressReducerState,
+} from "./updater-progress.ts";
 
 describe("reduceDownloadEvent", () => {
   it("Started sets phase=downloading, downloaded=0, and captures contentLength as total", () => {
@@ -74,6 +78,26 @@ describe("reduceDownloadEvent", () => {
       s,
       { event: "Progress", data: { chunkLength: 1_000_000 } },
       500, // 1 MB transferred over 500ms → 2 MB/s
+    );
+    expect(s.progress?.speed).toBe(2_000_000);
+  });
+
+  it("initializes speed timing when Started follows the synchronous seed state", () => {
+    // Mutation captured: treating the seed as an in-flight download leaves
+    // windowStartMs at 0, making the first speed sample effectively zero.
+    const seed: ProgressReducerState = {
+      ...initialProgressState(),
+      progress: { phase: "downloading", downloaded: 0, total: null, speed: 0 },
+    };
+    let s = reduceDownloadEvent(
+      seed,
+      { event: "Started", data: { contentLength: 10_000_000 } },
+      1000,
+    );
+    s = reduceDownloadEvent(
+      s,
+      { event: "Progress", data: { chunkLength: 1_000_000 } },
+      1500,
     );
     expect(s.progress?.speed).toBe(2_000_000);
   });
@@ -165,13 +189,36 @@ describe("reduceDownloadEvent", () => {
     expect(s.progress?.total).toBe(5_000);
   });
 
-  it("a fresh Started AFTER a finished download still resets (genuinely new run)", () => {
-    // Guard the other side: once we've flipped to installing, a new
-    // Started is a real new download and SHOULD reset to 0.
+  it("a Started AFTER a (premature) Finished resumes — keeps bytes, recovers phase", () => {
+    // The caller starts every install() with a FRESH reducer state
+    // (initialProgressState), so a Started here is never a new run reusing a
+    // finished state — it's the updater resuming after a premature Finished
+    // (observed on macOS). Resetting to 0 is exactly the "indo e voltando" bug,
+    // so keep the bytes and flip the phase back to downloading.
     let s = reduceDownloadEvent(initialProgressState(), { event: "Started", data: { contentLength: 100 } }, 0);
     s = reduceDownloadEvent(s, { event: "Progress", data: { chunkLength: 100 } }, 100);
     s = reduceDownloadEvent(s, { event: "Finished" }, 200);
+    expect(s.progress?.phase).toBe("installing");
     s = reduceDownloadEvent(s, { event: "Started", data: { contentLength: 200 } }, 300);
+    expect(s.progress?.downloaded).toBe(100); // resume, not reset
+    expect(s.progress?.phase).toBe("downloading");
+    expect(s.progress?.total).toBe(200); // grows to the larger resumed response
+    // And it keeps accumulating from where it was.
+    s = reduceDownloadEvent(s, { event: "Progress", data: { chunkLength: 25 } }, 350);
+    expect(s.progress?.downloaded).toBe(125);
+    const progress = s.progress;
+    if (progress && progress.total !== null) {
+      expect(progress.downloaded).toBeLessThanOrEqual(progress.total);
+    }
+  });
+
+  it("a genuinely new run uses a fresh state and starts at 0", () => {
+    // How the caller actually models a new download: a brand-new reducer state.
+    const s = reduceDownloadEvent(
+      initialProgressState(),
+      { event: "Started", data: { contentLength: 200 } },
+      0,
+    );
     expect(s.progress?.downloaded).toBe(0);
     expect(s.progress?.total).toBe(200);
   });

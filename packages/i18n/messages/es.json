@@ -162,6 +162,8 @@
   "update_available_later": "Más tarde",
   "update_available_install": "Instalar y reiniciar",
   "update_check_failed": "No se pudieron buscar actualizaciones: {message}",
+  "update_install_failed": "No se pudo instalar la actualización: {message}",
+  "update_installed_restart_manually": "Actualización instalada -- reinicia la app para terminar.",
   "update_up_to_date": "Estás en la última versión de Markdraw.",
   "update_downloading_progress": "Descargando {downloaded} / {total} · {speed}/s",
   "update_downloading_indeterminate": "Descargando {downloaded} · {speed}/s",
