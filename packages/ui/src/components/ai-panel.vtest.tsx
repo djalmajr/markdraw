@@ -387,6 +387,33 @@ describe("AiPanel", () => {
     });
   });
 
+  it("renders the waiting indicator for an empty streaming assistant turn", () => {
+    const { baseElement } = render(() => <AiMessage content="" role="assistant" streaming />);
+
+    expect(baseElement.querySelector(".ai-message-role")?.textContent).toBe("Markdraw");
+    expect(baseElement.querySelector(".ai-message-waiting")).not.toBeNull();
+    expect([
+      "Asking the cursor for patience",
+      "Warming up the next sentence",
+      "Rehearsing a dramatic pause",
+      "Organizing imaginary notes",
+      "Pretending to look busy",
+      "Polishing the dots",
+    ]).toContain(baseElement.querySelector(".ai-message-waiting-text")?.textContent);
+    expect(baseElement.querySelector(".ai-message-waiting-dots")).not.toBeNull();
+    expect(baseElement.querySelector(".ai-msg-action-btn")).toBeNull();
+  });
+
+  it("renders assistant markdown directly once streaming text arrives", () => {
+    const { baseElement } = render(() => (
+      <AiMessage content="partial answer" role="assistant" streaming />
+    ));
+
+    expect(baseElement.querySelector(".ai-markdown")?.textContent?.trim()).toBe("partial answer");
+    expect(baseElement.querySelector(".ai-message-waiting")).toBeNull();
+    expect(baseElement.querySelector(".ai-msg-action-btn")).toBeNull();
+  });
+
   it("shows retry only on the last assistant message and regenerates on click", async () => {
     const store = createAiChatStore({
       getProvider: () => createMockProvider({ reply: () => "fresh reply", chunkDelayMs: 0 }),
