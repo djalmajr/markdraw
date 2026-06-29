@@ -139,6 +139,8 @@ export interface AiMentionContext {
   label: string;
   path?: string;
   rootId?: string;
+  rootPath?: string;
+  absolutePath?: string;
 }
 
 /** One checklist entry of the live AI plan (model-maintained, user-steered). */
@@ -683,6 +685,8 @@ export function createAppState(config: AppStateConfig) {
       // path+rootId identity, since labels collide across roots).
       ...(file.path !== undefined ? { path: file.path } : {}),
       ...(file.rootId !== undefined ? { rootId: file.rootId } : {}),
+      ...(file.rootPath !== undefined ? { rootPath: file.rootPath } : {}),
+      ...(file.absolutePath !== undefined ? { absolutePath: file.absolutePath } : {}),
     });
   }
 
@@ -784,7 +788,14 @@ export function createAppState(config: AppStateConfig) {
       if (active && f && fileKind(f.name) === "document") {
         const content = editorContent();
         if (content.trim()) {
-          items.push({ id: `active:${active.path}`, kind: "file", label: active.label, content });
+          items.push({
+            id: `active:${active.path}`,
+            kind: "file",
+            label: active.label,
+            path: active.path,
+            ...(selectedRootId() !== null ? { rootId: selectedRootId()! } : {}),
+            content,
+          });
         }
       }
       // Explicit attachments (selections, @-mentions) follow; skip one that just
@@ -799,7 +810,21 @@ export function createAppState(config: AppStateConfig) {
         mode: aiMode(),
         userMessage: request.userMessage,
       });
-      return [skillContext, attachedContext].filter(Boolean).join("\n\n") || undefined;
+      const preamble = [skillContext, attachedContext].filter(Boolean).join("\n\n") || undefined;
+      const contextItems = items.map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        label: item.label,
+        ...(item.path !== undefined ? { path: item.path } : {}),
+        ...(item.rootId !== undefined ? { rootId: item.rootId } : {}),
+        ...(item.rootPath !== undefined ? { rootPath: item.rootPath } : {}),
+        ...(item.absolutePath !== undefined ? { absolutePath: item.absolutePath } : {}),
+      }));
+      if (!preamble && contextItems.length === 0) return undefined;
+      return {
+        ...(preamble ? { preamble } : {}),
+        ...(contextItems.length ? { items: contextItems } : {}),
+      };
     },
     // Engine-level approval (F3): the host's Accept/Reject gate rides the
     // ChatOptions instead of pre-wrapping every tool.

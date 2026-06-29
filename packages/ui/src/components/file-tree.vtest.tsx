@@ -258,6 +258,50 @@ describe("FileTree", () => {
       expect(onAddToChat.mock.calls[0]![0].kind).toBe("directory");
     });
 
+    it("offers 'Add to chat' in nested file and folder menus", () => {
+      const onAddToChat = vi.fn();
+      const roots = [
+        makeRoot("r1", "vault", [
+          dir(
+            "notes",
+            [
+              file("a.md", "notes/a.md"),
+              dir("deep", [file("z.md", "notes/deep/z.md")], "notes/deep"),
+            ],
+            "notes",
+          ),
+        ]),
+      ];
+      const { container } = render(() => (
+        <AppProvider state={makeAppStub()}>
+          <FileTree
+            roots={roots}
+            selectedPath={null}
+            selectedRootId={null}
+            onSelect={() => {}}
+            onAddToChat={onAddToChat}
+          />
+        </AppProvider>
+      ));
+
+      expandDir(container, "notes");
+      openFileMenu(container, "a.md");
+      let item = screen.getByText(/add to chat|adicionar ao chat|añadir al chat/i);
+      fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      fireEvent.click(item);
+
+      openFileMenu(container, "deep");
+      item = screen.getAllByText(/add to chat|adicionar ao chat|añadir al chat/i).at(-1)!;
+      fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      fireEvent.click(item);
+
+      expect(onAddToChat).toHaveBeenCalledTimes(2);
+      expect(onAddToChat.mock.calls[0]![0]).toMatchObject({ kind: "file", path: "notes/a.md" });
+      expect(onAddToChat.mock.calls[1]![0]).toMatchObject({ kind: "directory", path: "notes/deep" });
+    });
+
     it("offers 'Add to chat' in the workspace-root menu with a path:'' pseudo-entry", () => {
       const onAddToChat = vi.fn();
       const { container } = render(() => (

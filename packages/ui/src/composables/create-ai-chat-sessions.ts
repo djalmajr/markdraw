@@ -25,7 +25,12 @@ import {
   setChatSessionsIndex,
   toPersistedTool,
 } from "@markdraw/core/ai-chat-sessions.ts";
-import { type AiChatStore, type ChatTurn, createAiChatStore } from "./create-ai-chat-store.ts";
+import {
+  type AiChatStore,
+  type ChatContextResult,
+  type ChatTurn,
+  createAiChatStore,
+} from "./create-ai-chat-store.ts";
 
 /** Public, reactive metadata for a chat session (strip + history). */
 export type AiChatSessionMeta = PersistedChatSessionMeta;
@@ -75,7 +80,7 @@ export interface AiChatSessionsConfig {
   maxSteps?: number;
   /** Explicit context preamble injected into the sent message (shared across
    *  sessions — reflects the current composer context chips). */
-  getContext?: (request: { history: ChatTurn[]; userMessage: string }) => string | undefined;
+  getContext?: (request: { history: ChatTurn[]; userMessage: string }) => ChatContextResult;
   /** Called when any session's assistant turn finalizes (Plan-mode save). */
   onAssistantTurn?: (content: string) => void;
   /** Title generation from the first user message; injected for purity/testing. */
@@ -144,6 +149,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     return turns.map((t) => ({
       role: t.role,
       content: t.content,
+      ...(t.context && t.context.length ? { context: t.context } : {}),
       ...(t.tools && t.tools.length ? { tools: t.tools.map(toPersistedTool) } : {}),
       ...(t.usage ? { usage: t.usage } : {}),
     }));
@@ -235,6 +241,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     return msgs.map((m) => ({
       role: m.role,
       content: m.content,
+      ...(m.context && m.context.length ? { context: m.context } : {}),
       ...(m.tools && m.tools.length
         ? {
             tools: m.tools.map((t) => ({

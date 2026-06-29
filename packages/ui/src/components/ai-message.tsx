@@ -1,15 +1,20 @@
-import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import IconCheck from "~icons/lucide/check";
 import IconCopy from "~icons/lucide/copy";
 import IconPencil from "~icons/lucide/pencil";
 import IconRefreshCw from "~icons/lucide/refresh-cw";
-import type { ToolActivity, TurnUsage } from "../composables/create-ai-chat-store.ts";
+import type {
+  ChatTurnContextItem,
+  ToolActivity,
+  TurnUsage,
+} from "../composables/create-ai-chat-store.ts";
 import { renderChatMarkdown } from "../lib/chat-markdown.ts";
 
 const AI_WAITING_STATUS_MAX_DELAY_MS = 15_000;
 const AI_WAITING_STATUS_MIN_DELAY_MS = 5_000;
+const AI_TYPEWRITER_INTERVAL_MS = 18;
 
 export interface AiMessageProps {
   content: string;
@@ -21,6 +26,9 @@ export interface AiMessageProps {
   streaming?: boolean;
   /** Tool activity to surface as compact chips with this turn. */
   tools?: ToolActivity[];
+  /** Context snapshot used by this user turn. Raw context stays out of
+   *  history; these small labels make the effective prompt auditable. */
+  context?: ChatTurnContextItem[];
   /** Per-run token stats — rendered as a subtle span in the hover action bar
    *  (assistant turns, when the provider reported usage). */
   usage?: TurnUsage;
@@ -60,6 +68,135 @@ function randomWaitingStatusIndex(count: number, current?: number): number {
   if (count <= 1) return 0;
   const next = Math.floor(Math.random() * count);
   return next === current ? (next + 1) % count : next;
+}
+
+function localizedText(en: string, pt: string, es: string): string {
+  const locale = useLocale();
+  if (locale.startsWith("pt")) return pt;
+  if (locale.startsWith("es")) return es;
+  return en;
+}
+
+function toolArgPath(tool: ToolActivity): string {
+  const args = tool.args;
+  if (typeof args !== "object" || args === null) return "";
+  const path = (args as { path?: unknown }).path;
+  return typeof path === "string" && path.trim() ? ` ${path.trim()}` : "";
+}
+
+function toolActivityLabel(tool: ToolActivity): string {
+  const name = toolDisplayName(tool.toolName);
+  const target = toolArgPath(tool);
+  const running = tool.status === "running";
+  const failed = tool.status === "error";
+  const normalized = name.toLowerCase();
+  if (normalized.includes("create_file")) {
+    if (failed) {
+      return localizedText(
+        `Failed to create file${target}`,
+        `Falha ao criar arquivo${target}`,
+        `Error al crear archivo${target}`,
+      );
+    }
+    return running
+      ? localizedText(`Creating file${target}`, `Criando arquivo${target}`, `Creando archivo${target}`)
+      : localizedText(`Created file${target}`, `Arquivo criado${target}`, `Archivo creado${target}`);
+  }
+  if (normalized.includes("create_folder")) {
+    if (failed) {
+      return localizedText(
+        `Failed to create folder${target}`,
+        `Falha ao criar pasta${target}`,
+        `Error al crear carpeta${target}`,
+      );
+    }
+    return running
+      ? localizedText(`Creating folder${target}`, `Criando pasta${target}`, `Creando carpeta${target}`)
+      : localizedText(`Created folder${target}`, `Pasta criada${target}`, `Carpeta creada${target}`);
+  }
+  if (normalized.includes("edit_file") || normalized.includes("propose_edit")) {
+    if (failed) {
+      return localizedText(
+        `Failed to edit file${target}`,
+        `Falha ao editar arquivo${target}`,
+        `Error al editar archivo${target}`,
+      );
+    }
+    return running
+      ? localizedText(`Editing file${target}`, `Editando arquivo${target}`, `Editando archivo${target}`)
+      : localizedText(`Edited file${target}`, `Arquivo editado${target}`, `Archivo editado${target}`);
+  }
+  if (normalized.includes("read_file")) {
+    if (failed) {
+      return localizedText(
+        `Failed to read file${target}`,
+        `Falha ao ler arquivo${target}`,
+        `Error al leer archivo${target}`,
+      );
+    }
+    return running
+      ? localizedText(`Reading file${target}`, `Lendo arquivo${target}`, `Leyendo archivo${target}`)
+      : localizedText(`Read file${target}`, `Arquivo lido${target}`, `Archivo leído${target}`);
+  }
+  if (normalized.includes("read_active_doc")) {
+    if (failed) {
+      return localizedText(
+        "Failed to read active document",
+        "Falha ao ler documento ativo",
+        "Error al leer documento activo",
+      );
+    }
+    return running
+      ? localizedText("Reading active document", "Lendo documento ativo", "Leyendo documento activo")
+      : localizedText("Read active document", "Documento ativo lido", "Documento activo leído");
+  }
+  if (normalized.includes("list_files")) {
+    if (failed) {
+      return localizedText("Failed to list files", "Falha ao listar arquivos", "Error al listar archivos");
+    }
+    return running
+      ? localizedText("Listing files", "Listando arquivos", "Listando archivos")
+      : localizedText("Listed files", "Arquivos listados", "Archivos listados");
+  }
+  if (normalized.includes("search")) {
+    if (failed) {
+      return localizedText(
+        `Search failed: ${name}`,
+        `Busca falhou: ${name}`,
+        `Búsqueda fallida: ${name}`,
+      );
+    }
+    return running
+      ? localizedText(`Searching with ${name}`, `Buscando com ${name}`, `Buscando con ${name}`)
+      : localizedText(`Searched with ${name}`, `Busca feita com ${name}`, `Búsqueda hecha con ${name}`);
+  }
+  if (normalized.includes("update_plan")) {
+    if (failed) {
+      return localizedText("Failed to update plan", "Falha ao atualizar plano", "Error al actualizar plan");
+    }
+    return running
+      ? localizedText("Updating plan", "Atualizando plano", "Actualizando plan")
+      : localizedText("Updated plan", "Plano atualizado", "Plan actualizado");
+  }
+  if (failed) return localizedText(`Tool failed: ${name}`, `Ferramenta falhou: ${name}`, `Herramienta falló: ${name}`);
+  return running
+    ? localizedText(`Running ${name}`, `Executando ${name}`, `Ejecutando ${name}`)
+    : localizedText(`Ran ${name}`, `Executou ${name}`, `Ejecutó ${name}`);
+}
+
+function contextDisplayLabel(item: ChatTurnContextItem): string {
+  if (item.path !== undefined && item.path !== "") return item.path;
+  return item.label;
+}
+
+function contextTitle(item: ChatTurnContextItem): string {
+  return [
+    item.absolutePath ? `Absolute path: ${item.absolutePath}` : undefined,
+    item.path !== undefined ? `Workspace path: ${item.path}` : undefined,
+    item.rootPath ? `Workspace root: ${item.rootPath}` : undefined,
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
 }
 
 function AiWaitingIndicator(): JSX.Element {
@@ -164,10 +301,8 @@ export function AiToolChips(props: AiToolChipsProps): JSX.Element {
               setExpandedId((cur) => (cur === tool.toolCallId ? null : tool.toolCallId))
             }
           >
-            <span class="ai-tool-chip-icon" aria-hidden="true">
-              ⚙
-            </span>
-            <span class="ai-tool-chip-name">{toolDisplayName(tool.toolName)}</span>
+            <span class="ai-tool-chip-icon" aria-hidden="true" />
+            <span class="ai-tool-chip-name">{toolActivityLabel(tool)}</span>
             {/* Source is only informative for MCP servers — in-process "app"
                 tools already read clearly from the (de-namespaced) name. */}
             <Show when={tool.source && tool.source !== "app"}>
@@ -189,8 +324,57 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
   // Copy feedback: the button briefly swaps to a check + "Copied" after a
   // successful clipboard write, then reverts.
   const [copied, setCopied] = createSignal(false);
+  const [visibleContent, setVisibleContent] = createSignal(props.streaming ? "" : props.content);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
-  onCleanup(() => clearTimeout(copiedTimer));
+  let typewriterTimer: ReturnType<typeof setInterval> | undefined;
+
+  function stopTypewriter(): void {
+    clearInterval(typewriterTimer);
+    typewriterTimer = undefined;
+  }
+
+  function startTypewriter(): void {
+    if (typewriterTimer) return;
+    typewriterTimer = setInterval(() => {
+      const target = props.content;
+      const current = visibleContent();
+      if (!props.streaming || !target.startsWith(current)) {
+        setVisibleContent(target);
+        stopTypewriter();
+        return;
+      }
+      const lag = target.length - current.length;
+      if (lag <= 0) {
+        stopTypewriter();
+        return;
+      }
+      const step = Math.min(14, Math.max(1, Math.ceil(lag / 18)));
+      const next = target.slice(0, current.length + step);
+      setVisibleContent(next);
+      if (next.length >= target.length) stopTypewriter();
+    }, AI_TYPEWRITER_INTERVAL_MS);
+  }
+
+  createEffect(() => {
+    const target = props.content;
+    if (!props.streaming) {
+      stopTypewriter();
+      setVisibleContent(target);
+      return;
+    }
+    const current = visibleContent();
+    if (!target.startsWith(current)) {
+      stopTypewriter();
+      setVisibleContent(target);
+      return;
+    }
+    if (target.length > current.length) startTypewriter();
+  });
+
+  onCleanup(() => {
+    clearTimeout(copiedTimer);
+    stopTypewriter();
+  });
 
   function copyMessage(): void {
     // clipboard is undefined in non-secure contexts (and write can be denied);
@@ -207,7 +391,8 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
 
   const copyLabel = (): string =>
     copied() ? (useLocale(), m.ai_message_copied()) : (useLocale(), m.ai_message_copy());
-  const hasContent = (): boolean => props.content.trim().length > 0;
+  const hasContent = (): boolean => visibleContent().trim().length > 0;
+  const contextItems = (): ChatTurnContextItem[] => props.context ?? [];
 
   // Per-run stats for the hover bar — arrows + compact numbers only (no i18n),
   // with the raw token counts in the title. Hidden unless a token count exists.
@@ -246,17 +431,37 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
         <AiToolChips displayText={props.displayText} tools={props.tools!} />
       </Show>
       <div class="ai-message-text">
-        <Show when={props.role === "assistant"} fallback={props.content}>
-          <Show
-            when={props.streaming && !hasContent()}
-            fallback={
-              <>
-                {/* `html: false` in renderChatMarkdown escapes raw HTML, so this
-                    innerHTML never injects model/tool markup. */}
-                <div class="ai-markdown" innerHTML={renderChatMarkdown(props.content)} />
-              </>
-            }
-          >
+        <Show
+          when={props.role === "assistant"}
+          fallback={
+            <>
+              <div>{props.content}</div>
+              <Show when={contextItems().length > 0}>
+                <div
+                  class="ai-message-context-used"
+                  aria-label={localizedText("Used context", "Contexto usado", "Contexto usado")}
+                >
+                  <span class="ai-message-context-used-label">
+                    {localizedText("Context", "Contexto", "Contexto")}
+                  </span>
+                  <For each={contextItems()}>
+                    {(item) => (
+                      <span class="ai-message-context-chip" title={contextTitle(item)}>
+                        {contextDisplayLabel(item)}
+                      </span>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </>
+          }
+        >
+          <Show when={hasContent()}>
+            {/* `html: false` in renderChatMarkdown escapes raw HTML, so this
+                innerHTML never injects model/tool markup. */}
+            <div class="ai-markdown" innerHTML={renderChatMarkdown(visibleContent())} />
+          </Show>
+          <Show when={props.streaming}>
             <AiWaitingIndicator />
           </Show>
         </Show>

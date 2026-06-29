@@ -75,6 +75,13 @@ const NEW_FILE_SHORTCUT_LABEL = IS_MAC ? "⌘N" : "Ctrl+N";
 const NEW_FOLDER_SHORTCUT_LABEL = IS_MAC ? "⇧⌘N" : "Ctrl+Shift+N";
 const TRASH_SHORTCUT_LABEL = IS_MAC ? "⌘⌫" : "Del";
 
+function formatShortcutLabel(shortcut: string): string {
+  if (shortcut.includes("+")) {
+    return shortcut.split("+").join(" + ");
+  }
+  return Array.from(shortcut).join(" ");
+}
+
 /** Middle-click affordance glyph shown next to "Open in New Tab". */
 function MiddleClickGlyph() {
   return (
@@ -744,7 +751,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
                             when={typeof entry.shortcut === "string"}
                             fallback={<span class="menu-shortcut-kbd ml-auto">{entry.shortcut}</span>}
                           >
-                            <kbd class="menu-shortcut-kbd ml-auto">{entry.shortcut}</kbd>
+                            <kbd class="menu-shortcut-kbd ml-auto">{formatShortcutLabel(entry.shortcut as string)}</kbd>
                           </Show>
                         </Show>
                       </DropdownMenuItem>
@@ -776,7 +783,14 @@ export function FileTreeItem(props: FileTreeItemProps) {
                   <ContextMenuItem class={entry.itemClass} onSelect={entry.onSelect}>
                     <span class="flex items-center gap-2">{entry.icon} {(useLocale(), entry.label())}</span>
                     <Show when={entry.shortcut !== undefined}>
-                      <ContextMenuShortcut class="ml-0">{entry.shortcut}</ContextMenuShortcut>
+                      <Show
+                        when={typeof entry.shortcut === "string"}
+                        fallback={<ContextMenuShortcut class="ml-0">{entry.shortcut}</ContextMenuShortcut>}
+                      >
+                        <ContextMenuShortcut class="ml-0">
+                          {formatShortcutLabel(entry.shortcut as string)}
+                        </ContextMenuShortcut>
+                      </Show>
                     </Show>
                   </ContextMenuItem>
                 </>
@@ -823,6 +837,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
               onSelect={props.onSelect}
               onFocusEntry={props.onFocusEntry}
               onOpenInNewTab={props.onOpenInNewTab}
+              onAddToChat={props.onAddToChat}
               onDoubleClickFile={props.onDoubleClickFile}
               onCreate={props.onCreate}
               onMove={props.onMove}

@@ -595,7 +595,7 @@ describe("AppState — AI multi-chat tab routing", () => {
       expect(state.aiContextItems()[0]!.id).toBe("folder:r:src");
       const id = state.newChat();
       await state.aiSessions.storeFor(id)!.sendMessage("hi");
-      expect(sent?.at(-1)?.content).toContain('<context kind="folder" source="src/">');
+      expect(sent?.at(-1)?.content).toContain('<context kind="folder" source="src/" path="src">');
       expect(sent?.at(-1)?.content).toContain("- src/a.md");
       // Removing the chip drops the listing from the next send.
       state.removeAiContext("folder:r:src");

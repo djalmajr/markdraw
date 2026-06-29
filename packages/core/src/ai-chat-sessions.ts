@@ -53,9 +53,20 @@ const PersistedTurnUsageSchema = v.object({
   toolCalls: v.optional(v.number()),
 });
 
+const PersistedChatContextItemSchema = v.object({
+  id: v.optional(v.string()),
+  kind: v.picklist(["file", "folder", "selection"] as const),
+  label: v.string(),
+  path: v.optional(v.string()),
+  rootId: v.optional(v.string()),
+  rootPath: v.optional(v.string()),
+  absolutePath: v.optional(v.string()),
+});
+
 const PersistedChatMessageSchema = v.object({
   role: v.picklist(["user", "assistant"] as const),
   content: v.string(),
+  context: v.optional(v.array(PersistedChatContextItemSchema)),
   tools: v.optional(v.array(PersistedToolActivitySchema)),
   usage: v.optional(PersistedTurnUsageSchema),
 });
@@ -152,11 +163,12 @@ function capMessages(messages: PersistedChatMessage[]): PersistedChatMessage[] {
         ? msg.content.slice(0, MAX_MESSAGE_CONTENT_CHARS) + TRUNCATION_SENTINEL
         : msg.content;
     const usage = msg.usage !== undefined ? { usage: msg.usage } : {};
+    const context = msg.context && msg.context.length ? { context: msg.context.slice(0, 16) } : {};
     if (!msg.tools || msg.tools.length === 0) {
-      return { role: msg.role, content, ...usage };
+      return { role: msg.role, content, ...context, ...usage };
     }
     const tools = msg.tools.length > MAX_TOOLS_PER_MESSAGE ? msg.tools.slice(0, MAX_TOOLS_PER_MESSAGE) : msg.tools;
-    return { role: msg.role, content, tools, ...usage };
+    return { role: msg.role, content, ...context, tools, ...usage };
   });
 }
 
@@ -375,6 +387,7 @@ export {
   MAX_SESSIONS,
   MAX_TOOLS_PER_MESSAGE,
   MAX_TOOL_JSON_BYTES,
+  PersistedChatContextItemSchema,
   PersistedChatMessageSchema,
   PersistedChatSessionMetaSchema,
   capMessages,

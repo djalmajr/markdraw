@@ -28,7 +28,7 @@ describe("mapFullStream", () => {
         gen([
           { type: "text-delta", text: "Hel" },
           { type: "text-delta", text: "lo" },
-          { type: "finish", totalUsage: { inputTokens: 3, outputTokens: 5 } },
+          { type: "finish", usage: { inputTokens: 3, outputTokens: 5 } },
         ]),
       ),
     );
@@ -42,6 +42,11 @@ describe("mapFullStream", () => {
 
   it("supports the legacy textDelta field", async () => {
     const out = await collect(mapFullStream(gen([{ type: "text-delta", textDelta: "x" }])));
+    expect(out[0]).toEqual({ type: "text-delta", text: "x" });
+  });
+
+  it("supports the AI SDK delta field", async () => {
+    const out = await collect(mapFullStream(gen([{ type: "text-delta", delta: "x" }])));
     expect(out[0]).toEqual({ type: "text-delta", text: "x" });
   });
 
@@ -157,7 +162,7 @@ describe("mapFullStream", () => {
         gen([
           { type: "tool-call", toolCallId: "c1", toolName: "t", input: {} },
           { type: "tool-result", toolCallId: "c1", toolName: "t", output: 1 },
-          { type: "finish", totalUsage: { inputTokens: 10, outputTokens: 20 } },
+          { type: "finish", usage: { inputTokens: 10, outputTokens: 20 } },
         ]),
       ),
     );
@@ -344,7 +349,7 @@ describe("ai-sdk engine reasoning effort", () => {
 });
 
 describe("ai-sdk engine per-run usage telemetry (buffered path)", () => {
-  it("emits a usage part from the SDK totalUsage right before the done", async () => {
+  it("emits a usage part from the SDK usage right before the done", async () => {
     const { fetchImpl } = createFakeFetch([
       completionResponse("ok", { completion_tokens: 9, prompt_tokens: 7 }),
     ]);
@@ -366,7 +371,7 @@ describe("ai-sdk engine per-run usage telemetry (buffered path)", () => {
       source: "app",
     };
     const parts = await chatThrough(fetchImpl, [{ role: "user", content: "go" }], { tools: [tool] });
-    // totalUsage sums both steps: 1+2 prompt, 1+3 completion (toolCallResponse uses 1/1).
+    // AI SDK v7 usage sums both steps: 1+2 prompt, 1+3 completion (toolCallResponse uses 1/1).
     expect(parts.find((p) => p.type === "usage")).toEqual({
       type: "usage",
       inputTokens: 3,

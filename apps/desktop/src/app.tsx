@@ -2398,6 +2398,11 @@ export function App() {
    *  so a huge folder can't blow the prompt budget), plus a hint pointing the
    *  model at `app__read_file`. `path: ""` lists the whole root. Returns null
    *  when the root/subtree is gone (stale entry). */
+  function joinWorkspacePath(rootPath: string | undefined, path: string): string | undefined {
+    if (!rootPath) return undefined;
+    return path ? `${rootPath}/${path}` : rootPath;
+  }
+
   function buildFolderListing(rootId: string, path: string, label: string): string | null {
     const FOLDER_MENTION_CAP = 200;
     type Entry = import("@markdraw/core/types.ts").FSEntry;
@@ -2427,7 +2432,21 @@ export function App() {
     const lines = paths.slice(0, FOLDER_MENTION_CAP).map((p) => `- ${p}`);
     if (paths.length > FOLDER_MENTION_CAP) lines.push(`- (+${paths.length - FOLDER_MENTION_CAP} more)`);
     if (lines.length === 0) lines.push("- (no files)");
-    return `Folder listing of ${label}:\n${lines.join("\n")}\n\nUse app__read_file with one of these paths to read a specific file.`;
+    const folderPath = path === "" ? root.name : path;
+    const rootPath = rootPaths().get(rootId);
+    const absoluteFolderPath = joinWorkspacePath(rootPath, path);
+    const createHint =
+      path === ""
+        ? `Create new files at workspace-relative paths in this workspace${absoluteFolderPath ? ` (${absoluteFolderPath})` : ""}.`
+        : `Create new files under ${path}/ in this workspace${absoluteFolderPath ? ` (${absoluteFolderPath})` : ""}. Do not use another folder with the same basename.`;
+    return (
+      `Folder listing of ${label}:\n` +
+      `Workspace-relative path: ${folderPath}\n` +
+      (rootPath ? `Workspace root: ${rootPath}\n` : "") +
+      (absoluteFolderPath ? `Absolute path: ${absoluteFolderPath}\n` : "") +
+      `Files:\n${lines.join("\n")}\n\n` +
+      `Use app__read_file with one of these paths to read a specific file. ${createHint}`
+    );
   }
 
   /** Read a mentioned PDF for the chat context. PDFs aren't UTF-8 text, so
@@ -2468,25 +2487,48 @@ export function App() {
   async function addFileMention(
     file: { kind?: "dir" | "file"; label: string; path: string; rootId: string },
   ) {
+    const rootPath = rootPaths().get(file.rootId);
+    const absolutePath = joinWorkspacePath(rootPath, file.path);
     if (file.kind === "dir") {
       const content = buildFolderListing(file.rootId, file.path, file.label);
       if (content === null) return;
-      state.addFileMention({ content, kind: "folder", label: file.label, path: file.path, rootId: file.rootId });
+      state.addFileMention({
+        content,
+        kind: "folder",
+        label: file.label,
+        path: file.path,
+        rootId: file.rootId,
+        ...(rootPath ? { rootPath } : {}),
+        ...(absolutePath ? { absolutePath } : {}),
+      });
       return;
     }
-    const rootPath = rootPaths().get(file.rootId);
     if (!rootPath) return;
     // PDFs aren't readable as UTF-8 — route them through pdf.js extraction.
     // Chip content goes straight into the prompt, so scrub it here (folder
     // listings above are names only and stay unscrubbed).
     if (file.path.toLowerCase().endsWith(".pdf")) {
       const content = scrubAi(await buildPdfMentionContent(`${rootPath}/${file.path}`, file.label));
-      state.addFileMention({ content, label: file.label, path: file.path, rootId: file.rootId });
+      state.addFileMention({
+        content,
+        label: file.label,
+        path: file.path,
+        rootId: file.rootId,
+        rootPath,
+        ...(absolutePath ? { absolutePath } : {}),
+      });
       return;
     }
     try {
       const content = scrubAi(await readFileContent(`${rootPath}/${file.path}`));
-      state.addFileMention({ content, label: file.label, path: file.path, rootId: file.rootId });
+      state.addFileMention({
+        content,
+        label: file.label,
+        path: file.path,
+        rootId: file.rootId,
+        rootPath,
+        ...(absolutePath ? { absolutePath } : {}),
+      });
     } catch {
       // Unreadable (binary / deleted) — silently skip.
     }

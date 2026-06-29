@@ -232,6 +232,13 @@ async function highlightCodeBlocks(
   }
 }
 
+function mermaidSvgLooksRenderable(svg: string): boolean {
+  if (!/<svg\b/i.test(svg)) return false;
+  if (/\bNaN\b/.test(svg)) return false;
+  if (/viewBox=["']\s*0\s+0\s+0\s+0\s*["']/i.test(svg)) return false;
+  return true;
+}
+
 async function renderMermaidBlocks(
   container: HTMLElement,
   gen: number,
@@ -257,10 +264,19 @@ async function renderMermaidBlocks(
     // Bail out if a newer render has started (navigation happened mid-render)
     if (isStale(gen)) return;
 
-    if (block.getAttribute("data-processed")) continue;
+    if (block.getAttribute("data-processed")) {
+      const hasTerminalRender = block.querySelector("svg, .mermaid-error") !== null;
+      if (hasTerminalRender) continue;
+      block.removeAttribute("data-processed");
+    }
+    if (block.getAttribute("data-processing")) continue;
 
     const source = block.textContent?.trim() ?? "";
     if (!source) continue;
+    block.setAttribute("data-processing", "true");
+    block.textContent = "Rendering diagram...";
+    block.style.color = "hsl(var(--muted-foreground))";
+    block.style.fontStyle = "italic";
 
     try {
       // Mermaid sometimes throws `null is not an object (evaluating
@@ -275,16 +291,16 @@ async function renderMermaidBlocks(
       const baseId = `mermaid-${gen}-${idx++}`;
       let svg: string | undefined;
       let lastErr: unknown;
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (let attempt = 0; attempt < 3; attempt++) {
         if (isStale(gen)) return;
-        const attemptId = attempt === 0 ? baseId : `${baseId}-retry`;
+        const attemptId = attempt === 0 ? baseId : `${baseId}-retry-${attempt}`;
         try {
           const result = await mermaid.render(attemptId, source);
-          if (result?.svg) {
+          if (result?.svg && mermaidSvgLooksRenderable(result.svg)) {
             svg = result.svg;
             break;
           }
-          lastErr = new Error("mermaid render returned empty svg");
+          lastErr = new Error("mermaid render returned an empty or invalid svg");
         } catch (err) {
           lastErr = err;
         }
@@ -297,15 +313,20 @@ async function renderMermaidBlocks(
       if (isStale(gen)) return;
       // mermaid.render returns sanitized SVG — safe to inject
       block.innerHTML = svg;
+      block.style.color = "";
+      block.style.fontStyle = "";
     } catch (e: any) {
       if (isStale(gen)) return;
       const errMsg = e?.message || "Unknown error";
       const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       // Error message is escaped above — safe to inject
       block.innerHTML = `<pre class="mermaid-error">Mermaid error: ${errMsg.replace(/</g, "&lt;")}\n\n${escaped}</pre>`;
+      block.style.color = "";
+      block.style.fontStyle = "";
     }
 
     // Always mark as processed to prevent re-processing on effect re-runs
+    block.removeAttribute("data-processing");
     block.setAttribute("data-processed", "true");
 
     // Clean up temporary render containers mermaid leaves in the body

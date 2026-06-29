@@ -358,6 +358,10 @@ interface AppShellProps {
   onAboutOpen?: () => void;
 }
 
+export function aiDirectoryContextLabel(entry: Pick<FSEntry, "name" | "path">): string {
+  return entry.path ? `${entry.path}/` : `${entry.name}/`;
+}
+
 export function AppShell(props: AppShellProps) {
   let tocContainerRef: HTMLDivElement | undefined;
   let tocPanelRef: HTMLElement | undefined;
@@ -514,7 +518,7 @@ export function AppShell(props: AppShellProps) {
         if (entry.kind !== "directory") continue;
         entries.push({
           kind: "dir",
-          label: `${entry.name}/`,
+          label: aiDirectoryContextLabel(entry),
           path: entry.path,
           rootId,
           rootLabel: rootLabelFor(rootId),
@@ -913,7 +917,7 @@ export function AppShell(props: AppShellProps) {
                   const isDir = entry.kind === "directory";
                   props.onAddFileMention?.({
                     ...(isDir ? { kind: "dir" } : {}),
-                    label: isDir ? `${entry.name}/` : entry.name,
+                    label: isDir ? aiDirectoryContextLabel(entry) : entry.name,
                     path: entry.path,
                     rootId,
                   });

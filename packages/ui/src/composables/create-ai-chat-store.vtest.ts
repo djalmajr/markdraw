@@ -59,6 +59,19 @@ describe("createAiChatStore", () => {
     expect(store.error()).toBeNull();
   });
 
+  it("replaces cumulative text-delta snapshots instead of duplicating them", async () => {
+    const store = createAiChatStore({
+      getProvider: () =>
+        stubProvider([
+          { type: "text-delta", text: "Hel" },
+          { type: "text-delta", text: "Hello" },
+          { type: "done" },
+        ]),
+    });
+    await store.sendMessage("hi");
+    expect(store.messages().at(-1)).toEqual({ role: "assistant", content: "Hello" });
+  });
+
   it("surfaces a non-aborted error", async () => {
     const store = createAiChatStore({
       getProvider: () =>
@@ -291,6 +304,52 @@ describe("createAiChatStore", () => {
     expect(received?.at(-1)?.content).toBe("CTX-BLOCK\n\nhi");
     // …but the stored/displayed turn stays clean (no raw context dump).
     expect(store.messages()[0]).toEqual({ role: "user", content: "hi" });
+  });
+
+  it("stores context metadata for the user turn without storing raw context content", async () => {
+    let received: AIMessage[] | undefined;
+    const provider: AIProvider = {
+      async *chat(messages) {
+        received = messages as AIMessage[];
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const store = createAiChatStore({
+      getProvider: () => provider,
+      getContext: () => ({
+        preamble: "RAW CONTEXT CONTENT",
+        items: [
+          {
+            kind: "folder",
+            label: "playwright/",
+            path: "output/playwright",
+            rootPath: "/repo",
+            absolutePath: "/repo/output/playwright",
+          },
+        ],
+      }),
+    });
+    await store.sendMessage("create here");
+    expect(received?.at(-1)?.content).toBe("RAW CONTEXT CONTENT\n\ncreate here");
+    expect(store.messages()[0]).toEqual({
+      role: "user",
+      content: "create here",
+      context: [
+        {
+          kind: "folder",
+          label: "playwright/",
+          path: "output/playwright",
+          rootPath: "/repo",
+          absolutePath: "/repo/output/playwright",
+        },
+      ],
+    });
   });
 
   it("retryLast drops the last assistant turn and streams a fresh reply without duplicating the user turn", async () => {

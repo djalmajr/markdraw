@@ -29,11 +29,24 @@ describe("buildContextPreamble", () => {
 
   it("wraps a folder item (a mentioned directory's subtree listing) with kind=\"folder\"", () => {
     const items: AiContextItem[] = [
-      { id: "folder:r:src", kind: "folder", label: "src/", content: "- src/a.md\n- src/b.md" },
+      {
+        id: "folder:r:src",
+        kind: "folder",
+        label: "src/",
+        path: "output/src",
+        rootPath: "/repo",
+        absolutePath: "/repo/output/src",
+        content: "- output/src/a.md\n- output/src/b.md",
+      },
     ];
     const out = buildContextPreamble(items)!;
-    expect(out).toContain('<context kind="folder" source="src/">');
-    expect(out).toContain("- src/a.md");
+    expect(out).toContain(
+      '<context kind="folder" source="src/" path="output/src" root="/repo" absolute_path="/repo/output/src">',
+    );
+    expect(out).toContain("Workspace-relative path: output/src");
+    expect(out).toContain("Workspace root: /repo");
+    expect(out).toContain("Absolute path: /repo/output/src");
+    expect(out).toContain("- output/src/a.md");
   });
 
   it("escapes quotes in the source label", () => {
