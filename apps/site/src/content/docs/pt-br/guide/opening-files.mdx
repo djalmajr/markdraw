@@ -1,0 +1,40 @@
+---
+title: "Abrir arquivos"
+description: "Tudo que você precisa para instalar, configurar e usar o Markdraw nos fluxos desktop e extensão."
+---
+
+## Abrir pasta
+
+Selecione um diretório local para navegar por todos os arquivos suportados numa sidebar em árvore.
+
+<figure className="markdraw-figure">
+  <a href="/screenshots/desktop-workspace-preview.png">
+    <img alt="Árvore de arquivos na sidebar após carregar uma pasta" src="/screenshots/desktop-workspace-preview.png" />
+  </a>
+  <figcaption>Árvore de pastas carregada na sidebar esquerda.</figcaption>
+</figure>
+
+## Arrastar e soltar
+
+Solte uma pasta para preencher a árvore, ou solte um arquivo para abri-lo direto.
+
+## Respeitar .gitignore
+
+Ative <strong>Respeitar .gitignore</strong> no dropdown de visibilidade do file-tree (ícone de slider) para esconder todo caminho casado pelo <code>.gitignore</code> do workspace — incluindo <code>.gitignore</code>s aninhados em subdiretórios. Vem <strong>ligado</strong> por padrão, então artefatos de build (<code>node_modules</code>, <code>dist</code>, <code>target</code>, etc.) ficam fora da árvore sem configuração. Desligue pra revelar o que o bloco de pastas sempre-ignoradas continua escondendo.
+
+<figure className="markdraw-figure">
+  <a href="/screenshots/desktop-respect-gitignore.png">
+    <img alt="Dropdown do file-tree mostrando o toggle Respeitar .gitignore" src="/screenshots/desktop-respect-gitignore.png" />
+  </a>
+  <figcaption>Dropdown de visibilidade do file-tree com o toggle Respeitar .gitignore.</figcaption>
+</figure>
+
+## Modo URL
+
+URLs terminadas em <code>.adoc</code> e <code>.md</code> podem ser renderizadas diretamente.
+
+## Acesso a URL de arquivo (extensão)
+
+- Abra <code>chrome://extensions</code>
+- Encontre o Markdraw e abra Detalhes
+- Ative Permitir acesso a URLs de arquivo

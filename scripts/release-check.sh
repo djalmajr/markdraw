@@ -28,10 +28,9 @@ step "3/10 cargo test (incl. perf stress)"
 step "4/10 vitest (UI components)"
 (cd packages/ui && bun run test:vitest)
 
-# Builds the marketing site — the one packages/ui consumer whose Vite config has
-# NO unplugin-icons, so a stray `~icons/*` import in a shared component is caught
-# here rather than in the post-merge "Deploy Site" CI job. (smoke runs this too.)
-step "5/10 site frontend build (plugin-less packages/ui consumer)"
+# Builds the Starlight marketing/docs site and catches content/schema regressions
+# before the post-merge "Deploy Site" CI job.
+step "5/10 site frontend build (Starlight)"
 bun run --filter @markdraw/site build
 
 step "6/10 cargo coverage (Rust)"

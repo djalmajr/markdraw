@@ -6,8 +6,7 @@ on:
     branches: [main]
     paths:
       - "apps/site/**"
-      - "packages/ui/src/components/ui/**"
-      - "packages/core/src/**"
+      - "packages/i18n/messages/**"
 
 # The marketing site (markdraw.app) is hosted on Cloudflare Pages — project
 # "markdraw". Releases live in a public R2 bucket; the source repo is private.

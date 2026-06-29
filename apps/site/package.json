@@ -4,26 +4,20 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "vite",
-    "build": "vite build && node scripts/ssg-routes.mjs",
-    "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "dev": "node scripts/generate-starlight-content.mjs && astro dev",
+    "build": "node scripts/generate-starlight-content.mjs && astro build",
+    "preview": "astro preview",
+    "typecheck": "node scripts/generate-starlight-content.mjs && astro check"
   },
   "dependencies": {
-    "@markdraw/i18n": "workspace:*",
-    "@markdraw/ui": "workspace:*",
-    "@tanstack/history": "^1.132.31",
-    "@tanstack/solid-router": "^1.132.31",
-    "solid-js": "^1.9.11"
+    "@markdraw/i18n": "workspace:*"
   },
   "devDependencies": {
-    "@tanstack/router-plugin": "^1.132.31",
+    "@astrojs/check": "^0.9.9",
+    "@astrojs/starlight": "^0.41.1",
     "@types/bun": "latest",
     "@types/node": "^25.3.0",
-    "@tailwindcss/vite": "^4",
-    "tailwindcss": "^4",
-    "typescript": "^5.9.3",
-    "vite": "^8.0.14",
-    "vite-plugin-solid": "^2.11.10"
+    "astro": "^7.0.3",
+    "typescript": "^5.9.3"
   }
 }

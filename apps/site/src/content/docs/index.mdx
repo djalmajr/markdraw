@@ -1,0 +1,145 @@
+---
+title: "Markdraw"
+description: "Markdraw keeps authoring and preview side by side across desktop and browser. Install the latest build from GitHub Releases and keep everything in one ecosystem."
+template: splash
+hero:
+  tagline: |
+    <span class="markdraw-hero-kicker">AsciiDoc and Markdown Viewer</span>
+    <span class="markdraw-hero-line">Ship docs faster with a local-first preview workflow.</span>
+    <span class="markdraw-hero-description">Markdraw keeps authoring and preview side by side across desktop and browser. Install the latest build from GitHub Releases and keep everything in one ecosystem.</span>
+  image:
+    html: |
+      <figure class="markdraw-hero-shot">
+        <img alt="Markdraw desktop app with Markdown file, sidebar tree, and table of contents" src="/screenshots/desktop-workspace-preview.png" />
+        <figcaption>Desktop preview with sidebar, tabs, and table of contents.</figcaption>
+      </figure>
+  actions:
+    - text: "Download for your platform"
+      link: "https://github.com/djalmajr/markdraw/releases/latest"
+      icon: right-arrow
+      variant: primary
+      attrs:
+        rel: noreferrer
+        target: _blank
+        data-preferred-download: true
+        data-label-template: "Download for {platform}"
+        data-platform-fallback: "your platform"
+        data-platform-mac-arm64: "macOS (Apple Silicon)"
+        data-platform-mac-x64: "macOS (Intel)"
+        data-platform-linux: "Linux"
+        data-platform-windows: "Windows"
+    - text: "Read Guide"
+      link: "/guide/"
+      variant: secondary
+---
+
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+<script type="module" src="/scripts/preferred-download.js"></script>
+
+## Features
+
+<CardGrid stagger>
+<Card title="AsciiDoc + Markdown">
+  Renders both formats with admonitions, includes, frontmatter, and reusable partials in a single viewer.
+</Card>
+<Card title="Split panes + preview tabs">
+  Open files side by side. Single-click opens preview tabs (italic), edit or double-click pins them — VSCode-style.
+</Card>
+<Card title="Keyboard-first navigation">
+  Quick Open, Command Palette, Go-to-Heading, Workspace Symbols, and Find-in-Files — all one shortcut away.
+</Card>
+<Card title="Backlinks panel">
+  The right gutter has a References tab listing every doc in the workspace that links to the active file.
+</Card>
+<Card title="Workspace symbol search">
+  Cmd/Ctrl+Alt+O fuzzy-matches headings across every doc in the workspace and jumps to the right line.
+</Card>
+<Card title="Reader / Zen mode">
+  Cmd/Ctrl+. collapses the chrome and centers the preview at a comfortable reading width. Toggle off the same way.
+</Card>
+<Card title="Diagrams and math">
+  Mermaid, PlantUML, Graphviz, and KaTeX render inside the preview without extra setup.
+</Card>
+<Card title="AI assistant">
+  Chat about the document you're editing, generate editable diagrams, and connect your own AI providers and MCP servers.
+</Card>
+<Card title="Multi-root workspaces">
+  Pin several folders into the sidebar at once — handy when reading docs spread across repos.
+</Card>
+<Card title="Local-first, auto-update">
+  Files stay on your machine; signed releases land via the auto-updater on startup.
+</Card>
+<LinkCard
+  title="…and much more"
+  description="Themes, PDF export, the Chrome extension, the full keyboard map, and more. See the guide for screenshots and details."
+  href="/guide/"
+/>
+</CardGrid>
+
+## Downloads
+
+All links below point to releases/latest/download in the public repository.
+
+
+<CardGrid>
+<LinkCard
+  title="macOS (Apple Silicon)"
+  description="DMG installer - Markdraw-macos-arm64.dmg"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-macos-arm64.dmg"
+  rel="noreferrer"
+  target="_blank"
+/>
+<LinkCard
+  title="macOS (Intel)"
+  description="DMG installer - Markdraw-macos-x64.dmg"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-macos-x64.dmg"
+  rel="noreferrer"
+  target="_blank"
+/>
+<LinkCard
+  title="Linux"
+  description="AppImage - Markdraw-linux-x64.AppImage"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-linux-x64.AppImage"
+  rel="noreferrer"
+  target="_blank"
+/>
+<LinkCard
+  title="Linux (Debian)"
+  description="DEB package - Markdraw-linux-x64.deb"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-linux-x64.deb"
+  rel="noreferrer"
+  target="_blank"
+/>
+<LinkCard
+  title="Windows"
+  description="MSI installer - Markdraw-windows-x64.msi"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-windows-x64.msi"
+  rel="noreferrer"
+  target="_blank"
+/>
+<LinkCard
+  title="Windows (alt)"
+  description="EXE installer - Markdraw-windows-x64.exe"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-windows-x64.exe"
+  rel="noreferrer"
+  target="_blank"
+/>
+</CardGrid>
+
+<div className="markdraw-callout">
+  <div>
+    <h2>Prefer the browser?</h2>
+    <p>Markdraw is also a Chrome extension — render .adoc and .md files directly in any tab without installing the desktop app.</p>
+  </div>
+  <a className="markdraw-button markdraw-button-primary" href="https://chromewebstore.google.com/detail/asciimark/dmcihjkjbeckainfkaddpkeghlllmkbk" rel="noreferrer" target="_blank">Add to Chrome</a>
+</div>
+
+<div className="markdraw-home-links">
+  <LinkCard title="Privacy" description="Markdraw does not collect analytics, trackers, or telemetry, and does not send personal data to any Markdraw-controlled server. There is no Markdraw backend." href="/privacy/" />
+</div>
+
+<div className="markdraw-notice">
+  <p>Windows SmartScreen may require More info and then Run anyway.</p>
+</div>

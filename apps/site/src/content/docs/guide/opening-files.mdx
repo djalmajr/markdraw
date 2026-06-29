@@ -1,0 +1,40 @@
+---
+title: "Opening Files"
+description: "Everything you need to install, configure, and use Markdraw across desktop and extension workflows."
+---
+
+## Open Folder
+
+Select a local directory to browse all supported files in a tree sidebar.
+
+<figure className="markdraw-figure">
+  <a href="/screenshots/desktop-workspace-preview.png">
+    <img alt="Sidebar file tree after loading a folder" src="/screenshots/desktop-workspace-preview.png" />
+  </a>
+  <figcaption>Loaded folder tree in the left sidebar.</figcaption>
+</figure>
+
+## Drag and Drop
+
+Drop a folder to populate the tree, or drop a file to open it directly.
+
+## Respect .gitignore
+
+Toggle <strong>Respect .gitignore</strong> in the file-tree visibility dropdown (slider icon) to hide every path matched by the workspace's <code>.gitignore</code> — including nested <code>.gitignore</code> files inside subdirectories. The toggle ships <strong>on</strong> by default so build artifacts (<code>node_modules</code>, <code>dist</code>, <code>target</code>, etc.) stay out of the tree without configuration. Flip it off to reveal everything the always-ignored folders block still hides.
+
+<figure className="markdraw-figure">
+  <a href="/screenshots/desktop-respect-gitignore.png">
+    <img alt="File tree dropdown showing the Respect .gitignore toggle" src="/screenshots/desktop-respect-gitignore.png" />
+  </a>
+  <figcaption>File-tree visibility dropdown with the Respect .gitignore toggle.</figcaption>
+</figure>
+
+## URL Mode
+
+URLs ending with <code>.adoc</code> and <code>.md</code> can be rendered directly.
+
+## File URL Access (Extension)
+
+- Open <code>chrome://extensions</code>
+- Find Markdraw and open Details
+- Enable Allow access to file URLs
