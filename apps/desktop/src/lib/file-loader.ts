@@ -125,9 +125,16 @@ export function createFileLoader(deps: FileLoaderDeps) {
         includeFileCache = await readFilesRelative(root, scanPaths);
       }
 
-      const readFile = includeFileCache
-        ? (relPath: string) => Promise.resolve(includeFileCache!.get(relPath) ?? null)
-        : (relPath: string) => readFileByPath(root, relPath);
+      const readFile = async (relPath: string) => {
+        const cached = includeFileCache?.get(relPath);
+        if (cached !== undefined) return cached;
+
+        const fileContent = await readFileByPath(root, relPath);
+        if (fileContent !== null) {
+          includeFileCache?.set(relPath, fileContent);
+        }
+        return fileContent;
+      };
 
       state._readFile = readFile;
 
@@ -141,12 +148,9 @@ export function createFileLoader(deps: FileLoaderDeps) {
       targetPane.setEditorContent(content);
       targetPane.setSavedContent(content);
 
-      const baseDirPath = entry.path.includes("/")
-        ? entry.path.substring(0, entry.path.lastIndexOf("/"))
-        : "";
-      const includePaths = isMdFile(entry.path)
-        ? getMarkdownIncludePaths(content, baseDirPath)
-        : getIncludePaths(content, baseDirPath);
+      const includePaths = includeFileCache
+        ? Array.from(new Set([...scanPaths, ...includeFileCache.keys()]))
+        : scanPaths;
 
       watcher.setTarget({
         filePath: absolutePath,

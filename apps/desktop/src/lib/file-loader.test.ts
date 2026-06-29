@@ -25,6 +25,14 @@ installLocalStorageMock();
 const FAKE_FILE_CONTENT = "= intro.adoc\n\nbody\n";
 let resolveRead: ((value: string) => void) | undefined;
 let rejectRead: ((err: Error) => void) | undefined;
+let readFileByPathMock: (
+  rootPath: string,
+  relativePath: string,
+) => Promise<string | null> = async () => null;
+let readFilesRelativeMock: (
+  rootPath: string,
+  paths: string[],
+) => Promise<Map<string, string>> = async () => new Map<string, string>();
 
 mock.module("./fs.ts", () => ({
   readFileContent: () =>
@@ -32,8 +40,10 @@ mock.module("./fs.ts", () => ({
       resolveRead = resolve;
       rejectRead = reject;
     }),
-  readFileByPath: async () => null,
-  readFilesRelative: async () => new Map<string, string>(),
+  readFileByPath: (rootPath: string, relativePath: string) =>
+    readFileByPathMock(rootPath, relativePath),
+  readFilesRelative: (rootPath: string, paths: string[]) =>
+    readFilesRelativeMock(rootPath, paths),
   // Other exports listed because bun.module mocks the whole module —
   // anything not listed becomes undefined for every suite that
   // imports `./fs.ts` (mock survives the test process). These stubs
@@ -74,6 +84,9 @@ mock.module("./chaos-invoke.ts", () => ({
 describe("createFileLoader / loadFileContent — pane race regression", () => {
   beforeEach(() => {
     resolveRead = undefined;
+    rejectRead = undefined;
+    readFileByPathMock = async () => null;
+    readFilesRelativeMock = async () => new Map<string, string>();
     localStorage.clear();
   });
 
@@ -165,6 +178,86 @@ describe("createFileLoader / loadFileContent — pane race regression", () => {
     expect(_readFile).toBeTypeOf("function");
   });
 
+  it("falls back to direct reads for nested includes missing from the initial batch cache", async () => {
+    // Mutation captured: returning null on include-cache miss prevents
+    // README.adoc -> business/_index.adoc -> 01-visao-geral.adoc from
+    // rendering the nested sibling include.
+    const paneManager = createPaneManager();
+    paneManager.setActivePane(0);
+    const pane0 = paneManager.panes()[0]!;
+
+    let batchedPaths: string[] = [];
+    const fallbackPaths: string[] = [];
+    let watchedIncludePaths: string[] = [];
+
+    readFilesRelativeMock = async (_rootPath, paths) => {
+      batchedPaths = paths;
+      return new Map<string, string>([
+        ["business/_index.adoc", "include::01-visao-geral.adoc[]"],
+      ]);
+    };
+    readFileByPathMock = async (_rootPath, relativePath) => {
+      fallbackPaths.push(relativePath);
+      return relativePath === "business/01-visao-geral.adoc"
+        ? "Nested section content"
+        : null;
+    };
+
+    const state = {
+      paneManager,
+      pushNavHistory: () => {},
+      autoRefresh: () => false,
+      convert: async (
+        _filePath: string,
+        _content: string,
+        readFile: (path: string) => Promise<string | null>,
+      ) => {
+        const topLevel = await readFile("business/_index.adoc");
+        const nested = await readFile("business/01-visao-geral.adoc");
+        return {
+          html: `${topLevel ?? "missing top"}\n${nested ?? "missing nested"}`,
+          frontmatter: null,
+          toc: null,
+          meta: {},
+        };
+      },
+      set _readFile(_v: unknown) {},
+    } as unknown as AppState;
+
+    const watcher = {
+      setTarget: (target: { includePaths: string[] }) => {
+        watchedIncludePaths = target.includePaths;
+      },
+      start: () => {},
+      stop: () => {},
+      destroy: () => {},
+    } as unknown as Parameters<
+      typeof import("./file-loader.ts").createFileLoader
+    >[0]["watcher"];
+
+    const rootPaths = () => new Map<string, string>([["root-0", "/tmp/ws"]]);
+    const { createFileLoader } = await import("./file-loader.ts");
+    const loader = createFileLoader({ rootPaths, state, watcher });
+
+    const loadPromise = loader.loadFileContent(
+      { kind: "file", name: "README.adoc", path: "README.adoc" },
+      false,
+      false,
+      "root-0",
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    resolveRead!("= README\n\ninclude::business/_index.adoc[]");
+    await loadPromise;
+
+    expect(batchedPaths).toEqual(["business/_index.adoc"]);
+    expect(fallbackPaths).toEqual(["business/01-visao-geral.adoc"]);
+    expect(pane0.html()).toContain("Nested section content");
+    expect(watchedIncludePaths).toEqual([
+      "business/_index.adoc",
+      "business/01-visao-geral.adoc",
+    ]);
+  });
+
   it("error path also writes to the originally-targeted pane", async () => {
     // Even when convert throws, the error message html must land on
     // the pane the user opened the file in, not whatever's active
@@ -218,6 +311,9 @@ describe("createFileLoader / loadFileContent — pane race regression", () => {
 describe("createFileLoader / loadFileContent — image & PDF skip the text pipeline", () => {
   beforeEach(() => {
     resolveRead = undefined;
+    rejectRead = undefined;
+    readFileByPathMock = async () => null;
+    readFilesRelativeMock = async () => new Map<string, string>();
     localStorage.clear();
   });
 
@@ -285,6 +381,8 @@ describe("createFileLoader / loadFileContent — binary non-text marks the pane 
   beforeEach(() => {
     resolveRead = undefined;
     rejectRead = undefined;
+    readFileByPathMock = async () => null;
+    readFilesRelativeMock = async () => new Map<string, string>();
     localStorage.clear();
   });
 
