@@ -24,7 +24,7 @@ const CHAOS_SAFE_COMMANDS = new Set<string>([
 function readRate(): number {
   // SSR-safe + production-safe: window may not exist in tests, and a
   // production build serves over `tauri://` which doesn't carry chaos URLs.
-  if (typeof window === "undefined") return 0;
+  if (typeof window === "undefined" || !window.location) return 0;
   if (window.location.protocol !== "http:" && window.location.protocol !== "https:") {
     return 0;
   }
