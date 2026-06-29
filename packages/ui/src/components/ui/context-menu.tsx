@@ -60,9 +60,9 @@ const ContextMenuItem = <T extends ValidComponent = "div">(
   )
 }
 
-const ContextMenuShortcut: Component<ComponentProps<"span">> = (props) => {
+const ContextMenuShortcut: Component<ComponentProps<"kbd">> = (props) => {
   const [local, others] = splitProps(props, ["class"])
-  return <span class={cn("ml-auto text-xs tracking-widest opacity-60", local.class)} {...others} />
+  return <kbd class={cn("menu-shortcut-kbd ml-auto", local.class)} {...others} />
 }
 
 type ContextMenuSeparatorProps<T extends ValidComponent = "hr"> =

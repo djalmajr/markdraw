@@ -300,7 +300,13 @@ pub async fn mcp_discover<R: Runtime>(
         if let Some(content) = read(&global) {
             if let Ok(doc) = serde_json::from_str::<serde_json::Value>(&content) {
                 let src = global.to_string_lossy();
-                out.extend(claude_servers_at(&doc, &["mcpServers"], "global", None, &src));
+                out.extend(claude_servers_at(
+                    &doc,
+                    &["mcpServers"],
+                    "global",
+                    None,
+                    &src,
+                ));
                 // Per-project MCP servers stored inside ~/.claude.json.
                 for root in &roots {
                     out.extend(claude_servers_at(

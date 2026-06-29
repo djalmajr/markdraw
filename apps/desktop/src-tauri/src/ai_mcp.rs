@@ -628,8 +628,7 @@ mod tests {
         let exts = vec![".EXE".to_string(), ".CMD".to_string()];
         // /a has only the .CMD; /b has the .EXE. cmd.exe picks /a/tool.CMD —
         // directory order outranks extension order.
-        let exists =
-            |p: &Path| p == Path::new("/a/tool.CMD") || p == Path::new("/b/tool.EXE");
+        let exists = |p: &Path| p == Path::new("/a/tool.CMD") || p == Path::new("/b/tool.EXE");
         assert_eq!(
             find_in_path("tool", &dirs, &exts, &exists),
             Some(PathBuf::from("/a/tool.CMD")),

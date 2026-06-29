@@ -264,6 +264,7 @@ describe("createAiChatStore", () => {
 
   it("injects getContext into the SENT message but keeps the displayed turn clean", async () => {
     let received: AIMessage[] | undefined;
+    let contextRequest: { history: unknown[]; userMessage: string } | undefined;
     const provider: AIProvider = {
       async *chat(messages) {
         received = messages as AIMessage[];
@@ -276,8 +277,16 @@ describe("createAiChatStore", () => {
         return [];
       },
     };
-    const store = createAiChatStore({ getProvider: () => provider, getContext: () => "CTX-BLOCK" });
+    const store = createAiChatStore({
+      getProvider: () => provider,
+      getContext: (request) => {
+        contextRequest = request;
+        return "CTX-BLOCK";
+      },
+    });
     await store.sendMessage("hi");
+    expect(contextRequest?.userMessage).toBe("hi");
+    expect(contextRequest?.history).toHaveLength(1);
     // The model receives the context prepended to the last user message…
     expect(received?.at(-1)?.content).toBe("CTX-BLOCK\n\nhi");
     // …but the stored/displayed turn stays clean (no raw context dump).

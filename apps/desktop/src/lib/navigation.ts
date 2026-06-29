@@ -5,6 +5,7 @@ import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import type { TabStore } from "@markdraw/ui/composables/create-tab-store.ts";
 import { showToast } from "@markdraw/ui/components/ui/toast.tsx";
 import { readFileContent, readTree } from "./fs.ts";
+import { resolveNavigationTarget } from "./navigation-target.ts";
 
 interface NavigationDeps {
   loadFileContent: (entry: FSEntry, pushHistory?: boolean, force?: boolean, rootId?: string) => Promise<void>;
@@ -30,13 +31,16 @@ export function createNavigation(deps: NavigationDeps) {
 
   async function handleNavigate(targetPath: string, fragment?: string | null) {
     state.setPendingFragment(fragment ?? null);
+    const resolved = resolveNavigationTarget(targetPath, rootPaths());
+    targetPath = resolved.path;
     const currentRootId = state.selectedRootId();
+    const preferredRootId = resolved.rootId ?? currentRootId;
 
     // Try finding in the current root first
-    if (currentRootId) {
-      const entry = state.findEntryByPath(targetPath, currentRootId);
+    if (preferredRootId) {
+      const entry = state.findEntryByPath(targetPath, preferredRootId);
       if (entry && entry.kind === "file") {
-        loadFileContent(entry, true, false, currentRootId);
+        loadFileContent(entry, true, false, preferredRootId);
         return;
       }
     }
@@ -51,7 +55,8 @@ export function createNavigation(deps: NavigationDeps) {
     }
 
     // Not in any tree -- try filesystem fallback using the current root
-    const currentRootPath = currentRootId ? rootPaths().get(currentRootId) : null;
+    const fallbackRootId = preferredRootId ?? currentRootId;
+    const currentRootPath = fallbackRootId ? rootPaths().get(fallbackRootId) : null;
     if (currentRootPath) {
       // Try as directory first
       try {
@@ -85,7 +90,7 @@ export function createNavigation(deps: NavigationDeps) {
           ? targetPath.substring(targetPath.lastIndexOf("/") + 1)
           : targetPath;
         const syntheticEntry: FSEntry = { name, kind: "file", path: targetPath };
-        loadFileContent(syntheticEntry, true, false, currentRootId!);
+        loadFileContent(syntheticEntry, true, false, fallbackRootId!);
         return;
       } catch {
         // File doesn't exist at that path

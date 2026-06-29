@@ -75,7 +75,7 @@ export interface AiChatSessionsConfig {
   maxSteps?: number;
   /** Explicit context preamble injected into the sent message (shared across
    *  sessions — reflects the current composer context chips). */
-  getContext?: () => string | undefined;
+  getContext?: (request: { history: ChatTurn[]; userMessage: string }) => string | undefined;
   /** Called when any session's assistant turn finalizes (Plan-mode save). */
   onAssistantTurn?: (content: string) => void;
   /** Title generation from the first user message; injected for purity/testing. */

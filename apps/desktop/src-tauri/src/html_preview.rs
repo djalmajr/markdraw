@@ -391,7 +391,10 @@ pub fn serve<R: Runtime>(app: &AppHandle<R>, request: Request<Vec<u8>>) -> Respo
     }
     if is_html(&rel) {
         if let Ok(html) = std::str::from_utf8(&bytes) {
-            return ok(inject_preview_chrome(html).into_bytes(), content_type_for(&rel));
+            return ok(
+                inject_preview_chrome(html).into_bytes(),
+                content_type_for(&rel),
+            );
         }
     }
     ok(bytes, content_type_for(&rel))
@@ -557,7 +560,14 @@ mod tests {
         // Root-served document: empty path, token in the query. The path stays
         // `/` so SPA path routers match their root route.
         assert_eq!(
-            resolve_request(&is_reg, "markdraw-preview.localhost", "", Some("r0"), &[], None),
+            resolve_request(
+                &is_reg,
+                "markdraw-preview.localhost",
+                "",
+                Some("r0"),
+                &[],
+                None
+            ),
             ("r0".to_string(), String::new())
         );
         // An UNREGISTERED query token must not hijack resolution.
@@ -592,7 +602,14 @@ mod tests {
         );
         // No referer match → falls through (and 404s at the registry lookup).
         assert_eq!(
-            resolve_request(&is_reg, "localhost", "nope.css", None, &["zz".to_string()], None),
+            resolve_request(
+                &is_reg,
+                "localhost",
+                "nope.css",
+                None,
+                &["zz".to_string()],
+                None
+            ),
             ("nope.css".to_string(), String::new())
         );
         // Import CASCADE: a module loaded via referer recovery refers its own
@@ -604,7 +621,10 @@ mod tests {
                 "markdraw-preview.localhost",
                 "pages/user-edit.js",
                 None,
-                &["markdraw-preview.localhost".to_string(), "index.js".to_string()],
+                &[
+                    "markdraw-preview.localhost".to_string(),
+                    "index.js".to_string()
+                ],
                 Some("r1"),
             ),
             ("r1".to_string(), "pages/user-edit.js".to_string())
@@ -685,7 +705,10 @@ mod tests {
         // Mutation: keeping `..` would let `htmlpreview://t/../../etc/passwd`
         // climb out of the served directory.
         assert_eq!(clean_rel("/../../etc/passwd"), "etc/passwd");
-        assert_eq!(clean_rel("/assets/../assets/app.js"), "assets/assets/app.js");
+        assert_eq!(
+            clean_rel("/assets/../assets/app.js"),
+            "assets/assets/app.js"
+        );
         assert_eq!(clean_rel("/./index.html"), "index.html");
         assert_eq!(clean_rel("/"), "");
         assert_eq!(clean_rel("/a/b/c.css"), "a/b/c.css");
@@ -724,25 +747,26 @@ mod tests {
 
     #[test]
     fn rewrites_legacy_assert_and_single_quotes() {
-        let out = rewrite_css_module_imports(
-            "import s from './a/b.css' assert { type: 'css' }\n",
-        );
+        let out = rewrite_css_module_imports("import s from './a/b.css' assert { type: 'css' }\n");
         assert_eq!(out, "import s from \"./a/b.css?markdraw-css-module\"\n");
     }
 
     #[test]
     fn css_import_keeps_existing_query_with_ampersand() {
-        let out = rewrite_css_module_imports(
-            r#"import s from "./x.css?v=2" with { type: "css" };"#,
+        let out =
+            rewrite_css_module_imports(r#"import s from "./x.css?v=2" with { type: "css" };"#);
+        assert!(
+            out.contains(r#""./x.css?v=2&markdraw-css-module""#),
+            "{out}"
         );
-        assert!(out.contains(r#""./x.css?v=2&markdraw-css-module""#), "{out}");
     }
 
     #[test]
     fn leaves_unrelated_imports_untouched() {
         // Mutation: an over-broad regex would corrupt ordinary imports or
         // JSON-module imports (which WKWebView DOES support).
-        let src = "import x from \"./m.js\";\nimport d from \"./d.json\" with { type: \"json\" };\n";
+        let src =
+            "import x from \"./m.js\";\nimport d from \"./d.json\" with { type: \"json\" };\n";
         assert_eq!(rewrite_css_module_imports(src), src);
     }
 
@@ -808,7 +832,9 @@ mod tests {
         assert!(!html_is_self_rooted(
             r#"<link rel="stylesheet" href="../assets/styles.css">"#
         ));
-        assert!(!html_is_self_rooted(r#"<a href="0002-lesson.html">next</a>"#));
+        assert!(!html_is_self_rooted(
+            r#"<a href="0002-lesson.html">next</a>"#
+        ));
         assert!(!html_is_self_rooted(r#"<img src="./pic.png">"#));
         // Absolute & protocol-relative URLs are NOT root-absolute paths.
         assert!(!html_is_self_rooted(

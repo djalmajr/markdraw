@@ -110,7 +110,7 @@ export interface AiChatStoreConfig {
    *  message SENT to the model. The displayed turn stays clean — only the
    *  outgoing copy carries it. Resolved per send so it reflects the current
    *  context chips. */
-  getContext?: () => string | undefined;
+  getContext?: (request: { history: ChatTurn[]; userMessage: string }) => string | undefined;
   /** Called when an assistant turn finalizes with non-empty text (used by Plan
    *  mode to persist the produced plan). */
   onAssistantTurn?: (content: string) => void;
@@ -271,8 +271,11 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     // Inject the explicit context (attached files/selections) into the latest
     // user message that's SENT to the model — the stored/displayed turn above
     // stays clean so the chat doesn't show the raw context dump.
-    const context = config.getContext?.();
     const lastIndex = history.length - 1;
+    const context = config.getContext?.({
+      history,
+      userMessage: history[lastIndex]?.content ?? "",
+    });
     const aiMessages: AIMessage[] = history.map((t, i) => ({
       role: t.role,
       content: i === lastIndex && context ? `${context}\n\n${t.content}` : t.content,

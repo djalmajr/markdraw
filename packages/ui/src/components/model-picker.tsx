@@ -31,6 +31,7 @@ export interface ModelPickerProps {
   /** Label shown on the trigger pill. */
   currentLabel: string;
   onSelect: (value: string) => void;
+  variant?: "pill" | "form";
   /** "⚙" — open the model manager (Settings → AI), where providers are
    *  connected/added and model visibility is toggled. */
   onManage?: () => void;
@@ -88,7 +89,11 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     <Popover open={open()} onOpenChange={setOpen} placement="bottom-start" gutter={4}>
       <PopoverTrigger
         as="button"
-        class="ai-mp-trigger ai-mp-trigger-grow"
+        class="ai-mp-trigger"
+        classList={{
+          "ai-mp-trigger-grow": props.variant !== "form",
+          "ai-mp-trigger-form": props.variant === "form",
+        }}
         title={props.currentLabel}
         aria-label={props.currentLabel}
       >

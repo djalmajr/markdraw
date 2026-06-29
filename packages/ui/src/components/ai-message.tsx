@@ -193,7 +193,11 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
           <div class="ai-markdown" innerHTML={renderChatMarkdown(props.content)} />
         </Show>
         <Show when={props.streaming}>
-          <span class="ai-message-cursor" aria-hidden="true" />
+          <span class="ai-message-loader" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
         </Show>
       </div>
       {/* Hover action bar (revealed by CSS on .ai-message:hover). */}
@@ -205,38 +209,40 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
             </span>
           )}
         </Show>
-        <button
-          aria-label={copyLabel()}
-          class="ai-msg-action-btn"
-          title={copyLabel()}
-          type="button"
-          onClick={copyMessage}
-        >
-          <Show when={copied()} fallback={<IconCopy width={13} height={13} />}>
-            <IconCheck width={13} height={13} />
+        <Show when={!props.streaming}>
+          <button
+            aria-label={copyLabel()}
+            class="ai-msg-action-btn"
+            title={copyLabel()}
+            type="button"
+            onClick={copyMessage}
+          >
+            <Show when={copied()} fallback={<IconCopy width={13} height={13} />}>
+              <IconCheck width={13} height={13} />
+            </Show>
+          </button>
+          <Show when={props.onEdit}>
+            <button
+              aria-label={(useLocale(), m.ai_message_edit())}
+              class="ai-msg-action-btn"
+              title={(useLocale(), m.ai_message_edit())}
+              type="button"
+              onClick={() => props.onEdit?.()}
+            >
+              <IconPencil width={13} height={13} />
+            </button>
           </Show>
-        </button>
-        <Show when={props.onEdit}>
-          <button
-            aria-label={(useLocale(), m.ai_message_edit())}
-            class="ai-msg-action-btn"
-            title={(useLocale(), m.ai_message_edit())}
-            type="button"
-            onClick={() => props.onEdit?.()}
-          >
-            <IconPencil width={13} height={13} />
-          </button>
-        </Show>
-        <Show when={props.onRetry}>
-          <button
-            aria-label={(useLocale(), m.ai_message_regenerate())}
-            class="ai-msg-action-btn"
-            title={(useLocale(), m.ai_message_regenerate())}
-            type="button"
-            onClick={() => props.onRetry?.()}
-          >
-            <IconRefreshCw width={13} height={13} />
-          </button>
+          <Show when={props.onRetry}>
+            <button
+              aria-label={(useLocale(), m.ai_message_regenerate())}
+              class="ai-msg-action-btn"
+              title={(useLocale(), m.ai_message_regenerate())}
+              type="button"
+              onClick={() => props.onRetry?.()}
+            >
+              <IconRefreshCw width={13} height={13} />
+            </button>
+          </Show>
         </Show>
       </div>
     </div>

@@ -38,4 +38,23 @@ describe("renderChatMarkdown", () => {
     expect(html).not.toMatch(/href=["'][^"']*readme\.md/i);
     expect(html).not.toMatch(/href=["'][^"']*notes\.md/i);
   });
+
+  it("links workspace document paths that include a directory", () => {
+    const html = renderChatMarkdown(
+      "See apps/site/public/demo-folder/docs/architecture.adoc:18 for the diagram.",
+    );
+    expect(html).toContain(
+      'href="apps/site/public/demo-folder/docs/architecture.adoc:18"',
+    );
+    expect(html).toContain("apps/site/public/demo-folder/docs/architecture.adoc:18");
+  });
+
+  it("links inline-code workspace document paths", () => {
+    const html = renderChatMarkdown(
+      "Open `apps/site/public/demo-folder/docs/architecture.adoc`.",
+    );
+    expect(html).toContain(
+      '<a href="apps/site/public/demo-folder/docs/architecture.adoc"><code>apps/site/public/demo-folder/docs/architecture.adoc</code></a>',
+    );
+  });
 });
