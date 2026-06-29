@@ -1,0 +1,409 @@
+---
+import Search from "@astrojs/starlight/components/Search.astro";
+import SocialIcons from "@astrojs/starlight/components/SocialIcons.astro";
+import ThemeSelect from "@astrojs/starlight/components/ThemeSelect.astro";
+
+const route = Astro.locals.starlightRoute;
+const currentLocale = route.locale;
+type LocaleCode = "en" | "es" | "pt-BR";
+type NavKey = "guide" | "home" | "privacy";
+
+const localeCode: LocaleCode =
+  currentLocale === "pt-br" ? "pt-BR" : currentLocale === "es" ? "es" : "en";
+const localePrefix = currentLocale ? `/${currentLocale}` : "";
+const normalizedPath = normalizePath(Astro.url.pathname);
+
+const labels = {
+  en: {
+    guide: "Guide",
+    home: "Home",
+    language: "Language",
+    privacy: "Privacy",
+  },
+  es: {
+    guide: "Guía",
+    home: "Inicio",
+    language: "Idioma",
+    privacy: "Privacidad",
+  },
+  "pt-BR": {
+    guide: "Guia",
+    home: "Início",
+    language: "Idioma",
+    privacy: "Privacidade",
+  },
+};
+
+const navigationItems: { href: string; key: NavKey; path: string }[] = [
+  { href: localizedHref("/"), key: "home", path: "/" },
+  { href: localizedHref("/guide/"), key: "guide", path: "/guide" },
+  { href: localizedHref("/privacy/"), key: "privacy", path: "/privacy" },
+];
+
+const localeItems = [
+  { code: "en", href: hrefForLocale(undefined), label: "English" },
+  { code: "pt-BR", href: hrefForLocale("pt-br"), label: "Português" },
+  { code: "es", href: hrefForLocale("es"), label: "Español" },
+];
+
+function activeFor(path: string) {
+  if (path === "/") return normalizedPath === "/";
+  return normalizedPath === path || normalizedPath.startsWith(`${path}/`);
+}
+
+function flagSvg(code: string) {
+  if (code === "pt-BR") {
+    return `<svg aria-hidden="true" class="site-locale-flag" viewBox="0 0 20 14" xmlns="http://www.w3.org/2000/svg">
+      <rect width="20" height="14" fill="#009b3a" />
+      <polygon points="10,2 18,7 10,12 2,7" fill="#ffdf00" />
+      <circle cx="10" cy="7" r="2.4" fill="#002776" />
+    </svg>`;
+  }
+
+  if (code === "es") {
+    return `<svg aria-hidden="true" class="site-locale-flag" viewBox="0 0 20 14" xmlns="http://www.w3.org/2000/svg">
+      <rect width="20" height="3.5" y="0" fill="#aa151b" />
+      <rect width="20" height="7" y="3.5" fill="#f1bf00" />
+      <rect width="20" height="3.5" y="10.5" fill="#aa151b" />
+    </svg>`;
+  }
+
+  return `<svg aria-hidden="true" class="site-locale-flag" viewBox="0 0 20 14" xmlns="http://www.w3.org/2000/svg">
+    <rect width="20" height="14" fill="#ffffff" />
+    <rect width="20" height="2" y="0" fill="#b22234" />
+    <rect width="20" height="2" y="4" fill="#b22234" />
+    <rect width="20" height="2" y="8" fill="#b22234" />
+    <rect width="20" height="2" y="12" fill="#b22234" />
+    <rect width="8" height="7.5" fill="#3c3b6e" />
+  </svg>`;
+}
+
+function hrefForLocale(locale: string | undefined) {
+  const path = normalizedPath === "/" ? "/" : `${normalizedPath}/`;
+  return locale ? `/${locale}${path}` : path;
+}
+
+function localizedHref(path: string) {
+  return localePrefix ? `${localePrefix}${path}` : path;
+}
+
+function normalizePath(pathname: string) {
+  const parts = pathname.split("/").filter(Boolean);
+  const withoutLocale = parts[0] === "pt-br" || parts[0] === "es" ? parts.slice(1) : parts;
+  const normalized = `/${withoutLocale.join("/")}`.replace(/\/$/, "");
+  return normalized === "" ? "/" : normalized;
+}
+---
+
+<div class="markdraw-header">
+  <a class="site-logo" href={localizedHref("/")}>
+    <img alt="Markdraw logo" class="site-logo-mark" src="/markdraw-logo.svg" />
+    <span>Markdraw</span>
+  </a>
+
+  <nav aria-label="Main navigation" class="site-nav">
+    {
+      navigationItems.map((item) => (
+        <a
+          aria-current={activeFor(item.path) ? "page" : undefined}
+          class:list={["site-nav-item", { "site-nav-item-active": activeFor(item.path) }]}
+          href={item.href}
+        >
+          {labels[localeCode][item.key]}
+        </a>
+      ))
+    }
+  </nav>
+
+  <div class="site-header-actions">
+    <div class="site-search">
+      <Search />
+    </div>
+
+    <div class="site-theme">
+      <ThemeSelect />
+    </div>
+
+    <details class="site-locale-picker">
+      <summary aria-label={labels[localeCode].language} class="site-locale-trigger">
+        <Fragment set:html={flagSvg(localeCode)} />
+      </summary>
+      <div class="site-locale-popover">
+        {
+          localeItems.map((item) => (
+            <a
+              aria-current={item.code === localeCode ? "true" : undefined}
+              class:list={["site-locale-option", { "site-locale-option-active": item.code === localeCode }]}
+              href={item.href}
+            >
+              <Fragment set:html={flagSvg(item.code)} />
+              <span>{item.label}</span>
+            </a>
+          ))
+        }
+      </div>
+    </details>
+
+    <div class="site-social">
+      <SocialIcons />
+    </div>
+  </div>
+</div>
+
+<style>
+  .markdraw-header {
+    align-items: center;
+    display: grid;
+    gap: 0.8rem;
+    grid-template-columns: 1fr auto 1fr;
+    height: 100%;
+    margin: 0 auto;
+    max-width: var(--markdraw-shell-width);
+    width: 100%;
+  }
+
+  .site-logo {
+    align-items: center;
+    color: var(--sl-color-white);
+    display: inline-flex;
+    font-size: 1rem;
+    font-weight: 700;
+    gap: 0.55rem;
+    justify-self: start;
+    letter-spacing: 0.01em;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .site-logo-mark {
+    border-radius: 0.45rem;
+    display: block;
+    height: 1.5rem;
+    width: 1.5rem;
+  }
+
+  .site-nav {
+    display: flex;
+    gap: 0.35rem;
+    justify-self: center;
+  }
+
+  .site-nav-item {
+    border-radius: 0.5rem;
+    color: var(--sl-color-gray-3);
+    font-size: 0.92rem;
+    padding: 0.45rem 0.75rem;
+    text-decoration: none;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .site-nav-item:not(.site-nav-item-active):hover {
+    background: color-mix(in srgb, var(--markdraw-primary) 8%, transparent);
+    color: var(--markdraw-primary);
+  }
+
+  .site-nav-item-active,
+  .site-nav-item-active:hover,
+  .site-nav-item-active:focus-visible {
+    background: color-mix(in srgb, var(--markdraw-primary) 13%, transparent);
+    color: var(--markdraw-primary);
+  }
+
+  .site-header-actions {
+    align-items: center;
+    display: inline-flex;
+    gap: 0.35rem;
+    justify-self: end;
+  }
+
+  .site-search {
+    align-items: center;
+    display: inline-flex;
+  }
+
+  .site-search :global(button[data-open-modal]) {
+    background: transparent;
+    border: 0;
+    border-radius: 0.5rem;
+    color: var(--sl-color-gray-3);
+    font-size: 1.08rem;
+    height: 2rem;
+    justify-content: center;
+    min-width: 0;
+    padding: 0;
+    width: 2rem;
+  }
+
+  .site-search :global(button[data-open-modal]:hover) {
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-white);
+  }
+
+  .site-search :global(button[data-open-modal] > span),
+  .site-search :global(button[data-open-modal] > kbd) {
+    display: none !important;
+  }
+
+  .site-theme {
+    align-items: center;
+    display: inline-flex;
+    height: 2rem;
+  }
+
+  .site-theme :global(starlight-theme-select) {
+    display: contents;
+  }
+
+  .site-theme :global(label) {
+    --sl-caret-size: 0rem;
+    --sl-inline-padding: 0rem;
+    --sl-label-icon-size: 1.08rem;
+    border-radius: 0.5rem;
+    color: var(--sl-color-gray-3);
+    height: 2rem;
+    justify-content: center;
+    position: relative;
+    width: 2rem;
+  }
+
+  .site-theme :global(label:hover),
+  .site-theme :global(label:focus-within) {
+    background: color-mix(in srgb, var(--markdraw-primary) 8%, transparent);
+    color: var(--markdraw-primary);
+  }
+
+  .site-theme :global(select) {
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    padding: 0;
+    position: absolute;
+    width: 2rem;
+  }
+
+  .site-theme :global(.label-icon) {
+    inset-inline-start: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .site-theme :global(.caret) {
+    display: none;
+  }
+
+  .site-locale-picker {
+    position: relative;
+  }
+
+  .site-locale-picker[open] .site-locale-popover {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  .site-locale-trigger {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 0.5rem;
+    color: var(--sl-color-gray-3);
+    cursor: pointer;
+    display: inline-flex;
+    height: 2rem;
+    justify-content: center;
+    list-style: none;
+    padding: 0;
+    transition: background-color 120ms ease;
+    width: 2rem;
+  }
+
+  .site-locale-trigger::-webkit-details-marker {
+    display: none;
+  }
+
+  .site-locale-trigger:hover,
+  .site-locale-trigger:focus-visible {
+    background: var(--sl-color-gray-6);
+    outline: none;
+  }
+
+  .site-locale-popover {
+    background: var(--sl-color-black);
+    border: 1px solid var(--markdraw-border);
+    border-radius: 0.5rem;
+    box-shadow: var(--markdraw-shadow);
+    display: grid;
+    gap: 0.15rem;
+    min-width: 11rem;
+    opacity: 0;
+    padding: 0.4rem;
+    pointer-events: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.4rem);
+    transform: translateY(-0.2rem);
+    transition:
+      opacity 120ms ease,
+      transform 120ms ease;
+    z-index: 20;
+  }
+
+  .site-locale-option {
+    align-items: center;
+    border-radius: 0.35rem;
+    color: var(--sl-color-white);
+    display: flex;
+    font-size: 0.9rem;
+    gap: 0.55rem;
+    padding: 0.4rem 0.55rem;
+    text-decoration: none;
+  }
+
+  .site-locale-option:hover,
+  .site-locale-option-active {
+    background: color-mix(in srgb, var(--markdraw-primary) 14%, transparent);
+    color: var(--markdraw-primary);
+  }
+
+  :global(.site-locale-flag) {
+    border-radius: 2px;
+    display: block;
+    height: 0.82rem;
+    object-fit: cover;
+    width: 1.18rem;
+  }
+
+  .site-social {
+    align-items: center;
+    display: inline-flex;
+  }
+
+  .site-social :global(a) {
+    align-items: center;
+    border-radius: 0.5rem;
+    color: var(--sl-color-gray-3);
+    display: inline-flex;
+    font-size: 1.08rem;
+    height: 2rem;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    width: 2rem;
+  }
+
+  .site-social :global(a:hover) {
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-white);
+  }
+
+  @media (max-width: 720px) {
+    .markdraw-header {
+      grid-template-columns: auto 1fr auto;
+    }
+
+    .site-nav {
+      display: none;
+    }
+  }
+</style>

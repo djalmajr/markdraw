@@ -1,0 +1,45 @@
+---
+title: "Assistente de IA"
+description: "Tudo que você precisa para instalar, configurar e usar o Markdraw nos fluxos desktop e extensão."
+---
+
+Um assistente embutido fica no painel direito, ciente do documento que você está editando. Abra ou foque nele com <code>Cmd/Ctrl+L</code>, ou pelas abas do painel direito. Nada é enviado a lugar nenhum até você conectar um provedor — veja <strong>Provedores de IA</strong> abaixo.
+
+<figure className="markdraw-figure">
+  <a href="/screenshots/desktop-ai-panel.png">
+    <img alt="O painel do assistente, ciente do documento aberto." src="/screenshots/desktop-ai-panel.png" />
+  </a>
+  <figcaption>O painel do assistente, ciente do documento aberto.</figcaption>
+</figure>
+
+## Modos Plan e Build
+
+<strong>Build</strong> permite que o assistente proponha edições e use suas ferramentas; <strong>Plan</strong> o mantém em modo somente-leitura, para esboçar uma abordagem sem alterar nada. Alterne os modos pelo composer.
+
+## Contexto: seleções, arquivos e menções
+
+O documento ativo está sempre no contexto. Adicione mais selecionando texto no editor, selecionando formas num canvas Excalidraw, ou digitando <code>@</code> para mencionar outro arquivo ou pasta. Os chips de contexto mostram exatamente o que o assistente pode ver.
+
+## Comandos de barra
+
+Digite <code>/</code> no composer para inserir um modelo de prompt reutilizável. Os modelos podem ser embutidos, globais ou específicos do projeto, e podem receber argumentos.
+
+## Múltiplas sessões e histórico
+
+Mantenha várias conversas abertas ao mesmo tempo como abas no painel direito. As sessões anteriores são agrupadas por data e pesquisáveis; você pode duplicar, arquivar, restaurar ou excluí-las.
+
+<figure className="markdraw-figure">
+  <a href="/screenshots/desktop-ai-model-picker.png">
+    <img alt="Escolha um modelo, agrupado por provedor." src="/screenshots/desktop-ai-model-picker.png" />
+  </a>
+  <figcaption>Escolha um modelo, agrupado por provedor.</figcaption>
+</figure>
+
+## O que o assistente pode fazer
+
+Com um provedor conectado, o assistente pode usar um conjunto de ferramentas, cada uma sujeita à sua aprovação quando altera algo:
+
+- <strong>Ler o documento ativo</strong> — incluindo o esboço de um canvas Excalidraw.
+- <strong>Buscar no workspace</strong> — por palavra-chave, ou por significado quando a indexação está ativada.
+- <strong>Propor edições</strong> — exibidas como um diff que você pode aceitar ou rejeitar.
+- <strong>Gerar e editar diagramas</strong> — veja <strong>Diagramas</strong> para Excalidraw editável gerado por IA.

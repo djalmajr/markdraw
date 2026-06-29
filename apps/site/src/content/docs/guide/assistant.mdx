@@ -1,0 +1,45 @@
+---
+title: "AI Assistant"
+description: "Everything you need to install, configure, and use Markdraw across desktop and extension workflows."
+---
+
+A built-in assistant sits in the right panel, aware of the document you're editing. Open or focus it with <code>Cmd/Ctrl+L</code>, or from the right-panel tabs. Nothing is sent anywhere until you connect a provider — see <strong>AI Providers</strong> below.
+
+<figure className="markdraw-figure">
+  <a href="/screenshots/desktop-ai-panel.png">
+    <img alt="The assistant panel, aware of the open document." src="/screenshots/desktop-ai-panel.png" />
+  </a>
+  <figcaption>The assistant panel, aware of the open document.</figcaption>
+</figure>
+
+## Plan and Build modes
+
+<strong>Build</strong> lets the assistant propose edits and run its tools; <strong>Plan</strong> keeps it read-only, so it can outline an approach without changing anything. Switch modes from the composer.
+
+## Context: selections, files, and mentions
+
+The active document is always in context. Add more by selecting text in the editor, selecting shapes on an Excalidraw canvas, or typing <code>@</code> to mention another file or folder. Context chips show exactly what the assistant can see.
+
+## Slash commands
+
+Type <code>/</code> in the composer to insert a reusable prompt template. Templates can be built in, global, or project-specific, and may take arguments.
+
+## Multiple sessions and history
+
+Keep several conversations open at once as tabs in the right panel. Past sessions are grouped by date and searchable; you can fork, archive, restore, or delete them.
+
+<figure className="markdraw-figure">
+  <a href="/screenshots/desktop-ai-model-picker.png">
+    <img alt="Pick a model, grouped by provider." src="/screenshots/desktop-ai-model-picker.png" />
+  </a>
+  <figcaption>Pick a model, grouped by provider.</figcaption>
+</figure>
+
+## What the assistant can do
+
+With a provider connected, the assistant can use a set of tools, each gated by your approval when it changes anything:
+
+- <strong>Read the active document</strong> — including the outline of an Excalidraw canvas.
+- <strong>Search the workspace</strong> — by keyword, or by meaning when indexing is enabled.
+- <strong>Propose edits</strong> — shown as a diff you can accept or reject.
+- <strong>Generate and edit diagrams</strong> — see <strong>Diagrams</strong> for editable, AI-generated Excalidraw.

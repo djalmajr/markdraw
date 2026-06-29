@@ -1,0 +1,145 @@
+---
+title: "Markdraw"
+description: "Markdraw mantiene la edición y la vista previa lado a lado en escritorio y navegador. Instala la última versión desde GitHub Releases y mantén todo en un mismo ecosistema."
+template: splash
+hero:
+  tagline: |
+    <span class="markdraw-hero-kicker">Visor de AsciiDoc y Markdown</span>
+    <span class="markdraw-hero-line">Entrega documentación más rápido con un flujo de previsualización local-first.</span>
+    <span class="markdraw-hero-description">Markdraw mantiene la edición y la vista previa lado a lado en escritorio y navegador. Instala la última versión desde GitHub Releases y mantén todo en un mismo ecosistema.</span>
+  image:
+    html: |
+      <figure class="markdraw-hero-shot">
+        <img alt="Aplicación Markdraw de escritorio con archivo Markdown, árbol lateral y tabla de contenidos" src="/screenshots/desktop-workspace-preview.png" />
+        <figcaption>Vista previa en escritorio con barra lateral, pestañas y tabla de contenidos.</figcaption>
+      </figure>
+  actions:
+    - text: "Descargar para tu plataforma"
+      link: "https://github.com/djalmajr/markdraw/releases/latest"
+      icon: right-arrow
+      variant: primary
+      attrs:
+        rel: noreferrer
+        target: _blank
+        data-preferred-download: true
+        data-label-template: "Descargar para {platform}"
+        data-platform-fallback: "tu plataforma"
+        data-platform-mac-arm64: "macOS (Apple Silicon)"
+        data-platform-mac-x64: "macOS (Intel)"
+        data-platform-linux: "Linux"
+        data-platform-windows: "Windows"
+    - text: "Leer la guía"
+      link: "/es/guide/"
+      variant: secondary
+---
+
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+<script type="module" src="/scripts/preferred-download.js"></script>
+
+## Características
+
+<CardGrid stagger>
+<Card title="AsciiDoc + Markdown">
+  Renderiza ambos formatos con admonitions, includes, frontmatter y partials reutilizables en un solo visor.
+</Card>
+<Card title="Paneles divididos + pestañas de vista previa">
+  Abre archivos lado a lado. Un clic abre una pestaña de vista previa (en cursiva); edita o haz doble clic para fijarla — estilo VSCode.
+</Card>
+<Card title="Navegación keyboard-first">
+  Quick Open, Paleta de comandos, Ir al título, Símbolos del workspace y Buscar en archivos — todos a un atajo de distancia.
+</Card>
+<Card title="Panel de referencias">
+  La columna derecha tiene una pestaña de Referencias que lista todo documento del workspace que apunta al archivo activo.
+</Card>
+<Card title="Búsqueda de símbolos en el workspace">
+  Cmd/Ctrl+Alt+O hace fuzzy-match de títulos en todo documento del workspace y salta a la línea correcta.
+</Card>
+<Card title="Modo lectura / Zen">
+  Cmd/Ctrl+. oculta el chrome y centra la vista previa a un ancho de lectura cómodo. Alterna con el mismo atajo.
+</Card>
+<Card title="Diagramas y matemáticas">
+  Mermaid, PlantUML, Graphviz y KaTeX se renderizan dentro de la vista previa sin configuración adicional.
+</Card>
+<Card title="Asistente de IA">
+  Chatea sobre el documento que estás editando, genera diagramas editables y conecta tus propios proveedores de IA y servidores MCP.
+</Card>
+<Card title="Workspaces multi-raíz">
+  Fija varias carpetas en la barra lateral a la vez — útil al leer documentación dispersa entre repositorios.
+</Card>
+<Card title="Local-first, auto-actualización">
+  Los archivos quedan en tu máquina; los releases firmados llegan por el auto-updater al iniciar.
+</Card>
+<LinkCard
+  title="…y mucho más"
+  description="Temas, exportación a PDF, la extensión de Chrome, el mapa completo de teclado y más. Mira la guía para capturas y detalles."
+  href="/es/guide/"
+/>
+</CardGrid>
+
+## Descargas
+
+Todos los enlaces abajo apuntan a releases/latest/download del repositorio público.
+
+
+<CardGrid>
+<LinkCard
+  title="macOS (Apple Silicon)"
+  description="Instalador DMG - Markdraw-macos-arm64.dmg"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-macos-arm64.dmg"
+  rel="noreferrer"
+  target="_blank"
+/>
+<LinkCard
+  title="macOS (Intel)"
+  description="Instalador DMG - Markdraw-macos-x64.dmg"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-macos-x64.dmg"
+  rel="noreferrer"
+  target="_blank"
+/>
+<LinkCard
+  title="Linux"
+  description="AppImage - Markdraw-linux-x64.AppImage"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-linux-x64.AppImage"
+  rel="noreferrer"
+  target="_blank"
+/>
+<LinkCard
+  title="Linux (Debian)"
+  description="Paquete DEB - Markdraw-linux-x64.deb"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-linux-x64.deb"
+  rel="noreferrer"
+  target="_blank"
+/>
+<LinkCard
+  title="Windows"
+  description="Instalador MSI - Markdraw-windows-x64.msi"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-windows-x64.msi"
+  rel="noreferrer"
+  target="_blank"
+/>
+<LinkCard
+  title="Windows (alt)"
+  description="Instalador EXE - Markdraw-windows-x64.exe"
+  href="https://github.com/djalmajr/markdraw/releases/latest/download/Markdraw-windows-x64.exe"
+  rel="noreferrer"
+  target="_blank"
+/>
+</CardGrid>
+
+<div className="markdraw-callout">
+  <div>
+    <h2>¿Prefieres usarlo en el navegador?</h2>
+    <p>Markdraw también es una extensión de Chrome — renderiza archivos .adoc y .md directamente en cualquier pestaña, sin instalar la app de escritorio.</p>
+  </div>
+  <a className="markdraw-button markdraw-button-primary" href="https://chromewebstore.google.com/detail/asciimark/dmcihjkjbeckainfkaddpkeghlllmkbk" rel="noreferrer" target="_blank">Añadir a Chrome</a>
+</div>
+
+<div className="markdraw-home-links">
+  <LinkCard title="Privacidad" description="Markdraw no recopila analytics, trackers ni telemetría, y no envía datos personales a ningún servidor controlado por Markdraw. No hay un backend de Markdraw." href="/es/privacy/" />
+</div>
+
+<div className="markdraw-notice">
+  <p>El SmartScreen de Windows puede pedir Más información y luego Ejecutar de todos modos.</p>
+</div>

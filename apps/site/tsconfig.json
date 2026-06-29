@@ -1,16 +1,11 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "astro/tsconfigs/strict",
   "compilerOptions": {
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
+    "baseUrl": ".",
     "paths": {
-      "~/*": ["./src/*"],
-      "@markdraw/ui/*": ["../../packages/ui/src/*"]
+      "~/*": ["src/*"]
     }
   },
-  "include": [
-    "src",
-    "../../packages/ui/src/icons.d.ts",
-    "../../packages/core/src/ambient.d.ts"
-  ]
+  "include": [".astro/types.d.ts", "**/*"],
+  "exclude": ["dist"]
 }

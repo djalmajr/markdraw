@@ -1,0 +1,92 @@
+---
+title: "Política de privacidade"
+description: "O Markdraw não coleta analytics, trackers nem telemetria, e não envia dados pessoais para nenhum servidor controlado pelo Markdraw. Não há backend do Markdraw."
+sidebar:
+  hidden: true
+head:
+  - tag: script
+    content: "document.documentElement.dataset.markdrawStandalone = \"true\";"
+---
+
+
+
+**Última atualização:** 5 de maio de 2026
+
+## Coleta de dados
+
+O Markdraw não coleta analytics, trackers nem telemetria, e não envia dados pessoais para nenhum servidor controlado pelo Markdraw. Não há backend do Markdraw.
+
+
+## Escopo (extensão e desktop)
+
+Esta política se aplica tanto à extensão do Chrome quanto ao app desktop.
+
+
+## Processamento local
+
+A análise e a renderização dos documentos acontecem localmente dentro da sua aba do navegador (extensão) ou dentro da webview do Tauri (app desktop). O texto do documento nunca é enviado pela infraestrutura do Markdraw. As únicas exceções são requisições de rede explícitas, iniciadas pelo usuário, listadas abaixo.
+
+
+## Uso de armazenamento local
+
+O Markdraw persiste estado controlado pelo usuário no <code>localStorage</code> do navegador e, na extensão, no <code>IndexedDB</code> e no <code>chrome.storage.session</code>. Nada nesta lista sai da sua máquina.
+
+
+- Preferência de tema (<code>claro</code> / <code>escuro</code> / <code>sistema</code>).
+- Preferências do editor (modo de indentação, números de linha, quebra de linha, invisíveis, fonte).
+- Preferências de fonte do preview (família e tamanho).
+- Arquivos e pastas recentes, mais favoritos fixados.
+- Sessão de abas por painel (arquivos abertos e a aba ativa) e o layout do painel (número de painéis, painel ativo, proporção de divisão).
+- Largura e visibilidade da sidebar, visibilidade e profundidade do sumário.
+- Apenas extensão: handles de diretório no <code>IndexedDB</code> para restaurar a sessão.
+- Apenas extensão: payload temporário do modo URL no <code>chrome.storage.session</code> — capturado pelo content script ao redirecionar para a página do visualizador, limpo ao fim da sessão.
+
+
+## Permissões explicadas
+
+- <strong>storage</strong> (extensão): usado para o payload temporário do modo URL acima via <code>chrome.storage.session</code>.
+- <strong>host_permissions: <code>https://kroki.io/*</code></strong> (extensão): o único host que a extensão pode acessar. Usado exclusivamente para renderizar blocos de diagrama do Kroki.
+- <strong>Acesso a URL de arquivo</strong> (opcional, extensão): permite pré-visualizar documentos locais <code>file://</code>. Desativado por padrão; alternado em <code>chrome://extensions</code>.
+
+
+## Requisições de rede
+
+- <strong>URLs de documento (extensão)</strong>: quando a extensão renderiza uma URL remota <code>.adoc</code> ou <code>.md</code>, ela busca o arquivo nessa URL do mesmo jeito que o navegador buscaria — diretamente entre sua máquina e o host do documento.
+- <strong>Renderização Kroki</strong>: blocos de diagrama (<code>plantuml</code>, <code>graphviz</code>, <code>mermaid</code>, etc.) são enviados como texto puro para <code>https://kroki.io</code> via POST e a resposta é um SVG estático. Nenhum JavaScript é baixado. Pulado se o documento não contém blocos de diagrama.
+- <strong>Auto-updater (desktop)</strong>: na inicialização o app desktop consulta <code>https://github.com/djalmajr/markdraw/releases/latest/download/latest.json</code> para verificar uma versão mais nova. Se você aceitar o prompt de atualização, o binário assinado é baixado do mesmo repositório público do GitHub. A verificação não envia conteúdo de documento — só consulta o GitHub.
+
+
+## Segurança ao compartilhar (extensão)
+
+Quando você copia a URL de origem de um documento sendo visualizado na extensão, o Markdraw remove parâmetros de query (como o <code>?token=…</code> de curta duração do GitHub em URLs raw de repositório privado) antes de colocar a URL no clipboard. Isso evita que o token vaze quando a URL é colada em chats ou issues. A URL original que o visualizador usa não é alterada.
+
+
+## Bibliotecas de terceiros
+
+O Markdraw empacota pacotes open-source, todos rodando localmente:
+
+
+- @asciidoctor/core (parser AsciiDoc)
+- markdown-it e plugins (parser Markdown)
+- Prism (highlight de sintaxe)
+- Mermaid (diagramas renderizados localmente; alguns diagramas Kroki usam o serviço acima)
+- KaTeX (renderização matemática)
+- CodeMirror (editor)
+- SolidJS (framework de UI) e Kobalte (primitivas de UI)
+- Tauri (runtime desktop) e tauri-plugin-updater (apenas desktop)
+
+
+## Serviços de terceiros
+
+- <strong>Kroki</strong> (<code>https://kroki.io</code>) — apenas quando seu documento contém blocos de diagrama Kroki suportados.
+- <strong>GitHub</strong> (<code>github.com/djalmajr/markdraw</code>) — apenas para auto-updates do desktop e downloads de artefatos de instalação/atualização.
+
+
+## Mudanças na política
+
+Quaisquer atualizações futuras desta política serão publicadas nesta página. A data <strong>Última atualização</strong> no topo reflete a mudança mais recente.
+
+
+## Contato
+
+Para questões de privacidade, abra uma issue em <a href="https://github.com/djalmajr/markdraw/issues">github.com/djalmajr/markdraw/issues</a>.

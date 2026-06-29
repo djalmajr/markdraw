@@ -28,11 +28,9 @@ step "4/7 clippy --all-targets -D warnings"
 step "5/7 vitest (UI)"
 (cd packages/ui && bun run test:vitest)
 
-# Builds the marketing site — the one packages/ui consumer whose Vite config has
-# NO unplugin-icons. A `~icons/*` import sneaking into a shared component (which
-# the desktop build resolves fine) breaks here, so it's caught pre-merge instead
-# of by the "Deploy Site" CI job afterward. Fast (vite-only, no Rust).
-step "6/7 site frontend build (plugin-less packages/ui consumer)"
+# Builds the Starlight marketing/docs site and catches content/schema regressions
+# before the post-merge "Deploy Site" CI job.
+step "6/7 site frontend build (Starlight)"
 bun run --filter @markdraw/site build
 
 step "7/7 IPC contract"

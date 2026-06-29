@@ -14,16 +14,8 @@ toc::[]
 
 === Apple Silicon
 
-Download `Markdraw-macos-arm64.dmg`, drag the app into
-Applications, then run:
-
-[source,bash]
-----
-xattr -cr /Applications/Markdraw.app
-----
-
-The `xattr` step strips the quarantine flag macOS adds to unsigned
-builds. Skip it and Gatekeeper blocks the first launch.
+Download `Markdraw-macos-arm64.dmg`, open the disk image, and drag
+Markdraw into Applications. The app is Apple-signed and notarized.
 
 === Intel
 

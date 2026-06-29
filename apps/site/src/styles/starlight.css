@@ -1,0 +1,542 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+:root {
+  --markdraw-background: hsl(235 21% 13%);
+  --markdraw-border: hsl(233 16% 22%);
+  --markdraw-card: hsl(235 21% 13% / 0.86);
+  --markdraw-glow-1: hsl(173 51% 57%);
+  --markdraw-glow-2: hsl(188 60% 44%);
+  --markdraw-muted: hsl(229 21% 57%);
+  --markdraw-primary: hsl(173 51% 57%);
+  --markdraw-primary-contrast: hsl(235 21% 13%);
+  --markdraw-shadow: 0 24px 42px -36px hsl(0 0% 0% / 0.8);
+  --markdraw-shell-width: 1120px;
+  --markdraw-surface-end: hsl(186 32% 12%);
+  --markdraw-surface-start: hsl(235 21% 13%);
+
+  --sl-color-white: hsl(226 64% 88%);
+  --sl-color-gray-1: hsl(226 40% 82%);
+  --sl-color-gray-2: hsl(229 21% 67%);
+  --sl-color-gray-3: hsl(229 21% 57%);
+  --sl-color-gray-4: hsl(233 16% 34%);
+  --sl-color-gray-5: hsl(233 16% 22%);
+  --sl-color-gray-6: hsl(234 20% 15%);
+  --sl-color-black: var(--markdraw-background);
+  --sl-color-accent-low: hsl(178 37% 22%);
+  --sl-color-accent: var(--markdraw-primary);
+  --sl-color-accent-high: hsl(174 62% 88%);
+  --sl-color-bg: var(--markdraw-background);
+  --sl-color-bg-nav: hsl(234 20% 15% / 0.88);
+  --sl-color-bg-sidebar: var(--markdraw-background);
+  --sl-color-hairline: var(--markdraw-border);
+  --sl-color-hairline-light: var(--markdraw-border);
+  --sl-content-width: 52rem;
+  --sl-font: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sl-font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --sl-nav-height: 4.25rem;
+  --sl-nav-pad-y: 0;
+}
+
+:root[data-theme="light"] {
+  --markdraw-background: hsl(0 0% 100%);
+  --markdraw-border: hsl(220 13% 91%);
+  --markdraw-card: hsl(0 0% 100% / 0.86);
+  --markdraw-glow-1: hsl(188 60% 44%);
+  --markdraw-glow-2: hsl(175 67% 37%);
+  --markdraw-muted: hsl(220 9% 46%);
+  --markdraw-primary: hsl(188 76% 30%);
+  --markdraw-primary-contrast: hsl(0 0% 100%);
+  --markdraw-shadow: 0 24px 42px -36px hsl(240 10% 3.9% / 0.28);
+  --markdraw-surface-end: hsl(180 40% 97%);
+  --markdraw-surface-start: hsl(0 0% 100%);
+
+  --sl-color-white: hsl(240 10% 3.9%);
+  --sl-color-gray-1: hsl(220 13% 18%);
+  --sl-color-gray-2: hsl(220 9% 34%);
+  --sl-color-gray-3: hsl(220 9% 46%);
+  --sl-color-gray-4: hsl(220 6% 62%);
+  --sl-color-gray-5: hsl(220 13% 86%);
+  --sl-color-gray-6: hsl(220 14% 96%);
+  --sl-color-gray-7: hsl(180 40% 98%);
+  --sl-color-black: var(--markdraw-background);
+  --sl-color-accent-low: hsl(182 56% 94%);
+  --sl-color-accent: var(--markdraw-primary);
+  --sl-color-accent-high: hsl(188 58% 28%);
+  --sl-color-bg: var(--markdraw-background);
+  --sl-color-bg-nav: hsl(0 0% 100% / 0.82);
+  --sl-color-bg-sidebar: var(--markdraw-background);
+  --sl-color-hairline: var(--markdraw-border);
+  --sl-color-hairline-light: var(--markdraw-border);
+}
+
+html,
+body {
+  background: hsl(0 0% 100%);
+}
+
+html[data-has-hero],
+html[data-has-hero] body {
+  background:
+    radial-gradient(circle at 20% 10%, color-mix(in srgb, var(--markdraw-glow-1) 16%, transparent), transparent 30%),
+    radial-gradient(circle at 85% 0%, color-mix(in srgb, var(--markdraw-glow-2) 12%, transparent), transparent 32%),
+    linear-gradient(180deg, var(--markdraw-surface-start), var(--markdraw-surface-end));
+  background-attachment: fixed;
+}
+
+html:not([data-has-hero]) {
+  --markdraw-background: hsl(0 0% 100%);
+  --markdraw-border: hsl(220 13% 91%);
+  --markdraw-card: hsl(0 0% 100%);
+  --markdraw-glow-1: hsl(188 60% 44%);
+  --markdraw-glow-2: hsl(175 67% 37%);
+  --markdraw-muted: hsl(220 9% 46%);
+  --markdraw-primary: hsl(188 76% 30%);
+  --markdraw-primary-contrast: hsl(0 0% 100%);
+  --markdraw-shadow: 0 24px 42px -36px hsl(240 10% 3.9% / 0.18);
+
+  --sl-color-white: hsl(240 10% 3.9%);
+  --sl-color-gray-1: hsl(220 13% 18%);
+  --sl-color-gray-2: hsl(220 9% 34%);
+  --sl-color-gray-3: hsl(220 9% 46%);
+  --sl-color-gray-4: hsl(220 6% 62%);
+  --sl-color-gray-5: hsl(220 13% 86%);
+  --sl-color-gray-6: hsl(220 14% 96%);
+  --sl-color-gray-7: hsl(180 40% 98%);
+  --sl-color-black: hsl(0 0% 100%);
+  --sl-color-accent-low: hsl(182 56% 94%);
+  --sl-color-accent: var(--markdraw-primary);
+  --sl-color-accent-high: hsl(188 58% 28%);
+  --sl-color-bg: hsl(0 0% 100%);
+  --sl-color-bg-nav: hsl(0 0% 100%);
+  --sl-color-bg-sidebar: hsl(0 0% 100%);
+  --sl-color-hairline: var(--markdraw-border);
+  --sl-color-hairline-light: var(--markdraw-border);
+  --sl-sidebar-width: 17.5rem;
+}
+
+html[data-theme="dark"]:not([data-has-hero]) {
+  --markdraw-background: hsl(235 21% 13%);
+  --markdraw-border: hsl(232 14% 25%);
+  --markdraw-card: hsl(235 20% 16%);
+  --markdraw-muted: hsl(229 18% 68%);
+  --markdraw-primary: hsl(188 64% 55%);
+  --markdraw-primary-contrast: hsl(235 21% 13%);
+  --markdraw-shadow: 0 24px 42px -36px hsl(0 0% 0% / 0.7);
+
+  --sl-color-white: hsl(226 64% 91%);
+  --sl-color-gray-1: hsl(226 40% 84%);
+  --sl-color-gray-2: hsl(228 22% 74%);
+  --sl-color-gray-3: hsl(229 16% 62%);
+  --sl-color-gray-4: hsl(232 14% 42%);
+  --sl-color-gray-5: hsl(232 14% 28%);
+  --sl-color-gray-6: hsl(234 18% 18%);
+  --sl-color-gray-7: hsl(235 21% 13%);
+  --sl-color-black: var(--markdraw-background);
+  --sl-color-accent-low: hsl(188 42% 20%);
+  --sl-color-accent: var(--markdraw-primary);
+  --sl-color-accent-high: hsl(184 70% 78%);
+  --sl-color-bg: var(--markdraw-background);
+  --sl-color-bg-nav: hsl(235 18% 14% / 0.96);
+  --sl-color-bg-sidebar: var(--markdraw-background);
+  --sl-color-hairline: var(--markdraw-border);
+  --sl-color-hairline-light: var(--markdraw-border);
+}
+
+body {
+  font-family: var(--sl-font);
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--sl-font-mono);
+}
+
+.header {
+  backdrop-filter: blur(14px);
+  background: var(--sl-color-bg-nav);
+  border-bottom: 1px solid var(--markdraw-border);
+}
+
+html:not([data-has-hero]) body,
+html:not([data-has-hero]) .page,
+html:not([data-has-hero]) .main-frame,
+html:not([data-has-hero]) .content-panel {
+  background: var(--markdraw-background);
+}
+
+html:not([data-has-hero]) body .header {
+  background: var(--sl-color-bg-nav);
+  background-color: var(--sl-color-bg-nav);
+}
+
+.site-title {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.site-title img {
+  border-radius: 0.45rem;
+}
+
+[data-has-hero] main {
+  --overlay-blurple: color-mix(in srgb, var(--markdraw-primary) 13%, transparent);
+}
+
+[data-has-hero] .page {
+  background:
+    linear-gradient(215deg, var(--overlay-blurple), transparent 42%),
+    radial-gradient(var(--overlay-blurple), transparent 60%) no-repeat -60vw -40vh / 105vw 200vh,
+    radial-gradient(var(--overlay-blurple), transparent 65%) no-repeat 50% calc(100% + 20rem) /
+      60rem 30rem;
+}
+
+.hero {
+  align-items: start;
+}
+
+.hero h1,
+.hero .tagline {
+  text-wrap: balance;
+}
+
+.hero h1 {
+  color: var(--sl-color-white);
+  font-size: clamp(2.6rem, 7vw, 4.7rem);
+  letter-spacing: 0;
+}
+
+.hero .tagline {
+  display: grid;
+  gap: 0.55rem;
+  color: var(--sl-color-gray-2);
+}
+
+.markdraw-hero-kicker {
+  color: var(--markdraw-muted);
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.markdraw-hero-line {
+  color: var(--sl-color-white);
+  display: block;
+  font-size: clamp(1.7rem, 5.2vw, 2.7rem);
+  font-weight: 700;
+  line-height: 1.15;
+  max-width: 17ch;
+}
+
+.markdraw-hero-description {
+  color: var(--sl-color-gray-2);
+  display: block;
+  font-size: clamp(1rem, 1.6vw, 1.15rem);
+  line-height: 1.55;
+  max-width: 65ch;
+}
+
+.hero > .hero-html {
+  filter: drop-shadow(0 18px 50px color-mix(in srgb, var(--markdraw-primary) 23%, transparent));
+  width: min(100%, 34rem);
+}
+
+.markdraw-hero-shot {
+  background: color-mix(in srgb, var(--markdraw-card) 88%, transparent);
+  border: 1px solid var(--markdraw-border);
+  border-radius: 0.85rem;
+  box-shadow: var(--markdraw-shadow);
+  margin: 0;
+  padding: 0.65rem;
+}
+
+.markdraw-hero-shot img {
+  background: #fff;
+  border: 1px solid var(--markdraw-border);
+  border-radius: 0.55rem;
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.markdraw-hero-shot figcaption {
+  color: var(--sl-color-gray-3);
+  font-size: 0.8rem;
+  margin-top: 0.45rem;
+}
+
+.hero a.button[data-variant="primary"],
+.markdraw-button-primary {
+  background: var(--markdraw-primary);
+  border-color: var(--markdraw-primary);
+  color: var(--markdraw-primary-contrast) !important;
+}
+
+.hero a.button[data-variant="primary"]:hover,
+.markdraw-button-primary:hover {
+  background: color-mix(in srgb, var(--markdraw-primary) 88%, var(--sl-color-white));
+  border-color: color-mix(in srgb, var(--markdraw-primary) 88%, var(--sl-color-white));
+}
+
+.hero a.button[data-variant="secondary"] {
+  background: color-mix(in srgb, var(--sl-color-gray-6) 72%, transparent);
+  border-color: var(--markdraw-border);
+  color: var(--sl-color-white);
+}
+
+.card,
+.sl-link-card,
+.markdraw-callout,
+.markdraw-notice {
+  background: var(--markdraw-card);
+  border: 1px solid color-mix(in srgb, var(--markdraw-border) 82%, transparent);
+  border-radius: 0.8rem;
+  box-shadow: var(--markdraw-shadow);
+}
+
+.card {
+  padding: clamp(0.95rem, calc(0.5rem + 1vw), 1.35rem);
+}
+
+.card .title,
+.sl-link-card .title {
+  color: var(--sl-color-white);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.card .body,
+.sl-link-card .description {
+  color: var(--sl-color-gray-2);
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.sl-link-card {
+  box-shadow: none;
+  padding: 0.95rem;
+}
+
+.sl-link-card .icon {
+  color: var(--sl-color-gray-3);
+}
+
+.sl-link-card:hover {
+  background: color-mix(in srgb, var(--markdraw-primary) 7%, var(--markdraw-card));
+  border-color: color-mix(in srgb, var(--markdraw-primary) 26%, var(--markdraw-border));
+}
+
+.sl-link-card:hover .icon {
+  color: var(--markdraw-primary);
+}
+
+.card-grid {
+  gap: 0.85rem;
+}
+
+.markdraw-callout {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin: 1.25rem 0;
+  padding: 1.1rem 1.3rem;
+}
+
+.markdraw-callout h2,
+.markdraw-callout p,
+.markdraw-notice p {
+  margin: 0;
+}
+
+.markdraw-callout h2 {
+  color: var(--sl-color-white);
+  font-size: 1.25rem;
+}
+
+.markdraw-callout p,
+.markdraw-notice p {
+  color: var(--sl-color-gray-2);
+}
+
+.markdraw-button {
+  align-items: center;
+  border: 1px solid var(--markdraw-border);
+  border-radius: 0.5rem;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-weight: 700;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.8rem;
+  text-decoration: none !important;
+  white-space: nowrap;
+}
+
+.markdraw-home-links {
+  margin: 1.25rem 0;
+}
+
+.markdraw-notice {
+  display: grid;
+  gap: 0.55rem;
+  margin: 1.25rem 0;
+  padding: 1rem 1.2rem;
+}
+
+.markdraw-figure {
+  background: var(--markdraw-card);
+  border: 1px solid var(--markdraw-border);
+  border-radius: 0.8rem;
+  margin: 1.2rem 0;
+  overflow: hidden;
+}
+
+.markdraw-figure img,
+.markdraw-screenshot-card img {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.markdraw-figure figcaption,
+.markdraw-screenshot-card figcaption {
+  color: var(--sl-color-gray-3);
+  font-size: 0.9rem;
+  padding: 0.7rem 0.8rem;
+}
+
+.markdraw-screenshot-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  margin: 1rem 0 1.4rem;
+}
+
+.markdraw-screenshot-card {
+  background: var(--markdraw-card);
+  border: 1px solid var(--markdraw-border);
+  border-radius: 0.8rem;
+  margin: 0;
+  overflow: hidden;
+}
+
+.markdraw-screenshot-card a {
+  display: block;
+}
+
+.markdraw-table {
+  width: 100%;
+}
+
+.markdraw-table td:first-child {
+  white-space: nowrap;
+}
+
+.sl-markdown-content a:not(.not-content *) {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="page"]:focus {
+  background: color-mix(in srgb, var(--markdraw-primary) 11%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--markdraw-primary) 18%, transparent);
+  color: var(--sl-color-accent-high);
+}
+
+:root[data-theme="light"] .sidebar-content a[aria-current="page"],
+:root[data-theme="light"] .sidebar-content a[aria-current="page"]:hover,
+:root[data-theme="light"] .sidebar-content a[aria-current="page"]:focus {
+  background: color-mix(in srgb, var(--markdraw-primary) 10%, hsl(0 0% 100%));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--markdraw-primary) 14%, transparent);
+  color: var(--markdraw-primary);
+}
+
+.right-sidebar-panel a[aria-current="true"],
+mobile-starlight-toc a[aria-current="true"] {
+  font-weight: 600;
+}
+
+html[data-markdraw-standalone] .sidebar {
+  display: none;
+}
+
+html:not([data-has-hero]) .sidebar-pane {
+  background: var(--markdraw-background);
+  border-inline-end: 1px solid var(--markdraw-border);
+  width: min(var(--sl-sidebar-width), calc(100vw - 1rem));
+}
+
+@media (min-width: 50rem) {
+  html:not([data-has-hero]) .main-frame {
+    margin-inline: auto;
+    max-width: var(--markdraw-shell-width);
+    width: 100%;
+  }
+
+  html:not([data-has-hero]) .sidebar-pane {
+    inset-inline-start: max(
+      var(--sl-nav-pad-x),
+      calc((100vw - var(--markdraw-shell-width)) / 2)
+    );
+    width: var(--sl-sidebar-width);
+  }
+
+  html[data-markdraw-standalone][data-has-sidebar] {
+    --sl-content-inline-start: 0rem;
+    --sl-content-width: calc(var(--markdraw-shell-width) - var(--sl-sidebar-width));
+  }
+
+  html[data-markdraw-standalone] .main-frame {
+    padding-inline-start: 0;
+  }
+
+  html[data-markdraw-standalone] .main-pane {
+    --sl-content-margin-inline: 0 auto;
+  }
+}
+
+@media (min-width: 72rem) {
+  html[data-markdraw-standalone][data-has-toc] .right-sidebar-container {
+    width: var(--sl-sidebar-width);
+  }
+
+  html[data-markdraw-standalone][data-has-toc] .main-pane {
+    order: 1;
+    width: calc(100% - var(--sl-sidebar-width));
+  }
+}
+
+.pagination-links a {
+  background: hsl(0 0% 100%);
+  border-color: var(--markdraw-border);
+  box-shadow: var(--markdraw-shadow);
+}
+
+:root:not([data-theme="light"]) .pagination-links a {
+  background: var(--markdraw-card);
+}
+
+.pagination-links a:hover {
+  border-color: color-mix(in srgb, var(--markdraw-primary) 26%, var(--markdraw-border));
+}
+
+@media (min-width: 50rem) {
+  .hero {
+    padding-block: clamp(2.5rem, calc(1rem + 6vmin), 5rem);
+  }
+
+  .hero > .hero-html {
+    width: min(100%, 36rem);
+  }
+}
+
+@media (max-width: 640px) {
+  .markdraw-callout {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
