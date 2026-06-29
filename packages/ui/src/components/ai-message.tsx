@@ -8,6 +8,9 @@ import IconRefreshCw from "~icons/lucide/refresh-cw";
 import type { ToolActivity, TurnUsage } from "../composables/create-ai-chat-store.ts";
 import { renderChatMarkdown } from "../lib/chat-markdown.ts";
 
+const AI_WAITING_STATUS_MAX_DELAY_MS = 15_000;
+const AI_WAITING_STATUS_MIN_DELAY_MS = 5_000;
+
 export interface AiMessageProps {
   content: string;
   /** Display-only transform applied to expanded tool chip text (e.g. restore
@@ -51,6 +54,61 @@ function formatToolValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function randomWaitingStatusIndex(count: number, current?: number): number {
+  if (count <= 1) return 0;
+  const next = Math.floor(Math.random() * count);
+  return next === current ? (next + 1) % count : next;
+}
+
+function AiWaitingIndicator(): JSX.Element {
+  const statuses = (): string[] => {
+    useLocale();
+    return [
+      m.ai_message_waiting_mapping_context(),
+      m.ai_message_waiting_reading_workspace(),
+      m.ai_message_waiting_checking_paths(),
+      m.ai_message_waiting_weighing_edits(),
+      m.ai_message_waiting_drafting_answer(),
+      m.ai_message_waiting_verifying(),
+    ];
+  };
+  const [statusIndex, setStatusIndex] = createSignal(randomWaitingStatusIndex(statuses().length));
+  let statusTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function nextDelay(): number {
+    return (
+      AI_WAITING_STATUS_MIN_DELAY_MS +
+      Math.floor(Math.random() * (AI_WAITING_STATUS_MAX_DELAY_MS - AI_WAITING_STATUS_MIN_DELAY_MS))
+    );
+  }
+
+  function scheduleNextStatus(): void {
+    statusTimer = setTimeout(() => {
+      setStatusIndex((index) => randomWaitingStatusIndex(statuses().length, index));
+      scheduleNextStatus();
+    }, nextDelay());
+  }
+
+  scheduleNextStatus();
+  onCleanup(() => clearTimeout(statusTimer));
+
+  const status = (): string => {
+    const values = statuses();
+    return (values[statusIndex() % values.length] ?? "").replace(/[\s.\u2026]+$/u, "");
+  };
+
+  return (
+    <span class="ai-message-waiting" aria-live="polite" role="status">
+      <span class="ai-message-waiting-text">{status()}</span>
+      <span class="ai-message-waiting-dots" aria-hidden="true">
+        <span>.</span>
+        <span>.</span>
+        <span>.</span>
+      </span>
+    </span>
+  );
 }
 
 export interface AiToolChipsProps {
@@ -149,6 +207,7 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
 
   const copyLabel = (): string =>
     copied() ? (useLocale(), m.ai_message_copied()) : (useLocale(), m.ai_message_copy());
+  const hasContent = (): boolean => props.content.trim().length > 0;
 
   // Per-run stats for the hover bar — arrows + compact numbers only (no i18n),
   // with the raw token counts in the title. Hidden unless a token count exists.
@@ -188,16 +247,18 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
       </Show>
       <div class="ai-message-text">
         <Show when={props.role === "assistant"} fallback={props.content}>
-          {/* `html: false` in renderChatMarkdown escapes raw HTML, so this
-              innerHTML never injects model/tool markup. */}
-          <div class="ai-markdown" innerHTML={renderChatMarkdown(props.content)} />
-        </Show>
-        <Show when={props.streaming}>
-          <span class="ai-message-loader" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
+          <Show
+            when={props.streaming && !hasContent()}
+            fallback={
+              <>
+                {/* `html: false` in renderChatMarkdown escapes raw HTML, so this
+                    innerHTML never injects model/tool markup. */}
+                <div class="ai-markdown" innerHTML={renderChatMarkdown(props.content)} />
+              </>
+            }
+          >
+            <AiWaitingIndicator />
+          </Show>
         </Show>
       </div>
       {/* Hover action bar (revealed by CSS on .ai-message:hover). */}
