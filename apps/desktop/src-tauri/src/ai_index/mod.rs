@@ -280,7 +280,8 @@ fn open_db(path: &Path, root_path: &str) -> Result<Connection, String> {
     let _: String = conn
         .query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))
         .map_err(e2s)?;
-    conn.execute_batch("PRAGMA synchronous=NORMAL;").map_err(e2s)?;
+    conn.execute_batch("PRAGMA synchronous=NORMAL;")
+        .map_err(e2s)?;
     conn.busy_timeout(std::time::Duration::from_millis(5000))
         .map_err(e2s)?;
     init_schema(&conn)?;
@@ -354,7 +355,11 @@ fn write_embedding_meta(conn: &Connection, emb: &EmbeddingMeta) -> Result<(), St
 
 fn upsert(conn: &mut Connection, req: &IndexSyncRequest) -> Result<(), String> {
     let stored_sha: Option<String> = conn
-        .query_row("SELECT sha FROM documents WHERE path=?1", params![req.path], |r| r.get(0))
+        .query_row(
+            "SELECT sha FROM documents WHERE path=?1",
+            params![req.path],
+            |r| r.get(0),
+        )
         .optional()
         .map_err(e2s)?;
     // Unchanged content with no new vectors → nothing to do.
@@ -368,7 +373,12 @@ fn upsert(conn: &mut Connection, req: &IndexSyncRequest) -> Result<(), String> {
             if &existing != emb {
                 return Err(format!(
                     "embedding-mismatch: stored {}/{}/{} != incoming {}/{}/{}; reindex required",
-                    existing.provider, existing.model, existing.dim, emb.provider, emb.model, emb.dim
+                    existing.provider,
+                    existing.model,
+                    existing.dim,
+                    emb.provider,
+                    emb.model,
+                    emb.dim
                 ));
             }
         }
@@ -403,7 +413,11 @@ fn upsert(conn: &mut Connection, req: &IndexSyncRequest) -> Result<(), String> {
     )
     .map_err(e2s)?;
     let doc_id: i64 = tx
-        .query_row("SELECT id FROM documents WHERE path=?1", params![req.path], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM documents WHERE path=?1",
+            params![req.path],
+            |r| r.get(0),
+        )
         .map_err(e2s)?;
     // Full replace of this doc's chunks (cascades to its embeddings).
     tx.execute("DELETE FROM chunks WHERE doc_id=?1", params![doc_id])
@@ -413,7 +427,14 @@ fn upsert(conn: &mut Connection, req: &IndexSyncRequest) -> Result<(), String> {
         tx.execute(
             "INSERT INTO chunks (doc_id, ord, heading, heading_level, start_line, text) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![doc_id, c.ord, c.heading, c.heading_level, c.start_line, c.text],
+            params![
+                doc_id,
+                c.ord,
+                c.heading,
+                c.heading_level,
+                c.start_line,
+                c.text
+            ],
         )
         .map_err(e2s)?;
         if let (Some(vectors), Some(emb)) = (&req.vectors, &req.embedding) {
@@ -437,7 +458,9 @@ fn upsert(conn: &mut Connection, req: &IndexSyncRequest) -> Result<(), String> {
 fn staleness(conn: &Connection, entries: &[StalenessEntry]) -> Result<StalenessResponse, String> {
     let mut stored: HashMap<String, String> = HashMap::new();
     {
-        let mut stmt = conn.prepare("SELECT path, sha FROM documents").map_err(e2s)?;
+        let mut stmt = conn
+            .prepare("SELECT path, sha FROM documents")
+            .map_err(e2s)?;
         let rows = stmt
             .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
             .map_err(e2s)?;
@@ -467,13 +490,19 @@ fn staleness(conn: &Connection, entries: &[StalenessEntry]) -> Result<StalenessR
 }
 
 fn status_counts(conn: &Connection) -> Result<IndexStatusResponse, String> {
-    let doc_count: i64 = conn.query_row("SELECT count(*) FROM documents", [], |r| r.get(0)).map_err(e2s)?;
-    let chunk_count: i64 = conn.query_row("SELECT count(*) FROM chunks", [], |r| r.get(0)).map_err(e2s)?;
+    let doc_count: i64 = conn
+        .query_row("SELECT count(*) FROM documents", [], |r| r.get(0))
+        .map_err(e2s)?;
+    let chunk_count: i64 = conn
+        .query_row("SELECT count(*) FROM chunks", [], |r| r.get(0))
+        .map_err(e2s)?;
     let embedded: i64 = conn
         .query_row("SELECT count(*) FROM chunk_embeddings", [], |r| r.get(0))
         .map_err(e2s)?;
     let last: Option<i64> = conn
-        .query_row("SELECT max(updated_at) FROM documents", [], |r| r.get::<_, Option<i64>>(0))
+        .query_row("SELECT max(updated_at) FROM documents", [], |r| {
+            r.get::<_, Option<i64>>(0)
+        })
         .map_err(e2s)?;
     Ok(IndexStatusResponse {
         exists: true,
@@ -487,7 +516,8 @@ fn status_counts(conn: &Connection) -> Result<IndexStatusResponse, String> {
 
 fn delete_paths(conn: &Connection, paths: &[String]) -> Result<(), String> {
     for p in paths {
-        conn.execute("DELETE FROM documents WHERE path=?1", params![p]).map_err(e2s)?;
+        conn.execute("DELETE FROM documents WHERE path=?1", params![p])
+            .map_err(e2s)?;
     }
     Ok(())
 }
@@ -866,7 +896,12 @@ mod tests {
         let mut conn = mem();
         upsert(
             &mut conn,
-            &sync_req("follow-ups/ui-refresh.md", "X", "s", vec![chunk(0, "", 0, "body")]),
+            &sync_req(
+                "follow-ups/ui-refresh.md",
+                "X",
+                "s",
+                vec![chunk(0, "", 0, "body")],
+            ),
         )
         .unwrap();
         let hits = search_lite(&conn, "ui-refresh", 10).unwrap();
@@ -876,11 +911,25 @@ mod tests {
     #[test]
     fn unchanged_lite_resync_is_noop_but_changed_replaces() {
         let mut conn = mem();
-        upsert(&mut conn, &sync_req("a.md", "A", "s1", vec![chunk(0, "", 0, "alpha")])).unwrap();
-        upsert(&mut conn, &sync_req("a.md", "A", "s1", vec![chunk(0, "", 0, "alpha")])).unwrap();
-        let docs: i64 = conn.query_row("SELECT count(*) FROM documents", [], |r| r.get(0)).unwrap();
+        upsert(
+            &mut conn,
+            &sync_req("a.md", "A", "s1", vec![chunk(0, "", 0, "alpha")]),
+        )
+        .unwrap();
+        upsert(
+            &mut conn,
+            &sync_req("a.md", "A", "s1", vec![chunk(0, "", 0, "alpha")]),
+        )
+        .unwrap();
+        let docs: i64 = conn
+            .query_row("SELECT count(*) FROM documents", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(docs, 1);
-        upsert(&mut conn, &sync_req("a.md", "A", "s2", vec![chunk(0, "", 0, "beta")])).unwrap();
+        upsert(
+            &mut conn,
+            &sync_req("a.md", "A", "s2", vec![chunk(0, "", 0, "beta")]),
+        )
+        .unwrap();
         assert!(search_lite(&conn, "alpha", 10).unwrap().is_empty());
         assert_eq!(search_lite(&conn, "beta", 10).unwrap().len(), 1);
     }
@@ -888,13 +937,27 @@ mod tests {
     #[test]
     fn staleness_reports_new_changed_and_missing() {
         let mut conn = mem();
-        upsert(&mut conn, &sync_req("keep.md", "K", "s1", vec![chunk(0, "", 0, "k")])).unwrap();
-        upsert(&mut conn, &sync_req("gone.md", "G", "s1", vec![chunk(0, "", 0, "g")])).unwrap();
+        upsert(
+            &mut conn,
+            &sync_req("keep.md", "K", "s1", vec![chunk(0, "", 0, "k")]),
+        )
+        .unwrap();
+        upsert(
+            &mut conn,
+            &sync_req("gone.md", "G", "s1", vec![chunk(0, "", 0, "g")]),
+        )
+        .unwrap();
         let res = staleness(
             &conn,
             &[
-                StalenessEntry { path: "keep.md".into(), sha: "s1".into() }, // unchanged
-                StalenessEntry { path: "keep2.md".into(), sha: "x".into() }, // new
+                StalenessEntry {
+                    path: "keep.md".into(),
+                    sha: "s1".into(),
+                }, // unchanged
+                StalenessEntry {
+                    path: "keep2.md".into(),
+                    sha: "x".into(),
+                }, // new
             ],
         )
         .unwrap();
@@ -907,11 +970,19 @@ mod tests {
         let mut conn = mem();
         let mut req = sync_req("d.md", "D", "s", vec![chunk(0, "", 0, "x")]);
         req.vectors = Some(vec![vec![1.0, 0.0, 0.0]]);
-        req.embedding = Some(EmbeddingMeta { provider: "openai".into(), model: "m".into(), dim: 3 });
+        req.embedding = Some(EmbeddingMeta {
+            provider: "openai".into(),
+            model: "m".into(),
+            dim: 3,
+        });
         upsert(&mut conn, &req).unwrap();
         delete_paths(&conn, &["d.md".into()]).unwrap();
-        let chunks: i64 = conn.query_row("SELECT count(*) FROM chunks", [], |r| r.get(0)).unwrap();
-        let embs: i64 = conn.query_row("SELECT count(*) FROM chunk_embeddings", [], |r| r.get(0)).unwrap();
+        let chunks: i64 = conn
+            .query_row("SELECT count(*) FROM chunks", [], |r| r.get(0))
+            .unwrap();
+        let embs: i64 = conn
+            .query_row("SELECT count(*) FROM chunk_embeddings", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(chunks, 0);
         assert_eq!(embs, 0);
     }
@@ -923,14 +994,25 @@ mod tests {
             "v.md",
             "V",
             "s",
-            vec![chunk(0, "Intro", 0, "unrelated"), chunk(1, "Target", 5, "match here")],
+            vec![
+                chunk(0, "Intro", 0, "unrelated"),
+                chunk(1, "Target", 5, "match here"),
+            ],
         );
         // chunk 1 points the same direction as the query.
         req.vectors = Some(vec![vec![0.0, 1.0], vec![1.0, 0.0]]);
-        req.embedding = Some(EmbeddingMeta { provider: "p".into(), model: "m".into(), dim: 2 });
+        req.embedding = Some(EmbeddingMeta {
+            provider: "p".into(),
+            model: "m".into(),
+            dim: 2,
+        });
         upsert(&mut conn, &req).unwrap();
 
-        let emb = EmbeddingMeta { provider: "p".into(), model: "m".into(), dim: 2 };
+        let emb = EmbeddingMeta {
+            provider: "p".into(),
+            model: "m".into(),
+            dim: 2,
+        };
         let hits = search_full(&conn, "", Some(&[1.0, 0.0]), Some(&emb), 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].best_chunk_heading, "Target"); // chunk 1 won the max-cosine
@@ -940,7 +1022,11 @@ mod tests {
     #[test]
     fn full_search_degrades_to_lite_without_a_query_vector() {
         let mut conn = mem();
-        upsert(&mut conn, &sync_req("x.md", "X", "s", vec![chunk(0, "", 0, "findme please")])).unwrap();
+        upsert(
+            &mut conn,
+            &sync_req("x.md", "X", "s", vec![chunk(0, "", 0, "findme please")]),
+        )
+        .unwrap();
         let hits = search_full(&conn, "findme", None, None, 10).unwrap();
         assert_eq!(hits.len(), 1);
     }
@@ -950,12 +1036,20 @@ mod tests {
         let mut conn = mem();
         let mut a = sync_req("a.md", "A", "s1", vec![chunk(0, "", 0, "x")]);
         a.vectors = Some(vec![vec![1.0, 0.0]]);
-        a.embedding = Some(EmbeddingMeta { provider: "p".into(), model: "m1".into(), dim: 2 });
+        a.embedding = Some(EmbeddingMeta {
+            provider: "p".into(),
+            model: "m1".into(),
+            dim: 2,
+        });
         upsert(&mut conn, &a).unwrap();
 
         let mut b = sync_req("b.md", "B", "s1", vec![chunk(0, "", 0, "y")]);
         b.vectors = Some(vec![vec![1.0, 0.0, 0.0]]);
-        b.embedding = Some(EmbeddingMeta { provider: "p".into(), model: "m2".into(), dim: 3 });
+        b.embedding = Some(EmbeddingMeta {
+            provider: "p".into(),
+            model: "m2".into(),
+            dim: 3,
+        });
         let err = upsert(&mut conn, &b).unwrap_err();
         assert!(err.contains("embedding-mismatch"), "got: {err}");
     }

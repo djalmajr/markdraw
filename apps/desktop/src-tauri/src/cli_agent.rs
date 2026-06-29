@@ -278,7 +278,11 @@ fn common_cli_dirs() -> Vec<PathBuf> {
 fn cli_search_dirs() -> &'static [PathBuf] {
     static DIRS: OnceLock<Vec<PathBuf>> = OnceLock::new();
     DIRS.get_or_init(|| {
-        build_search_dirs(std::env::var_os("PATH"), login_shell_path(), common_cli_dirs())
+        build_search_dirs(
+            std::env::var_os("PATH"),
+            login_shell_path(),
+            common_cli_dirs(),
+        )
     })
 }
 
@@ -431,7 +435,12 @@ fn build_probe_command(provider: &str, binary: &str) -> Result<Command, String> 
             // and a GUI launch's cwd rarely is one — so the subscription probe
             // failed for every user not sitting in a trusted repo. We use Codex
             // purely as a chat backend (no repo edits), so opt out of the gate.
-            cmd.args(["exec", "--skip-git-repo-check", "reply with exactly: ok", "--json"]);
+            cmd.args([
+                "exec",
+                "--skip-git-repo-check",
+                "reply with exactly: ok",
+                "--json",
+            ]);
         }
         "grok-cli" => {
             cmd.args([
@@ -489,7 +498,10 @@ fn build_chat_command(request: &CliChatRequest, binary: &str) -> Result<Command,
         "codex-cli" => {
             // See build_probe_command: opt out of the Git-repo trust gate so a
             // GUI launch (cwd not a trusted repo) doesn't abort every turn.
-            cmd.arg("exec").arg("--skip-git-repo-check").arg(&prompt).arg("--json");
+            cmd.arg("exec")
+                .arg("--skip-git-repo-check")
+                .arg(&prompt)
+                .arg("--json");
             cmd.arg("-m").arg(&request.model);
         }
         "grok-cli" => {
@@ -583,15 +595,15 @@ pub async fn cli_probe_subscription(request: CliProbeRequest) -> Result<CliProbe
     // unauthenticated / hung binary must not leave the Settings "Continue"
     // button (and refreshConnectedProviders) stuck forever. kill_on_drop reaps
     // the child when this future is dropped on timeout.
-    let output = match tokio::time::timeout(
-        std::time::Duration::from_secs(25),
-        cmd.output(),
-    )
-    .await
+    let output = match tokio::time::timeout(std::time::Duration::from_secs(25), cmd.output()).await
     {
         Ok(Ok(o)) => o,
         Ok(Err(e)) => {
-            return Ok(CliProbeResult { ok: false, path: Some(path), error: Some(e.to_string()) });
+            return Ok(CliProbeResult {
+                ok: false,
+                path: Some(path),
+                error: Some(e.to_string()),
+            });
         }
         Err(_) => {
             return Ok(CliProbeResult {
@@ -633,9 +645,7 @@ pub async fn cli_probe_subscription(request: CliProbeRequest) -> Result<CliProbe
             .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
             .any(|v| {
                 v.get("type").and_then(|t| t.as_str()) == Some("item.completed")
-                    && v.pointer("/item/type")
-                        .and_then(|t| t.as_str())
-                        == Some("agent_message")
+                    && v.pointer("/item/type").and_then(|t| t.as_str()) == Some("agent_message")
             }),
         // Grok `--output-format json` prints a single object: a success carries
         // `text`/`stopReason`; a failure is `{"type":"error",...}`. Parse the
@@ -666,7 +676,10 @@ pub async fn cli_probe_subscription(request: CliProbeRequest) -> Result<CliProbe
     let error = if ok {
         None
     } else if stdout.trim().is_empty() {
-        Some("The CLI produced no output — make sure it's installed and signed in, then try again.".to_string())
+        Some(
+            "The CLI produced no output — make sure it's installed and signed in, then try again."
+                .to_string(),
+        )
     } else {
         Some("CLI ran but subscription auth did not succeed".to_string())
     };
@@ -690,7 +703,11 @@ pub async fn cli_chat_stream(
     let child = cmd.spawn().map_err(|e| e.to_string())?;
 
     let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-    state.inflight.lock().await.insert(call_id.clone(), cancel_tx);
+    state
+        .inflight
+        .lock()
+        .await
+        .insert(call_id.clone(), cancel_tx);
 
     let result = read_stdout_lines(child, &on_event, cancel_rx).await;
     state.inflight.lock().await.remove(&call_id);
@@ -903,7 +920,10 @@ mod tests {
                 .map(|v| v.to_string_lossy().into_owned())
                 .unwrap_or_default();
             // cli_path_env() always includes the common-dir fallback.
-            assert!(path.contains("/opt/homebrew/bin"), "child PATH lacks augmented dirs: {path}");
+            assert!(
+                path.contains("/opt/homebrew/bin"),
+                "child PATH lacks augmented dirs: {path}"
+            );
         }
     }
 
@@ -927,20 +947,32 @@ mod tests {
         write_exec(&cli, "#!/usr/bin/env fakeinterp\n");
         // PATH points only at our dir: the shebang's `env fakeinterp` must resolve
         // through it for the CLI to launch at all.
-        let out = std::process::Command::new(&cli).env("PATH", &dir).output().unwrap();
+        let out = std::process::Command::new(&cli)
+            .env("PATH", &dir)
+            .output()
+            .unwrap();
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "INTERP_OK");
     }
 
     #[test]
     fn parse_path_after_marker_ignores_profile_banner() {
         assert_eq!(
-            parse_path_after_marker("Welcome to your shell!\n__MDPATH__/opt/homebrew/bin:/usr/bin\n"),
+            parse_path_after_marker(
+                "Welcome to your shell!\n__MDPATH__/opt/homebrew/bin:/usr/bin\n"
+            ),
             Some("/opt/homebrew/bin:/usr/bin".to_string())
         );
         // Banner with no trailing newline before the marker.
-        assert_eq!(parse_path_after_marker("noise__MDPATH__/a:/b"), Some("/a:/b".to_string()));
+        assert_eq!(
+            parse_path_after_marker("noise__MDPATH__/a:/b"),
+            Some("/a:/b".to_string())
+        );
     }
 
     #[test]
@@ -956,9 +988,15 @@ mod tests {
         let path = cli_path_env_for("/custom/nvm/bin/claude");
         let path = path.to_string_lossy();
         // The binary's own dir leads so a co-located interpreter (env node) resolves.
-        assert!(path.starts_with("/custom/nvm/bin"), "binary dir must lead: {path}");
+        assert!(
+            path.starts_with("/custom/nvm/bin"),
+            "binary dir must lead: {path}"
+        );
         // The merged search dirs still follow.
-        assert!(path.contains("/opt/homebrew/bin"), "search dirs must follow: {path}");
+        assert!(
+            path.contains("/opt/homebrew/bin"),
+            "search dirs must follow: {path}"
+        );
     }
 
     #[test]
@@ -966,7 +1004,10 @@ mod tests {
         // A bare program name has no parent dir to prepend — must not inject an
         // empty (cwd) PATH entry.
         let path = cli_path_env_for("codex");
-        assert!(!path.to_string_lossy().starts_with(':'), "no empty lead entry: {path:?}");
+        assert!(
+            !path.to_string_lossy().starts_with(':'),
+            "no empty lead entry: {path:?}"
+        );
     }
 
     #[test]

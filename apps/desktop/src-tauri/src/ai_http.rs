@@ -132,7 +132,11 @@ pub async fn ai_http_stream(
     on_event: Channel<StreamEvent>,
 ) -> Result<(), String> {
     let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-    state.inflight.lock().await.insert(call_id.clone(), cancel_tx);
+    state
+        .inflight
+        .lock()
+        .await
+        .insert(call_id.clone(), cancel_tx);
 
     let result = run_stream(request, &on_event, cancel_rx).await;
 

@@ -9,6 +9,7 @@ import {
 import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@markdraw/core/types.ts";
 import { createPaneManager, type PaneManager } from "./create-pane-manager.ts";
 import { createAiChatSessions } from "./create-ai-chat-sessions.ts";
+import type { ChatTurn } from "./create-ai-chat-store.ts";
 import { createAiInlineStore } from "./create-ai-inline-store.ts";
 import {
   type AiContextItem,
@@ -174,6 +175,13 @@ interface AppStateConfig {
   /** Custom instructions merged into the chat system prompt (omp#1 — e.g. the
    *  workspace's `.markdraw/instructions.md`). Read fresh per send. */
   getCustomInstructions?: () => CustomInstructions | undefined;
+  /** Optional host-built skill instructions for the current chat turn. The host
+   *  owns filesystem discovery; packages/ui only injects the returned text. */
+  getSkillContext?: (request: {
+    history: ChatTurn[];
+    mode: "build" | "plan";
+    userMessage: string;
+  }) => string | undefined;
   /** Persist a plan produced in Plan mode (the host writes it to
    *  `.markdraw/plans`). Called with the assistant's plan text. */
   onPlanComplete?: (content: string) => void;
@@ -762,7 +770,7 @@ export function createAppState(config: AppStateConfig) {
     onAssistantTurn: (content) => {
       if (aiMode() === "plan") config.onPlanComplete?.(content);
     },
-    getContext: () => {
+    getContext: (request) => {
       const items: AiContextItem[] = [];
       // The open document is implicit context (the active-file chip) unless the
       // user dismissed it — include its CURRENT editor content so a plain
@@ -785,7 +793,13 @@ export function createAppState(config: AppStateConfig) {
         if (active && item.kind === "file" && item.path === active.path) continue;
         items.push(item);
       }
-      return buildContextPreamble(items);
+      const attachedContext = buildContextPreamble(items);
+      const skillContext = config.getSkillContext?.({
+        history: request.history,
+        mode: aiMode(),
+        userMessage: request.userMessage,
+      });
+      return [skillContext, attachedContext].filter(Boolean).join("\n\n") || undefined;
     },
     // Engine-level approval (F3): the host's Accept/Reject gate rides the
     // ChatOptions instead of pre-wrapping every tool.

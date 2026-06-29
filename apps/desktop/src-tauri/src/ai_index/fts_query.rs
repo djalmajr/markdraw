@@ -162,7 +162,10 @@ mod tests {
     #[test]
     fn quoted_phrase_query_is_not_or_joined() {
         let q = prepare_fts5_query("\"exact phrase\" baz");
-        assert!(!q.contains(" OR "), "quoted-phrase query must not be OR-joined; got {q}");
+        assert!(
+            !q.contains(" OR "),
+            "quoted-phrase query must not be OR-joined; got {q}"
+        );
     }
 
     #[test]

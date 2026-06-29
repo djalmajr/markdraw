@@ -339,7 +339,7 @@ export function Toolbar(props: ToolbarProps) {
             {(useLocale(), m.menu_settings())}
             {/* Resolved through the keybindings catalog (not hardcoded) so a
                 user override shows here too — ⌘, on macOS, Ctrl+, elsewhere. */}
-            <kbd class="ml-auto pl-4 text-[10px] opacity-60">{settingsShortcutHint()}</kbd>
+            <kbd class="menu-shortcut-kbd ml-auto">{settingsShortcutHint()}</kbd>
           </DropdownMenuItem>
         </Show>
         <Show when={props.hasFile && props.onExportPdf}>

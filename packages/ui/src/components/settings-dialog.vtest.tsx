@@ -38,7 +38,7 @@ function setup(overrides: Record<string, unknown> = {}) {
 describe("SettingsDialog", () => {
   it("renders the vertical nav and opens on the AI section (Manage models)", () => {
     const { baseElement } = setup();
-    expect(baseElement.querySelectorAll('[role="tab"]').length).toBe(7);
+    expect(baseElement.querySelectorAll('[role="tab"]').length).toBe(8);
     // The AI section opens on the OpenCode-style Manage models view.
     expect(baseElement.querySelector(".settings-models-search")).not.toBeNull();
     expect(baseElement.querySelector(".settings-provider-list")).toBeNull();
@@ -276,6 +276,62 @@ describe("SettingsDialog", () => {
     fireEvent.click(mcpTab!);
   }
 
+  function openSkillsSection(baseElement: HTMLElement) {
+    const skillsTab = [...baseElement.querySelectorAll('[role="tab"]')].find((t) =>
+      /Skills/i.test(t.textContent ?? ""),
+    );
+    fireEvent.click(skillsTab!);
+  }
+
+  it("renders discovered skills and opens a detail sub-page", () => {
+    const longDescription =
+      "Review changes before shipping with enough detail to require opening the skill detail page.";
+    const { baseElement } = setup({
+      skills: [
+        {
+          id: "skill:review",
+          name: "review",
+          description: longDescription,
+          slashCommands: ["work-review"],
+          scope: "project",
+          sources: [
+            {
+              tool: "claude",
+              scope: "global",
+              path: "/home/.claude/skills/review/SKILL.md",
+              active: false,
+            },
+            {
+              tool: "codex",
+              scope: "project",
+              path: "/repo/.codex/skills/review/SKILL.md",
+              active: true,
+            },
+          ],
+        },
+      ],
+    });
+    openSkillsSection(baseElement);
+    expect(baseElement.textContent).toContain("Agent skills");
+    expect(baseElement.textContent).not.toContain("settings_skills_title");
+    expect(baseElement.textContent).not.toContain("settings_skills_desc");
+    const card = baseElement.querySelector(".settings-mcp-card") as HTMLElement;
+    expect(card.textContent).toContain("review");
+    expect(card.textContent).toContain(longDescription);
+    expect(card.textContent).toContain("Preferred source Codex");
+    expect(baseElement.querySelectorAll(".settings-mcp-tool-chip")).toHaveLength(2);
+    expect(card.tagName).toBe("BUTTON");
+
+    fireEvent.click(card);
+    expect(baseElement.textContent).toContain(longDescription);
+    expect(baseElement.textContent).toContain("Slash commands");
+    expect(baseElement.textContent).toContain("/work-review");
+    expect(baseElement.textContent).toContain("/repo/.codex/skills/review/SKILL.md");
+
+    fireEvent.click(baseElement.querySelector(".settings-back") as HTMLElement);
+    expect(baseElement.textContent).toContain("Agent skills");
+  });
+
   function openAddForm(baseElement: HTMLElement) {
     fireEvent.click(baseElement.querySelector(".settings-mcp-new-row") as HTMLElement);
   }
@@ -387,6 +443,31 @@ describe("SettingsDialog", () => {
     ) as HTMLElement;
     fireEvent.click(removeBtn);
     expect(onRemoveMcpServer).toHaveBeenCalledWith("memory");
+  });
+
+  it("Authorize on a discovered MCP server calls onAuthorizeMcpServer with its id", () => {
+    const onAuthorizeMcpServer = vi.fn();
+    const { baseElement } = setup({
+      onAuthorizeMcpServer,
+      mcpServers: [
+        {
+          id: "discovered:memory",
+          name: "memory-personal",
+          transport: "http",
+          enabled: true,
+          connected: false,
+          requiresAuth: true,
+          url: "https://memory.example/mcp",
+          discovered: { tools: ["claude", "codex"], scope: "global" },
+        },
+      ],
+    });
+    openMcpSection(baseElement);
+    const authorize = [...baseElement.querySelectorAll("button")].find((button) =>
+      /Authorize/.test(button.textContent ?? ""),
+    ) as HTMLElement;
+    fireEvent.click(authorize);
+    expect(onAuthorizeMcpServer).toHaveBeenCalledWith("discovered:memory");
   });
 
   it("a stdio server card renders the name and the mono command subtitle", () => {

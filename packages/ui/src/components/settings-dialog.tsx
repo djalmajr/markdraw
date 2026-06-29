@@ -17,6 +17,7 @@ import IconChevronRight from "~icons/lucide/chevron-right";
 import IconPlus from "~icons/lucide/plus";
 import IconSparkles from "~icons/lucide/sparkles";
 import IconPlug from "~icons/lucide/plug";
+import IconBookOpen from "~icons/lucide/book-open";
 import IconLayers from "~icons/lucide/layers";
 import IconPencil from "~icons/lucide/pencil";
 import IconPalette from "~icons/lucide/palette";
@@ -63,11 +64,16 @@ import { ModelPicker } from "./model-picker.tsx";
 import { confirm } from "./confirm-dialog.tsx";
 
 const messages = m as unknown as Record<string, () => string>;
-const label = (key: string): string => messages[key]?.() ?? key;
+const SETTINGS_LABEL_FALLBACKS: Record<string, string> = {
+  settings_skills_slash_commands: "Slash commands",
+  settings_skills_sources: "Sources",
+};
+const label = (key: string): string => messages[key]?.() ?? SETTINGS_LABEL_FALLBACKS[key] ?? key;
 
 export type SettingsSection =
   | "ai"
   | "mcp"
+  | "skills"
   | "indexing"
   | "editor"
   | "appearance"
@@ -100,6 +106,20 @@ export interface SettingsMcpServer {
   discovered?: { tools: string[]; scope: string };
   /** A discovered project-scoped server awaiting the user's approval to connect. */
   pendingApproval?: boolean;
+}
+
+export interface SettingsSkill {
+  id: string;
+  name: string;
+  description?: string;
+  slashCommands?: string[];
+  scope: "global" | "project";
+  sources: Array<{
+    tool: "claude" | "codex" | "opencode";
+    scope: "global" | "project";
+    path: string;
+    active: boolean;
+  }>;
 }
 
 export interface SaveMcpServerInput {
@@ -191,6 +211,8 @@ export interface SettingsDialogProps {
   platform?: Platform;
   /** Configured MCP servers with live connection/tool status. */
   mcpServers?: SettingsMcpServer[];
+  /** Auto-discovered agent skills from Claude/Codex/OpenCode. Read-only. */
+  skills?: SettingsSkill[];
   /** Persist (add or update) an MCP server. */
   onSaveMcpServer?: (server: SaveMcpServerInput) => void | Promise<void>;
   /** Remove an MCP server by id. */
@@ -247,12 +269,18 @@ const PRIVACY_POLICY_URL = "https://markdraw.app/privacy";
 const NAV: ReadonlyArray<{ id: SettingsSection; key: string; icon: () => JSX.Element }> = [
   { id: "ai", key: "settings_nav_ai", icon: () => <IconSparkles width={15} height={15} /> },
   { id: "mcp", key: "settings_nav_mcp", icon: () => <IconPlug width={15} height={15} /> },
+  { id: "skills", key: "settings_nav_skills", icon: () => <IconBookOpen width={15} height={15} /> },
   { id: "indexing", key: "settings_nav_indexing", icon: () => <IconLayers width={15} height={15} /> },
   { id: "editor", key: "settings_nav_editor", icon: () => <IconPencil width={15} height={15} /> },
   { id: "appearance", key: "settings_nav_appearance", icon: () => <IconPalette width={15} height={15} /> },
   { id: "keybindings", key: "settings_nav_keybindings", icon: () => <IconKeyboard width={15} height={15} /> },
   { id: "about", key: "settings_nav_about", icon: () => <IconInfo width={15} height={15} /> },
 ];
+
+function navLabel(key: string): string {
+  if (key === "settings_nav_skills") return m.settings_nav_skills();
+  return label(key);
+}
 
 /** Discreet, informational breadcrumb shown ABOVE an AI sub-page's title — the
  *  ancestor trail that led here (e.g. "Manage models › Connect provider"), so
@@ -312,7 +340,7 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                   onClick={() => setSection(item.id)}
                 >
                   {item.icon()}
-                  <span>{(useLocale(), label(item.key))}</span>
+                  <span>{(useLocale(), navLabel(item.key))}</span>
                 </button>
               )}
             </For>
@@ -324,6 +352,9 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
               </Match>
               <Match when={section() === "mcp"}>
                 <McpSection {...props} />
+              </Match>
+              <Match when={section() === "skills"}>
+                <SkillsSection {...props} />
               </Match>
               <Match when={section() === "indexing"}>
                 <IndexingSection {...props} />
@@ -1078,6 +1109,145 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
   );
 }
 
+function capitalizeTool(tool: string): string {
+  return tool === "opencode" ? "OpenCode" : tool.charAt(0).toUpperCase() + tool.slice(1);
+}
+
+function scopeLabel(scope: "global" | "project"): string {
+  return scope === "global"
+    ? label("settings_mcp_scope_global")
+    : label("settings_mcp_scope_project");
+}
+
+function SkillCard(props: { skill: SettingsSkill; onOpen: () => void }): JSX.Element {
+  const active = createMemo(() => props.skill.sources.find((s) => s.active) ?? props.skill.sources[0]);
+  const sourceSummary = createMemo(() => {
+    const source = active();
+    if (!source) return "";
+    return `${m.settings_skills_preferred_source()} ${capitalizeTool(source.tool)} · ${scopeLabel(source.scope)}`;
+  });
+
+  return (
+    <button type="button" class="settings-mcp-card settings-skill-card" onClick={props.onOpen}>
+      <div class="settings-mcp-card-header">
+        <span class="settings-mcp-avatar" aria-hidden="true">
+          {props.skill.name.charAt(0).toUpperCase()}
+        </span>
+        <div class="settings-mcp-card-info">
+          <span class="settings-mcp-card-name">{props.skill.name}</span>
+          <Show when={props.skill.description}>
+            <span class="settings-skill-description-preview">{props.skill.description}</span>
+          </Show>
+        </div>
+        <IconChevronRight width={14} height={14} class="settings-skill-card-chevron" aria-hidden="true" />
+      </div>
+      <Show when={sourceSummary()}>
+        <div class="settings-mcp-badge">{(useLocale(), sourceSummary())}</div>
+      </Show>
+      <div class="settings-mcp-tool-chips">
+        <For each={props.skill.sources}>
+          {(source) => (
+            <span
+              class="settings-mcp-tool-chip"
+              title={source.path}
+            >
+              {capitalizeTool(source.tool)} · {scopeLabel(source.scope)}
+            </span>
+          )}
+        </For>
+      </div>
+    </button>
+  );
+}
+
+function SkillDetail(props: { skill: SettingsSkill; onBack: () => void }): JSX.Element {
+  const active = createMemo(() => props.skill.sources.find((s) => s.active) ?? props.skill.sources[0]);
+  return (
+    <div class="settings-section">
+      <SettingsBreadcrumb segments={[(useLocale(), m.settings_nav_skills())]} />
+      <div class="settings-subpage-header">
+        <button
+          type="button"
+          class="settings-back"
+          aria-label={(useLocale(), label("settings_ai_back"))}
+          onClick={props.onBack}
+        >
+          <IconArrowLeft width={14} height={14} />
+        </button>
+        <h3 class="settings-h3" style={{ margin: "0" }}>{props.skill.name}</h3>
+      </div>
+
+      <Show when={props.skill.description}>
+        <p class="settings-skill-description">{props.skill.description}</p>
+      </Show>
+
+      <Show when={props.skill.slashCommands?.length}>
+        <div class="settings-skill-detail-block">
+          <div class="settings-label">{(useLocale(), label("settings_skills_slash_commands"))}</div>
+          <div class="settings-mcp-tool-chips">
+            <For each={props.skill.slashCommands}>
+              {(command) => <span class="settings-mcp-tool-chip">/{command}</span>}
+            </For>
+          </div>
+        </div>
+      </Show>
+
+      <div class="settings-skill-detail-block">
+        <div class="settings-label">{(useLocale(), label("settings_skills_sources"))}</div>
+        <div class="settings-skill-source-list">
+          <For each={props.skill.sources}>
+            {(source) => (
+              <div
+                class="settings-skill-source-row"
+                classList={{ "settings-skill-source-row-active": source === active() }}
+              >
+                <span class="settings-mcp-tool-chip">
+                  {capitalizeTool(source.tool)} · {scopeLabel(source.scope)}
+                </span>
+                <span class="settings-skill-source-path" title={source.path}>
+                  {source.path}
+                </span>
+              </div>
+            )}
+          </For>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SkillsSection(props: SettingsDialogProps): JSX.Element {
+  const skills = createMemo(() => props.skills ?? []);
+  const [selectedSkillId, setSelectedSkillId] = createSignal<string | null>(null);
+  const selectedSkill = createMemo(() => skills().find((skill) => skill.id === selectedSkillId()) ?? null);
+  return (
+    <Show
+      when={selectedSkill()}
+      keyed
+      fallback={
+        <div class="settings-section">
+          <h3 class="settings-h3">{(useLocale(), m.settings_skills_title())}</h3>
+          <p class="settings-prose" style={{ margin: "0 0 6px" }}>
+            {(useLocale(), m.settings_skills_desc())}
+          </p>
+          <Show
+            when={skills().length > 0}
+            fallback={<p class="settings-prose">{(useLocale(), m.settings_skills_empty())}</p>}
+          >
+            <div class="settings-mcp-list">
+              <For each={skills()}>
+                {(skill) => <SkillCard skill={skill} onOpen={() => setSelectedSkillId(skill.id)} />}
+              </For>
+            </div>
+          </Show>
+        </div>
+      }
+    >
+      {(skill) => <SkillDetail skill={skill} onBack={() => setSelectedSkillId(null)} />}
+    </Show>
+  );
+}
+
 // Tool chips above this count collapse behind a "Show more (N)" toggle, so a
 // large server (dozens of tools) doesn't dominate the settings list.
 const MCP_TOOLS_VISIBLE = 6;
@@ -1613,6 +1783,7 @@ function IndexingSection(props: SettingsDialogProps): JSX.Element {
             groups={embeddingGroups()}
             current={props.embeddingSelectedModel ?? undefined}
             currentLabel={embeddingCurrentLabel()}
+            variant="form"
             onSelect={(v) => props.onSelectEmbeddingModel?.(v)}
           />
         </div>

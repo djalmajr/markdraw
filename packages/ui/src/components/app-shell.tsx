@@ -23,7 +23,7 @@ import { TocPanel } from "./toc-panel.tsx";
 import { fromRpTabDndId } from "./right-panel-tabs.tsx";
 import { BacklinksList, type BacklinkEntry } from "./backlinks-list.tsx";
 import type { SlashCommandDef } from "@markdraw/ai/slash-commands.ts";
-import { AiPanel, type AiMentionEntry } from "./ai-panel.tsx";
+import { AiPanel, type AiMentionEntry, type AiSkillEntry } from "./ai-panel.tsx";
 import { ChatHistoryMenu } from "./chat-history-menu.tsx";
 import { SelectionPopover } from "./selection-popover.tsx";
 import {
@@ -31,6 +31,7 @@ import {
   type IndexingTier,
   type SettingsAiProvider,
   type SettingsMcpServer,
+  type SettingsSkill,
 } from "./settings-dialog.tsx";
 import { QuickOpen } from "./quick-open.tsx";
 import { ShortcutsHelp } from "./shortcuts-help.tsx";
@@ -104,6 +105,11 @@ interface AppShellProps {
   /** The chat composer's "/" autocomplete just opened — the host refreshes
    *  `aiSlashCommands` so the popover lists fresh entries. */
   onAiSlashMenuOpen?: () => void;
+  /** Auto-discovered agent skills for the chat composer's "$" autocomplete. */
+  aiSkills?: AiSkillEntry[];
+  /** The chat composer's "$" autocomplete just opened — the host refreshes
+   *  `aiSkills` so the popover lists fresh entries. */
+  onAiSkillsMenuOpen?: () => void;
   /** Persist a model selection from the chat footer picker. */
   onSelectAiModel?: (modelRef: string) => void;
   /** Opens Settings → AI (AI panel empty-state CTA + the picker's "+"/"⚙"). */
@@ -124,6 +130,8 @@ interface AppShellProps {
    *  add/remove/toggle handlers. Forwarded to SettingsDialog — typed by the
    *  dialog's own contract so new fields (args/tools) can't silently drop. */
   mcpServers?: SettingsMcpServer[];
+  /** Auto-discovered agent skills shown read-only in Settings. */
+  skills?: SettingsSkill[];
   onSaveMcpServer?: (server: {
     id: string;
     name?: string;
@@ -631,10 +639,13 @@ export function AppShell(props: AppShellProps) {
           onDismissActiveFile={s.dismissActiveFileContext}
           mentionFiles={mentionFiles()}
           slashCommands={props.aiSlashCommands}
+          skills={props.aiSkills}
           onMention={(f) => props.onAddFileMention?.(f)}
           onOpenExternal={props.onOpenExternal}
+          onNavigateDocument={props.onNavigate}
           onOpenSettings={props.onOpenSettings}
           onSlashMenuOpen={props.onAiSlashMenuOpen}
+          onSkillsMenuOpen={props.onAiSkillsMenuOpen}
           mode={s.aiMode()}
           planItems={s.aiPlan()?.items}
           onClearPlan={s.clearAiPlan}
@@ -711,6 +722,7 @@ export function AppShell(props: AppShellProps) {
           onRemoveProvider={(ids) => props.onRemoveProvider?.(ids)}
           onRefreshModels={(id) => props.onRefreshModels?.(id)}
           mcpServers={props.mcpServers ?? []}
+          skills={props.skills ?? []}
           onSaveMcpServer={(s) => props.onSaveMcpServer?.(s)}
           onRemoveMcpServer={(id) => props.onRemoveMcpServer?.(id)}
           onToggleMcpServer={(id, enabled) => props.onToggleMcpServer?.(id, enabled)}

@@ -10,7 +10,7 @@ import {
   type AiContextItem,
   type AiInlineReference,
 } from "../composables/ai-context.ts";
-import { AiPanel, type AiMentionEntry } from "./ai-panel.tsx";
+import { AiPanel, type AiMentionEntry, type AiSkillEntry } from "./ai-panel.tsx";
 import { AiMessage } from "./ai-message.tsx";
 
 afterEach(cleanup);
@@ -317,6 +317,55 @@ describe("AiPanel", () => {
     const notCancelled = fireEvent.click(links[0]!);
     expect(notCancelled).toBe(false);
     expect(onOpenExternal).toHaveBeenCalledWith("https://example.com");
+  });
+
+  it("routes document links from chat replies through workspace navigation", () => {
+    const store = createAiChatStore({
+      getProvider: () => null,
+      initialMessages: [
+        { role: "assistant", content: "see [doc](docs/architecture.adoc:18)" },
+      ],
+    });
+    const onNavigateDocument = vi.fn();
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        providerLabel="Mock"
+        onNavigateDocument={onNavigateDocument}
+      />
+    ));
+
+    const link = baseElement.querySelector(".ai-markdown a")!;
+    const notCancelled = fireEvent.click(link);
+    expect(notCancelled).toBe(false);
+    expect(onNavigateDocument).toHaveBeenCalledWith("docs/architecture.adoc", null);
+  });
+
+  it("routes absolute document links from chat replies through workspace navigation", () => {
+    const store = createAiChatStore({
+      getProvider: () => null,
+      initialMessages: [
+        {
+          role: "assistant",
+          content: "see [doc](/Users/djalmajr/Developer/djalmajr/markdraw/docs/README.md)",
+        },
+      ],
+    });
+    const onNavigateDocument = vi.fn();
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        providerLabel="Mock"
+        onNavigateDocument={onNavigateDocument}
+      />
+    ));
+
+    const link = baseElement.querySelector(".ai-markdown a")!;
+    fireEvent.click(link);
+    expect(onNavigateDocument).toHaveBeenCalledWith(
+      "/Users/djalmajr/Developer/djalmajr/markdraw/docs/README.md",
+      null,
+    );
   });
 
   it("copies the message content to the clipboard via the hover copy action", async () => {
@@ -1365,6 +1414,101 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     typeText(baseElement, "@flow.excalidraw:sel ");
     expect(onRemoveContext).toHaveBeenCalledTimes(1);
     expect(onRemoveContext).toHaveBeenCalledWith("excalidraw-selection:flow.excalidraw:e2");
+  });
+});
+
+describe("AiPanel — skill references", () => {
+  const SKILLS: AiSkillEntry[] = [
+    {
+      description: "Create interactive UI prototypes",
+      id: "skill:agile-proto",
+      name: "agile-proto",
+      scope: "global",
+    },
+    {
+      description: "Use OpenAI documentation",
+      id: "skill:openai-docs",
+      name: "openai-docs",
+      scope: "project",
+    },
+    {
+      description: "Manages shadcn components",
+      id: "skill:shadcn",
+      name: "build-web-apps:shadcn",
+      scope: "global",
+    },
+    {
+      description: "Try to refute a claim",
+      id: "skill:work-refute",
+      name: "work-refute",
+      scope: "global",
+      slashCommands: ["work-refute"],
+    },
+  ];
+
+  function typeIntoComposer(baseElement: HTMLElement, value: string): HTMLTextAreaElement {
+    const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    ta.value = value;
+    ta.setSelectionRange(value.length, value.length);
+    fireEvent.input(ta);
+    return ta;
+  }
+
+  it("shows the '$' skill list, filters by token, and inserts '$name ' on click", () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} skills={SKILLS} />);
+    typeIntoComposer(baseElement, "use $proto");
+    const items = baseElement.querySelectorAll(".ai-skill-item");
+    expect(items).toHaveLength(1);
+    expect(items[0]!.textContent).toContain("$agile-proto");
+    expect(items[0]!.textContent).toContain("Create interactive UI prototypes");
+    fireEvent.mouseDown(items[0]!);
+    const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    expect(ta.value).toBe("use $agile-proto ");
+    expect(baseElement.querySelectorAll(".ai-skill-item")).toHaveLength(0);
+  });
+
+  it("matches namespaced skills by suffix and inserts the full invocation token", () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} skills={SKILLS} />);
+    const ta = typeIntoComposer(baseElement, "$shadcn");
+    expect(baseElement.querySelectorAll(".ai-skill-item")).toHaveLength(1);
+    fireEvent.keyDown(ta, { key: "Enter" });
+    expect(ta.value).toBe("$build-web-apps:shadcn ");
+    expect(store.messages()).toHaveLength(0);
+  });
+
+  it("sends '$skill' as raw text so the orchestrator can inject the skill context", async () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} skills={SKILLS} />);
+    const ta = typeIntoComposer(baseElement, "$openai-docs ");
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => {
+      expect(store.messages()[0]?.content).toBe("$openai-docs");
+    });
+  });
+
+  it("shows declared skill slash commands in the '/' list and inserts '/name '", () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} skills={SKILLS} />);
+    const ta = typeIntoComposer(baseElement, "/work");
+    const items = baseElement.querySelectorAll(".ai-slash-item");
+    expect(items).toHaveLength(1);
+    expect(items[0]!.textContent).toContain("/work-refute");
+    expect(items[0]!.textContent).toContain("skill");
+    fireEvent.keyDown(ta, { key: "Enter" });
+    expect(ta.value).toBe("/work-refute ");
+    expect(store.messages()).toHaveLength(0);
+  });
+
+  it("sends a skill slash invocation as raw text for the orchestrator", async () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} skills={SKILLS} />);
+    const ta = typeIntoComposer(baseElement, "/work-refute check this plan");
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => {
+      expect(store.messages()[0]?.content).toBe("/work-refute check this plan");
+    });
   });
 });
 

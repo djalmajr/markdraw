@@ -30,6 +30,12 @@ use ai_mcp::{
 mod mcp_discovery;
 use mcp_discovery::mcp_discover;
 
+// Discovers `SKILL.md` files that other agent tools expose automatically. Like
+// MCP discovery, Rust only reads + normalizes; the JS host dedupes and decides
+// when to inject skill instructions into chat context.
+mod skill_discovery;
+use skill_discovery::skills_discover;
+
 // Streaming provider HTTP — Rust-side POST + SSE line framing over an ipc
 // Channel (tauri-plugin-http buffers whole responses, so SSE never streamed).
 mod ai_http;
@@ -129,7 +135,9 @@ pub fn build_gitignore_matcher(base: &Path) -> ignore::gitignore::Gitignore {
         // by fixing the .gitignore.
         let _ = builder.add(gitignore_path);
     }
-    builder.build().unwrap_or_else(|_| ignore::gitignore::Gitignore::empty())
+    builder
+        .build()
+        .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty())
 }
 
 pub fn read_dir_recursive(
@@ -176,7 +184,8 @@ pub fn read_dir_recursive(
                     continue;
                 }
             }
-            let children = read_dir_recursive(&entry_path, base, include_hidden_entries, ignore_matcher)?;
+            let children =
+                read_dir_recursive(&entry_path, base, include_hidden_entries, ignore_matcher)?;
             entries.push(DirEntry {
                 name,
                 kind: "directory".into(),
@@ -297,7 +306,10 @@ async fn read_file_relative(root: String, relative_path: String) -> Result<Strin
 }
 
 #[tauri::command]
-async fn read_files_relative(root: String, paths: Vec<String>) -> Result<std::collections::HashMap<String, String>, String> {
+async fn read_files_relative(
+    root: String,
+    paths: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
     Ok(read_files_relative_impl(&PathBuf::from(&root), &paths))
 }
 
@@ -543,11 +555,7 @@ pub use pure_helpers::resolve_within_root;
 
 /// Move a file inside a workspace root, validating that both endpoints stay
 /// inside `root` and refusing to clobber an existing destination.
-pub fn rename_file_impl(
-    root: &Path,
-    old_relative: &str,
-    new_relative: &str,
-) -> Result<(), String> {
+pub fn rename_file_impl(root: &Path, old_relative: &str, new_relative: &str) -> Result<(), String> {
     let from = root.join(old_relative);
     let to = root.join(new_relative);
 
@@ -557,7 +565,9 @@ pub fn rename_file_impl(
         return Err("rename source escapes workspace root".into());
     }
 
-    let to_parent = to.parent().ok_or_else(|| "invalid destination".to_string())?;
+    let to_parent = to
+        .parent()
+        .ok_or_else(|| "invalid destination".to_string())?;
     let to_parent_canon = std::fs::canonicalize(to_parent).map_err(|e| e.to_string())?;
     if !to_parent_canon.starts_with(&root_canon) {
         return Err("rename destination escapes workspace root".into());
@@ -588,7 +598,9 @@ pub fn ensure_parent_within_root(root: &Path, relative: &str) -> Result<PathBuf,
     }
     let root_canon = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
     let target = root_canon.join(rel);
-    let parent = target.parent().ok_or_else(|| "invalid destination".to_string())?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| "invalid destination".to_string())?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let parent_canon = std::fs::canonicalize(parent).map_err(|e| e.to_string())?;
     if !parent_canon.starts_with(&root_canon) {
@@ -665,7 +677,9 @@ pub fn copy_path_impl(
     if from_canon.is_dir() {
         copy_dir_recursive(&from_canon, &to)
     } else {
-        std::fs::copy(&from_canon, &to).map(|_| ()).map_err(|e| e.to_string())
+        std::fs::copy(&from_canon, &to)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -730,9 +744,7 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
-struct WatcherHolder(
-    Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>>,
-);
+struct WatcherHolder(Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>>);
 
 struct DirWatcherHolder(
     Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>>,
@@ -751,15 +763,18 @@ pub fn make_watcher<F>(
 where
     F: Fn(Vec<String>) + Send + 'static,
 {
-    let mut debouncer = new_debouncer(debounce, move |events: Result<Vec<DebouncedEvent>, notify::Error>| {
-        if let Ok(events) = events {
-            let changed: Vec<String> = events
-                .iter()
-                .map(|e| e.path.to_string_lossy().replace('\\', "/"))
-                .collect();
-            on_change(changed);
-        }
-    })
+    let mut debouncer = new_debouncer(
+        debounce,
+        move |events: Result<Vec<DebouncedEvent>, notify::Error>| {
+            if let Ok(events) = events {
+                let changed: Vec<String> = events
+                    .iter()
+                    .map(|e| e.path.to_string_lossy().replace('\\', "/"))
+                    .collect();
+                on_change(changed);
+            }
+        },
+    )
     .map_err(|e| e.to_string())?;
 
     let mode = if recursive {
@@ -785,14 +800,9 @@ async fn watch_paths<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> Resul
     }
 
     let app_clone = app.clone();
-    let debouncer = make_watcher(
-        &paths,
-        Duration::from_millis(500),
-        false,
-        move |changed| {
-            let _ = app_clone.emit("fs-change", WatchEvent { paths: changed });
-        },
-    )?;
+    let debouncer = make_watcher(&paths, Duration::from_millis(500), false, move |changed| {
+        let _ = app_clone.emit("fs-change", WatchEvent { paths: changed });
+    })?;
 
     // Store to prevent drop
     if let Some(state) = app.try_state::<WatcherHolder>() {
@@ -820,14 +830,9 @@ async fn watch_dirs<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> Result
     }
 
     let app_clone = app.clone();
-    let debouncer = make_watcher(
-        &paths,
-        Duration::from_millis(800),
-        true,
-        move |changed| {
-            let _ = app_clone.emit("fs-tree-change", WatchEvent { paths: changed });
-        },
-    )?;
+    let debouncer = make_watcher(&paths, Duration::from_millis(800), true, move |changed| {
+        let _ = app_clone.emit("fs-tree-change", WatchEvent { paths: changed });
+    })?;
 
     if let Some(state) = app.try_state::<DirWatcherHolder>() {
         let mut lock = state.0.lock().map_err(|e| e.to_string())?;
@@ -865,8 +870,7 @@ mod macos_maximize {
     };
 
     unsafe impl Encode for CGPoint {
-        const ENCODING: Encoding =
-            Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
+        const ENCODING: Encoding = Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
     }
 
     unsafe impl RefEncode for CGPoint {
@@ -874,8 +878,7 @@ mod macos_maximize {
     }
 
     unsafe impl Encode for CGSize {
-        const ENCODING: Encoding =
-            Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
+        const ENCODING: Encoding = Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
     }
 
     unsafe impl RefEncode for CGSize {
@@ -929,7 +932,6 @@ mod macos_maximize {
             }
         }
     }
-
 }
 
 #[cfg(target_os = "macos")]
@@ -944,52 +946,54 @@ fn toggle_maximize_instant(webview: tauri::Webview) -> Result<(), String> {
     IS_ANIMATING.store(true, Ordering::SeqCst);
 
     webview
-        .with_webview(|wv| {
-            unsafe {
-                let ns_window: *mut objc2::runtime::AnyObject = wv.ns_window().cast();
-                let current_frame: CGRect = objc2::msg_send![ns_window, frame];
+        .with_webview(|wv| unsafe {
+            let ns_window: *mut objc2::runtime::AnyObject = wv.ns_window().cast();
+            let current_frame: CGRect = objc2::msg_send![ns_window, frame];
 
-                let target_frame = {
-                    let mut saved = SAVED_FRAME.lock().unwrap();
-                    if let Some(prev_frame) = saved.take() {
-                        prev_frame
+            let target_frame = {
+                let mut saved = SAVED_FRAME.lock().unwrap();
+                if let Some(prev_frame) = saved.take() {
+                    prev_frame
+                } else {
+                    *saved = Some(current_frame);
+                    let screen: *mut objc2::runtime::AnyObject =
+                        objc2::msg_send![ns_window, screen];
+                    objc2::msg_send![screen, visibleFrame]
+                }
+            };
+
+            let _: *mut objc2::runtime::AnyObject = objc2::msg_send![ns_window, retain];
+            let ns_window_addr = ns_window as usize;
+
+            std::thread::spawn(move || {
+                let ns_window = ns_window_addr as *mut objc2::runtime::AnyObject;
+                let sleep_ms = std::time::Duration::from_millis(DURATION_MS / STEPS);
+
+                for i in 0..STEPS {
+                    let is_last = i == STEPS - 1;
+                    let frame = if is_last {
+                        target_frame
                     } else {
-                        *saved = Some(current_frame);
-                        let screen: *mut objc2::runtime::AnyObject =
-                            objc2::msg_send![ns_window, screen];
-                        objc2::msg_send![screen, visibleFrame]
+                        let t = (i + 1) as f64 / STEPS as f64;
+                        interpolate_frame(current_frame, target_frame, ease_out_cubic(t))
+                    };
+
+                    let step = Box::new(AnimStep {
+                        ns_window,
+                        frame,
+                        is_last,
+                    });
+                    dispatch_async_f(
+                        std::ptr::addr_of!(_dispatch_main_q),
+                        Box::into_raw(step) as *mut std::ffi::c_void,
+                        apply_frame,
+                    );
+
+                    if !is_last {
+                        std::thread::sleep(sleep_ms);
                     }
-                };
-
-                let _: *mut objc2::runtime::AnyObject = objc2::msg_send![ns_window, retain];
-                let ns_window_addr = ns_window as usize;
-
-                std::thread::spawn(move || {
-                    let ns_window = ns_window_addr as *mut objc2::runtime::AnyObject;
-                    let sleep_ms = std::time::Duration::from_millis(DURATION_MS / STEPS);
-
-                    for i in 0..STEPS {
-                        let is_last = i == STEPS - 1;
-                        let frame = if is_last {
-                            target_frame
-                        } else {
-                            let t = (i + 1) as f64 / STEPS as f64;
-                            interpolate_frame(current_frame, target_frame, ease_out_cubic(t))
-                        };
-
-                        let step = Box::new(AnimStep { ns_window, frame, is_last });
-                        dispatch_async_f(
-                            std::ptr::addr_of!(_dispatch_main_q),
-                            Box::into_raw(step) as *mut std::ffi::c_void,
-                            apply_frame,
-                        );
-
-                        if !is_last {
-                            std::thread::sleep(sleep_ms);
-                        }
-                    }
-                });
-            }
+                }
+            });
         })
         .map_err(|e| e.to_string())
 }
@@ -1018,7 +1022,11 @@ fn get_startup_args() -> Vec<String> {
 fn set_dock_visible(app: AppHandle, visible: bool) -> Result<(), String> {
     // Dev keeps the dock icon (never the hidden "tray"/accessory mode) so the
     // dev instance stays visible and distinct from a running prod build.
-    let visible = if cfg!(debug_assertions) { true } else { visible };
+    let visible = if cfg!(debug_assertions) {
+        true
+    } else {
+        visible
+    };
     let policy = if visible {
         tauri::ActivationPolicy::Regular
     } else {
@@ -1117,11 +1125,9 @@ pub fn run() {
                     //   (like ignoring exposé) survives the patch.
                     const FULL_SCREEN_NONE: usize = 1 << 9;
                     unsafe {
-                        let current: usize =
-                            objc2::msg_send![ns_window, collectionBehavior];
+                        let current: usize = objc2::msg_send![ns_window, collectionBehavior];
                         let next = current | FULL_SCREEN_NONE;
-                        let _: () =
-                            objc2::msg_send![ns_window, setCollectionBehavior: next];
+                        let _: () = objc2::msg_send![ns_window, setCollectionBehavior: next];
                     }
                 }
             }
@@ -1192,6 +1198,7 @@ pub fn run() {
             ai_mcp_disconnect,
             ai_mcp_list_servers,
             mcp_discover,
+            skills_discover,
             ai_mcp_list_tools,
             ai_mcp_call_tool,
             ai_mcp_cancel_call,
@@ -1335,7 +1342,10 @@ mod tests {
         fs::write(dir.path().join("src/inner/leaf.md"), b"2").unwrap();
         copy_path_impl(dir.path(), "src", dir.path(), "src-copy").unwrap();
         assert_eq!(fs::read(dir.path().join("src-copy/top.md")).unwrap(), b"1");
-        assert_eq!(fs::read(dir.path().join("src-copy/inner/leaf.md")).unwrap(), b"2");
+        assert_eq!(
+            fs::read(dir.path().join("src-copy/inner/leaf.md")).unwrap(),
+            b"2"
+        );
     }
 
     #[test]
@@ -1417,9 +1427,18 @@ mod tests {
         fs::create_dir(root.join("alpha-folder")).unwrap();
 
         let entries = read_dir_recursive(root, root, false, None).unwrap();
-        assert_eq!(names(&entries), vec!["alpha-folder", "zfolder", "apple.md", "zebra.md"]);
-        assert!(entries[0].children.is_some(), "directories should carry a children vec");
-        assert!(entries[2].children.is_none(), "files must not carry children");
+        assert_eq!(
+            names(&entries),
+            vec!["alpha-folder", "zfolder", "apple.md", "zebra.md"]
+        );
+        assert!(
+            entries[0].children.is_some(),
+            "directories should carry a children vec"
+        );
+        assert!(
+            entries[2].children.is_none(),
+            "files must not carry children"
+        );
     }
 
     #[test]
@@ -1494,8 +1513,20 @@ mod tests {
 
         let entries = read_dir_recursive(root, root, false, None).unwrap();
         let a = entries.iter().find(|e| e.name == "a").unwrap();
-        let b = a.children.as_ref().unwrap().iter().find(|e| e.name == "b").unwrap();
-        let c = b.children.as_ref().unwrap().iter().find(|e| e.name == "c").unwrap();
+        let b = a
+            .children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|e| e.name == "b")
+            .unwrap();
+        let c = b
+            .children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|e| e.name == "c")
+            .unwrap();
         let leaf = &c.children.as_ref().unwrap()[0];
         assert_eq!(leaf.kind, "file");
         assert_eq!(leaf.path, "a/b/c/leaf.md");
@@ -1518,9 +1549,19 @@ mod tests {
         let matcher = build_gitignore_matcher(root);
         let entries = read_dir_recursive(root, root, false, Some(&matcher)).unwrap();
         let entry_names = names(&entries);
-        assert!(entry_names.contains(&"README.md"), "kept entries: {:?}", entry_names);
-        assert!(!entry_names.contains(&"ignored"), "directory rule must skip the dir entry");
-        assert!(!entry_names.contains(&"debug.log"), "file rule must skip matching files");
+        assert!(
+            entry_names.contains(&"README.md"),
+            "kept entries: {:?}",
+            entry_names
+        );
+        assert!(
+            !entry_names.contains(&"ignored"),
+            "directory rule must skip the dir entry"
+        );
+        assert!(
+            !entry_names.contains(&"debug.log"),
+            "file rule must skip matching files"
+        );
     }
 
     #[test]
@@ -1675,7 +1716,10 @@ mod tests {
         );
         let batches = buf.lock().unwrap();
         let any_path = batches.iter().flatten().any(|p| p.contains("hello.md"));
-        assert!(any_path, "change event must include the modified path; got {batches:?}");
+        assert!(
+            any_path,
+            "change event must include the modified path; got {batches:?}"
+        );
     }
 
     #[test]
@@ -1729,10 +1773,7 @@ mod tests {
         // Wait long enough that any deferred event would have fired.
         std::thread::sleep(Duration::from_millis(400));
         let batches = buf.lock().unwrap();
-        let any_nested = batches
-            .iter()
-            .flatten()
-            .any(|p| p.contains("nested.md"));
+        let any_nested = batches.iter().flatten().any(|p| p.contains("nested.md"));
         assert!(
             !any_nested,
             "non-recursive watcher leaked a descendant event: {batches:?}",
@@ -1995,11 +2036,16 @@ mod tests {
             .unwrap();
 
         runtime.block_on(async {
-            watch_paths(handle.clone(), vec![path.clone()]).await.unwrap();
+            watch_paths(handle.clone(), vec![path.clone()])
+                .await
+                .unwrap();
         });
         {
             let holder = app.state::<WatcherHolder>();
-            assert!(holder.0.lock().unwrap().is_some(), "debouncer must be stored");
+            assert!(
+                holder.0.lock().unwrap().is_some(),
+                "debouncer must be stored"
+            );
         }
 
         runtime.block_on(async {
@@ -2024,7 +2070,9 @@ mod tests {
             .unwrap();
 
         runtime.block_on(async {
-            watch_dirs(handle.clone(), vec![path.clone()]).await.unwrap();
+            watch_dirs(handle.clone(), vec![path.clone()])
+                .await
+                .unwrap();
         });
         // Both holders coexist, but only DirWatcherHolder should be populated.
         let dir_holder = app.state::<DirWatcherHolder>();
@@ -2062,12 +2110,9 @@ mod tests {
             .unwrap();
 
         runtime.block_on(async {
-            watch_paths(
-                handle.clone(),
-                vec![watched.to_string_lossy().into()],
-            )
-            .await
-            .unwrap();
+            watch_paths(handle.clone(), vec![watched.to_string_lossy().into()])
+                .await
+                .unwrap();
         });
 
         // The default debounce is 500 ms. Wait a beat for the OS watcher to
@@ -2158,10 +2203,8 @@ mod tests {
         let root = dir.path();
         fs::write(root.join("a.md"), "A").unwrap();
         fs::write(root.join("b.md"), "B").unwrap();
-        let map = read_files_relative_impl(
-            root,
-            &["a.md".into(), "missing.md".into(), "b.md".into()],
-        );
+        let map =
+            read_files_relative_impl(root, &["a.md".into(), "missing.md".into(), "b.md".into()]);
         assert_eq!(map.len(), 2);
         assert_eq!(map.get("a.md"), Some(&"A".to_string()));
         assert_eq!(map.get("b.md"), Some(&"B".to_string()));
@@ -2291,11 +2334,17 @@ mod tests {
         use macos_maximize::{interpolate_frame, CGPoint, CGRect, CGSize};
         let a = CGRect {
             origin: CGPoint { x: 0.0, y: 0.0 },
-            size: CGSize { width: 100.0, height: 100.0 },
+            size: CGSize {
+                width: 100.0,
+                height: 100.0,
+            },
         };
         let b = CGRect {
             origin: CGPoint { x: 100.0, y: 100.0 },
-            size: CGSize { width: 300.0, height: 300.0 },
+            size: CGSize {
+                width: 300.0,
+                height: 300.0,
+            },
         };
         let mid = interpolate_frame(a, b, 0.5);
         assert!((mid.origin.x - 50.0).abs() < 1e-9);
@@ -2368,7 +2417,10 @@ mod tests {
         // include_hidden_entries=true — they would freeze the IPC.
         let dir = tempdir().unwrap();
         let root = dir.path();
-        write_file(&root.join("node_modules").join("dep.md"), "needle inside dep\n");
+        write_file(
+            &root.join("node_modules").join("dep.md"),
+            "needle inside dep\n",
+        );
         write_file(&root.join("real.md"), "needle inside real\n");
 
         let matches = find_in_files_impl(root, "needle", true, true).unwrap();
@@ -2461,7 +2513,10 @@ mod tests {
         let m = &matches[0];
         // Offsets are UTF-16 code units (what the frontend's String.slice uses).
         let units: Vec<u16> = m.line_text.encode_utf16().collect();
-        assert_eq!(String::from_utf16(&units[m.column_start..m.column_end]).unwrap(), "needle");
+        assert_eq!(
+            String::from_utf16(&units[m.column_start..m.column_end]).unwrap(),
+            "needle"
+        );
     }
 
     #[test]
@@ -2477,7 +2532,10 @@ mod tests {
         let m = &matches[0];
         // Slicing the UTF-16 view (as JS String.slice does) yields exactly "GVC".
         let units: Vec<u16> = m.line_text.encode_utf16().collect();
-        assert_eq!(String::from_utf16(&units[m.column_start..m.column_end]).unwrap(), "GVC");
+        assert_eq!(
+            String::from_utf16(&units[m.column_start..m.column_end]).unwrap(),
+            "GVC"
+        );
         // The UTF-16 start is strictly less than the byte index (multi-byte
         // chars precede the match) — proving offsets aren't bytes.
         assert!(m.column_start < m.line_text.find("GVC").unwrap());
@@ -2504,8 +2562,16 @@ mod tests {
             .await
             .unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert!(names.contains(&"alpha.md"), "expected alpha.md in {:?}", names);
-        assert!(names.contains(&"bravo.md"), "expected bravo.md in {:?}", names);
+        assert!(
+            names.contains(&"alpha.md"),
+            "expected alpha.md in {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"bravo.md"),
+            "expected bravo.md in {:?}",
+            names
+        );
         // Ok(vec![]) mutation would make the assertions above fail.
         assert!(!entries.is_empty(), "Ok(vec![]) mutation must not pass");
     }
@@ -2540,8 +2606,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(content, "markdraw-mutation-guard\n");
-        assert!(!content.is_empty(), "Ok(String::new()) mutation must not pass");
-        assert_ne!(content, "xyzzy", "Ok(\"xyzzy\".into()) mutation must not pass");
+        assert!(
+            !content.is_empty(),
+            "Ok(String::new()) mutation must not pass"
+        );
+        assert_ne!(
+            content, "xyzzy",
+            "Ok(\"xyzzy\".into()) mutation must not pass"
+        );
     }
 
     #[tokio::test]
@@ -2550,15 +2622,19 @@ mod tests {
         let root = dir.path();
         write_file(&root.join("rel.txt"), "relative-content\n");
 
-        let content = super::read_file_relative(
-            root.to_string_lossy().to_string(),
-            "rel.txt".to_string(),
-        )
-        .await
-        .unwrap();
+        let content =
+            super::read_file_relative(root.to_string_lossy().to_string(), "rel.txt".to_string())
+                .await
+                .unwrap();
         assert_eq!(content, "relative-content\n");
-        assert!(!content.is_empty(), "Ok(String::new()) mutation must not pass");
-        assert_ne!(content, "xyzzy", "Ok(\"xyzzy\".into()) mutation must not pass");
+        assert!(
+            !content.is_empty(),
+            "Ok(String::new()) mutation must not pass"
+        );
+        assert_ne!(
+            content, "xyzzy",
+            "Ok(\"xyzzy\".into()) mutation must not pass"
+        );
     }
 
     #[tokio::test]
@@ -2568,12 +2644,9 @@ mod tests {
         let file_path = root.join("out.txt");
         let payload = "markdraw-write-guard\n";
 
-        super::write_file(
-            file_path.to_string_lossy().to_string(),
-            payload.to_string(),
-        )
-        .await
-        .unwrap();
+        super::write_file(file_path.to_string_lossy().to_string(), payload.to_string())
+            .await
+            .unwrap();
         let read_back = fs::read_to_string(&file_path).unwrap();
         assert_eq!(read_back, payload, "Ok(()) mutation would skip the write");
     }

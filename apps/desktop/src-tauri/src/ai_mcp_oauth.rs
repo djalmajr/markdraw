@@ -271,7 +271,12 @@ fn query_params(request_line: &str) -> Vec<(String, String)> {
 /// (e.g. an error redirect — see [`parse_callback_error`]). Pure → unit-tested.
 pub fn parse_callback_query(request_line: &str) -> Option<(String, String)> {
     let params = query_params(request_line);
-    let get = |key: &str| params.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+    let get = |key: &str| {
+        params
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+    };
     Some((get("code")?, get("state")?))
 }
 
@@ -280,7 +285,12 @@ pub fn parse_callback_query(request_line: &str) -> Option<(String, String)> {
 /// when `code` is absent but `error` is present. Pure → unit-tested.
 fn parse_callback_error(request_line: &str) -> Option<(String, Option<String>)> {
     let params = query_params(request_line);
-    let get = |key: &str| params.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+    let get = |key: &str| {
+        params
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+    };
     if get("code").is_some() {
         return None;
     }

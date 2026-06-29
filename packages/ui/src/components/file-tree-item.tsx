@@ -740,7 +740,12 @@ export function FileTreeItem(props: FileTreeItemProps) {
                       <DropdownMenuItem class={entry.itemClass} onSelect={entry.onSelect}>
                         <span class="flex items-center gap-2">{entry.icon} {(useLocale(), entry.label())}</span>
                         <Show when={entry.shortcut !== undefined}>
-                          <span class={typeof entry.shortcut === "string" ? "ml-auto text-xs tracking-widest opacity-40" : "ml-auto opacity-40"}>{entry.shortcut}</span>
+                          <Show
+                            when={typeof entry.shortcut === "string"}
+                            fallback={<span class="menu-shortcut-kbd ml-auto">{entry.shortcut}</span>}
+                          >
+                            <kbd class="menu-shortcut-kbd ml-auto">{entry.shortcut}</kbd>
+                          </Show>
                         </Show>
                       </DropdownMenuItem>
                     </>
@@ -771,7 +776,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
                   <ContextMenuItem class={entry.itemClass} onSelect={entry.onSelect}>
                     <span class="flex items-center gap-2">{entry.icon} {(useLocale(), entry.label())}</span>
                     <Show when={entry.shortcut !== undefined}>
-                      <ContextMenuShortcut class="ml-0 opacity-40">{entry.shortcut}</ContextMenuShortcut>
+                      <ContextMenuShortcut class="ml-0">{entry.shortcut}</ContextMenuShortcut>
                     </Show>
                   </ContextMenuItem>
                 </>

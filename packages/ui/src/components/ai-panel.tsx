@@ -9,6 +9,7 @@ import IconFileText from "~icons/lucide/file-text";
 import IconFolder from "~icons/lucide/folder";
 import IconTextSelect from "~icons/lucide/text-select";
 import type { AIChatMode } from "@markdraw/core/ai-prefs.ts";
+import { isSupportedFile } from "@markdraw/core/utils.ts";
 import { expandSlashCommand, type SlashCommandDef } from "@markdraw/ai/slash-commands.ts";
 import type { AiChatStore } from "../composables/create-ai-chat-store.ts";
 import type { AiContextItem, AiInlineReference } from "../composables/ai-context.ts";
@@ -33,10 +34,21 @@ export interface AiMentionEntry {
   rootLabel?: string;
 }
 
+export interface AiSkillEntry {
+  id: string;
+  name: string;
+  description?: string;
+  slashCommands?: string[];
+  scope: "global" | "project";
+}
+
 /** A tracked composer token: an @-mention (whose context item the host
  *  resolves ASYNC) or a direct context-item reference (selection chips — the
  *  item exists synchronously when the token is born). */
 type TrackedRef = { entry: AiMentionEntry; kind: "mention" } | { itemId: string; kind: "item" };
+type SlashMatch =
+  | { command: SlashCommandDef; description?: string; kind: "command"; name: string }
+  | { description?: string; kind: "skill"; name: string; skill: AiSkillEntry };
 
 export interface AiPanelProps {
   store: AiChatStore;
@@ -105,12 +117,21 @@ export interface AiPanelProps {
    *  refresh `slashCommands`; the open list reads the prop reactively, so a
    *  late-arriving fresh list updates it in place. */
   onSlashMenuOpen?: () => void;
+  /** Auto-discovered agent skills for the composer's "$" autocomplete. A sent
+   *  "$name" token remains in the user's text; the host/orchestrator uses it to
+   *  inject the matching skill instructions. */
+  skills?: AiSkillEntry[];
+  /** The "$" autocomplete just opened — the host can refresh discovered skills. */
+  onSkillsMenuOpen?: () => void;
   /** Opens Settings → AI (empty-state CTA). */
   onOpenSettings?: () => void;
   /** Open an http(s) link from a chat reply in the OS browser. Clicks on chat
    *  links are ALWAYS intercepted — without this the webview itself would
    *  navigate away to the link target (hijacking the whole app). */
   onOpenExternal?: (url: string) => void;
+  /** Navigate a document link emitted inside a chat reply, using the host's
+   *  workspace navigation instead of webview navigation. */
+  onNavigateDocument?: (path: string, fragment?: string | null) => void;
   /** Active chat mode (Plan = no tools, saves a plan; Build = implements).
    *  When provided the composer shows a Build/Plan toggle. */
   mode?: AIChatMode;
@@ -123,6 +144,31 @@ export interface AiPanelProps {
   onModeChange?: (mode: AIChatMode) => void;
   /** User checked/unchecked a plan item. */
   onTogglePlanItem?: (index: number) => void;
+}
+
+function isSupportedChatDocumentHref(href: string): boolean {
+  const path = stripDocumentLocationSuffix(href.split("#")[0] ?? "");
+  if (!path) return false;
+  if (isSupportedFile(path)) return true;
+  if (path.endsWith(".html")) return true;
+  if (path.includes("://")) return false;
+  const lastSegment = path.split("/").pop() ?? "";
+  return path.includes("/") && !lastSegment.includes(".");
+}
+
+function stripDocumentLocationSuffix(path: string): string {
+  return path.replace(
+    /(\.(?:adoc\.txt|asciidoc|markdown|mdown|adoc|asc|ad|md)):\d+(?::\d+)?$/i,
+    "$1",
+  );
+}
+
+function normalizeChatDocumentHref(href: string): { path: string; fragment: string | null } {
+  const hashIdx = href.indexOf("#");
+  let path = stripDocumentLocationSuffix(hashIdx >= 0 ? href.slice(0, hashIdx) : href);
+  const fragment = hashIdx >= 0 ? decodeURIComponent(href.slice(hashIdx + 1)) : null;
+  if (path.endsWith(".html")) path = path.slice(0, -5) + ".adoc";
+  return { path, fragment: fragment || null };
 }
 
 /**
@@ -166,11 +212,11 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   function startEditing(index: number, content: string): void {
     setEditing({ index });
     setInput(content);
-    // Loading the turn bypasses the textarea's input event (where syncSlash
-    // suppresses the list while editing) — an open slash popover from the
-    // abandoned draft would otherwise capture the edit's Enter and replace the
-    // loaded content with a "/name " insertion.
+    // Loading the turn bypasses the textarea's input event (where syncSlash /
+    // syncSkill run) — open popovers from the abandoned draft would otherwise
+    // capture the edit's Enter.
     setSlashQuery(null);
+    setSkillQuery(null);
     // The pending draft's inline tokens die with the draft. The loaded text
     // may contain literal "@..." strings from the original message — those
     // references were consumed at the original send and are NOT re-tracked.
@@ -185,6 +231,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     // would keep capturing arrows/Enter over the next chat's empty composer.
     setMentionQuery(null);
     setSlashQuery(null);
+    setSkillQuery(null);
     // The draft's inline tokens die with it — their context items too.
     clearTrackedTokens();
   }
@@ -204,6 +251,9 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       // re-run turn reads the context preamble too.
       setEditing(null);
       setInput("");
+      setMentionQuery(null);
+      setSlashQuery(null);
+      setSkillQuery(null);
       const editTracked = beginTokenConsumption(text);
       settleTokenConsumption(editTracked, props.store.editAndResend(edit.index, text));
       return;
@@ -215,6 +265,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     setInput("");
     setMentionQuery(null);
     setSlashQuery(null);
+    setSkillQuery(null);
     // The sent text keeps the inline tokens VERBATIM — the reorder + consume
     // pair runs before the send so the preamble matches the tokens' order.
     const tracked = beginTokenConsumption(text);
@@ -242,14 +293,34 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   // slash must be the very first character and no whitespace typed yet, so a
   // "/" mid-sentence stays plain text.
   const SLASH_RE = /^\/([a-z0-9_-]*)$/i;
+  const SLASH_SAFE_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
   const [slashQuery, setSlashQuery] = createSignal<string | null>(null);
   const [slashIndex, setSlashIndex] = createSignal(0);
 
   const slashMatches = createMemo(() => {
     const q = slashQuery();
-    if (q === null || !props.slashCommands?.length) return [];
+    if (q === null) return [];
     const ql = q.toLowerCase();
-    return props.slashCommands.filter((c) => c.name.startsWith(ql)).slice(0, 8);
+    const commands = props.slashCommands ?? [];
+    const commandNames = new Set(commands.map((c) => c.name));
+    const commandMatches: SlashMatch[] = commands
+      .filter((c) => c.name.startsWith(ql))
+      .map((command) => ({
+        command,
+        description: command.description,
+        kind: "command",
+        name: command.name,
+      }));
+    const skillMatches: SlashMatch[] = (props.skills ?? [])
+      .flatMap((skill) => (skill.slashCommands ?? []).map((name) => ({ name, skill })))
+      .filter(({ name }) => SLASH_SAFE_NAME_RE.test(name) && !commandNames.has(name) && name.startsWith(ql))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(({ name, skill }) => ({
+        kind: "skill",
+        name,
+        skill,
+      }));
+    return [...commandMatches, ...skillMatches].slice(0, 8);
   });
 
   function syncSlash(ta: HTMLTextAreaElement): void {
@@ -257,7 +328,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     // expands commands (the turn was expanded at its original send), so the
     // list would offer an expansion that cannot happen. Mentions stay active —
     // they attach context chips, orthogonal to the send path.
-    if (editing() || !props.slashCommands?.length) {
+    if (editing() || (!props.slashCommands?.length && !props.skills?.length)) {
       setSlashQuery(null);
       return;
     }
@@ -266,6 +337,8 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     if (match) {
       setSlashQuery(match[1]!);
       setSlashIndex(0);
+      setMentionQuery(null);
+      setSkillQuery(null);
     } else {
       setSlashQuery(null);
     }
@@ -279,7 +352,10 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     on(
       () => slashQuery() !== null,
       (open, wasOpen) => {
-        if (open && !wasOpen) props.onSlashMenuOpen?.();
+        if (open && !wasOpen) {
+          props.onSlashMenuOpen?.();
+          props.onSkillsMenuOpen?.();
+        }
       },
     ),
   );
@@ -297,6 +373,96 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     queueMicrotask(() => {
       ta.focus();
       ta.setSelectionRange(inserted.length, inserted.length);
+    });
+  }
+
+  function selectSlashSkill(match: Extract<SlashMatch, { kind: "skill" }>): void {
+    const ta = textarea;
+    if (!ta) return;
+    const caret = ta.selectionStart ?? input().length;
+    const inserted = `/${match.name} `;
+    setInput(inserted + input().slice(caret));
+    setSlashQuery(null);
+    queueMicrotask(() => {
+      ta.focus();
+      ta.setSelectionRange(inserted.length, inserted.length);
+    });
+  }
+
+  function selectSlashMatch(match: SlashMatch): void {
+    if (match.kind === "command") selectSlashCommand(match.command);
+    else selectSlashSkill(match);
+  }
+
+  // ── "$" skill autocomplete ─────────────────────────────────────────────
+  const SKILL_RE = /(^|\s)\$([^\s$]*)$/;
+  const [skillQuery, setSkillQuery] = createSignal<string | null>(null);
+  const [skillIndex, setSkillIndex] = createSignal(0);
+
+  function skillInvocationName(skill: AiSkillEntry): string {
+    return skill.name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9:_-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  const skillMatches = createMemo(() => {
+    const q = skillQuery();
+    if (q === null || !props.skills?.length) return [];
+    const ql = q.toLowerCase();
+    return props.skills
+      .filter((skill) => skillInvocationName(skill).includes(ql))
+      .sort((a, b) => {
+        const an = skillInvocationName(a);
+        const bn = skillInvocationName(b);
+        const ap = an.startsWith(ql) ? 0 : 1;
+        const bp = bn.startsWith(ql) ? 0 : 1;
+        return ap - bp || an.localeCompare(bn);
+      })
+      .slice(0, 8);
+  });
+
+  function syncSkill(ta: HTMLTextAreaElement): void {
+    if (!props.skills?.length) {
+      setSkillQuery(null);
+      return;
+    }
+    const upToCaret = ta.value.slice(0, ta.selectionStart ?? ta.value.length);
+    const match = SKILL_RE.exec(upToCaret);
+    if (match) {
+      setSkillQuery(match[2]!);
+      setSkillIndex(0);
+      setMentionQuery(null);
+      setSlashQuery(null);
+    } else {
+      setSkillQuery(null);
+    }
+  }
+
+  createEffect(
+    on(
+      () => skillQuery() !== null,
+      (open, wasOpen) => {
+        if (open && !wasOpen) props.onSkillsMenuOpen?.();
+      },
+    ),
+  );
+
+  function selectSkill(skill: AiSkillEntry): void {
+    const ta = textarea;
+    if (!ta) return;
+    const caret = ta.selectionStart ?? input().length;
+    const token = `$${skillInvocationName(skill)}`;
+    const before = input()
+      .slice(0, caret)
+      .replace(SKILL_RE, (_full, pre: string) => `${pre}${token} `);
+    const next = before + input().slice(caret);
+    setInput(next);
+    setSkillQuery(null);
+    queueMicrotask(() => {
+      ta.focus();
+      ta.setSelectionRange(before.length, before.length);
     });
   }
 
@@ -593,6 +759,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     // (same contract as submit()/startEditing()).
     setMentionQuery(null);
     setSlashQuery(null);
+    setSkillQuery(null);
     setInlineRefs((prev) => new Map(prev).set(token, { itemId, kind: "item" }));
     const caret = at + inserted.length;
     queueMicrotask(() => {
@@ -687,6 +854,8 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     if (match) {
       setMentionQuery(match[2]!);
       setMentionIndex(0);
+      setSlashQuery(null);
+      setSkillQuery(null);
     } else {
       setMentionQuery(null);
     }
@@ -739,13 +908,37 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       // plain Enter (or Tab, shift or not) selects the highlighted command.
       if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
         e.preventDefault();
-        const command = slashMatches()[slashIndex()];
-        if (command) selectSlashCommand(command);
+        const match = slashMatches()[slashIndex()];
+        if (match) selectSlashMatch(match);
         return;
       }
       if (e.key === "Escape") {
         e.preventDefault();
         setSlashQuery(null);
+        return;
+      }
+    }
+    // While the "$" skill list is open, the arrows/Enter/Escape drive it.
+    if (skillQuery() !== null && skillMatches().length) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSkillIndex((i) => Math.min(i + 1, skillMatches().length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSkillIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+        e.preventDefault();
+        const skill = skillMatches()[skillIndex()];
+        if (skill) selectSkill(skill);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSkillQuery(null);
         return;
       }
     }
@@ -808,14 +1001,30 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   // Chat replies must never navigate the webview: a reply link is untrusted
   // model output, and an uncaught click would replace the whole app with the
   // link target. Delegated on the scroll viewport so it covers completed and
-  // streaming messages alike; http(s) goes to the OS browser, anything else
-  // (relative paths, odd schemes) is inert.
+  // streaming messages alike; http(s) goes to the OS browser, document links
+  // go through workspace navigation, and odd schemes stay inert.
   function onMessagesClick(e: MouseEvent): void {
     const link = (e.target as Element | null)?.closest?.("a[href]");
     if (!link) return;
     e.preventDefault();
     const href = link.getAttribute("href") ?? "";
-    if (/^https?:\/\//i.test(href)) props.onOpenExternal?.(href);
+    if (/^https?:\/\//i.test(href)) {
+      props.onOpenExternal?.(href);
+      return;
+    }
+    if (/^file:\/\//i.test(href)) {
+      const fileHref = href.replace(/^file:\/\/(?:localhost)?/i, "");
+      if (!isSupportedChatDocumentHref(fileHref)) return;
+      const target = normalizeChatDocumentHref(fileHref);
+      if (target.path) props.onNavigateDocument?.(target.path, target.fragment);
+      return;
+    }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return;
+    if (!isSupportedChatDocumentHref(href)) return;
+
+    const target = normalizeChatDocumentHref(href);
+    if (!target.path) return;
+    props.onNavigateDocument?.(target.path, target.fragment);
   }
 
   return (
@@ -1016,21 +1225,51 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
         <Show when={slashQuery() !== null && slashMatches().length > 0}>
           <div class="ai-mention-list ai-slash-list">
             <For each={slashMatches()}>
-              {(command, i) => (
+              {(match, i) => (
                 <button
                   class="ai-mention-item ai-slash-item"
-                  classList={{ "ai-mention-item-active": i() === slashIndex() }}
+                  classList={{
+                    "ai-mention-item-active": i() === slashIndex(),
+                    "ai-slash-skill-item": match.kind === "skill",
+                  }}
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    selectSlashCommand(command);
+                    selectSlashMatch(match);
                   }}
                   onMouseEnter={() => setSlashIndex(i())}
                 >
-                  <span class="ai-mention-name ai-slash-name">/{command.name}</span>
-                  <Show when={command.description}>
-                    <span class="ai-mention-path">{command.description}</span>
+                  <span class="ai-mention-name ai-slash-name">/{match.name}</span>
+                  <Show when={match.description}>
+                    <span class="ai-mention-path">{match.description}</span>
                   </Show>
+                  <Show when={match.kind === "skill"}>
+                    <span class="ai-mention-root-badge">skill</span>
+                  </Show>
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
+        <Show when={skillQuery() !== null && skillMatches().length > 0}>
+          <div class="ai-mention-list ai-skill-list">
+            <For each={skillMatches()}>
+              {(skill, i) => (
+                <button
+                  class="ai-mention-item ai-skill-item"
+                  classList={{ "ai-mention-item-active": i() === skillIndex() }}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectSkill(skill);
+                  }}
+                  onMouseEnter={() => setSkillIndex(i())}
+                >
+                  <span class="ai-mention-name ai-skill-name">${skillInvocationName(skill)}</span>
+                  <Show when={skill.description}>
+                    <span class="ai-mention-path">{skill.description}</span>
+                  </Show>
+                  <span class="ai-mention-root-badge">{skill.scope}</span>
                 </button>
               )}
             </For>
@@ -1062,6 +1301,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
                 reconcileTokens(e.currentTarget.value);
                 syncMention(e.currentTarget);
                 syncSlash(e.currentTarget);
+                syncSkill(e.currentTarget);
               }}
               onKeyDown={onKeyDown}
               onScroll={(e) => {

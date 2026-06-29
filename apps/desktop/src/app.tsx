@@ -87,6 +87,12 @@ import {
   type DiscoveredEntry,
 } from "./lib/mcp-discovery.ts";
 import {
+  buildSkillContextForPrompt,
+  dedupeSkills,
+  discoverSkills,
+  type DiscoveredSkillEntry,
+} from "./lib/skill-discovery.ts";
+import {
   buildInProcessTools,
   type ExcalidrawGenerateOutcome,
   type ExcalidrawGenerateRequest,
@@ -193,6 +199,7 @@ export function App() {
   // MCP servers discovered from other agent tools (Claude/Codex/OpenCode), deduped
   // + hashed. Global ones auto-connect; project ones wait for approval.
   const [discoveredMcp, setDiscoveredMcp] = createSignal<DiscoveredEntry[]>([]);
+  const [discoveredSkills, setDiscoveredSkills] = createSignal<DiscoveredSkillEntry[]>([]);
   // OpenCode has no first-class provider, so its discovery rides this toggle.
   const [importOpenCode, setImportOpenCode] = createSignal(getImportOpenCodeMcps());
 
@@ -356,6 +363,8 @@ export function App() {
         ? { ...base, text: `${base.text}\n\n${note}` }
         : { mode: "append" as const, text: note };
     },
+    getSkillContext: (request) =>
+      buildSkillContextForPrompt(discoveredSkills(), request.userMessage),
     // Engine-enforced Accept/Reject for prompt-tier tools (arrow defers the
     // read — the gate is defined further down in this component).
     onToolApprovalRequest: (req) => requestToolApproval(req),
@@ -1110,6 +1119,20 @@ export function App() {
     await refreshMcpStatuses();
   }
 
+  const skillDiscoveryGuard = createGenerationGuard();
+  async function refreshDiscoveredSkills(): Promise<void> {
+    const isLatest = skillDiscoveryGuard.begin();
+    const roots = Array.from(rootPaths().values());
+    try {
+      const raw = await discoverSkills(roots, ["claude", "codex", "opencode"]);
+      const entries = dedupeSkills(raw);
+      if (isLatest()) setDiscoveredSkills(entries);
+    } catch (e) {
+      console.warn("[skills] discovery failed:", e);
+      if (isLatest()) setDiscoveredSkills([]);
+    }
+  }
+
   /** Approve a pending project-scoped discovered server, then connect it. */
   async function approveDiscoveredMcp(id: string): Promise<void> {
     const entry = discoveredMcp().find((e) => e.id === id);
@@ -1187,12 +1210,18 @@ export function App() {
   // failed, callback timeout…). Surfaced on the card only while it still needs
   // auth; cleared on a fresh attempt and auto-hidden once the server connects.
   const [mcpAuthErrors, setMcpAuthErrors] = createSignal<Map<string, string>>(new Map());
+  const [rootPaths, setRootPaths] = createSignal<Map<string, string>>(new Map());
 
   /** Kick off the interactive OAuth flow for an OAuth-gated server (Rust opens
    *  the browser), then refresh so the now-connected server shows its tools. A
    *  failed flow surfaces its reason on the card instead of failing silently. */
   async function authorizeMcpServerById(id: string): Promise<void> {
-    const server = (aiConfig().mcp ?? []).find((s) => s.id === id);
+    const server =
+      (aiConfig().mcp ?? []).find((s) => s.id === id) ??
+      (() => {
+        const discovered = discoveredMcp().find((s) => s.id === id);
+        return discovered ? toMcpServerConfig(discovered) : undefined;
+      })();
     if (!server) return;
     setMcpAuthErrors((m) => {
       const next = new Map(m);
@@ -1240,6 +1269,7 @@ export function App() {
   /** View model for the settings MCP list: persisted config + live status. */
   const mcpServersView = createMemo(() => {
     const statuses = new Map(mcpStatuses().map((s) => [s.id, s]));
+    const openRoots = new Set(rootPaths().values());
     const explicit = (aiConfig().mcp ?? []).map((s) => {
       const st = statuses.get(s.id);
       return {
@@ -1262,7 +1292,9 @@ export function App() {
     });
     // Discovered (read-only) servers from other tools, with their source badge
     // and — for unapproved project servers — a pending-approval flag.
-    const discovered = discoveredMcp().map((e) => {
+    const discovered = discoveredMcp().filter((e) =>
+      e.scope === "global" || (!!e.root && openRoots.has(e.root)),
+    ).map((e) => {
       const st = statuses.get(e.id);
       const pendingApproval =
         e.scope === "project" && !!e.root && !isApproved(e.root, e.configHash);
@@ -1288,6 +1320,24 @@ export function App() {
     return [...explicit, ...discovered];
   });
 
+  const skillsView = createMemo(() =>
+    {
+      const openRoots = new Set(rootPaths().values());
+      return discoveredSkills()
+        .filter((skill) =>
+          skill.scope === "global" || (!!skill.root && openRoots.has(skill.root)),
+        )
+        .map((skill) => ({
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+          slashCommands: skill.slashCommands,
+          scope: skill.scope,
+          sources: skill.sources,
+        }));
+    },
+  );
+
   // TabStore lives inside each PaneStore (see `createPaneStore`). The
   // host treats whichever pane is currently active as the "default"
   // tab store — read/write operations route there. As panes change
@@ -1295,8 +1345,6 @@ export function App() {
   // Wrapped as a function (not a captured const) so the activePane
   // dependency stays reactive inside Solid effects.
   const tabStore = (): TabStore => state.paneManager.activePane().tabs;
-
-  const [rootPaths, setRootPaths] = createSignal<Map<string, string>>(new Map());
 
   // File-backed slash commands + custom instructions (omp#1). Reloaded
   // whenever the primary workspace root changes — the project-level files
@@ -1327,6 +1375,10 @@ export function App() {
   }
   // reloadAiCommands reads rootPaths() synchronously, so the effect tracks it.
   createEffect(() => reloadAiCommands());
+  createEffect(() => {
+    rootPaths();
+    void refreshDiscoveredSkills();
+  });
 
   // Quick Open (Cmd/Ctrl+P) overlay visibility — owned here so the keyboard
   // handler can toggle it without round-tripping through AppShell.
@@ -3354,6 +3406,8 @@ export function App() {
       // Freshness without a file watcher: opening the "/" popover re-runs the
       // loader (the open transition itself debounces; latest-wins guard above).
       onAiSlashMenuOpen={reloadAiCommands}
+      aiSkills={skillsView()}
+      onAiSkillsMenuOpen={refreshDiscoveredSkills}
       onSelectAiModel={selectAiModel}
       onOpenSettings={() => setSettingsOpen(true)}
       settingsOpen={settingsOpen()}
@@ -3398,6 +3452,7 @@ export function App() {
       onRemoveProvider={removeProvider}
       onRefreshModels={refreshModels}
       mcpServers={mcpServersView()}
+      skills={skillsView()}
       onSaveMcpServer={saveMcpServer}
       onRemoveMcpServer={removeMcpServer}
       onToggleMcpServer={toggleMcpServer}
