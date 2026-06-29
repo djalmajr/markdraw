@@ -1,5 +1,5 @@
 [features]
-codex_hooks = true
+hooks = true
 
 [mcp_servers.linear]
 url = "https://mcp.linear.app/mcp"
@@ -7,10 +7,7 @@ bearer_token_env_var = "LINEAR_API_KEY"
 
 [mcp_servers.tauri]
 command = "npx"
-args = [
-    "-y",
-    "@hypothesi/tauri-mcp-server",
-]
+args = ["-y", "@hypothesi/tauri-mcp-server"]
 
 [mcp_servers.tauri.env]
 MCP_BRIDGE_HOST = "127.0.0.1"
