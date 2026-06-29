@@ -282,17 +282,17 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
 
   return (
     <AlertDialog open={props.open} onOpenChange={(o) => !o && props.onClose()}>
-      <AlertDialogContent class="flex max-h-[90vh] min-h-[60vh] w-full max-w-3xl flex-col gap-0 overflow-hidden p-0">
+      <AlertDialogContent class="flex h-[540px] max-h-[90vh] min-h-0 w-full max-w-[720px] flex-col gap-0 overflow-hidden p-0 shadow-none sm:rounded-[2px]">
         <button
           type="button"
           aria-label={(useLocale(), label("ai_inline_reject"))}
-          class="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          class="absolute right-3 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-muted-foreground ring-inset hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           onClick={props.onClose}
         >
-          <IconX width={16} height={16} />
+          <IconX width={14} height={14} />
         </button>
-        <div class="border-b px-5 py-3">
-          <AlertDialogTitle class="text-base font-semibold">
+        <div class="border-b px-4 py-2">
+          <AlertDialogTitle class="text-sm font-semibold">
             {(useLocale(), label("settings_title"))}
           </AlertDialogTitle>
           <AlertDialogDescription class="sr-only">
@@ -344,10 +344,10 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                   <p>{(useLocale(), label("about_tagline"))}</p>
                   {/* Privacy lives here rather than in its own tab: a short
                       guarantee plus a link to the canonical policy on the site. */}
-                  <p style={{ "margin-top": "12px" }}>
+                  <p style={{ "margin-top": "8px" }}>
                     {(useLocale(), label("settings_privacy_body"))}
                   </p>
-                  <div class="settings-row" style={{ gap: "8px", "margin-top": "12px" }}>
+                  <div class="settings-row" style={{ gap: "6px", "margin-top": "8px" }}>
                     <Show when={props.onOpenExternal}>
                       <Button
                         variant="outline"
@@ -401,7 +401,7 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                         </SelectItem>
                       )}
                     >
-                      <SelectTrigger class="w-40 h-8">
+                      <SelectTrigger class="h-6 w-36">
                         <SelectValue<string>>
                           {(state) => (useLocale(), label(`settings_editor_indent_${state.selectedOption()}`))}
                         </SelectValue>
@@ -419,7 +419,7 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                         <SelectItem item={itemProps.item}>{itemProps.item.rawValue}</SelectItem>
                       )}
                     >
-                      <SelectTrigger class="w-40 h-8">
+                      <SelectTrigger class="h-6 w-36">
                         <SelectValue<number>>{(state) => state.selectedOption()}</SelectValue>
                       </SelectTrigger>
                       <SelectContent />
@@ -442,7 +442,7 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                         </SelectItem>
                       )}
                     >
-                      <SelectTrigger class="w-40 h-8">
+                      <SelectTrigger class="h-6 w-36">
                         <SelectValue<string>>
                           {(state) => (useLocale(), label(`menu_theme_${state.selectedOption()}`))}
                         </SelectValue>
@@ -464,7 +464,7 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                         </SelectItem>
                       )}
                     >
-                      <SelectTrigger class="w-40 h-8">
+                      <SelectTrigger class="h-6 w-36">
                         <SelectValue<string>>
                           {(state) => FontFamilies.find((f) => f.id === state.selectedOption())?.label ?? state.selectedOption()}
                         </SelectValue>
@@ -482,7 +482,7 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                         <SelectItem item={itemProps.item}>{itemProps.item.rawValue}px</SelectItem>
                       )}
                     >
-                      <SelectTrigger class="w-40 h-8">
+                      <SelectTrigger class="h-6 w-36">
                         <SelectValue<number>>{(state) => `${state.selectedOption()}px`}</SelectValue>
                       </SelectTrigger>
                       <SelectContent />
@@ -771,7 +771,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               aria-label={(useLocale(), label("settings_ai_back"))}
               onClick={() => setView({ kind: "manage" })}
             >
-              <IconArrowLeft width={16} height={16} />
+              <IconArrowLeft width={14} height={14} />
             </button>
             <h3 class="settings-h3" style={{ margin: "0" }}>{(useLocale(), label("ai_connect_provider"))}</h3>
           </div>
@@ -779,14 +779,14 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
             <Show when={props.onSaveCustomProvider}>
               <button type="button" class="settings-catalog-row" onClick={() => setView({ kind: "custom" })}>
                 <span class="settings-catalog-name">{(useLocale(), label("settings_ai_custom_provider"))}</span>
-                <IconChevronRight width={16} height={16} class="settings-catalog-chevron" />
+                <IconChevronRight width={14} height={14} class="settings-catalog-chevron" />
               </button>
             </Show>
             <For each={catalogProviders()}>
               {(group) => (
                 <button type="button" class="settings-catalog-row" onClick={() => enterProvider(group)}>
                   <span class="settings-catalog-name">{group.name}</span>
-                  <IconChevronRight width={16} height={16} class="settings-catalog-chevron" />
+                  <IconChevronRight width={14} height={14} class="settings-catalog-chevron" />
                 </button>
               )}
             </For>
@@ -809,7 +809,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               aria-label={(useLocale(), label("settings_ai_back"))}
               onClick={() => setView({ kind: providerViewData()?.from ?? "catalog" })}
             >
-              <IconArrowLeft width={16} height={16} />
+              <IconArrowLeft width={14} height={14} />
             </button>
             <h3 class="settings-h3" style={{ margin: "0" }}>
               {(useLocale(), label("settings_ai_connect"))} {providerViewData()?.name}
@@ -867,7 +867,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
             <div
               style={
                 groupApiIds().length > 0
-                  ? { "border-top": "1px solid hsl(var(--border))", "margin-top": "16px", "padding-top": "12px" }
+                  ? { "border-top": "1px solid hsl(var(--border))", "margin-top": "10px", "padding-top": "8px" }
                   : {}
               }
             >
@@ -915,7 +915,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
               aria-label={(useLocale(), label("settings_ai_back"))}
               onClick={() => setView({ kind: "catalog" })}
             >
-              <IconArrowLeft width={16} height={16} />
+              <IconArrowLeft width={14} height={14} />
             </button>
             <h3 class="settings-h3" style={{ margin: "0" }}>{(useLocale(), label("settings_ai_custom_provider"))}</h3>
           </div>
@@ -965,7 +965,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
         {/* ── Manage models (main view) ── */}
         <Match when={view().kind === "manage"}>
           <h3 class="settings-h3">{(useLocale(), label("settings_nav_ai"))}</h3>
-          <p class="settings-prose" style={{ margin: "0 0 10px" }}>
+          <p class="settings-prose" style={{ margin: "0 0 6px" }}>
             {(useLocale(), label("settings_ai_manage_models_desc"))}
           </p>
           <div class="settings-models-search">
@@ -1052,7 +1052,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
         </div>
       </Show>
 
-          <div class="settings-row" style={{ "align-items": "center", gap: "10px", "margin-top": "16px" }}>
+          <div class="settings-row" style={{ "align-items": "center", gap: "8px", "margin-top": "10px" }}>
         <ToggleSwitch
           checked={props.aiStreaming ?? false}
           onChange={(checked) => props.onAiStreamingChange?.(checked)}
@@ -1384,7 +1384,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
           {/* OpenCode has no first-class AI provider in Markdraw (Claude/Codex
               are gated on their connected provider), so importing its configured
               MCP servers rides this explicit toggle. */}
-          <div class="settings-row" style={{ "align-items": "center", gap: "10px", margin: "0 0 12px" }}>
+          <div class="settings-row" style={{ "align-items": "center", gap: "8px", margin: "0 0 8px" }}>
             <ToggleSwitch
               checked={props.importOpenCodeMcps ?? false}
               onChange={(checked) => props.onImportOpenCodeMcpsChange?.(checked)}
@@ -1448,6 +1448,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
         </Match>
 
         <Match when={view() === "form"}>
+          <SettingsBreadcrumb segments={[(useLocale(), label("settings_mcp_title"))]} />
           {/* Back arrow mirrors the AI section's sub-pages (shared aria label). */}
           <div class="settings-subpage-header">
             <button
@@ -1459,7 +1460,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
                 setView("list");
               }}
             >
-              <IconArrowLeft width={16} height={16} />
+              <IconArrowLeft width={14} height={14} />
             </button>
             <h3 class="settings-h3" style={{ margin: "0" }}>
               {(useLocale(),

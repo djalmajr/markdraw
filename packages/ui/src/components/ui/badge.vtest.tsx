@@ -28,8 +28,8 @@ describe("Badge", () => {
     expect(node.className).toContain("bg-primary");
   });
 
-  it("toggles round modifier (rounded-full) when round prop is set", () => {
+  it("keeps the round prop within the compact radius system", () => {
     const { getByText } = render(() => <Badge round>Pill</Badge>);
-    expect(getByText("Pill").className).toContain("rounded-full");
+    expect(getByText("Pill").className).toContain("rounded-[2px]");
   });
 });

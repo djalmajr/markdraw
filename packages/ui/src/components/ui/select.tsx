@@ -25,7 +25,7 @@ const SelectTrigger = <T extends ValidComponent = "button">(
   return (
     <SelectPrimitive.Trigger
       class={cn(
-        "flex h-10 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 data-[invalid]:border-error-foreground data-[invalid]:text-error-foreground [&>span]:line-clamp-1",
+        "flex h-6 w-full items-center justify-between rounded-[2px] border border-input bg-background px-2 py-0.5 text-xs ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 data-[invalid]:border-error-foreground data-[invalid]:text-error-foreground [&>span]:line-clamp-1",
         local.class
       )}
       {...others}
@@ -33,7 +33,7 @@ const SelectTrigger = <T extends ValidComponent = "button">(
       {local.children}
       <SelectPrimitive.Icon
         as={IconChevronDown}
-        class="size-4 shrink-0 opacity-50"
+        class="size-3 shrink-0 opacity-50"
       />
     </SelectPrimitive.Trigger>
   )
@@ -50,7 +50,7 @@ const SelectContent = <T extends ValidComponent = "div">(
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         class={cn(
-          "relative z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md outline-none animate-content-hide data-[expanded]:animate-content-show",
+          "relative z-50 min-w-[8rem] overflow-hidden rounded-[2px] border bg-popover text-popover-foreground shadow-none outline-none animate-content-hide data-[expanded]:animate-content-show",
           local.class
         )}
         {...others}
@@ -73,14 +73,14 @@ const SelectItem = <T extends ValidComponent = "li">(
   return (
     <SelectPrimitive.Item
       class={cn(
-        "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex w-full cursor-default select-none items-center rounded-[2px] py-0.5 pl-6 pr-2 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         local.class
       )}
       {...others}
     >
-      <span class="absolute left-2 flex size-3.5 items-center justify-center">
+      <span class="absolute left-2 flex size-3 items-center justify-center">
         <SelectPrimitive.ItemIndicator>
-          <IconCheck class="size-4" />
+          <IconCheck class="size-3" />
         </SelectPrimitive.ItemIndicator>
       </span>
       <SelectPrimitive.ItemLabel>{local.children}</SelectPrimitive.ItemLabel>

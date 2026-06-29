@@ -9,7 +9,7 @@ import { cva } from "class-variance-authority"
 import { cn } from "@markdraw/core/utils.ts"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[2px] text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -21,10 +21,10 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline"
       },
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 px-3 text-xs",
-        lg: "h-11 px-8",
-        icon: "size-10"
+        default: "h-6 px-2 py-0.5",
+        sm: "h-[22px] px-2",
+        lg: "h-7 px-2.5",
+        icon: "size-6"
       }
     },
     defaultVariants: {
@@ -71,7 +71,7 @@ const Button = <T extends ValidComponent = "button">(
           stroke-width="2"
           stroke-linecap="round"
           stroke-linejoin="round"
-          class="size-4 animate-spin"
+          class="size-3.5 animate-spin"
         >
           <path d="M21 12a9 9 0 1 1-6.219-8.56" />
         </svg>

@@ -135,7 +135,7 @@ export function Toolbar(props: ToolbarProps) {
           onChange={props.onToggleSidebar}
           aria-label={(useLocale(), m.toolbar_toggle_sidebar())}
         >
-          <IconPanelLeft width={16} height={16} />
+          <IconPanelLeft width={14} height={14} />
         </TooltipTrigger>
         <TooltipContent>{(useLocale(), m.toolbar_toggle_sidebar())}</TooltipContent>
       </Tooltip>
@@ -151,7 +151,7 @@ export function Toolbar(props: ToolbarProps) {
         onChange={props.onToggleToc}
         aria-label={(useLocale(), m.toolbar_toggle_toc())}
       >
-        <IconPanelRight width={16} height={16} />
+        <IconPanelRight width={14} height={14} />
       </TooltipTrigger>
       <TooltipContent>{(useLocale(), m.toolbar_toggle_toc())}</TooltipContent>
     </Tooltip>
@@ -167,7 +167,7 @@ export function Toolbar(props: ToolbarProps) {
           onChange={() => props.onToggleSplit?.()}
           aria-label={(useLocale(), m.toolbar_split_editor())}
         >
-          <IconColumns width={16} height={16} />
+          <IconColumns width={14} height={14} />
         </TooltipTrigger>
         <TooltipContent>{(useLocale(), m.toolbar_split_editor())}</TooltipContent>
       </Tooltip>
@@ -179,11 +179,11 @@ export function Toolbar(props: ToolbarProps) {
       <Tooltip>
         <TooltipTrigger
           as="button"
-          class="inline-flex items-center justify-center rounded-md h-7 w-7 text-sm hover:bg-accent hover:text-accent-foreground"
+          class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground"
           aria-label={(useLocale(), m.toolbar_reload_document())}
           onClick={props.onReload}
         >
-          <IconRefreshCw width={16} height={16} />
+          <IconRefreshCw width={14} height={14} />
         </TooltipTrigger>
         <TooltipContent>{(useLocale(), m.toolbar_reload_document())}</TooltipContent>
       </Tooltip>
@@ -195,11 +195,11 @@ export function Toolbar(props: ToolbarProps) {
       <Tooltip>
         <TooltipTrigger
           as="button"
-          class="inline-flex items-center justify-center rounded-md h-7 w-7 text-sm hover:bg-accent hover:text-accent-foreground"
+          class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground"
           aria-label={(useLocale(), m.toolbar_copy_source_url())}
           onClick={props.onCopySource}
         >
-          <IconLink width={16} height={16} />
+          <IconLink width={14} height={14} />
         </TooltipTrigger>
         <TooltipContent>{(useLocale(), m.toolbar_copy_source_url())}</TooltipContent>
       </Tooltip>
@@ -211,11 +211,11 @@ export function Toolbar(props: ToolbarProps) {
       <Tooltip>
         <TooltipTrigger
           as="button"
-          class="inline-flex items-center justify-center rounded-md h-7 w-7 text-sm hover:bg-accent hover:text-accent-foreground"
+          class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground"
           aria-label={(useLocale(), m.toolbar_copy_document_content())}
           onClick={props.onCopyContent}
         >
-          <IconCopy width={16} height={16} />
+          <IconCopy width={14} height={14} />
         </TooltipTrigger>
         <TooltipContent>{(useLocale(), m.toolbar_copy_document_content())}</TooltipContent>
       </Tooltip>
@@ -230,11 +230,11 @@ export function Toolbar(props: ToolbarProps) {
       <Tooltip>
         <TooltipTrigger
           as="button"
-          class="inline-flex items-center justify-center rounded-md h-7 w-7 text-sm hover:bg-accent hover:text-accent-foreground"
+          class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground"
           aria-label={(useLocale(), m.toolbar_open_folder())}
           onClick={props.onOpenFolder}
         >
-          <IconFolder width={16} height={16} />
+          <IconFolder width={14} height={14} />
         </TooltipTrigger>
         <TooltipContent>{(useLocale(), m.toolbar_open_folder())}</TooltipContent>
       </Tooltip>
@@ -248,9 +248,9 @@ export function Toolbar(props: ToolbarProps) {
             menu would appear together. The icon + aria-label are enough. */}
       <DropdownMenuTrigger
         aria-label={(useLocale(), m.toolbar_menu())}
-        class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-accent hover:text-accent-foreground h-8 w-8"
+        class="inline-flex h-6 w-6 items-center justify-center whitespace-nowrap rounded-[2px] text-xs font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1"
       >
-        <IconMenu width={16} height={16} />
+        <IconMenu width={14} height={14} />
       </DropdownMenuTrigger>
       <DropdownMenuContent class="w-48">
         <Show when={props.onOpenFolder}>
@@ -389,24 +389,24 @@ export function Toolbar(props: ToolbarProps) {
           <Tooltip>
             <TooltipTrigger
               as="button"
-              class="inline-flex items-center justify-center rounded-md h-7 w-7 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-30 disabled:pointer-events-none"
+              class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-30"
               aria-label={(useLocale(), m.toolbar_go_back())}
               disabled={!props.canGoBack}
               onClick={props.onGoBack}
             >
-              <IconArrowLeft width={16} height={16} />
+              <IconArrowLeft width={14} height={14} />
             </TooltipTrigger>
             <TooltipContent>{(useLocale(), m.toolbar_go_back())}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
               as="button"
-              class="inline-flex items-center justify-center rounded-md h-7 w-7 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-30 disabled:pointer-events-none"
+              class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-30"
               aria-label={(useLocale(), m.toolbar_go_forward())}
               disabled={!props.canGoForward}
               onClick={props.onGoForward}
             >
-              <IconArrowRight width={16} height={16} />
+              <IconArrowRight width={14} height={14} />
             </TooltipTrigger>
             <TooltipContent>{(useLocale(), m.toolbar_go_forward())}</TooltipContent>
           </Tooltip>

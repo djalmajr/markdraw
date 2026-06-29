@@ -42,11 +42,11 @@ export function AboutDialog(props: AboutDialogProps) {
       <AlertDialogContent class="flex max-h-[80vh] w-full max-w-md flex-col gap-0 overflow-hidden p-6">
         <button
           aria-label={(useLocale(), m.about_close())}
-          class="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          class="absolute right-3 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-muted-foreground ring-inset hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           type="button"
           onClick={props.onClose}
         >
-          <IconX width={16} height={16} />
+          <IconX width={14} height={14} />
         </button>
 
         <div class="flex flex-col items-center gap-2 pb-2">
