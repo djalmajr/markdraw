@@ -10,7 +10,7 @@ import { cva } from "class-variance-authority"
 import { cn } from "@markdraw/core/utils.ts"
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between overflow-hidden rounded-md border bg-popover text-popover-foreground px-4 py-3 pr-8 shadow-md transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--kb-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--kb-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[opened]:animate-in data-[closed]:animate-out data-[swipe=end]:animate-out data-[closed]:fade-out-80 data-[closed]:slide-out-to-right-full data-[opened]:slide-in-from-top-full data-[opened]:sm:slide-in-from-bottom-full",
+  "group pointer-events-auto relative flex w-full items-center justify-between overflow-hidden rounded-md border bg-popover px-3 py-2 pr-7 text-xs text-popover-foreground shadow-none transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--kb-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--kb-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[opened]:animate-in data-[closed]:animate-out data-[swipe=end]:animate-out data-[closed]:fade-out-80 data-[closed]:slide-out-to-right-full data-[opened]:slide-in-from-top-full data-[opened]:sm:slide-in-from-bottom-full",
   {
     variants: {
       variant: {
@@ -41,7 +41,7 @@ const Toaster = <T extends ValidComponent = "ol">(
       <ToastPrimitive.Region>
         <ToastPrimitive.List
           class={cn(
-            "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse gap-2 p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
+            "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse gap-1.5 p-3 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[360px]",
             local.class
           )}
           {...others}
@@ -74,7 +74,7 @@ const ToastClose = <T extends ValidComponent = "button">(
   return (
     <ToastPrimitive.CloseButton
       class={cn(
-        "absolute right-2 top-2 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity focus:opacity-100 focus:outline-none focus:ring-2 group-hover:opacity-100 group-[.destructive]:text-destructive-foreground group-[.error]:text-error-foreground group-[.success]:text-success-foreground group-[.warning]:text-warning-foreground",
+        "absolute right-1.5 top-1.5 rounded-md p-1 text-foreground/50 opacity-0 ring-inset transition-opacity focus:opacity-100 focus:outline-none focus:ring-1 focus:ring-ring group-hover:opacity-100 group-[.destructive]:text-destructive-foreground group-[.error]:text-error-foreground group-[.success]:text-success-foreground group-[.warning]:text-warning-foreground",
         local.class
       )}
       {...others}
@@ -87,7 +87,7 @@ const ToastClose = <T extends ValidComponent = "button">(
         stroke-width="2"
         stroke-linecap="round"
         stroke-linejoin="round"
-        class="size-4"
+        class="size-3.5"
       >
         <path d="M18 6l-12 12" />
         <path d="M6 6l12 12" />
@@ -104,7 +104,7 @@ const ToastTitle = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ToastTitleProps<T>>
 ) => {
   const [local, others] = splitProps(props as ToastTitleProps, ["class"])
-  return <ToastPrimitive.Title class={cn("text-sm font-semibold", local.class)} {...others} />
+  return <ToastPrimitive.Title class={cn("text-xs font-semibold", local.class)} {...others} />
 }
 
 type ToastDescriptionProps<T extends ValidComponent = "div"> =
@@ -114,7 +114,7 @@ const ToastDescription = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ToastDescriptionProps<T>>
 ) => {
   const [local, others] = splitProps(props as ToastDescriptionProps, ["class"])
-  return <ToastPrimitive.Description class={cn("text-sm opacity-90", local.class)} {...others} />
+  return <ToastPrimitive.Description class={cn("text-xs opacity-90", local.class)} {...others} />
 }
 
 function showToast(props: {

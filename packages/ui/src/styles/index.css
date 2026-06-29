@@ -35,8 +35,8 @@
   --color-card-foreground: hsl(var(--card-foreground));
 
   --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: var(--radius);
+  --radius-sm: var(--radius);
 
   --animate-content-show: content-show 0.15s ease-out;
   --animate-content-hide: content-hide 0.1s ease-in;
@@ -84,8 +84,8 @@
     --border: 220 13% 91%;
     --input: 220 13% 91%;
     --ring: 188 76% 30%;
-    /* Squarer components (smaller corner radius across the app). */
-    --radius: 0.375rem;
+    /* Compact DS: use the same 2px corner on controls and cards. */
+    --radius: 2px;
 
     /* Layout tokens (used by custom CSS below) */
     --toolbar-bg: 220 14% 97%;
@@ -274,11 +274,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 16px;
+  gap: 6px;
+  padding: 3px 10px;
   background: hsl(var(--toolbar-bg));
   border-bottom: 1px solid hsl(var(--border));
-  min-height: 44px;
+  min-height: 32px;
   flex-shrink: 0;
 }
 
@@ -286,7 +286,7 @@
 .toolbar-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex: 1;
   min-width: 0;
 }
@@ -304,14 +304,14 @@
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .toolbar-window-frame {
   min-height: 28px;
-  padding: 4px var(--toolbar-frame-inset-right, 8px) 4px var(--toolbar-frame-inset-left, 8px);
-  gap: 8px;
+  padding: 2px var(--toolbar-frame-inset-right, 8px) 2px var(--toolbar-frame-inset-left, 8px);
+  gap: 6px;
 }
 
 /* Custom Windows caption buttons (minimize/maximize/close). On macOS the
@@ -440,8 +440,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 32px;
-  padding: 0 4px 0 12px;
+  height: 26px;
+  padding: 0 3px 0 8px;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
   border-right: 1px solid hsl(var(--border));
@@ -508,10 +508,10 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  min-width: 20px;
-  border-radius: 4px;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  border-radius: 2px;
   color: hsl(var(--muted-foreground));
   opacity: 0.5;
   transition: color 0.1s, opacity 0.1s;
@@ -541,8 +541,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  min-width: 24px;
+  width: 20px;
+  min-width: 20px;
   color: hsl(var(--muted-foreground));
   border-right: 1px solid hsl(var(--border));
   flex-shrink: 0;
@@ -571,8 +571,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  min-width: 28px;
+  width: 22px;
+  min-width: 22px;
   color: hsl(var(--muted-foreground));
   opacity: 0.6;
   flex-shrink: 0;
@@ -585,8 +585,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 .tab-bar-drag-overlay {
   opacity: 0.8;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border-radius: 2px;
+  box-shadow: none;
 }
 
 /* === Status Bar === */
@@ -1176,15 +1176,15 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  padding: 2px 12px;
+  padding: 1px 8px;
   border-bottom: 1px solid hsl(var(--border));
   background: hsl(var(--background));
   flex-shrink: 0;
 }
 
 .content-toolbar-separator {
-  height: 16px;
-  margin: 0 4px;
+  height: 12px;
+  margin: 0 2px;
 }
 
 .content-toolbar-group {
@@ -1197,9 +1197,9 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 2px;
   color: hsl(var(--muted-foreground));
   transition: background-color 0.15s, color 0.15s;
 }
@@ -1215,7 +1215,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .content-toolbar-value {
-  min-width: 28px;
+  min-width: 22px;
   text-align: center;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -1225,9 +1225,9 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .content-toolbar-select {
   display: inline-flex;
   align-items: center;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 6px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 2px;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
@@ -1581,7 +1581,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .rp-strip {
   display: flex;
   align-items: stretch;
-  height: 36px;
+  height: 28px;
   flex-shrink: 0;
   background: hsl(var(--secondary));
   border-bottom: 1px solid hsl(var(--border));
@@ -1604,7 +1604,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
+  width: 20px;
   flex-shrink: 0;
   border: none;
   background: hsl(var(--secondary));
@@ -1622,9 +1622,9 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .rp-tab {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 36px;
-  padding: 0 6px 0 10px;
+  gap: 4px;
+  height: 28px;
+  padding: 0 4px 0 7px;
   max-width: 160px;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
@@ -1665,8 +1665,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 .rp-tab-drag-overlay {
   opacity: 0.8;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border-radius: 2px;
+  box-shadow: none;
 }
 /* Insertion-line preview while dragging: a bright bar on the EXACT edge the
    dragged tab will land at (rpDropIndicator mirrors the reorder semantics,
@@ -1718,12 +1718,12 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
-  min-width: 18px;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
   border: none;
   background: none;
-  border-radius: 4px;
+  border-radius: 2px;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
   opacity: 0;
@@ -1745,20 +1745,20 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   flex: 1;
   min-width: 60px;
   max-width: 150px;
-  height: 20px;
+  height: 22px;
   padding: 0 4px;
   font: inherit;
   font-size: 12px;
   color: hsl(var(--foreground));
   background: hsl(var(--background));
   border: 1px solid hsl(var(--primary));
-  border-radius: 4px;
+  border-radius: 2px;
   outline: none;
 }
 /* Keep a visible focus indicator (the input autofocuses on rename). */
 .rp-tab-rename:focus {
   border-color: hsl(var(--primary));
-  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.35);
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.35);
 }
 /* The chat-tab "Delete" context-menu item reads as destructive. */
 .rp-tab-menu-danger {
@@ -1773,7 +1773,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   gap: 1px;
-  padding: 0 4px;
+  padding: 0 2px;
   flex-shrink: 0;
   border-left: 1px solid hsl(var(--border));
 }
@@ -1781,11 +1781,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   border: none;
   background: none;
-  border-radius: 5px;
+  border-radius: 2px;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
   transition:
@@ -2046,11 +2046,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 22px;
+  height: 20px;
   max-width: 130px;
   padding: 0 5px 0 7px;
   border: none;
-  border-radius: 6px;
+  border-radius: 2px;
   background: transparent;
   color: hsl(var(--foreground));
   font-size: 11px;
@@ -2074,7 +2074,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 /* No ring on mouse click (it reads as noise inside the composer); only a thin
    teal ring on keyboard focus. */
 .ai-mp-trigger:focus-visible {
-  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.4);
+  box-shadow: 0 0 0 1px hsl(var(--ring) / 0.45);
 }
 .ai-mp-trigger-label {
   overflow: hidden;
@@ -2095,13 +2095,14 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 6px 6px 8px;
+  padding: 2px 4px 2px 6px;
   border-bottom: 1px solid hsl(var(--border));
 }
 .ai-mp-search {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  min-height: 22px;
   flex: 1;
   min-width: 0;
   color: hsl(var(--muted-foreground));
@@ -2119,11 +2120,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 2px;
   background: none;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
@@ -2138,12 +2139,12 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .ai-mp-list {
   max-height: 320px;
   overflow-y: auto;
-  padding: 4px;
+  padding: 2px;
 }
 .ai-mp-group-label {
-  margin: 4px -4px 0;
-  padding: 5px 12px;
-  font-size: 11px;
+  margin: 2px -2px 0;
+  padding: 3px 7px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -2151,16 +2152,17 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   background: hsl(var(--secondary));
 }
 .ai-mp-group-label:first-child {
-  margin-top: -4px;
+  margin-top: -2px;
 }
 .ai-mp-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
-  padding: 5px 8px;
+  min-height: 22px;
+  padding: 2px 6px;
   border: none;
-  border-radius: 5px;
+  border-radius: 2px;
   background: none;
   color: hsl(var(--foreground));
   font-size: 12px;
@@ -2187,8 +2189,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   flex-shrink: 0;
   color: hsl(var(--primary));
 }
+.ai-mp-row-active .ai-mp-row-check {
+  color: hsl(var(--primary));
+}
 .ai-mp-empty {
-  padding: 16px 8px;
+  padding: 12px 8px;
   text-align: center;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
@@ -2930,23 +2935,24 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 /* ── Settings modal (DJA-15) ─────────────────────────────────────────────── */
 .settings-nav {
-  width: 200px;
+  width: 184px;
   flex-shrink: 0;
   border-right: 1px solid hsl(var(--border));
-  padding: 8px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   overflow-y: auto;
 }
 
 .settings-nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
-  border-radius: 6px;
-  font-size: 13px;
+  gap: 6px;
+  min-height: 24px;
+  padding: 4px 7px;
+  border-radius: 2px;
+  font-size: 12px;
   text-align: left;
   color: hsl(var(--foreground));
   cursor: pointer;
@@ -2965,39 +2971,39 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 20px;
+  padding: 10px;
 }
 
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .settings-h3 {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .settings-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: hsl(var(--muted-foreground));
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .settings-row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
 .settings-row-end {
   justify-content: flex-end;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 /* Editor / Appearance / Indexing: a vertical stack of "label ↔ control" rows
@@ -3006,15 +3012,15 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .settings-fields {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 4px;
+  margin-top: 4px;
 }
 .settings-fields .settings-row,
 .settings-field {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   min-height: 24px;
 }
 .settings-fields .settings-label,
@@ -3023,15 +3029,17 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .settings-input {
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .settings-input.ai-composer-input {
   flex: 1;
-  padding: 7px 9px;
+  min-height: 24px;
+  padding: 3px 8px;
   border: 1px solid hsl(var(--input));
-  border-radius: var(--radius-sm);
+  border-radius: 2px;
   background: hsl(var(--background));
+  line-height: 16px;
 }
 .settings-input.ai-composer-input:focus {
   border-color: hsl(var(--ring));
@@ -3039,25 +3047,28 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 .settings-select {
   width: 100%;
-  border-radius: 5px;
+  min-height: 24px;
+  border-radius: 2px;
   border: 1px solid hsl(var(--input));
   background: hsl(var(--background));
   color: hsl(var(--foreground));
-  padding: 8px 10px;
+  padding: 3px 8px;
+  font-size: 12px;
 }
 
 .settings-provider-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .settings-provider {
-  padding: 6px 12px;
-  border-radius: 5px;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 2px;
   border: 1px solid hsl(var(--border));
   background: hsl(var(--background));
-  font-size: 13px;
+  font-size: 12px;
   color: hsl(var(--foreground));
   cursor: pointer;
 }
@@ -3073,11 +3084,13 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .settings-models-search {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  margin-bottom: 6px;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 6px;
+  margin-bottom: 4px;
   border: 1px solid hsl(var(--border));
-  border-radius: 5px;
+  border-radius: 2px;
+  background: hsl(var(--background));
   color: hsl(var(--muted-foreground));
 }
 .settings-models-search input {
@@ -3087,11 +3100,15 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   background: none;
   outline: none;
   color: hsl(var(--foreground));
-  font-size: 13px;
+  font-size: 12px;
+}
+.settings-models-search .ai-mp-icon-btn {
+  width: 20px;
+  height: 20px;
 }
 .settings-models {
   border: 1px solid hsl(var(--border));
-  border-radius: 5px;
+  border-radius: 2px;
   overflow: hidden;
   /* No inner scroll: the list grows with the modal (which caps at 90vh), and
      the settings content area provides the single scroll once that cap hits. */
@@ -3100,12 +3117,12 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 8px 12px;
-  font-size: 11px;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 10px;
   font-weight: 600;
   color: hsl(var(--muted-foreground));
-  background: hsl(var(--secondary));
+  background: hsl(var(--background));
 }
 .settings-models-group:not(:first-child) {
   border-top: 1px solid hsl(var(--border));
@@ -3120,9 +3137,9 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   gap: 6px;
 }
 .settings-models-empty {
-  padding: 16px 12px;
+  padding: 12px 8px;
   text-align: center;
-  font-size: 13px;
+  font-size: 12px;
   color: hsl(var(--muted-foreground));
 }
 
@@ -3130,8 +3147,8 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .settings-subpage-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 /* Discreet, informational breadcrumb ABOVE an AI sub-page title — small, muted,
    not clickable (the back button + title own navigation). */
@@ -3140,7 +3157,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   align-items: center;
   gap: 3px;
   min-width: 0;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   font-size: 11px;
   font-weight: 500;
   color: hsl(var(--muted-foreground));
@@ -3156,11 +3173,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 2px;
   background: none;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
@@ -3173,19 +3190,20 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   flex-direction: column;
   border: 1px solid hsl(var(--border));
-  border-radius: 5px;
+  border-radius: 2px;
   overflow: hidden;
 }
 .settings-catalog-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 11px 12px;
+  gap: 8px;
+  min-height: 26px;
+  padding: 5px 8px;
   border: none;
   background: none;
   color: hsl(var(--foreground));
-  font-size: 13px;
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
@@ -3205,10 +3223,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-top: 8px;
-  padding: 12px;
+  margin-top: 6px;
+  padding: 8px;
   border: 1px solid hsl(var(--border));
-  border-radius: 5px;
+  border-radius: 2px;
+  background: hsl(var(--background));
 }
 .settings-custom-model {
   display: flex;
@@ -3219,11 +3238,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 2px;
   background: none;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
@@ -3236,12 +3255,13 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 7px 12px;
+  gap: 8px;
+  min-height: 24px;
+  padding: 3px 8px;
   border-top: 1px solid hsl(var(--border));
 }
 .settings-models-name {
-  font-size: 13px;
+  font-size: 12px;
   color: hsl(var(--foreground));
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3249,7 +3269,7 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 }
 
 .settings-saved {
-  font-size: 12px;
+  font-size: 11px;
   color: hsl(142 71% 40%);
   align-self: center;
 }
@@ -3257,15 +3277,16 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .settings-tiers {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .settings-tier-card {
   text-align: left;
   border: 1px solid hsl(var(--border));
-  border-radius: 6px;
-  padding: 12px;
+  border-radius: 2px;
+  padding: 8px;
   background: hsl(var(--background));
+  box-shadow: none;
   cursor: pointer;
 }
 
@@ -3277,11 +3298,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .settings-tier-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .settings-tier-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   flex: 1;
 }
@@ -3290,8 +3311,9 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  padding: 1px 6px;
-  border-radius: 6px;
+  line-height: 14px;
+  padding: 1px 5px;
+  border-radius: 2px;
   background: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
 }
@@ -3303,21 +3325,28 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 .settings-tier-desc {
   font-size: 12px;
   color: hsl(var(--muted-foreground));
-  margin-top: 4px;
-  line-height: 1.45;
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.settings-tier-note,
+.settings-hint {
+  font-size: 11px;
+  line-height: 1.35;
+  color: hsl(var(--muted-foreground));
 }
 
 .settings-prose {
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.45;
   color: hsl(var(--muted-foreground));
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .settings-kb-group {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .settings-kb-group-title {
@@ -3325,15 +3354,16 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   font-weight: 600;
   text-transform: uppercase;
   color: hsl(var(--muted-foreground));
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 
 .settings-kb-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  font-size: 13px;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 0;
+  font-size: 12px;
 }
 
 .settings-kb-desc {
@@ -3343,13 +3373,13 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
 
 .settings-kb-keys {
   font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-size: 11px;
   color: hsl(var(--foreground));
-  min-width: 64px;
-  padding: 3px 8px;
+  min-width: 60px;
+  padding: 2px 6px;
   border: 1px solid hsl(var(--border));
-  border-radius: 6px;
-  background: hsl(var(--secondary));
+  border-radius: 2px;
+  background: hsl(var(--background));
   cursor: pointer;
   text-align: center;
 }
@@ -3365,11 +3395,11 @@ body:has(.app.window-frame-toolbar) .workspace-root-header {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border: none;
   background: none;
-  border-radius: 5px;
+  border-radius: 2px;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
 }
@@ -3848,6 +3878,8 @@ mark.quick-open-hit {
 }
 
 .find-in-files-option input[type="checkbox"] {
+  accent-color: hsl(var(--primary));
+  border-radius: 2px;
   margin: 0;
 }
 
@@ -4902,12 +4934,12 @@ kbd.shortcuts-help-key {
 .settings-mcp-groups {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 10px;
 }
 .settings-mcp-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 .settings-mcp-group-title {
   margin: 0;
@@ -4920,21 +4952,23 @@ kbd.shortcuts-help-key {
 .settings-mcp-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 5px;
 }
 .settings-mcp-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 5px;
+  padding: 6px 8px;
   border: 1px solid hsl(var(--border));
-  border-radius: 10px;
+  border-radius: 2px;
+  background: hsl(var(--background));
+  box-shadow: none;
 }
 
 .settings-mcp-card-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -4943,14 +4977,14 @@ kbd.shortcuts-help-key {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   border-radius: 9999px;
   background: hsl(var(--muted));
   border: 1px solid hsl(var(--border));
   color: hsl(var(--foreground));
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -4982,7 +5016,7 @@ kbd.shortcuts-help-key {
 }
 
 .settings-mcp-card-name {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   color: hsl(var(--foreground));
 }
@@ -4999,7 +5033,7 @@ kbd.shortcuts-help-key {
 .settings-mcp-card-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
@@ -5009,7 +5043,7 @@ kbd.shortcuts-help-key {
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: 2px;
   color: hsl(var(--muted-foreground));
 }
 
@@ -5021,15 +5055,15 @@ kbd.shortcuts-help-key {
 .settings-mcp-tool-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 3px;
 }
 
 .settings-mcp-tool-chip {
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1;
-  padding: 3px 7px;
-  border-radius: 6px;
+  padding: 2px 5px;
+  border-radius: 2px;
   background: color-mix(in srgb, hsl(var(--muted)) 95%, black);
   border: 1px solid color-mix(in srgb, hsl(var(--muted)) 87%, black);
   color: hsl(var(--muted-foreground));
@@ -5039,7 +5073,7 @@ kbd.shortcuts-help-key {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 6px;
 }
 
 .settings-mcp-card-footer {
@@ -5047,13 +5081,13 @@ kbd.shortcuts-help-key {
   justify-content: flex-end;
   gap: 2px;
   margin-top: 2px;
-  padding-top: 8px;
+  padding-top: 6px;
   border-top: 1px solid color-mix(in srgb, hsl(var(--border)) 60%, transparent);
 }
 
 .settings-mcp-auth-note {
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 11px;
+  line-height: 1.35;
   color: hsl(var(--muted-foreground));
 }
 
@@ -5063,10 +5097,7 @@ kbd.shortcuts-help-key {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, hsl(var(--muted)) 92%, black);
-  border: 1px solid color-mix(in srgb, hsl(var(--muted)) 84%, black);
+  line-height: 1.2;
   color: hsl(var(--muted-foreground));
 }
 
@@ -5083,11 +5114,11 @@ kbd.shortcuts-help-key {
 .settings-mcp-new-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 8px 10px;
-  margin-top: 10px;
-  border-radius: 10px;
+  padding: 6px 8px;
+  margin-top: 6px;
+  border-radius: 2px;
   text-align: left;
   cursor: pointer;
 }
@@ -5141,11 +5172,11 @@ kbd.shortcuts-help-key {
 .settings-danger-btn {
   background: transparent;
   border: 1px solid color-mix(in srgb, hsl(var(--destructive)) 35%, transparent);
-  border-radius: 6px;
+  border-radius: 2px;
   color: hsl(var(--destructive));
   cursor: pointer;
-  font-size: 12px;
-  padding: 5px 10px;
+  font-size: 11px;
+  padding: 4px 8px;
 }
 
 .settings-danger-btn:hover {
@@ -5157,7 +5188,7 @@ kbd.shortcuts-help-key {
 button.settings-models-group-name {
   background: none;
   border: 0;
-  border-radius: 4px;
+  border-radius: 2px;
   color: inherit;
   cursor: pointer;
   font: inherit;
@@ -5312,6 +5343,7 @@ button.settings-models-group-name:hover {
 
 .ai-plan-checkbox {
   accent-color: hsl(var(--primary));
+  border-radius: 2px;
   cursor: pointer;
   flex-shrink: 0;
   margin: 1px 0 0;

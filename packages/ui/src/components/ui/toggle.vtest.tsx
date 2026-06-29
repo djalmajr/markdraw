@@ -27,7 +27,7 @@ describe("Toggle", () => {
 
   it("applies size variants", () => {
     const { getByRole } = render(() => <Toggle size="lg">L</Toggle>);
-    expect(getByRole("button").className).toContain("h-10");
+    expect(getByRole("button").className).toContain("h-7");
   });
 
   it("applies the outline variant", () => {

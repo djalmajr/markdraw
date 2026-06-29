@@ -30,16 +30,15 @@ const Switch = <T extends ValidComponent = "div">(
 const SwitchDescription = SwitchPrimitive.Description
 const SwitchErrorMessage = SwitchPrimitive.ErrorMessage
 
-/** Switch size variants — keep all toggles in the app visually consistent.
- *  `sm` is the list/compact size; `default` is the standalone size. */
+/** Switch size variants — the compact squared switch is the default DS shape. */
 type SwitchSize = "default" | "sm"
 const CONTROL_SIZE: Record<SwitchSize, string> = {
-  default: "h-6 w-11",
-  sm: "h-5 w-9",
+  default: "h-4 w-[29px]",
+  sm: "h-4 w-[29px]",
 }
 const THUMB_SIZE: Record<SwitchSize, string> = {
-  default: "size-5 data-[checked]:translate-x-5",
-  sm: "size-4 data-[checked]:translate-x-4",
+  default: "size-3 data-[checked]:translate-x-[13px]",
+  sm: "size-3 data-[checked]:translate-x-[13px]",
 }
 
 type SwitchControlProps = SwitchPrimitive.SwitchControlProps & {
@@ -61,7 +60,7 @@ const SwitchControl = <T extends ValidComponent = "input">(
       />
       <SwitchPrimitive.Control
         class={cn(
-          "inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent bg-input transition-[color,background-color,box-shadow] data-[disabled]:cursor-not-allowed data-[checked]:bg-primary data-[disabled]:opacity-50",
+          "inline-flex shrink-0 cursor-pointer items-center rounded-[2px] border border-input bg-input p-[1px] transition-[color,background-color,border-color,box-shadow] data-[disabled]:cursor-not-allowed data-[checked]:border-primary data-[checked]:bg-primary data-[disabled]:opacity-50",
           CONTROL_SIZE[local.size ?? "default"],
           local.class
         )}
@@ -85,7 +84,7 @@ const SwitchThumb = <T extends ValidComponent = "div">(
   return (
     <SwitchPrimitive.Thumb
       class={cn(
-        "pointer-events-none block translate-x-0 rounded-full bg-background shadow-sm ring-0 transition-transform",
+        "pointer-events-none block translate-x-0 rounded-[2px] bg-background shadow-none ring-0 transition-transform",
         THUMB_SIZE[local.size ?? "default"],
         local.class
       )}
@@ -103,7 +102,7 @@ const SwitchLabel = <T extends ValidComponent = "label">(
   return (
     <SwitchPrimitive.Label
       class={cn(
-        "text-sm font-medium leading-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-70",
+        "text-xs font-medium leading-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-70",
         local.class
       )}
       {...others}

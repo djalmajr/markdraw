@@ -13,12 +13,12 @@ export function Progress<T extends ValidComponent = "div">(
   return (
     <ProgressPrimitive.Root {...others}>
       {local.children}
-      <ProgressPrimitive.Track class="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+      <ProgressPrimitive.Track class="relative h-1.5 w-full overflow-hidden rounded-[2px] bg-secondary">
         {/* progress-fill: indeterminate gets a looping sweep via CSS — with no
             fill-width var set, the bare Kobalte fill renders FULL, which read
             as a bar jumping to 100% and back during the updater's
             content-length-less redirect hop. */}
-        <ProgressPrimitive.Fill class="progress-fill h-full w-[var(--kb-progress-fill-width)] flex-1 bg-primary transition-all" />
+        <ProgressPrimitive.Fill class="progress-fill h-full w-[var(--kb-progress-fill-width)] flex-1 rounded-[2px] bg-primary transition-all" />
       </ProgressPrimitive.Track>
     </ProgressPrimitive.Root>
   );

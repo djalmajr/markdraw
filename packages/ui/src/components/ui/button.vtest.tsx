@@ -38,6 +38,6 @@ describe("Button", () => {
     ));
     const btn = getByRole("button");
     expect(btn.className).toContain("bg-destructive");
-    expect(btn.className).toContain("h-11");
+    expect(btn.className).toContain("h-7");
   });
 });
