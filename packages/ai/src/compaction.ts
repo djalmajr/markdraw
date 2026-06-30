@@ -17,7 +17,7 @@
 //     start of any `role:"tool"` message — the only message kind that
 //     continues a chain opened earlier.
 //
-// Note on the SDK's `pruneMessages` (ai@6): its API prunes message CONTENT by
+// Note on the SDK's `pruneMessages`: its API prunes message CONTENT by
 // kind (`reasoning`, `toolCalls: 'all' | 'before-last-message' | ...`) — it
 // strips reasoning/tool parts out of messages, it does not drop the oldest N
 // turns. It therefore does not fit oldest-first history truncation, and the

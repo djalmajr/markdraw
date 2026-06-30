@@ -19,6 +19,8 @@ export interface PillPickerProps {
   title?: string;
   /** Capitalize the trigger + row labels (e.g. reasoning effort: off/low/…). */
   capitalize?: boolean;
+  /** Direction for the popover. Composer footer pickers open upward. */
+  placement?: "bottom-start" | "top-start";
 }
 
 /**
@@ -36,9 +38,10 @@ export function PillPicker(props: PillPickerProps): JSX.Element {
   }
 
   return (
-    <Popover open={open()} onOpenChange={setOpen} placement="bottom-start" gutter={4}>
+    <Popover open={open()} onOpenChange={setOpen} placement={props.placement ?? "bottom-start"} gutter={4}>
       <PopoverTrigger
         as="button"
+        type="button"
         class="ai-mp-trigger"
         title={props.title ?? props.currentLabel}
         aria-label={props.ariaLabel ?? props.currentLabel}

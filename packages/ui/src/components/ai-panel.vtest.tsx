@@ -21,6 +21,34 @@ function readyStore(reply = "hello there") {
   });
 }
 
+function installScrollMetrics(
+  viewport: HTMLElement,
+  metrics: { clientHeight: number; scrollHeight: number; scrollTop: number },
+): { scrollTop: () => number; setScrollTop: (value: number) => void } {
+  let top = metrics.scrollTop;
+  Object.defineProperty(viewport, "clientHeight", { configurable: true, get: () => metrics.clientHeight });
+  Object.defineProperty(viewport, "scrollHeight", { configurable: true, get: () => metrics.scrollHeight });
+  Object.defineProperty(viewport, "scrollTop", {
+    configurable: true,
+    get: () => top,
+    set: (value) => {
+      top = Number(value);
+    },
+  });
+  Object.defineProperty(viewport, "scrollTo", {
+    configurable: true,
+    value: vi.fn((options?: ScrollToOptions | number) => {
+      top = typeof options === "number" ? options : Number(options?.top ?? top);
+    }),
+  });
+  return {
+    scrollTop: () => top,
+    setScrollTop: (value: number) => {
+      top = value;
+    },
+  };
+}
+
 describe("AiPanel", () => {
   it("shows the empty state with no messages and no provider", () => {
     const store = createAiChatStore({ getProvider: () => null });
@@ -29,6 +57,35 @@ describe("AiPanel", () => {
     expect(baseElement.querySelector(".ai-message")).toBeNull();
     // no provider/model yet → the model-picker pill shows the placeholder
     expect(baseElement.querySelector(".ai-mp-trigger")?.textContent).toContain("Select…");
+  });
+
+  it("follows new chat output until the user scrolls away, then resumes from the bottom chip", async () => {
+    const store = readyStore("answer");
+    const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
+    const viewport = baseElement.querySelector(".ai-messages > div") as HTMLElement;
+    expect(viewport).not.toBeNull();
+    const scroll = installScrollMetrics(viewport, {
+      clientHeight: 300,
+      scrollHeight: 1000,
+      scrollTop: 700,
+    });
+
+    await store.sendMessage("first");
+    await waitFor(() => expect(store.messages()).toHaveLength(2));
+    await waitFor(() => expect(scroll.scrollTop()).toBe(1000));
+
+    scroll.setScrollTop(100);
+    fireEvent.scroll(viewport);
+    const chip = screen.getByRole("button", { name: /scroll to bottom|ir para o fim|ir al final/i });
+    expect(chip).not.toBeNull();
+
+    await store.sendMessage("second");
+    await waitFor(() => expect(store.messages()).toHaveLength(4));
+    expect(scroll.scrollTop()).toBe(100);
+
+    fireEvent.click(chip);
+    await waitFor(() => expect(scroll.scrollTop()).toBe(1000));
+    expect(screen.queryByRole("button", { name: /scroll to bottom|ir para o fim|ir al final/i })).toBeNull();
   });
 
   it("shows the neutral select placeholder (never the provider name) when no model is selected", () => {
@@ -186,6 +243,32 @@ describe("AiPanel", () => {
     expect(chip?.textContent).toContain("src/");
   });
 
+  it("renders the context used by a sent user message", () => {
+    const store = createAiChatStore({
+      getProvider: () => createMockProvider({ reply: () => "", chunkDelayMs: 0 }),
+      initialMessages: [
+        {
+          role: "user",
+          content: "crie outro documento aqui",
+          context: [
+            {
+              kind: "folder",
+              label: "playwright/",
+              path: "output/playwright",
+              absolutePath: "/repo/output/playwright",
+            },
+          ],
+        },
+      ],
+    });
+    const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
+    expect(baseElement.querySelector(".ai-message-context-used")?.textContent).toContain("Context");
+    expect(baseElement.querySelector(".ai-message-context-chip")?.textContent).toBe("output/playwright");
+    expect(baseElement.querySelector(".ai-message-context-chip")?.getAttribute("title")).toContain(
+      "/repo/output/playwright",
+    );
+  });
+
   it("opens the context-usage popover with an estimated breakdown", async () => {
     const store = readyStore();
     render(() => <AiPanel store={store} providerLabel="Mock" />);
@@ -236,7 +319,7 @@ describe("AiPanel", () => {
     expect(baseElement.querySelector(".ai-tool-chip-done")).not.toBeNull();
   });
 
-  it("de-namespaces the tool name and hides the redundant 'app' source", () => {
+  it("de-namespaces app tools and hides the redundant 'app' source", () => {
     const { baseElement } = render(() => (
       <AiMessage
         role="assistant"
@@ -245,10 +328,34 @@ describe("AiPanel", () => {
       />
     ));
     const chip = baseElement.querySelector(".ai-tool-chip")!;
-    expect(chip.querySelector(".ai-tool-chip-name")?.textContent).toBe("read_active_doc");
+    expect(chip.querySelector(".ai-tool-chip-name")?.textContent).toBe("Active document");
+    expect(chip.getAttribute("title")).toBe("Read active document");
     expect(chip.textContent).not.toContain("app__");
     // The "· app" source chip is hidden for in-process app tools.
     expect(chip.querySelector(".ai-tool-chip-source")).toBeNull();
+  });
+
+  it("renders compact activity targets for file tools", () => {
+    const { baseElement } = render(() => (
+      <AiMessage
+        role="assistant"
+        content=""
+        streaming
+        tools={[
+          {
+            args: { path: "output/playwright/mermaid-example.md" },
+            source: "app",
+            status: "running",
+            toolCallId: "t1",
+            toolName: "app__create_file",
+          },
+        ]}
+      />
+    ));
+
+    const chip = baseElement.querySelector(".ai-tool-chip")!;
+    expect(chip.querySelector(".ai-tool-chip-name")?.textContent).toBe("output/playwright/mermaid-example.md");
+    expect(chip.getAttribute("title")).toBe("Creating file output/playwright/mermaid-example.md");
   });
 
   it("expands a tool chip into a terminal block with the result, and collapses on re-click", () => {
@@ -404,13 +511,15 @@ describe("AiPanel", () => {
     expect(baseElement.querySelector(".ai-msg-action-btn")).toBeNull();
   });
 
-  it("renders assistant markdown directly once streaming text arrives", () => {
+  it("renders assistant markdown and keeps the waiting indicator while streaming text arrives", async () => {
     const { baseElement } = render(() => (
       <AiMessage content="partial answer" role="assistant" streaming />
     ));
 
-    expect(baseElement.querySelector(".ai-markdown")?.textContent?.trim()).toBe("partial answer");
-    expect(baseElement.querySelector(".ai-message-waiting")).toBeNull();
+    await waitFor(() => {
+      expect(baseElement.querySelector(".ai-markdown")?.textContent).toContain("partial");
+    });
+    expect(baseElement.querySelector(".ai-message-waiting")).not.toBeNull();
     expect(baseElement.querySelector(".ai-msg-action-btn")).toBeNull();
   });
 
@@ -545,7 +654,7 @@ describe("AiPanel", () => {
     expect(baseElement.querySelector(".ai-msg-usage")?.textContent).toBe("↑10 ↓20");
   });
 
-  it("hides the Build/Plan mode picker when onModeChange is absent", () => {
+  it("hides the Plan/Build/Ask mode picker when onModeChange is absent", () => {
     const store = readyStore();
     render(() => <AiPanel store={store} providerLabel="Mock" />);
     expect(screen.queryByLabelText("Chat mode")).toBeNull();
@@ -558,10 +667,25 @@ describe("AiPanel", () => {
     // The pill trigger shows the current mode's label.
     const trigger = screen.getByLabelText("Chat mode");
     expect(trigger.textContent).toContain("Plan");
-    // Open the popover and pick Build.
+    // Open the popover and pick Build, with modes ordered alphabetically.
     fireEvent.click(trigger);
+    const rows = [...document.querySelectorAll(".ai-mp-popover-compact .ai-mp-row-label")].map(
+      (el) => el.textContent,
+    );
+    expect(rows).toEqual(["Ask", "Build", "Plan"]);
     fireEvent.click(screen.getByText("Build"));
     expect(onModeChange).toHaveBeenCalledWith("build");
+  });
+
+  it("renders Ask as the active mode and fires onModeChange when selected", () => {
+    const store = readyStore();
+    const onModeChange = vi.fn();
+    render(() => <AiPanel store={store} providerLabel="Mock" mode="ask" onModeChange={onModeChange} />);
+    const trigger = screen.getByLabelText("Chat mode");
+    expect(trigger.textContent).toContain("Ask");
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByText("Plan"));
+    expect(onModeChange).toHaveBeenCalledWith("plan");
   });
 
   it("displayText transforms the rendered content but the store text stays untouched", async () => {
@@ -627,7 +751,8 @@ describe("AiPanel", () => {
       />
     ));
     const chip = baseElement.querySelector(".ai-tool-chip") as HTMLButtonElement;
-    expect(chip.textContent).toContain("read_file");
+    expect(chip.querySelector(".ai-tool-chip-name")?.textContent).toBe("File");
+    expect(chip.getAttribute("title")).toBe("Read file");
     fireEvent.click(chip);
     const output = baseElement.querySelector(".ai-tool-output");
     expect(output?.textContent).toBe("key: sk-realvalue");

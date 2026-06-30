@@ -2237,8 +2237,14 @@ body:has(.app.window-frame-toolbar) .doc-body a {
 /* ScrollArea root — owns the flex sizing; overflow + the custom scrollbar live
    inside the component. The flex-column message layout moves to the measured
    content wrapper (.ai-messages-content) since that's the messages' parent. */
-.ai-messages {
+.ai-messages-wrap {
+  position: relative;
   flex: 1;
+  min-height: 0;
+}
+
+.ai-messages {
+  height: 100%;
   min-height: 0;
 }
 
@@ -2247,6 +2253,32 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   flex-direction: column;
   gap: 10px;
   padding: 12px 12px 12px;
+}
+
+.ai-scroll-bottom-chip {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  z-index: 12;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  background: hsl(var(--background));
+  color: hsl(var(--primary));
+  box-shadow: 0 2px 8px hsl(var(--foreground) / 0.08);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.ai-scroll-bottom-chip:hover {
+  border-color: hsl(var(--primary) / 0.28);
+  background: hsl(var(--accent) / 0.65);
 }
 
 .ai-message {
@@ -2278,6 +2310,40 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   border: 1px solid color-mix(in srgb, hsl(var(--bg-hover)) 88%, hsl(var(--foreground)) 12%);
 }
 
+.ai-message-context-used {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.ai-message-context-used-label {
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.ai-message-context-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 19px;
+  max-width: 100%;
+  padding: 1px 6px;
+  border: 1px solid hsl(var(--primary) / 0.22);
+  border-radius: 3px;
+  background: hsl(var(--primary) / 0.08);
+  color: hsl(var(--primary));
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ai-message-assistant .ai-message-text {
   background: hsl(var(--secondary));
   color: hsl(var(--foreground));
@@ -2290,27 +2356,31 @@ body:has(.app.window-frame-toolbar) .doc-body a {
 .ai-tool-chips {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 4px;
 }
 
 .ai-tool-chip {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 5px;
+  max-width: 100%;
+  min-width: 0;
   font-size: 11px;
   font-family: inherit;
-  line-height: 1;
-  padding: 4px 8px;
-  border-radius: 9999px;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
+  line-height: 1.25;
+  padding: 3px 0;
+  border-radius: 2px;
+  background: transparent;
+  border: 1px solid transparent;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
+  text-align: left;
 }
 
 .ai-tool-chip:hover,
 .ai-tool-chip-open {
-  border-color: color-mix(in srgb, hsl(var(--border)) 70%, hsl(var(--foreground)));
+  color: hsl(var(--foreground));
 }
 
 /* Expanded tool call — raw args/result in a terminal-style block (dark in both
@@ -2333,13 +2403,25 @@ body:has(.app.window-frame-toolbar) .doc-body a {
 }
 
 .ai-tool-chip-icon {
-  font-size: 10px;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  opacity: 0.7;
+}
+
+.ai-tool-chip-icon svg {
+  width: 13px;
+  height: 13px;
 }
 
 .ai-tool-chip-name {
-  font-weight: 500;
-  color: hsl(var(--foreground));
+  min-width: 0;
+  font-weight: 400;
+  color: inherit;
+  overflow-wrap: anywhere;
 }
 
 .ai-tool-chip-source {
@@ -2347,13 +2429,11 @@ body:has(.app.window-frame-toolbar) .doc-body a {
 }
 
 .ai-tool-chip-running {
-  animation: ai-tool-chip-pulse 1.2s ease-in-out infinite;
+  color: hsl(var(--muted-foreground));
 }
 
-@keyframes ai-tool-chip-pulse {
-  50% {
-    opacity: 0.55;
-  }
+.ai-tool-chip-running .ai-tool-chip-icon {
+  animation: ai-tool-chip-pulse 1.2s ease-in-out infinite;
 }
 
 .ai-tool-chip-error {
@@ -2446,8 +2526,13 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   color: hsl(var(--muted-foreground) / 0.72);
   font-family: inherit;
   font-size: 12px;
+  font-style: italic;
   font-weight: 400;
   letter-spacing: 0.01em;
+}
+
+.ai-markdown + .ai-message-waiting {
+  margin-top: 4px;
 }
 
 .ai-message-waiting-dots {
@@ -2492,6 +2577,12 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   67%,
   100% {
     opacity: 1;
+  }
+}
+
+@keyframes ai-tool-chip-pulse {
+  50% {
+    opacity: 0.3;
   }
 }
 
@@ -2772,6 +2863,150 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   gap: 4px;
   align-self: flex-end;
   padding: 0 6px 6px;
+}
+
+.tool-approval-dialog {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(70vh, 620px);
+  padding: 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 2px;
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  box-shadow: 0 10px 32px hsl(0 0% 0% / 0.22);
+}
+
+.tool-approval-header {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.tool-approval-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tool-approval-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.tool-approval-meta-label {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground) / 0.75);
+  font-size: 10px;
+}
+
+.tool-approval-tool-name,
+.tool-approval-source {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: hsl(var(--foreground));
+}
+
+.tool-approval-separator {
+  color: hsl(var(--muted-foreground) / 0.55);
+}
+
+.tool-approval-details {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1px;
+}
+
+.tool-approval-detail {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 6px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 2px;
+  background: hsl(var(--muted) / 0.32);
+}
+
+.tool-approval-detail-multiline {
+  grid-template-columns: 1fr;
+}
+
+.tool-approval-detail-label {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tool-approval-detail-value {
+  margin: 0;
+  min-width: 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: hsl(var(--foreground));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.tool-approval-empty {
+  padding: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 2px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.tool-approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.tool-approval-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tool-approval-btn-secondary {
+  border: 1px solid hsl(var(--input));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.tool-approval-btn-secondary:hover {
+  background: hsl(var(--bg-hover));
+}
+
+.tool-approval-btn-primary {
+  border: 1px solid hsl(var(--primary));
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.tool-approval-btn-primary:hover {
+  opacity: 0.9;
 }
 
 .ai-send-btn {
@@ -3447,7 +3682,9 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   text-align: center;
 }
 .settings-kb-keys:hover {
-  border-color: hsl(var(--ring));
+  border-color: hsl(var(--primary) / 0.32);
+  background: hsl(var(--accent) / 0.4);
+  color: hsl(var(--primary));
 }
 .settings-kb-recording {
   border-color: hsl(var(--primary));
@@ -4151,7 +4388,7 @@ kbd.shortcuts-help-key {
   font-size: 10px;
   font-weight: 500;
   line-height: 1;
-  letter-spacing: 0;
+  letter-spacing: 0.08em;
   white-space: nowrap;
 }
 

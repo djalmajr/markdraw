@@ -1,4 +1,16 @@
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, on, onMount, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createEffect,
+  createMemo,
+  createSignal,
+  on,
+  onCleanup,
+  onMount,
+  type JSX,
+} from "solid-js";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import IconSparkles from "~icons/lucide/sparkles";
@@ -132,8 +144,8 @@ export interface AiPanelProps {
   /** Navigate a document link emitted inside a chat reply, using the host's
    *  workspace navigation instead of webview navigation. */
   onNavigateDocument?: (path: string, fragment?: string | null) => void;
-  /** Active chat mode (Plan = no tools, saves a plan; Build = implements).
-   *  When provided the composer shows a Build/Plan toggle. */
+  /** Active chat mode (Plan = no tools, Build = auto, Ask = tool prompts).
+   *  When provided the composer shows a mode toggle. */
   mode?: AIChatMode;
   /** Live plan items (app__update_plan) — when non-empty the checklist card
    *  renders above the composer. */
@@ -171,6 +183,8 @@ function normalizeChatDocumentHref(href: string): { path: string; fragment: stri
   return { path, fragment: fragment || null };
 }
 
+const CHAT_BOTTOM_THRESHOLD_PX = 24;
+
 /**
  * The AI sidebar chat. Header-less (the tab already says it's the assistant):
  * a scrollable message list over a composer "box" — the textarea with the
@@ -179,9 +193,14 @@ function normalizeChatDocumentHref(href: string): { path: string; fragment: stri
  */
 export function AiPanel(props: AiPanelProps): JSX.Element {
   const [input, setInput] = createSignal("");
+  const [followMessages, setFollowMessages] = createSignal(true);
+  const [showScrollBottom, setShowScrollBottom] = createSignal(false);
   let textarea: HTMLTextAreaElement | undefined;
   let highlightEl: HTMLDivElement | undefined;
   let scroller: HTMLDivElement | undefined;
+  let messagesResizeObserver: ResizeObserver | undefined;
+  let messagesScrollFrame: ReturnType<typeof requestAnimationFrame> | undefined;
+  let messagesViewportCleanup: (() => void) | undefined;
 
   createEffect(() => {
     props.focusTrigger;
@@ -190,11 +209,101 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
 
   createEffect(() => {
     props.store.messages();
+    props.store.streaming();
     props.store.streamingText();
-    queueMicrotask(() => {
-      if (scroller) scroller.scrollTop = scroller.scrollHeight;
-    });
+    props.store.toolActivity();
+    scheduleMessagesScrollSync();
   });
+
+  function isMessagesAtBottom(el: HTMLElement): boolean {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_BOTTOM_THRESHOLD_PX;
+  }
+
+  function setMessagesScrollTop(el: HTMLElement, top: number, behavior: ScrollBehavior): void {
+    if (typeof el.scrollTo === "function") el.scrollTo({ top, behavior });
+    else el.scrollTop = top;
+  }
+
+  function scrollMessagesToBottom(behavior: ScrollBehavior = "auto"): void {
+    const el = scroller;
+    if (!el) return;
+    setMessagesScrollTop(el, el.scrollHeight, behavior);
+  }
+
+  function syncMessagesScrollNow(): void {
+    const el = scroller;
+    if (!el) return;
+    if (followMessages()) {
+      scrollMessagesToBottom("auto");
+      setShowScrollBottom(false);
+      return;
+    }
+    const atBottom = isMessagesAtBottom(el);
+    if (atBottom) setFollowMessages(true);
+    setShowScrollBottom(!atBottom);
+  }
+
+  function scheduleMessagesScrollSync(): void {
+    if (typeof requestAnimationFrame !== "function") {
+      queueMicrotask(syncMessagesScrollNow);
+      return;
+    }
+    if (messagesScrollFrame !== undefined) cancelAnimationFrame(messagesScrollFrame);
+    messagesScrollFrame = requestAnimationFrame(() => {
+      messagesScrollFrame = undefined;
+      syncMessagesScrollNow();
+    });
+  }
+
+  function onMessagesScroll(): void {
+    const el = scroller;
+    if (!el) return;
+    const atBottom = isMessagesAtBottom(el);
+    setFollowMessages(atBottom);
+    setShowScrollBottom(!atBottom);
+  }
+
+  function attachMessagesViewport(el: HTMLDivElement): void {
+    if (scroller === el) return;
+    messagesViewportCleanup?.();
+    messagesResizeObserver?.disconnect();
+    scroller = el;
+    el.addEventListener("click", onMessagesClick);
+    el.addEventListener("scroll", onMessagesScroll, { passive: true });
+    messagesViewportCleanup = () => {
+      el.removeEventListener("click", onMessagesClick);
+      el.removeEventListener("scroll", onMessagesScroll);
+      if (scroller === el) scroller = undefined;
+    };
+    if (typeof ResizeObserver !== "undefined") {
+      messagesResizeObserver = new ResizeObserver(scheduleMessagesScrollSync);
+      messagesResizeObserver.observe(el);
+      const content = el.firstElementChild;
+      if (content instanceof HTMLElement) messagesResizeObserver.observe(content);
+    }
+    scheduleMessagesScrollSync();
+  }
+
+  onCleanup(() => {
+    messagesViewportCleanup?.();
+    messagesResizeObserver?.disconnect();
+    if (messagesScrollFrame !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(messagesScrollFrame);
+    }
+  });
+
+  function scrollBottomLabel(): string {
+    const locale = useLocale();
+    if (locale.startsWith("pt")) return "Ir para o fim";
+    if (locale.startsWith("es")) return "Ir al final";
+    return "Scroll to bottom";
+  }
+
+  function handleScrollBottomClick(): void {
+    setFollowMessages(true);
+    setShowScrollBottom(false);
+    scheduleMessagesScrollSync();
+  }
 
   // ── Edit-and-resend (a past user turn loaded into the composer) ─────────
   const [editing, setEditing] = createSignal<{ index: number } | null>(null);
@@ -1029,63 +1138,72 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
 
   return (
     <div class="ai-panel">
-      <ScrollArea
-        class="ai-messages"
-        contentClass="ai-messages-content"
-        viewportRef={(el) => {
-          scroller = el;
-          el.addEventListener("click", onMessagesClick);
-        }}
-      >
-        <Show when={hasConversation()} fallback={<AiEmptyState {...props} />}>
-          <For each={props.store.messages()}>
-            {(msg, i) => (
+      <div class="ai-messages-wrap">
+        <ScrollArea
+          class="ai-messages"
+          contentClass="ai-messages-content"
+          viewportRef={attachMessagesViewport}
+        >
+          <Show when={hasConversation()} fallback={<AiEmptyState {...props} />}>
+            <For each={props.store.messages()}>
+              {(msg, i) => (
+                <AiMessage
+                  content={displayed(msg.content)}
+                  context={msg.context}
+                  displayText={props.displayText}
+                  role={msg.role}
+                  tools={msg.tools}
+                  usage={msg.usage}
+                  // Any user turn can be edited-and-resent: the click loads its
+                  // content into the composer (the store guards re-runs while a
+                  // turn streams).
+                  onEdit={
+                    // Gated on idle like onRetry — editAndResend no-ops while a
+                    // turn streams, so offering the pencil then would mislead.
+                    msg.role === "user" && !props.store.streaming()
+                      ? () => startEditing(i(), msg.content)
+                      : undefined
+                  }
+                  // Retry only makes sense on the LAST assistant reply, and never
+                  // while a fresh turn is already streaming.
+                  onRetry={
+                    msg.role === "assistant" &&
+                    i() === props.store.messages().length - 1 &&
+                    !props.store.streaming()
+                      ? () => void props.store.retryLast()
+                      : undefined
+                  }
+                />
+              )}
+            </For>
+            <Show when={props.store.streaming()}>
               <AiMessage
-                content={displayed(msg.content)}
+                content={displayed(props.store.streamingText())}
                 displayText={props.displayText}
-                role={msg.role}
-                tools={msg.tools}
-                usage={msg.usage}
-                // Any user turn can be edited-and-resent: the click loads its
-                // content into the composer (the store guards re-runs while a
-                // turn streams).
-                onEdit={
-                  // Gated on idle like onRetry — editAndResend no-ops while a
-                  // turn streams, so offering the pencil then would mislead.
-                  msg.role === "user" && !props.store.streaming()
-                    ? () => startEditing(i(), msg.content)
-                    : undefined
-                }
-                // Retry only makes sense on the LAST assistant reply, and never
-                // while a fresh turn is already streaming.
-                onRetry={
-                  msg.role === "assistant" &&
-                  i() === props.store.messages().length - 1 &&
-                  !props.store.streaming()
-                    ? () => void props.store.retryLast()
-                    : undefined
-                }
+                role="assistant"
+                streaming
+                tools={props.store.toolActivity()}
               />
-            )}
-          </For>
-          <Show when={props.store.streaming()}>
-            <AiMessage
-              content={displayed(props.store.streamingText())}
-              displayText={props.displayText}
-              role="assistant"
-              streaming
-              tools={props.store.toolActivity()}
-            />
+            </Show>
           </Show>
+          <Show when={props.store.error()}>
+            {(err) => (
+              <div class="ai-error" role="alert">
+                {err().message || (useLocale(), m.ai_error_generic())}
+              </div>
+            )}
+          </Show>
+        </ScrollArea>
+        <Show when={showScrollBottom()}>
+          <button
+            type="button"
+            class="ai-scroll-bottom-chip"
+            onClick={handleScrollBottomClick}
+          >
+            {scrollBottomLabel()}
+          </button>
         </Show>
-        <Show when={props.store.error()}>
-          {(err) => (
-            <div class="ai-error" role="alert">
-              {err().message || (useLocale(), m.ai_error_generic())}
-            </div>
-          )}
-        </Show>
-      </ScrollArea>
+      </div>
 
       <Show when={(props.planItems?.length ?? 0) > 0}>
         <AiPlan
@@ -1342,14 +1460,29 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           <Show when={props.onModeChange}>
             <PillPicker
               options={[
+                { value: "ask", label: (useLocale(), m.ai_mode_ask()) },
                 { value: "build", label: (useLocale(), m.ai_mode_build()) },
                 { value: "plan", label: (useLocale(), m.ai_mode_plan()) },
               ]}
               current={props.mode ?? "build"}
-              currentLabel={props.mode === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
+              currentLabel={
+                props.mode === "plan"
+                  ? (useLocale(), m.ai_mode_plan())
+                  : props.mode === "ask"
+                    ? (useLocale(), m.ai_mode_ask())
+                    : (useLocale(), m.ai_mode_build())
+              }
               onSelect={(v) => props.onModeChange?.(v as AIChatMode)}
               ariaLabel={(useLocale(), m.ai_mode_label())}
-              title={(useLocale(), props.mode === "plan" ? m.ai_mode_plan_hint() : m.ai_mode_build_hint())}
+              placement="top-start"
+              title={(
+                useLocale(),
+                props.mode === "plan"
+                  ? m.ai_mode_plan_hint()
+                  : props.mode === "ask"
+                    ? m.ai_mode_ask_hint()
+                    : m.ai_mode_build_hint()
+              )}
             />
           </Show>
           {/* Always the model-picker pill (even with no models yet) so the bar
@@ -1381,6 +1514,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
               onSelect={(v) => props.onReasoningEffortChange?.(v)}
               ariaLabel={(useLocale(), m.settings_ai_reasoning_label())}
               title={(useLocale(), m.settings_ai_reasoning_label())}
+              placement="top-start"
               capitalize
             />
           </Show>

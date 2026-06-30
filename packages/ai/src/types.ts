@@ -37,7 +37,7 @@ export interface AIUsage {
  *  emitted in M1. `tool-call`/`tool-result` surface the model's use of MCP
  *  (and in-process app) tools during a tool-calling loop (M2).
  *  `usage` is per-run telemetry: emitted once at the end of a turn, right
- *  before `done`, when the SDK reports `totalUsage` (and/or tools ran). */
+ *  before `done`, when the SDK reports run `usage` (and/or tools ran). */
 export type AIStreamPart =
   | { type: "text-delta"; text: string }
   | { type: "citation"; file: string; line: number }
@@ -105,7 +105,7 @@ export interface ChatOptions {
   /** Tools the model may call (MCP + in-process). When present, the engine
    *  runs a multi-step tool-calling loop. */
   tools?: AITool[];
-  /** Max steps in the tool-calling loop (AI SDK `stopWhen: stepCountIs`).
+  /** Max steps in the tool-calling loop (AI SDK `stopWhen: isStepCount`).
    *  Defaults to 8. Ignored when `tools` is empty. */
   maxSteps?: number;
   /** Engine-level human-in-the-loop: when provided, the ENGINE gates every

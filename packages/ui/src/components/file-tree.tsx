@@ -780,6 +780,15 @@ export function FileTree(props: FileTreeProps) {
         items[idx].dispatchEvent(new Event("tree-rename"));
         break;
       }
+      case "a":
+      case "A": {
+        // ⇧⌘A / Ctrl+Shift+A → attach the focused file/folder to the chat.
+        if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return;
+        if (idx < 0 || !props.onAddToChat) return;
+        e.preventDefault();
+        items[idx].dispatchEvent(new Event("tree-add-to-chat"));
+        break;
+      }
       case "c":
       case "C": {
         const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
@@ -828,6 +837,15 @@ export function FileTree(props: FileTreeProps) {
           const handler = clip.mode === "cut" ? props.onMove : props.onCopy;
           void Promise.resolve(handler?.(clip.entry, "", clip.rootId, root)).catch(() => {});
         }
+        break;
+      }
+      case "r":
+      case "R": {
+        // ⇧⌘R / Ctrl+Shift+R → reveal the focused file/folder in the OS file manager.
+        if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return;
+        if (idx < 0 || !props.onRevealInFileManager) return;
+        e.preventDefault();
+        items[idx].dispatchEvent(new Event("tree-reveal"));
         break;
       }
       case "Backspace":

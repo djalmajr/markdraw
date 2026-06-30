@@ -122,11 +122,13 @@ describe("ai preferences round-trip", () => {
     }
   });
 
-  it("persists the chat mode (build ↔ plan)", () => {
+  it("persists the chat mode (plan ↔ build ↔ ask)", () => {
     setStoredAiMode("plan");
     expect(getStoredAiMode()).toBe("plan");
     setStoredAiMode("build");
     expect(getStoredAiMode()).toBe("build");
+    setStoredAiMode("ask");
+    expect(getStoredAiMode()).toBe("ask");
   });
 
   it("hidden models default to empty and round-trip (deduped)", () => {

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import type { CliStreamEvent } from "./cli-bridge.ts";
-import { antigravityCliEngine, claudeCliEngine, grokCliEngine } from "./cli-bridge.ts";
+import {
+  antigravityCliEngine,
+  claudeCliEngine,
+  codexCliEngine,
+  grokCliEngine,
+} from "./cli-bridge.ts";
 import type { ResolvedModel } from "../resolve-model.ts";
 
 const resolved: ResolvedModel = {
@@ -93,6 +98,42 @@ describe("cli-bridge", () => {
 
     const text = await provider.complete("hi");
     expect(text).toBe("Hello world");
+  });
+
+  it("separates multiple Codex completed agent messages", async () => {
+    const codexResolved: ResolvedModel = {
+      id: "codex-sub/gpt-5.5",
+      providerId: "codex-sub",
+      modelId: "gpt-5.5",
+      provider: {
+        kind: "codex-cli",
+        name: "Codex (subscription)",
+        models: { "gpt-5.5": { name: "GPT-5.5" } },
+      },
+      model: { name: "GPT-5.5" },
+    };
+    const lines = [
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "First" },
+      }),
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "Second" },
+      }),
+      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 2 } }),
+    ];
+    const provider = codexCliEngine.createProvider(codexResolved, async () => undefined, {
+      cliHost: {
+        streamChat: async (_req, onEvent) => {
+          for (const line of lines) onEvent({ type: "line", line });
+          onEvent({ type: "done" });
+        },
+      },
+    });
+
+    const text = await provider.complete("hi");
+    expect(text).toBe("First\n\nSecond");
   });
 
   it("parses Antigravity plain-text stdout lines into the response", async () => {

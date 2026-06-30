@@ -13,9 +13,11 @@ type IndexingTier = "off" | "lite" | "full";
  *  package that ai itself depends on). */
 type AIEngineId = "ai-sdk" | "tanstack";
 
-/** Chat mode: "plan" produces a saved plan with no editing tools; "build"
- *  implements with the full tool set. */
-type AIChatMode = "build" | "plan";
+/** Chat mode:
+ *  - "plan" produces a saved plan with no tools;
+ *  - "build" implements with the full tool set and auto-runs tool calls;
+ *  - "ask" implements with the full tool set but asks before every tool call. */
+type AIChatMode = "ask" | "build" | "plan";
 
 /** Reasoning effort forwarded to providers that support it (the engine maps it
  *  per provider kind). Labels mirror OpenCode's per-model effort menu (see
@@ -59,7 +61,9 @@ const HIDDEN_MODELS_KEY = "markdraw-ai-hidden-models";
 const CONNECTED_SUBS_KEY = "markdraw-ai-connected-subscriptions";
 
 function getStoredAiMode(): AIChatMode {
-  return localStorage.getItem(MODE_KEY) === "plan" ? "plan" : "build";
+  const stored = localStorage.getItem(MODE_KEY);
+  if (stored === "ask" || stored === "plan") return stored;
+  return "build";
 }
 
 function setStoredAiMode(mode: AIChatMode): void {

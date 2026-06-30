@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { createConverter } from "@markdraw/core/converter.ts";
 import ConvertWorker from "@markdraw/core/convert-worker.ts?worker";
 import type { IndexedFile } from "@markdraw/core/file-index.ts";
@@ -220,13 +220,87 @@ export function App() {
 
   // A prompt-tier tool call (MCP / unknown) awaiting Accept/Reject before it
   // runs. Human-in-the-loop gating on top of the current non-streaming loop.
+  type ApprovalDetail = {
+    key: string;
+    label: string;
+    multiline: boolean;
+    value: string;
+  };
+
   const [pendingApproval, setPendingApproval] = createSignal<{
+    details: ApprovalDetail[];
     toolName: string;
     source?: string;
-    argsPreview: string;
     approve: () => void;
     deny: () => void;
   } | null>(null);
+
+  const APPROVAL_KEY_ORDER = [
+    "path",
+    "root",
+    "relative",
+    "rel",
+    "mode",
+    "startLine",
+    "endLine",
+    "all",
+    "find",
+    "replace",
+    "content",
+  ];
+
+  function approvalKeyLabel(key: string): string {
+    return key
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  function approvalKeyRank(key: string): number {
+    const idx = APPROVAL_KEY_ORDER.indexOf(key);
+    return idx === -1 ? APPROVAL_KEY_ORDER.length : idx;
+  }
+
+  function approvalValue(value: unknown): { multiline: boolean; value: string } {
+    if (value === undefined) return { multiline: false, value: "" };
+    if (value === null) return { multiline: false, value: "null" };
+    if (typeof value === "string") {
+      const restored = restoreAi(value);
+      return { multiline: restored.includes("\n") || restored.length > 90, value: restored };
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return { multiline: false, value: String(value) };
+    }
+    try {
+      const restored = restoreAi(JSON.stringify(value, null, 2));
+      return { multiline: true, value: restored };
+    } catch {
+      return { multiline: false, value: restoreAi(String(value)) };
+    }
+  }
+
+  function approvalDetails(args: unknown): ApprovalDetail[] {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      const formatted = approvalValue(args);
+      return formatted.value
+        ? [{ key: "input", label: m.ai_tool_approval_args_title(), ...formatted }]
+        : [];
+    }
+    return Object.entries(args as Record<string, unknown>)
+      .sort(([a], [b]) => {
+        const rank = approvalKeyRank(a) - approvalKeyRank(b);
+        return rank === 0 ? a.localeCompare(b) : rank;
+      })
+      .map(([key, raw]) => {
+        const formatted = approvalValue(raw);
+        return {
+          key,
+          label: approvalKeyLabel(key),
+          ...formatted,
+        };
+      })
+      .filter((detail) => detail.value.length > 0);
+  }
 
   /** Engine options read fresh per provider build: streaming picks the Rust
    *  SSE transport (tauri-plugin-http buffers whole bodies); reasoning "default"
@@ -1020,20 +1094,10 @@ export function App() {
    *  bar at a time (FIFO so concurrent calls in a step don't clobber it) and
    *  auto-denies + hides on Stop/clear (the run's abort signal settles it). */
   const requestToolApproval = createApprovalGate((req, decide) => {
-    let argsPreview: string;
-    try {
-      argsPreview = JSON.stringify(req.args, null, 2);
-    } catch {
-      argsPreview = String(req.args);
-    }
-    // The user must approve the REAL values, not session placeholders. Display
-    // only — the tool still receives the args as sent (restoreSecretsIn maps
-    // them back where they must match real content).
-    argsPreview = restoreAi(argsPreview);
     setPendingApproval({
       toolName: req.toolName,
       source: req.source,
-      argsPreview,
+      details: approvalDetails(req.args),
       approve: () => decide(true),
       deny: () => decide(false),
     });
@@ -2398,6 +2462,11 @@ export function App() {
    *  so a huge folder can't blow the prompt budget), plus a hint pointing the
    *  model at `app__read_file`. `path: ""` lists the whole root. Returns null
    *  when the root/subtree is gone (stale entry). */
+  function joinWorkspacePath(rootPath: string | undefined, path: string): string | undefined {
+    if (!rootPath) return undefined;
+    return path ? `${rootPath}/${path}` : rootPath;
+  }
+
   function buildFolderListing(rootId: string, path: string, label: string): string | null {
     const FOLDER_MENTION_CAP = 200;
     type Entry = import("@markdraw/core/types.ts").FSEntry;
@@ -2427,7 +2496,21 @@ export function App() {
     const lines = paths.slice(0, FOLDER_MENTION_CAP).map((p) => `- ${p}`);
     if (paths.length > FOLDER_MENTION_CAP) lines.push(`- (+${paths.length - FOLDER_MENTION_CAP} more)`);
     if (lines.length === 0) lines.push("- (no files)");
-    return `Folder listing of ${label}:\n${lines.join("\n")}\n\nUse app__read_file with one of these paths to read a specific file.`;
+    const folderPath = path === "" ? root.name : path;
+    const rootPath = rootPaths().get(rootId);
+    const absoluteFolderPath = joinWorkspacePath(rootPath, path);
+    const createHint =
+      path === ""
+        ? `Create new files at workspace-relative paths in this workspace${absoluteFolderPath ? ` (${absoluteFolderPath})` : ""}.`
+        : `Create new files under ${path}/ in this workspace${absoluteFolderPath ? ` (${absoluteFolderPath})` : ""}. Do not use another folder with the same basename.`;
+    return (
+      `Folder listing of ${label}:\n` +
+      `Workspace-relative path: ${folderPath}\n` +
+      (rootPath ? `Workspace root: ${rootPath}\n` : "") +
+      (absoluteFolderPath ? `Absolute path: ${absoluteFolderPath}\n` : "") +
+      `Files:\n${lines.join("\n")}\n\n` +
+      `Use app__read_file with one of these paths to read a specific file. ${createHint}`
+    );
   }
 
   /** Read a mentioned PDF for the chat context. PDFs aren't UTF-8 text, so
@@ -2468,25 +2551,48 @@ export function App() {
   async function addFileMention(
     file: { kind?: "dir" | "file"; label: string; path: string; rootId: string },
   ) {
+    const rootPath = rootPaths().get(file.rootId);
+    const absolutePath = joinWorkspacePath(rootPath, file.path);
     if (file.kind === "dir") {
       const content = buildFolderListing(file.rootId, file.path, file.label);
       if (content === null) return;
-      state.addFileMention({ content, kind: "folder", label: file.label, path: file.path, rootId: file.rootId });
+      state.addFileMention({
+        content,
+        kind: "folder",
+        label: file.label,
+        path: file.path,
+        rootId: file.rootId,
+        ...(rootPath ? { rootPath } : {}),
+        ...(absolutePath ? { absolutePath } : {}),
+      });
       return;
     }
-    const rootPath = rootPaths().get(file.rootId);
     if (!rootPath) return;
     // PDFs aren't readable as UTF-8 — route them through pdf.js extraction.
     // Chip content goes straight into the prompt, so scrub it here (folder
     // listings above are names only and stay unscrubbed).
     if (file.path.toLowerCase().endsWith(".pdf")) {
       const content = scrubAi(await buildPdfMentionContent(`${rootPath}/${file.path}`, file.label));
-      state.addFileMention({ content, label: file.label, path: file.path, rootId: file.rootId });
+      state.addFileMention({
+        content,
+        label: file.label,
+        path: file.path,
+        rootId: file.rootId,
+        rootPath,
+        ...(absolutePath ? { absolutePath } : {}),
+      });
       return;
     }
     try {
       const content = scrubAi(await readFileContent(`${rootPath}/${file.path}`));
-      state.addFileMention({ content, label: file.label, path: file.path, rootId: file.rootId });
+      state.addFileMention({
+        content,
+        label: file.label,
+        path: file.path,
+        rootId: file.rootId,
+        rootPath,
+        ...(absolutePath ? { absolutePath } : {}),
+      });
     } catch {
       // Unreadable (binary / deleted) — silently skip.
     }
@@ -3616,61 +3722,56 @@ export function App() {
         arbitrary server tool without an explicit Accept here. */}
     <Show when={pendingApproval()}>
       {(req) => (
-        <div
-          role="dialog"
-          aria-label={m.ai_tool_approval_title()}
-          style={{
-            position: "fixed",
-            bottom: "16px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            "z-index": "60",
-            "max-width": "min(640px, 92vw)",
-            display: "flex",
-            "flex-direction": "column",
-            gap: "10px",
-            padding: "12px 14px",
-            "border-radius": "10px",
-            border: "1px solid hsl(var(--border))",
-            background: "hsl(var(--popover))",
-            color: "hsl(var(--popover-foreground))",
-            "box-shadow": "0 10px 30px rgba(0, 0, 0, 0.25)",
-          }}
-        >
-          <div style={{ "font-size": "13px", "font-weight": "600" }}>
-            {m.ai_tool_approval_title()}
+        <div role="dialog" aria-label={m.ai_tool_approval_title()} class="tool-approval-dialog">
+          <div class="tool-approval-header">
+            <div class="tool-approval-title">{m.ai_tool_approval_title()}</div>
+            <div class="tool-approval-meta">
+              <span class="tool-approval-meta-label">{m.ai_tool_approval_tool()}</span>
+              <span class="tool-approval-tool-name">{req().toolName}</span>
+              <Show when={req().source}>
+                {(src) => (
+                  <>
+                    <span class="tool-approval-separator">·</span>
+                    <span class="tool-approval-meta-label">{m.ai_tool_approval_source()}</span>
+                    <span class="tool-approval-source">{src()}</span>
+                  </>
+                )}
+              </Show>
+            </div>
           </div>
-          <div style={{ "font-size": "12px", opacity: "0.85" }}>
-            <span style={{ "font-family": "var(--font-mono, monospace)" }}>{req().toolName}</span>
-            <Show when={req().source}>
-              {(src) => <span style={{ opacity: "0.6" }}>{`  ·  ${src()}`}</span>}
+
+          <div class="tool-approval-details">
+            <Show
+              when={req().details.length > 0}
+              fallback={
+                <div class="tool-approval-empty">{m.ai_tool_approval_empty_args()}</div>
+              }
+            >
+              <For each={req().details}>
+                {(detail) => (
+                  <div
+                    class="tool-approval-detail"
+                    classList={{ "tool-approval-detail-multiline": detail.multiline }}
+                  >
+                    <div class="tool-approval-detail-label">{detail.label}</div>
+                    <pre class="tool-approval-detail-value">{detail.value}</pre>
+                  </div>
+                )}
+              </For>
             </Show>
           </div>
-          <pre
-            style={{
-              "font-size": "11px",
-              "line-height": "1.4",
-              margin: "0",
-              "white-space": "pre-wrap",
-              "word-break": "break-word",
-              "max-height": "30vh",
-              "overflow-y": "auto",
-              opacity: "0.8",
-            }}
-          >
-            {req().argsPreview}
-          </pre>
-          <div style={{ display: "flex", "justify-content": "flex-end", gap: "8px" }}>
+
+          <div class="tool-approval-actions">
             <button
               type="button"
-              class="inline-flex items-center justify-center rounded-md h-8 px-3 text-sm hover:bg-accent hover:text-accent-foreground border border-input"
+              class="tool-approval-btn tool-approval-btn-secondary"
               onClick={() => req().deny()}
             >
               {m.ai_inline_reject()}
             </button>
             <button
               type="button"
-              class="inline-flex items-center justify-center rounded-md h-8 px-3 text-sm bg-primary text-primary-foreground hover:opacity-90"
+              class="tool-approval-btn tool-approval-btn-primary"
               onClick={() => req().approve()}
             >
               {m.ai_inline_accept()}

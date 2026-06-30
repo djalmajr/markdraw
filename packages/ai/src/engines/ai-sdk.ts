@@ -6,8 +6,8 @@
 // CORS: WKWebView blocks direct cross-origin fetches to provider APIs, so the
 // host injects a `fetch` that routes through Rust (Tauri HTTP plugin).
 //
-// Errors: in AI SDK v6 `streamText` does NOT throw on the `textStream` — failures
-// surface on `fullStream` as `{type:"error"}`. We iterate `fullStream` so auth /
+// Errors: `streamText` does NOT throw on the `textStream` — failures surface on
+// the full event `stream` as `{type:"error"}`. We iterate that stream so auth /
 // network / rate-limit errors reach the UI instead of a silent empty reply.
 
 import type { EmbeddingModel, LanguageModel } from "ai";
@@ -116,7 +116,7 @@ async function buildEmbeddingModel(
         ...(baseURL ? { baseURL } : {}),
         ...(headers ? { headers } : {}),
         ...fetchOpt,
-      }).textEmbeddingModel(modelId);
+      }).embeddingModel(modelId);
     }
     case "openai-compatible": {
       const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
@@ -126,7 +126,7 @@ async function buildEmbeddingModel(
         ...(apiKey ? { apiKey } : {}),
         ...(headers ? { headers } : {}),
         ...fetchOpt,
-      }).textEmbeddingModel(modelId);
+      }).embeddingModel(modelId);
     }
     default:
       throw new NotSupportedError("embed");
@@ -156,13 +156,13 @@ const ANTHROPIC_THINKING_BUDGETS: Record<string, number> = {
 /**
  * Map `AIEngineOptions.reasoningEffort` (an OpenCode-style label) onto each
  * provider family's native option, verified against the INSTALLED SDK schemas:
- *   - anthropic (@ai-sdk/anthropic 3.0.81): `providerOptions.anthropic.thinking`
+ *   - anthropic (@ai-sdk/anthropic 4.0.2): `providerOptions.anthropic.thinking`
  *     takes `{ type: "enabled", budgetTokens }` — effort becomes a budget via
  *     ANTHROPIC_THINKING_BUDGETS; "none" disables thinking (`{ type: "disabled" }`).
- *   - openai (@ai-sdk/openai 3.0.68): `providerOptions.openai.reasoningEffort`
+ *   - openai (@ai-sdk/openai 4.0.3): `providerOptions.openai.reasoningEffort`
  *     — the label is forwarded verbatim (GPT-5.x accepts none/minimal/.../xhigh;
  *     the per-model picker only offers labels that model supports).
- *   - openai-compatible (@ai-sdk/openai-compatible 2.0.48): the label is
+ *   - openai-compatible (@ai-sdk/openai-compatible 3.0.1): the label is
  *     serialized as `reasoning_effort`; backends ignore values they don't support.
  * Returns undefined when effort is unset or "default": the request is unchanged.
  */
@@ -218,14 +218,14 @@ function classifyError(e: unknown): { code: AIErrorCode; message: string } {
   return { code: "unknown", message };
 }
 
-/** A loosely-typed AI SDK `fullStream` part — we read only the fields we map. */
+/** A loosely-typed AI SDK event stream part — we read only the fields we map. */
 type FullStreamPart = { type: string } & Record<string, unknown>;
 
 /** Build the per-run telemetry `usage` part (emitted once, right before
- *  `done`): token totals from the SDK's `totalUsage` (ai@6 names them
- *  `inputTokens`/`outputTokens`, both possibly undefined) plus the tool-call
- *  count across steps. Returns undefined unless at least one number is finite
- *  — a turn with no reported usage and no tool calls emits nothing. */
+ *  `done`): token totals from the SDK's `usage` (ai@7 reports total run usage
+ *  there) plus the tool-call count across steps. Returns undefined unless at
+ *  least one number is finite — a turn with no reported usage and no tool calls
+ *  emits nothing. */
 function buildUsagePart(
   usage: { inputTokens?: number; outputTokens?: number } | undefined,
   toolCalls: number,
@@ -244,7 +244,7 @@ function buildUsagePart(
 }
 
 /**
- * Map an AI SDK v6 `streamText().fullStream` onto our `AIStreamPart` contract,
+ * Map an AI SDK `streamText().stream` onto our `AIStreamPart` contract,
  * owning the single terminal emission: an `error`/`abort` part yields one error
  * and STOPS the stream (no trailing `done`); otherwise a `done` is emitted after
  * the loop, carrying usage from the `finish` part. Unknown part types
@@ -252,15 +252,15 @@ function buildUsagePart(
  * raw, ...) are intentionally ignored. Pure over the input — unit-testable.
  */
 export async function* mapFullStream(
-  fullStream: AsyncIterable<FullStreamPart>,
+  stream: AsyncIterable<FullStreamPart>,
   sourceByName?: Map<string, string | undefined>,
 ): AsyncIterable<AIStreamPart> {
   let usage: { inputTokens?: number; outputTokens?: number } | undefined;
   let toolCalls = 0;
-  for await (const part of fullStream) {
+  for await (const part of stream) {
     switch (part.type) {
       case "text-delta": {
-        const text = (part.text ?? part.textDelta) as string | undefined;
+        const text = (part.delta ?? part.text ?? part.textDelta) as string | undefined;
         if (text) yield { type: "text-delta", text };
         break;
       }
@@ -312,7 +312,7 @@ export async function* mapFullStream(
         };
         break;
       case "finish":
-        usage = (part.totalUsage ?? part.usage) as typeof usage;
+        usage = (part.usage ?? part.totalUsage) as typeof usage;
         break;
       default:
         // Non-mapped parts (text-start/-end, reasoning-*, tool-input-*, source,
@@ -375,8 +375,7 @@ function createProvider(
     // the callback, tools run exactly as given (hosts that still pre-wrap keep
     // today's behavior; no double-gating).
     //
-    // Why not the SDK's native `needsApproval` (ai@6 / @ai-sdk/provider-utils):
-    // `Tool.needsApproval: boolean | ToolNeedsApprovalFunction` makes
+    // Why not the SDK's native tool approval flow:
     // generateText/streamText HALT the loop with a `tool-approval-request`
     // content part; execution resumes only when the caller appends a tool
     // message carrying a `tool-approval-response` part and issues a NEW
@@ -396,6 +395,14 @@ function createProvider(
     // result (and pinning leading system messages). See MAX_CONTEXT_MESSAGES
     // for why the budget is a message count.
     const history = compactMessages(messages, MAX_CONTEXT_MESSAGES);
+    const historyInstructions = history
+      .filter((m) => m.role === "system")
+      .map((m) => m.content)
+      .join("\n\n");
+    const instructions = [chatOpts?.system, historyInstructions].filter(Boolean).join("\n\n");
+    const modelMessages = history
+      .filter((m) => m.role !== "system")
+      .map((m) => ({ role: m.role, content: m.content }));
     try {
       const apiKey = await getApiKey();
       const model = await buildModel(resolved, apiKey, opts?.fetch);
@@ -419,15 +426,15 @@ function createProvider(
       );
       const common = {
         model,
-        ...(chatOpts?.system ? { system: chatOpts.system } : {}),
-        messages: history.map((m) => ({ role: m.role, content: m.content })),
+        ...(instructions ? { instructions } : {}),
+        messages: modelMessages,
         ...(chatOpts?.signal ? { abortSignal: chatOpts.signal } : {}),
         ...(chatOpts?.temperature != null ? { temperature: chatOpts.temperature } : {}),
-        ...(tools ? { tools, stopWhen: ai.stepCountIs(chatOpts?.maxSteps ?? 8) } : {}),
+        ...(tools ? { tools, stopWhen: ai.isStepCount(chatOpts?.maxSteps ?? 8) } : {}),
         ...(providerOptions ? { providerOptions } : {}),
       };
 
-      // Streaming path (opt-in): real incremental deltas via `fullStream`,
+      // Streaming path (opt-in): real incremental deltas via `stream`,
       // smoothed to word boundaries. `mapFullStream` owns the terminal. If the
       // injected fetch doesn't surface SSE incrementally (the A0 question),
       // smoothStream still yields a typing feel; if it hangs, the default
@@ -437,15 +444,14 @@ function createProvider(
           ...common,
           experimental_transform: ai.smoothStream({ chunking: "word" }),
         });
-        yield* mapFullStream(result.fullStream as AsyncIterable<FullStreamPart>, sourceByName);
+        yield* mapFullStream(result.stream as AsyncIterable<FullStreamPart>, sourceByName);
         return;
       }
 
       const result = await ai.generateText(common);
       text = result.text;
-      // `totalUsage` sums every step; `usage` is only the last step (undercounts
-      // multi-step tool loops).
-      usage = result.totalUsage;
+      // AI SDK v7 reports total run usage across every step in `usage`.
+      usage = result.usage;
       steps = result.steps;
     } catch (e) {
       yield { type: "error", ...classifyError(e) };

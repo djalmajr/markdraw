@@ -32,9 +32,29 @@ export interface TurnUsage {
   toolCalls?: number;
 }
 
+export interface ChatTurnContextItem {
+  id?: string;
+  kind: "file" | "folder" | "selection";
+  label: string;
+  path?: string;
+  rootId?: string;
+  rootPath?: string;
+  absolutePath?: string;
+}
+
+export interface ChatContextResolution {
+  preamble?: string;
+  items?: ChatTurnContextItem[];
+}
+
+export type ChatContextResult = ChatContextResolution | string | undefined;
+
 export interface ChatTurn {
   role: "user" | "assistant";
   content: string;
+  /** Context metadata used for this user turn. The raw context text is not
+   *  stored; this is only the small display/debug snapshot shown in chat. */
+  context?: ChatTurnContextItem[];
   /** Tool calls the assistant made on this turn (assistant turns only). */
   tools?: ToolActivity[];
   /** Per-run telemetry, attached when the provider reported it (assistant
@@ -110,7 +130,7 @@ export interface AiChatStoreConfig {
    *  message SENT to the model. The displayed turn stays clean — only the
    *  outgoing copy carries it. Resolved per send so it reflects the current
    *  context chips. */
-  getContext?: (request: { history: ChatTurn[]; userMessage: string }) => string | undefined;
+  getContext?: (request: { history: ChatTurn[]; userMessage: string }) => ChatContextResult;
   /** Called when an assistant turn finalizes with non-empty text (used by Plan
    *  mode to persist the produced plan). */
   onAssistantTurn?: (content: string) => void;
@@ -122,6 +142,23 @@ export interface AiChatStoreConfig {
     source?: string;
     toolName: string;
   }) => Promise<boolean>;
+}
+
+function appendTextDelta(current: string, delta: string): string {
+  if (!delta) return current;
+  if (!current) return delta;
+  if (delta.startsWith(current)) return delta;
+  return current + delta;
+}
+
+interface RunTurnOptions {
+  context?: ChatContextResolution;
+  system?: string;
+}
+
+function normalizeContextResult(result: ChatContextResult): ChatContextResolution {
+  if (typeof result === "string") return result ? { preamble: result } : {};
+  return result ?? {};
 }
 
 export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
@@ -148,6 +185,30 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
 
   function providerReady(): boolean {
     return config.getProvider() !== null;
+  }
+
+  function resolveContext(history: ChatTurn[]): ChatContextResolution {
+    const lastIndex = history.length - 1;
+    return normalizeContextResult(
+      config.getContext?.({
+        history,
+        userMessage: history[lastIndex]?.content ?? "",
+      }),
+    );
+  }
+
+  function appendUserTurn(
+    base: ChatTurn[],
+    content: string,
+  ): { context: ChatContextResolution; history: ChatTurn[] } {
+    const draft: ChatTurn[] = [...base, { role: "user", content }];
+    const context = resolveContext(draft);
+    const userTurn: ChatTurn = {
+      role: "user",
+      content,
+      ...(context.items && context.items.length ? { context: context.items } : {}),
+    };
+    return { context, history: [...base, userTurn] };
   }
 
   /** Dispatch the steering queue once the current turn settled. One slot:
@@ -194,9 +255,9 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     }
 
     setError(null);
-    const history: ChatTurn[] = [...messages(), { role: "user", content: trimmed }];
+    const { context, history } = appendUserTurn(messages(), trimmed);
     setMessages(history);
-    await runTurn(history, opts);
+    await runTurn(history, { ...(opts ?? {}), context });
     await drainQueue();
   }
 
@@ -240,12 +301,9 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     const trimmed = text.trim();
     if (!trimmed) return;
     setError(null);
-    const history: ChatTurn[] = [
-      ...messages().slice(0, index),
-      { role: "user", content: trimmed },
-    ];
+    const { context, history } = appendUserTurn(messages().slice(0, index), trimmed);
     setMessages(history);
-    await runTurn(history);
+    await runTurn(history, { context });
     await drainQueue();
   }
 
@@ -253,7 +311,7 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
    *  turn being answered): provider resolution, the streaming buffer, tool
    *  activity, and the finally-append of the consolidated reply. Shared by
    *  sendMessage and retryLast. */
-  async function runTurn(history: ChatTurn[], opts?: { system?: string }): Promise<void> {
+  async function runTurn(history: ChatTurn[], opts?: RunTurnOptions): Promise<void> {
     const provider = config.getProvider();
     if (!provider) {
       setError({ code: "unknown", message: m.ai_error_no_provider() });
@@ -272,13 +330,10 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     // user message that's SENT to the model — the stored/displayed turn above
     // stays clean so the chat doesn't show the raw context dump.
     const lastIndex = history.length - 1;
-    const context = config.getContext?.({
-      history,
-      userMessage: history[lastIndex]?.content ?? "",
-    });
+    const context = opts?.context ?? resolveContext(history);
     const aiMessages: AIMessage[] = history.map((t, i) => ({
       role: t.role,
-      content: i === lastIndex && context ? `${context}\n\n${t.content}` : t.content,
+      content: i === lastIndex && context.preamble ? `${context.preamble}\n\n${t.content}` : t.content,
     }));
 
     // Resolve tools lazily so newly-connected MCP servers are picked up. A
@@ -308,7 +363,7 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
       });
       for await (const part of stream) {
         if (part.type === "text-delta") {
-          setStreamingText((prev) => prev + part.text);
+          setStreamingText((prev) => appendTextDelta(prev, part.text));
         } else if (part.type === "tool-call") {
           setToolActivity((prev) => [
             ...prev,

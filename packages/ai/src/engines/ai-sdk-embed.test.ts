@@ -17,9 +17,9 @@ describe("ai-sdk engine embed()", () => {
     await expect(p.embed("hello")).rejects.toBeInstanceOf(NotSupportedError);
   });
 
-  it("embeds via OpenAI textEmbeddingModel; wraps a single string; short-circuits empty", async () => {
+  it("embeds via OpenAI embeddingModel; wraps a single string; short-circuits empty", async () => {
     mock.module("@ai-sdk/openai", () => ({
-      createOpenAI: () => ({ textEmbeddingModel: (id: string) => ({ id }) }),
+      createOpenAI: () => ({ embeddingModel: (id: string) => ({ id }) }),
     }));
     mock.module("ai", () => ({
       embedMany: async ({ values }: { values: string[] }) => ({

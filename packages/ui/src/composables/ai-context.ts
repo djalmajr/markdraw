@@ -13,6 +13,8 @@ export interface AiContextItem {
   label: string;
   path?: string;
   rootId?: string;
+  rootPath?: string;
+  absolutePath?: string;
   /** The resolved text injected into the prompt. */
   content: string;
 }
@@ -51,9 +53,19 @@ function escapeAttr(value: string): string {
  */
 export function buildContextPreamble(items: AiContextItem[]): string | undefined {
   if (items.length === 0) return undefined;
-  const blocks = items.map(
-    (item) => `<context kind="${item.kind}" source="${escapeAttr(item.label)}">\n${item.content}\n</context>`,
-  );
+  const blocks = items.map((item) => {
+    const pathAttr = item.path !== undefined ? ` path="${escapeAttr(item.path)}"` : "";
+    const rootAttr = item.rootPath !== undefined ? ` root="${escapeAttr(item.rootPath)}"` : "";
+    const absoluteAttr =
+      item.absolutePath !== undefined ? ` absolute_path="${escapeAttr(item.absolutePath)}"` : "";
+    const locationLines = [
+      item.path !== undefined ? `Workspace-relative path: ${item.path}` : undefined,
+      item.rootPath !== undefined ? `Workspace root: ${item.rootPath}` : undefined,
+      item.absolutePath !== undefined ? `Absolute path: ${item.absolutePath}` : undefined,
+    ].filter((line): line is string => line !== undefined);
+    const location = locationLines.length ? `${locationLines.join("\n")}\n\n` : "";
+    return `<context kind="${item.kind}" source="${escapeAttr(item.label)}"${pathAttr}${rootAttr}${absoluteAttr}>\n${location}${item.content}\n</context>`;
+  });
   return `The user attached the following context — use it when relevant:\n\n${blocks.join("\n\n")}`;
 }
 

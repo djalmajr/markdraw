@@ -102,6 +102,7 @@ function createCliProvider(
   ): AsyncIterable<AIStreamPart> {
     const signal = chatOpts?.signal;
     let emittedLen = 0;
+    let codexAgentMessages = 0;
     let usage: { inputTokens?: number; outputTokens?: number } | undefined;
     const queue: AIStreamPart[] = [];
     let done = false;
@@ -132,12 +133,18 @@ function createCliProvider(
                 : extractGrokText(obj);
           if (text) {
             // Claude's `assistant` events carry the full text-so-far, so we
-            // diff against what we've emitted. Codex and Grok stream genuine
-            // incremental chunks — push them verbatim.
+            // diff against what we've emitted. Codex reports completed agent
+            // messages, so separate multiple ones; Grok streams genuine
+            // incremental chunks and stays verbatim.
             if (kind === "claude-cli") {
               const delta = text.slice(emittedLen);
               emittedLen = text.length;
               if (delta) queue.push({ type: "text-delta", text: delta });
+            } else if (kind === "codex-cli") {
+              const separator =
+                codexAgentMessages > 0 && !/^\s/.test(text) ? "\n\n" : "";
+              codexAgentMessages += 1;
+              queue.push({ type: "text-delta", text: `${separator}${text}` });
             } else {
               queue.push({ type: "text-delta", text });
             }

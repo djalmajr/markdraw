@@ -73,6 +73,8 @@ const COPY_ENTRY_SHORTCUT_LABEL = IS_MAC ? "⌘C" : "Ctrl+C";
 const PASTE_SHORTCUT_LABEL = IS_MAC ? "⌘V" : "Ctrl+V";
 const NEW_FILE_SHORTCUT_LABEL = IS_MAC ? "⌘N" : "Ctrl+N";
 const NEW_FOLDER_SHORTCUT_LABEL = IS_MAC ? "⇧⌘N" : "Ctrl+Shift+N";
+const ADD_TO_CHAT_SHORTCUT_LABEL = IS_MAC ? "⇧⌘A" : "Ctrl+Shift+A";
+const REVEAL_SHORTCUT_LABEL = IS_MAC ? "⇧⌘R" : "Ctrl+Shift+R";
 const TRASH_SHORTCUT_LABEL = IS_MAC ? "⌘⌫" : "Del";
 
 /** Middle-click affordance glyph shown next to "Open in New Tab". */
@@ -225,6 +227,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
     };
     const onPasteEvt = () => doPaste();
     const onTrashEvt = () => props.onDelete?.(props.entry, props.rootId);
+    const onAddToChatEvt = () => props.onAddToChat?.(props.entry);
+    const onRevealEvt = () => revealInFileManager();
     itemRef.addEventListener("tree-expand", onExpand);
     itemRef.addEventListener("tree-collapse", onCollapse);
     itemRef.addEventListener("tree-rename", onRenameEvt);
@@ -233,6 +237,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
     itemRef.addEventListener("tree-copy", onCopyEntryEvt);
     itemRef.addEventListener("tree-paste", onPasteEvt);
     itemRef.addEventListener("tree-trash", onTrashEvt);
+    itemRef.addEventListener("tree-add-to-chat", onAddToChatEvt);
+    itemRef.addEventListener("tree-reveal", onRevealEvt);
     onCleanup(() => {
       itemRef!.removeEventListener("tree-expand", onExpand);
       itemRef!.removeEventListener("tree-collapse", onCollapse);
@@ -242,6 +248,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
       itemRef!.removeEventListener("tree-copy", onCopyEntryEvt);
       itemRef!.removeEventListener("tree-paste", onPasteEvt);
       itemRef!.removeEventListener("tree-trash", onTrashEvt);
+      itemRef!.removeEventListener("tree-add-to-chat", onAddToChatEvt);
+      itemRef!.removeEventListener("tree-reveal", onRevealEvt);
     });
   });
 
@@ -503,7 +511,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
         icon: <IconSparkles width={14} height={14} />,
         label: m.ai_add_to_chat,
         onSelect: () => props.onAddToChat?.(props.entry),
-        itemClass: "gap-2",
+        shortcut: ADD_TO_CHAT_SHORTCUT_LABEL,
+        itemClass: "justify-between gap-3",
       });
     }
     list.push({
@@ -530,7 +539,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
         icon: <IconFolderOpen width={14} height={14} />,
         label: revealLabel,
         onSelect: revealInFileManager,
-        itemClass: "gap-2",
+        shortcut: REVEAL_SHORTCUT_LABEL,
+        itemClass: "justify-between gap-3",
       });
     }
     if (props.onMove) {
@@ -744,7 +754,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
                             when={typeof entry.shortcut === "string"}
                             fallback={<span class="menu-shortcut-kbd ml-auto">{entry.shortcut}</span>}
                           >
-                            <kbd class="menu-shortcut-kbd ml-auto">{entry.shortcut}</kbd>
+                            <kbd class="menu-shortcut-kbd ml-auto">{entry.shortcut as string}</kbd>
                           </Show>
                         </Show>
                       </DropdownMenuItem>
@@ -776,7 +786,12 @@ export function FileTreeItem(props: FileTreeItemProps) {
                   <ContextMenuItem class={entry.itemClass} onSelect={entry.onSelect}>
                     <span class="flex items-center gap-2">{entry.icon} {(useLocale(), entry.label())}</span>
                     <Show when={entry.shortcut !== undefined}>
-                      <ContextMenuShortcut class="ml-0">{entry.shortcut}</ContextMenuShortcut>
+                      <Show
+                        when={typeof entry.shortcut === "string"}
+                        fallback={<ContextMenuShortcut class="ml-0">{entry.shortcut}</ContextMenuShortcut>}
+                      >
+                        <ContextMenuShortcut class="ml-0">{entry.shortcut as string}</ContextMenuShortcut>
+                      </Show>
                     </Show>
                   </ContextMenuItem>
                 </>
@@ -823,6 +838,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
               onSelect={props.onSelect}
               onFocusEntry={props.onFocusEntry}
               onOpenInNewTab={props.onOpenInNewTab}
+              onAddToChat={props.onAddToChat}
               onDoubleClickFile={props.onDoubleClickFile}
               onCreate={props.onCreate}
               onMove={props.onMove}

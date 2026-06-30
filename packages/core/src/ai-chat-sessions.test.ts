@@ -198,6 +198,24 @@ describe("messages round-trip", () => {
     expect(getChatMessages("s1")).toEqual([turn]);
   });
 
+  it("round-trips a user turn's context metadata without raw prompt content", () => {
+    const turn: PersistedChatMessage = {
+      role: "user",
+      content: "create here",
+      context: [
+        {
+          kind: "folder",
+          label: "playwright/",
+          path: "output/playwright",
+          rootPath: "/repo",
+          absolutePath: "/repo/output/playwright",
+        },
+      ],
+    };
+    setChatMessages("s1", [turn]);
+    expect(getChatMessages("s1")).toEqual([turn]);
+  });
+
   it("writing an empty list removes the key", () => {
     setChatMessages("s1", [userTurn]);
     setChatMessages("s1", []);
