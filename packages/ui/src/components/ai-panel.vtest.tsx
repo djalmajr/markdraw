@@ -319,7 +319,7 @@ describe("AiPanel", () => {
     expect(baseElement.querySelector(".ai-tool-chip-done")).not.toBeNull();
   });
 
-  it("de-namespaces the tool name and hides the redundant 'app' source", () => {
+  it("de-namespaces app tools and hides the redundant 'app' source", () => {
     const { baseElement } = render(() => (
       <AiMessage
         role="assistant"
@@ -328,13 +328,14 @@ describe("AiPanel", () => {
       />
     ));
     const chip = baseElement.querySelector(".ai-tool-chip")!;
-    expect(chip.querySelector(".ai-tool-chip-name")?.textContent).toBe("Read active document");
+    expect(chip.querySelector(".ai-tool-chip-name")?.textContent).toBe("Active document");
+    expect(chip.getAttribute("title")).toBe("Read active document");
     expect(chip.textContent).not.toContain("app__");
     // The "· app" source chip is hidden for in-process app tools.
     expect(chip.querySelector(".ai-tool-chip-source")).toBeNull();
   });
 
-  it("renders readable activity labels for file tools", () => {
+  it("renders compact activity targets for file tools", () => {
     const { baseElement } = render(() => (
       <AiMessage
         role="assistant"
@@ -352,9 +353,9 @@ describe("AiPanel", () => {
       />
     ));
 
-    expect(baseElement.querySelector(".ai-tool-chip-name")?.textContent).toBe(
-      "Creating file output/playwright/mermaid-example.md",
-    );
+    const chip = baseElement.querySelector(".ai-tool-chip")!;
+    expect(chip.querySelector(".ai-tool-chip-name")?.textContent).toBe("output/playwright/mermaid-example.md");
+    expect(chip.getAttribute("title")).toBe("Creating file output/playwright/mermaid-example.md");
   });
 
   it("expands a tool chip into a terminal block with the result, and collapses on re-click", () => {
@@ -653,7 +654,7 @@ describe("AiPanel", () => {
     expect(baseElement.querySelector(".ai-msg-usage")?.textContent).toBe("↑10 ↓20");
   });
 
-  it("hides the Build/Plan mode picker when onModeChange is absent", () => {
+  it("hides the Plan/Build/Ask mode picker when onModeChange is absent", () => {
     const store = readyStore();
     render(() => <AiPanel store={store} providerLabel="Mock" />);
     expect(screen.queryByLabelText("Chat mode")).toBeNull();
@@ -666,10 +667,25 @@ describe("AiPanel", () => {
     // The pill trigger shows the current mode's label.
     const trigger = screen.getByLabelText("Chat mode");
     expect(trigger.textContent).toContain("Plan");
-    // Open the popover and pick Build.
+    // Open the popover and pick Build, with modes ordered alphabetically.
     fireEvent.click(trigger);
+    const rows = [...document.querySelectorAll(".ai-mp-popover-compact .ai-mp-row-label")].map(
+      (el) => el.textContent,
+    );
+    expect(rows).toEqual(["Ask", "Build", "Plan"]);
     fireEvent.click(screen.getByText("Build"));
     expect(onModeChange).toHaveBeenCalledWith("build");
+  });
+
+  it("renders Ask as the active mode and fires onModeChange when selected", () => {
+    const store = readyStore();
+    const onModeChange = vi.fn();
+    render(() => <AiPanel store={store} providerLabel="Mock" mode="ask" onModeChange={onModeChange} />);
+    const trigger = screen.getByLabelText("Chat mode");
+    expect(trigger.textContent).toContain("Ask");
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByText("Plan"));
+    expect(onModeChange).toHaveBeenCalledWith("plan");
   });
 
   it("displayText transforms the rendered content but the store text stays untouched", async () => {
@@ -735,7 +751,8 @@ describe("AiPanel", () => {
       />
     ));
     const chip = baseElement.querySelector(".ai-tool-chip") as HTMLButtonElement;
-    expect(chip.textContent).toContain("Read file");
+    expect(chip.querySelector(".ai-tool-chip-name")?.textContent).toBe("File");
+    expect(chip.getAttribute("title")).toBe("Read file");
     fireEvent.click(chip);
     const output = baseElement.querySelector(".ai-tool-output");
     expect(output?.textContent).toBe("key: sk-realvalue");

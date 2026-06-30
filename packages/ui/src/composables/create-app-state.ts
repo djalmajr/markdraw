@@ -181,7 +181,7 @@ interface AppStateConfig {
    *  owns filesystem discovery; packages/ui only injects the returned text. */
   getSkillContext?: (request: {
     history: ChatTurn[];
-    mode: "build" | "plan";
+    mode: AIChatMode;
     userMessage: string;
   }) => string | undefined;
   /** Persist a plan produced in Plan mode (the host writes it to
@@ -690,8 +690,9 @@ export function createAppState(config: AppStateConfig) {
     });
   }
 
-  // Chat mode: "build" (full tools) vs "plan" (no editing tools — produce a
-  // plan that the host saves to .markdraw/plans).
+  // Chat mode: "build" (full tools, auto-run), "ask" (full tools, prompt for
+  // every tool call), or "plan" (no tools — produce a plan saved to
+  // .markdraw/plans).
   const [aiMode, setAiModeSig] = createSignal<AIChatMode>(getStoredAiMode());
   function setAiMode(mode: AIChatMode): void {
     setAiModeSig(mode);
@@ -769,7 +770,9 @@ export function createAppState(config: AppStateConfig) {
     },
     getTools: async () => {
       if (aiMode() === "plan") return [];
-      return config.getAITools ? await config.getAITools() : [];
+      const tools = config.getAITools ? await config.getAITools() : [];
+      if (aiMode() !== "ask") return tools;
+      return tools.map((tool) => ({ ...tool, approval: "prompt" as const }));
     },
     onAssistantTurn: (content) => {
       if (aiMode() === "plan") config.onPlanComplete?.(content);
@@ -826,10 +829,13 @@ export function createAppState(config: AppStateConfig) {
         ...(contextItems.length ? { items: contextItems } : {}),
       };
     },
-    // Engine-level approval (F3): the host's Accept/Reject gate rides the
-    // ChatOptions instead of pre-wrapping every tool.
+    // Engine-level approval: Ask mode prompts for every tool call. Build mode
+    // intentionally omits the gate so calls run automatically.
     ...(config.onToolApprovalRequest
-      ? { onApprovalRequest: config.onToolApprovalRequest }
+      ? {
+          onApprovalRequest: (req) =>
+            aiMode() === "ask" ? config.onToolApprovalRequest!(req) : Promise.resolve(true),
+        }
       : {}),
   });
   // Restore persisted chats (open tabs + active) on boot, while this owner is

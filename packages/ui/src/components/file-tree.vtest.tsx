@@ -37,6 +37,24 @@ function makeRoot(id: string, name: string, entries: FSEntry[]): WorkspaceRoot {
   return { id, name, entries, collapsed: false };
 }
 
+function mockVisibleOffsetParent(): () => void {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetParent");
+  Object.defineProperty(HTMLElement.prototype, "offsetParent", {
+    configurable: true,
+    get(this: HTMLElement) {
+      const wrapper = this.closest<HTMLElement>(".tree-item-wrapper");
+      return wrapper?.style.display === "none" ? null : document.body;
+    },
+  });
+  return () => {
+    if (descriptor) {
+      Object.defineProperty(HTMLElement.prototype, "offsetParent", descriptor);
+    } else {
+      delete (HTMLElement.prototype as { offsetParent?: unknown }).offsetParent;
+    }
+  };
+}
+
 const SINGLE_ROOT: WorkspaceRoot[] = [
   makeRoot("r1", "vault", [
     dir("notes", [file("a.md", "notes/a.md"), file("b.md", "notes/b.md")], "notes"),
@@ -328,6 +346,60 @@ describe("FileTree", () => {
       const [entry, rootId] = onAddToChat.mock.calls[0]!;
       expect(entry).toMatchObject({ kind: "directory", path: "" });
       expect(rootId).toBe(SINGLE_ROOT[0]!.id);
+    });
+
+    it("attaches the focused entry to chat with Ctrl+Shift+A", () => {
+      const restoreOffsetParent = mockVisibleOffsetParent();
+      try {
+        const onAddToChat = vi.fn();
+        const { container } = render(() => (
+          <AppProvider state={makeAppStub()}>
+            <FileTree
+              roots={SINGLE_ROOT}
+              selectedPath="README.md"
+              selectedRootId="r1"
+              onSelect={() => {}}
+              onAddToChat={onAddToChat}
+            />
+          </AppProvider>
+        ));
+        const nav = container.querySelector(".file-tree") as HTMLElement;
+        nav.focus();
+        fireEvent.keyDown(nav, { key: "A", ctrlKey: true, shiftKey: true });
+        expect(onAddToChat).toHaveBeenCalledTimes(1);
+        const [entry, rootId] = onAddToChat.mock.calls[0]!;
+        expect(entry).toMatchObject({ path: "README.md" });
+        expect(rootId).toBe("r1");
+      } finally {
+        restoreOffsetParent();
+      }
+    });
+
+    it("reveals the focused entry with Ctrl+Shift+R", () => {
+      const restoreOffsetParent = mockVisibleOffsetParent();
+      try {
+        const onRevealInFileManager = vi.fn();
+        const { container } = render(() => (
+          <AppProvider state={makeAppStub()}>
+            <FileTree
+              roots={SINGLE_ROOT}
+              selectedPath="README.md"
+              selectedRootId="r1"
+              onSelect={() => {}}
+              onRevealInFileManager={onRevealInFileManager}
+            />
+          </AppProvider>
+        ));
+        const nav = container.querySelector(".file-tree") as HTMLElement;
+        nav.focus();
+        fireEvent.keyDown(nav, { key: "R", ctrlKey: true, shiftKey: true });
+        expect(onRevealInFileManager).toHaveBeenCalledTimes(1);
+        const [entry, rootId] = onRevealInFileManager.mock.calls[0]!;
+        expect(entry).toMatchObject({ path: "README.md" });
+        expect(rootId).toBe("r1");
+      } finally {
+        restoreOffsetParent();
+      }
     });
 
     it("hides the menu on root-level rows when showItemMenu={false}", () => {

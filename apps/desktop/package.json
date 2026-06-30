@@ -1,14 +1,14 @@
 {
   "name": "@markdraw/desktop",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "bash scripts/dev.sh",
     "macos:dev-signing": "bash scripts/macos-dev-signing-setup.sh",
-    "dev:frontend": "bun run prepare:excalidraw && vite",
+    "dev:frontend": "bun run --filter @markdraw/i18n compile && bun run prepare:excalidraw && vite",
     "build": "tauri build",
-    "build:frontend": "bun run prepare:excalidraw --force && vite build",
+    "build:frontend": "bun run --filter @markdraw/i18n compile && bun run prepare:excalidraw --force && vite build",
     "prepare:excalidraw": "node scripts/prepare-excalidraw-guest.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bun test e2e/specs",

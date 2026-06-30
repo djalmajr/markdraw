@@ -3,8 +3,16 @@ import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import IconCheck from "~icons/lucide/check";
 import IconCopy from "~icons/lucide/copy";
+import IconFilePlus from "~icons/lucide/file-plus";
+import IconFileSearch from "~icons/lucide/file-search";
+import IconFileText from "~icons/lucide/file-text";
+import IconFolderPlus from "~icons/lucide/folder-plus";
+import IconList from "~icons/lucide/list";
+import IconListChecks from "~icons/lucide/list-checks";
 import IconPencil from "~icons/lucide/pencil";
 import IconRefreshCw from "~icons/lucide/refresh-cw";
+import IconSearch from "~icons/lucide/search";
+import IconTerminal from "~icons/lucide/terminal";
 import type {
   ChatTurnContextItem,
   ToolActivity,
@@ -64,6 +72,42 @@ function formatToolValue(value: unknown): string {
   }
 }
 
+function toolActivityKind(tool: ToolActivity): "create-file" | "create-folder" | "edit-file" | "read-file" | "read-doc" | "list-files" | "search" | "plan" | "generic" {
+  const name = toolDisplayName(tool.toolName).toLowerCase();
+  if (name.includes("create_file")) return "create-file";
+  if (name.includes("create_folder")) return "create-folder";
+  if (name.includes("edit_file") || name.includes("propose_edit")) return "edit-file";
+  if (name.includes("read_active_doc")) return "read-doc";
+  if (name.includes("read_file")) return "read-file";
+  if (name.includes("list_files")) return "list-files";
+  if (name.includes("search")) return "search";
+  if (name.includes("update_plan")) return "plan";
+  return "generic";
+}
+
+function toolActivityIcon(tool: ToolActivity): JSX.Element {
+  switch (toolActivityKind(tool)) {
+    case "create-file":
+      return <IconFilePlus width={13} height={13} />;
+    case "create-folder":
+      return <IconFolderPlus width={13} height={13} />;
+    case "edit-file":
+      return <IconPencil width={13} height={13} />;
+    case "read-file":
+      return <IconFileSearch width={13} height={13} />;
+    case "read-doc":
+      return <IconFileText width={13} height={13} />;
+    case "list-files":
+      return <IconList width={13} height={13} />;
+    case "search":
+      return <IconSearch width={13} height={13} />;
+    case "plan":
+      return <IconListChecks width={13} height={13} />;
+    case "generic":
+      return <IconTerminal width={13} height={13} />;
+  }
+}
+
 function randomWaitingStatusIndex(count: number, current?: number): number {
   if (count <= 1) return 0;
   const next = Math.floor(Math.random() * count);
@@ -77,16 +121,43 @@ function localizedText(en: string, pt: string, es: string): string {
   return en;
 }
 
-function toolArgPath(tool: ToolActivity): string {
+function toolTargetPath(tool: ToolActivity): string {
   const args = tool.args;
   if (typeof args !== "object" || args === null) return "";
   const path = (args as { path?: unknown }).path;
-  return typeof path === "string" && path.trim() ? ` ${path.trim()}` : "";
+  return typeof path === "string" ? path.trim() : "";
+}
+
+function toolTargetSuffix(tool: ToolActivity): string {
+  const path = toolTargetPath(tool);
+  return path ? ` ${path}` : "";
+}
+
+function toolActivityTargetLabel(tool: ToolActivity): string {
+  const target = toolTargetPath(tool);
+  if (target) return target;
+  const name = toolDisplayName(tool.toolName);
+  switch (toolActivityKind(tool)) {
+    case "create-file":
+    case "edit-file":
+    case "read-file":
+      return localizedText("File", "Arquivo", "Archivo");
+    case "create-folder":
+      return localizedText("Folder", "Pasta", "Carpeta");
+    case "read-doc":
+      return localizedText("Active document", "Documento ativo", "Documento activo");
+    case "list-files":
+      return localizedText("Files", "Arquivos", "Archivos");
+    case "plan":
+      return localizedText("Plan", "Plano", "Plan");
+    default:
+      return name;
+  }
 }
 
 function toolActivityLabel(tool: ToolActivity): string {
   const name = toolDisplayName(tool.toolName);
-  const target = toolArgPath(tool);
+  const target = toolTargetSuffix(tool);
   const running = tool.status === "running";
   const failed = tool.status === "error";
   const normalized = name.toLowerCase();
@@ -290,19 +361,15 @@ export function AiToolChips(props: AiToolChipsProps): JSX.Element {
               "ai-tool-chip-open": expandedId() === tool.toolCallId,
             }}
             aria-expanded={expandedId() === tool.toolCallId}
-            title={
-              tool.status === "running"
-                ? (useLocale(), m.ai_tool_running())
-                : tool.status === "error"
-                  ? (useLocale(), m.ai_tool_error())
-                  : (useLocale(), m.ai_tool_used())
-            }
+            title={toolActivityLabel(tool)}
             onClick={() =>
               setExpandedId((cur) => (cur === tool.toolCallId ? null : tool.toolCallId))
             }
           >
-            <span class="ai-tool-chip-icon" aria-hidden="true" />
-            <span class="ai-tool-chip-name">{toolActivityLabel(tool)}</span>
+            <span class="ai-tool-chip-icon" aria-hidden="true">
+              {toolActivityIcon(tool)}
+            </span>
+            <span class="ai-tool-chip-name">{toolActivityTargetLabel(tool)}</span>
             {/* Source is only informative for MCP servers — in-process "app"
                 tools already read clearly from the (de-namespaced) name. */}
             <Show when={tool.source && tool.source !== "app"}>

@@ -144,8 +144,8 @@ export interface AiPanelProps {
   /** Navigate a document link emitted inside a chat reply, using the host's
    *  workspace navigation instead of webview navigation. */
   onNavigateDocument?: (path: string, fragment?: string | null) => void;
-  /** Active chat mode (Plan = no tools, saves a plan; Build = implements).
-   *  When provided the composer shows a Build/Plan toggle. */
+  /** Active chat mode (Plan = no tools, Build = auto, Ask = tool prompts).
+   *  When provided the composer shows a mode toggle. */
   mode?: AIChatMode;
   /** Live plan items (app__update_plan) — when non-empty the checklist card
    *  renders above the composer. */
@@ -1460,14 +1460,29 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           <Show when={props.onModeChange}>
             <PillPicker
               options={[
+                { value: "ask", label: (useLocale(), m.ai_mode_ask()) },
                 { value: "build", label: (useLocale(), m.ai_mode_build()) },
                 { value: "plan", label: (useLocale(), m.ai_mode_plan()) },
               ]}
               current={props.mode ?? "build"}
-              currentLabel={props.mode === "plan" ? (useLocale(), m.ai_mode_plan()) : (useLocale(), m.ai_mode_build())}
+              currentLabel={
+                props.mode === "plan"
+                  ? (useLocale(), m.ai_mode_plan())
+                  : props.mode === "ask"
+                    ? (useLocale(), m.ai_mode_ask())
+                    : (useLocale(), m.ai_mode_build())
+              }
               onSelect={(v) => props.onModeChange?.(v as AIChatMode)}
               ariaLabel={(useLocale(), m.ai_mode_label())}
-              title={(useLocale(), props.mode === "plan" ? m.ai_mode_plan_hint() : m.ai_mode_build_hint())}
+              placement="top-start"
+              title={(
+                useLocale(),
+                props.mode === "plan"
+                  ? m.ai_mode_plan_hint()
+                  : props.mode === "ask"
+                    ? m.ai_mode_ask_hint()
+                    : m.ai_mode_build_hint()
+              )}
             />
           </Show>
           {/* Always the model-picker pill (even with no models yet) so the bar
@@ -1499,6 +1514,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
               onSelect={(v) => props.onReasoningEffortChange?.(v)}
               ariaLabel={(useLocale(), m.settings_ai_reasoning_label())}
               title={(useLocale(), m.settings_ai_reasoning_label())}
+              placement="top-start"
               capitalize
             />
           </Show>

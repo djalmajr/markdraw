@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "solid-js";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
+import type { AITool, ToolApprovalRequest } from "@markdraw/ai/types.ts";
 import { createAppState, type ThemeMode } from "./create-app-state.ts";
 
 // Storage helpers — happy-dom ships localStorage, but we still clear
@@ -894,14 +895,26 @@ describe("AppState — AI Plan/Build mode", () => {
   // Captures the per-turn provider options (system prompt + tools) so we can
   // assert the mode gating. Yields a non-empty turn so onPlanComplete can fire.
   function captureProvider() {
-    const calls: Array<{ system?: string; tools?: unknown[] }> = [];
+    const calls: Array<{
+      onApprovalRequest?: (req: ToolApprovalRequest) => Promise<boolean>;
+      system?: string;
+      tools?: AITool[];
+    }> = [];
     const provider = {
       // eslint-disable-next-line require-yield
       async *chat(
         _messages: { role: string; content: string }[],
-        opts?: { system?: string; tools?: unknown[] },
+        opts?: {
+          onApprovalRequest?: (req: ToolApprovalRequest) => Promise<boolean>;
+          system?: string;
+          tools?: AITool[];
+        },
       ) {
-        calls.push({ system: opts?.system, tools: opts?.tools });
+        calls.push({
+          onApprovalRequest: opts?.onApprovalRequest,
+          system: opts?.system,
+          tools: opts?.tools,
+        });
         yield { type: "text-delta" as const, text: "PLAN BODY" };
         yield { type: "done" as const };
       },
@@ -915,7 +928,15 @@ describe("AppState — AI Plan/Build mode", () => {
     return { calls, provider };
   }
 
-  const fakeTools = [{ name: "edit", description: "d" }] as never;
+  const fakeTools: AITool[] = [
+    {
+      description: "d",
+      execute: async () => ({}),
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      name: "edit",
+      source: "app",
+    },
+  ];
 
   it("defaults to build mode", () => {
     withState((state) => {
@@ -930,11 +951,15 @@ describe("AppState — AI Plan/Build mode", () => {
       expect(localStorage.getItem("markdraw-ai-mode")).toBe("plan");
       state.setAiMode("build");
       expect(localStorage.getItem("markdraw-ai-mode")).toBe("build");
+      state.setAiMode("ask");
+      expect(state.aiMode()).toBe("ask");
+      expect(localStorage.getItem("markdraw-ai-mode")).toBe("ask");
     });
   });
 
-  it("build mode: forwards tools, no plan prompt, onPlanComplete not called", async () => {
+  it("build mode: forwards tools, auto-approves the gate, and does not save a plan", async () => {
     const { calls, provider } = captureProvider();
+    const approvalGate = vi.fn(async () => false);
     const onPlanComplete = vi.fn();
     await withState(
       async (state) => {
@@ -942,12 +967,52 @@ describe("AppState — AI Plan/Build mode", () => {
         await state.aiSessions.storeFor(id)!.sendMessage("hi");
         expect(calls.at(-1)?.system).toBeUndefined();
         expect(calls.at(-1)?.tools).toEqual(fakeTools);
+        await expect(
+          calls.at(-1)?.onApprovalRequest?.({
+            args: {},
+            toolName: "edit",
+          }),
+        ).resolves.toBe(true);
+        expect(approvalGate).not.toHaveBeenCalled();
         expect(onPlanComplete).not.toHaveBeenCalled();
       },
       {
         createAIProvider: () => provider,
         getAITools: () => fakeTools,
         onPlanComplete,
+        onToolApprovalRequest: approvalGate,
+      },
+    );
+  });
+
+  it("ask mode: forwards tools as prompt-gated and calls the approval gate", async () => {
+    const { calls, provider } = captureProvider();
+    const approvalGate = vi.fn(async () => false);
+    await withState(
+      async (state) => {
+        state.setAiMode("ask");
+        const id = state.newChat();
+        await state.aiSessions.storeFor(id)!.sendMessage("hi");
+        expect(calls.at(-1)?.tools).toEqual([
+          expect.objectContaining({ approval: "prompt", name: "edit" }),
+        ]);
+        await expect(
+          calls.at(-1)?.onApprovalRequest?.({
+            args: { path: "notes.md" },
+            source: "app",
+            toolName: "edit",
+          }),
+        ).resolves.toBe(false);
+        expect(approvalGate).toHaveBeenCalledWith({
+          args: { path: "notes.md" },
+          source: "app",
+          toolName: "edit",
+        });
+      },
+      {
+        createAIProvider: () => provider,
+        getAITools: () => fakeTools,
+        onToolApprovalRequest: approvalGate,
       },
     );
   });

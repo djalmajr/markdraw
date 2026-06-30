@@ -91,6 +91,11 @@ mcps/
 
 # Project-local scratch (workflow/agent raw outputs, ad-hoc analysis dumps).
 tmp/
+output/
+apps/desktop/src-tauri/output/
+apps/desktop/src-tauri/playwright/
+.markdraw/plans/
+.markdraw/chats/
 
 # Agents — track project-owned config + guardrails (the mutation-suggest
 # hook lives here, no secrets). The personal MCP endpoint is registered
