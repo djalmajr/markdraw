@@ -12,6 +12,9 @@ import type {
   ExcalidrawWriteResult,
 } from "../components/excalidraw-frame.tsx";
 import type { AITool } from "@markdraw/ai/types.ts";
+import { ruleIdentity } from "@markdraw/core/ai-rules.ts";
+import { djb2 } from "@markdraw/core/hash.ts";
+import { skillIdentity } from "./skill-discovery.ts";
 
 /** Filesystem bridge for the creation/read tools. Paths are workspace-relative
  *  and validated by the Rust side (rejects `..`/absolute paths, creates parent
@@ -109,6 +112,11 @@ export interface InProcessToolDeps {
   /** Stage an edit proposal for the user to Accept/Reject. Resolves to a short
    *  status string fed back to the model (applied / rejected / not found). */
   proposeEdit: (edit: { find: string; replace: string }) => Promise<string>;
+  /** Auto-discovered local agent skills. Enables app__read_skill so the model
+   *  can inspect a skill's canonical SKILL.md and nearby examples/scripts. */
+  getSkills?: () => ToolSkillEntry[];
+  /** Auto-discovered sticky rules. Enables app__read_rule. */
+  getRules?: () => ToolRuleEntry[];
   /** Restore scrubbed `[secret-N]` placeholders in strings the model sends
    *  that must match or land in REAL files (file content is scrubbed on the
    *  way out, so the model only ever echoes placeholders). Omitted -> strings
@@ -147,6 +155,20 @@ export interface InProcessToolDeps {
   /** Embed a query string for Full semantic search. Resolves null when no
    *  embedding provider is available (caller degrades to keyword search). */
   embedQuery?: (query: string) => Promise<number[] | null>;
+}
+
+export interface ToolSkillEntry {
+  content: string;
+  description?: string;
+  name: string;
+  sources: Array<{ active: boolean; path: string; scope: string; tool: string }>;
+}
+
+export interface ToolRuleEntry {
+  content: string;
+  description?: string;
+  name: string;
+  sources: Array<{ active: boolean; path: string; scope: string; source: string }>;
 }
 
 const APPLY_MODES: readonly ExcalidrawApplyMode[] = ["replace-selection", "append", "replace-all"];
@@ -409,6 +431,111 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
 
   const tools = [readActiveDoc, searchWorkspace, listFiles, proposeEdit, writeExcalidraw];
 
+  const getSkills = deps.getSkills;
+  if (getSkills) {
+    const readSkill: AITool = {
+      name: "app__read_skill",
+      source: APP,
+      description:
+        "Read a discovered local agent skill. Pass `name` as the skill invocation name (for example " +
+        "$excalidraw without the '$'). Omit `path` to read the skill's SKILL.md; pass a relative " +
+        "path such as `examples/architecture.example.mjs` or `scripts/render.mjs` to read a file " +
+        "inside that skill directory. Use this before following a skill-specific workflow.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Skill name or invocation name, without '$'." },
+          path: {
+            type: "string",
+            description: "Optional path relative to the skill directory. Omit for SKILL.md.",
+          },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      execute: async (args) => {
+        const a = isRecord(args) ? args : {};
+        const name = typeof a.name === "string" ? a.name.trim() : "";
+        if (!name) return { status: "error", message: "`name` is required." };
+        const skill = findSkill(getSkills(), name);
+        if (!skill) {
+          return {
+            status: "error",
+            message: `Skill not found: ${name}. Available skills: ${getSkills().map((entry) => entry.name).join(", ")}`,
+          };
+        }
+        const source = skill.sources.find((entry) => entry.active) ?? skill.sources[0];
+        if (!source) return { status: "error", message: `Skill has no source path: ${skill.name}.` };
+        const rel = typeof a.path === "string" ? a.path.trim() : "";
+        if (!rel) {
+          return {
+            content: scrub(truncateToolContent(skill.content)),
+            description: skill.description,
+            path: source.path,
+            skill: skill.name,
+            status: "ok",
+            truncated: skill.content.length > READ_FILE_CAP,
+          };
+        }
+        const target = resolveSkillResourcePath(source.path, rel);
+        if ("error" in target) return { status: "error", message: target.error };
+        try {
+          const content = await invoke<string>("read_file", { path: target.path });
+          return {
+            content: scrub(truncateToolContent(content)),
+            path: target.path,
+            skill: skill.name,
+            status: "ok",
+            truncated: content.length > READ_FILE_CAP,
+          };
+        } catch (error) {
+          return { status: "error", message: error instanceof Error ? error.message : String(error) };
+        }
+      },
+    };
+    tools.push(readSkill);
+  }
+
+  const getRules = deps.getRules;
+  if (getRules) {
+    const readRule: AITool = {
+      name: "app__read_rule",
+      source: APP,
+      description:
+        "Read a discovered local sticky rule. Pass `name` as the rule invocation name (for example #build without the '#'). Use this when a user references a rule or when you need the complete rule text.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Rule name or invocation name, without '#'." },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      execute: async (args) => {
+        const a = isRecord(args) ? args : {};
+        const name = typeof a.name === "string" ? a.name.trim() : "";
+        if (!name) return { status: "error", message: "`name` is required." };
+        const rule = findRule(getRules(), name);
+        if (!rule) {
+          return {
+            status: "error",
+            message: `Rule not found: ${name}. Available rules: ${getRules().map((entry) => entry.name).join(", ")}`,
+          };
+        }
+        const source = rule.sources.find((entry) => entry.active) ?? rule.sources[0];
+        return {
+          content: scrub(truncateToolContent(rule.content)),
+          description: rule.description,
+          path: source?.path,
+          rule: rule.name,
+          status: "ok",
+          truncated: rule.content.length > READ_FILE_CAP,
+        };
+      },
+    };
+    tools.push(readRule);
+  }
+
   // ── Spec-based diagram generation (gated on the dep) ─────────────────────
   // Richer than the Mermaid path: a declarative DiagramSpec with lanes, groups,
   // and edges that the engine auto-sizes, auto-routes, and BINDS (arrows follow
@@ -628,7 +755,8 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
         "is sliced before the size cap, so every slice of a huge file is reachable). Pass " +
         "numbered: true to prefix each line with its line number as 'N→'; use those numbers " +
         "to build line-anchored `edits` for app__edit_file. The 'N→' prefix is metadata, NOT " +
-        "file content — strip everything through the first '→' when quoting the file's text." +
+        "file content — strip everything through the first '→' when quoting the file's text. " +
+        "The response includes `version`; pass it back to app__edit_file so stale edits can be rejected." +
         MULTI_ROOT_PATHS_NOTE,
       inputSchema: {
         type: "object",
@@ -661,15 +789,16 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
           };
         }
         const content = read.content;
+        const version = contentVersion(content);
         const startLine = readLineParam(a.startLine);
         const endLine = readLineParam(a.endLine);
         const numbered = a.numbered === true;
         if (startLine === undefined && endLine === undefined && !numbered) {
           // Legacy whole-file read: raw content, original line endings.
           if (content.length > READ_FILE_CAP) {
-            return { content: content.slice(0, READ_FILE_CAP), path, truncated: true };
+            return { content: content.slice(0, READ_FILE_CAP), path, truncated: true, version };
           }
-          return { content, path };
+          return { content, path, version };
         }
         // Ranged/numbered read. The range slices LINES first, the char cap
         // applies after — so paging can reach any slice of a huge file.
@@ -697,6 +826,7 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
           path,
           startLine: start,
           totalLines,
+          version,
           ...(truncated ? { truncated: true } : {}),
         };
       },
@@ -736,7 +866,7 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
       source: APP,
       approval: "prompt",
       description:
-        "Create a NEW file at a workspace-relative path, optionally with initial content. Refuses to overwrite an existing file — to change one, use app__propose_edit on the active document instead. The user approves each call." +
+        "Create a NEW workspace file. Use this whenever the user asks to create, add, write, or save a file that does not exist yet; put the complete initial content in `content`. Refuses to overwrite an existing file — to change one, use app__edit_file for workspace files or app__propose_edit for the active document. For editable Excalidraw diagrams, prefer app__excalidraw_generate or app__excalidraw_write. The user approves each call." +
         MULTI_ROOT_PATHS_NOTE,
       inputSchema: {
         type: "object",
@@ -773,15 +903,19 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
       source: APP,
       approval: "prompt",
       description:
-        "Edit ANY workspace file. Two modes. (1) find/replace: replace an exact occurrence of " +
+        "Edit ANY workspace file. Three modes. (1) operations: pass `operations`, an array of " +
+        "JSON line operations from app__read_file(numbered: true): replace/delete/insert_before/" +
+        "insert_after. Each operation must include the current expectedText anchor and the version " +
+        "from app__read_file so stale edits are rejected. (2) find/replace: replace an exact occurrence of " +
         "`find` with `replace` — read the file first (app__read_file) and copy `find` exactly, " +
-        "whitespace included; use `all: true` to replace every occurrence. (2) line-anchored: " +
+        "whitespace included; use `all: true` to replace every occurrence. (3) legacy line-anchored: " +
         "pass `edits`, an array of { startLine, endLine, expectedText, replace } hunks. Line " +
         "numbers come from app__read_file with numbered: true; expectedText is the RAW current " +
         "text of lines startLine..endLine joined with \\n (strip the 'N→' prefixes — they are " +
-        "not file content). Hunks must not overlap; they are applied bottom-up, so the line " +
+        "not file content). Hunks/operations must not overlap; they are applied bottom-up, so the line " +
         "numbers you read stay valid for every hunk. When `edits` is present, find/replace/all " +
-        "are ignored. The user approves each call." +
+        "are ignored; when `operations` is present, it takes precedence over `edits`. Pass the `version` returned by app__read_file when available; a stale " +
+        "version rejects the edit and tells you to re-read. The user approves each call." +
         MULTI_ROOT_PATHS_NOTE,
       inputSchema: {
         type: "object",
@@ -809,12 +943,44 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
               additionalProperties: false,
             },
           },
+          operations: {
+            type: "array",
+            description:
+              "Preferred line operation mode. Non-overlapping JSON operations using current line anchors.",
+            items: {
+              type: "object",
+              properties: {
+                endLine: { type: "integer", description: "Last line for replace/delete." },
+                expectedText: {
+                  type: "string",
+                  description:
+                    "Exact current text of the affected line/range, joined with \\n — no 'N→' prefixes.",
+                },
+                line: { type: "integer", description: "Anchor line for insert_before/insert_after." },
+                op: {
+                  type: "string",
+                  enum: ["replace", "delete", "insert_before", "insert_after"],
+                  description: "Operation to apply.",
+                },
+                replacement: { type: "string", description: "Replacement text for replace." },
+                startLine: { type: "integer", description: "First line for replace/delete." },
+                text: { type: "string", description: "Inserted text for insert operations." },
+              },
+              required: ["op", "expectedText"],
+              additionalProperties: false,
+            },
+          },
           find: {
             type: "string",
             description: "find/replace mode: exact text to locate in the file. Required unless `edits` is given.",
           },
           path: { type: "string", description: "Workspace-relative file path." },
           replace: { type: "string", description: "find/replace mode: replacement text." },
+          version: {
+            type: "string",
+            description:
+              "Optional content version returned by app__read_file. When present, the edit is rejected if the file changed.",
+          },
         },
         required: ["path"],
         additionalProperties: false,
@@ -836,8 +1002,19 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
           };
         }
         const raw = read.content;
-        if (a.edits !== undefined) {
-          const parsed = parseLineEdits(a.edits);
+        const suppliedVersion = typeof a.version === "string" ? a.version.trim() : "";
+        const currentVersion = contentVersion(raw);
+        if (suppliedVersion && suppliedVersion !== currentVersion) {
+          return {
+            status: "error",
+            message:
+              `Stale version for ${path}: expected ${suppliedVersion}, current ${currentVersion}. ` +
+              "Re-read the file with app__read_file and rebuild the edit from the current content.",
+          };
+        }
+        if (a.operations !== undefined || a.edits !== undefined) {
+          const parsed =
+            a.operations !== undefined ? parseLineOperations(a.operations) : parseLineEdits(a.edits);
           if ("error" in parsed) return { status: "error", message: parsed.error };
           // Line-anchored hunks stay in the ONE coordinate system the model
           // saw: numbered reads serve SCRUBBED text, and scrubbing can
@@ -849,7 +1026,13 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
           const applied = applyLineEdits(raw, parsed.hunks, path);
           if ("error" in applied) return { status: "error", message: applied.error };
           await fs.writeFileAbs(`${resolved.root.path}/${read.rel}`, restore(applied.next));
-          return { path, replacements: parsed.hunks.length, status: "edited" };
+          return {
+            path,
+            replacements: parsed.hunks.length,
+            status: "edited",
+            version: contentVersion(applied.next),
+            versionBefore: currentVersion,
+          };
         }
         // find/replace mode is coordinate-free: the bridge scrubs reads for
         // the model's benefit, so restore its strings and match against the
@@ -887,7 +1070,21 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
             ? content.split(find).join(replace)
             : content.replace(find, replace);
         await fs.writeFileAbs(`${resolved.root.path}/${read.rel}`, next);
-        return { path, replacements: a.all === true ? occurrences : 1, status: "edited" };
+        let nextVersion = contentVersion(scrub(next));
+        try {
+          const nextRead = await fs.readFileRelative(resolved.root.path, read.rel);
+          if (nextRead !== null) nextVersion = contentVersion(nextRead);
+        } catch {
+          // Keep the write result usable even if a custom fs bridge cannot
+          // immediately re-read the file it just wrote.
+        }
+        return {
+          path,
+          replacements: a.all === true ? occurrences : 1,
+          status: "edited",
+          version: nextVersion,
+          versionBefore: currentVersion,
+        };
       },
     };
 
@@ -895,6 +1092,57 @@ export function buildInProcessTools(deps: InProcessToolDeps): AITool[] {
   }
 
   return tools;
+}
+
+export function contentVersion(content: string): string {
+  return `v${djb2(content)}`;
+}
+
+function findSkill(skills: ToolSkillEntry[], name: string): ToolSkillEntry | undefined {
+  const identity = skillIdentity({ name });
+  return skills.find((skill) => skillIdentity(skill) === identity);
+}
+
+function findRule(rules: ToolRuleEntry[], name: string): ToolRuleEntry | undefined {
+  const identity = ruleIdentity({ name });
+  return rules.find((rule) => ruleIdentity(rule) === identity);
+}
+
+function dirname(path: string): string {
+  const index = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return index >= 0 ? path.slice(0, index) : "";
+}
+
+function resolveSkillResourcePath(
+  skillPath: string,
+  relativePath: string,
+): { path: string } | { error: string } {
+  if (!relativePath || relativePath.includes("\0")) {
+    return { error: "`path` must be a relative file path inside the skill directory." };
+  }
+  if (
+    relativePath.startsWith("/") ||
+    relativePath.startsWith("\\") ||
+    /^[a-zA-Z]:[\\/]/.test(relativePath)
+  ) {
+    return { error: "`path` must be relative to the skill directory, not absolute." };
+  }
+  const parts: string[] = [];
+  for (const raw of relativePath.split(/[\\/]+/)) {
+    if (!raw || raw === ".") continue;
+    if (raw === "..") {
+      return { error: "`path` cannot traverse outside the skill directory." };
+    }
+    parts.push(raw);
+  }
+  if (parts.length === 0) return { error: "`path` must name a file inside the skill directory." };
+  const base = dirname(skillPath);
+  const sep = skillPath.includes("\\") ? "\\" : "/";
+  return { path: `${base}${sep}${parts.join(sep)}` };
+}
+
+function truncateToolContent(content: string): string {
+  return content.length > READ_FILE_CAP ? content.slice(0, READ_FILE_CAP) : content;
 }
 
 /** Cap for app__read_file so a huge file can't blow the model's context. */
@@ -1002,6 +1250,55 @@ function parseLineEdits(raw: unknown): { hunks: LineEditHunk[] } | { error: stri
     }
   }
   return { hunks };
+}
+
+function parseLineOperations(raw: unknown): { hunks: LineEditHunk[] } | { error: string } {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { error: "`operations` must be a non-empty array of JSON line operations." };
+  }
+  const edits: unknown[] = [];
+  for (const entry of raw) {
+    const op = isRecord(entry) ? entry : {};
+    const kind = typeof op.op === "string" ? op.op : "";
+    const expectedText = typeof op.expectedText === "string" ? op.expectedText : undefined;
+    if (expectedText === undefined) {
+      return { error: "Each operation needs string expectedText from app__read_file(numbered: true)." };
+    }
+    if (kind === "replace") {
+      const startLine = readLineParam(op.startLine);
+      const endLine = readLineParam(op.endLine);
+      const replacement = typeof op.replacement === "string" ? op.replacement : undefined;
+      if (startLine === undefined || endLine === undefined || replacement === undefined) {
+        return { error: "replace operations need startLine, endLine, expectedText and replacement." };
+      }
+      edits.push({ startLine, endLine, expectedText, replace: replacement });
+      continue;
+    }
+    if (kind === "delete") {
+      const startLine = readLineParam(op.startLine);
+      const endLine = readLineParam(op.endLine);
+      if (startLine === undefined || endLine === undefined) {
+        return { error: "delete operations need startLine, endLine and expectedText." };
+      }
+      edits.push({ startLine, endLine, expectedText, replace: "" });
+      continue;
+    }
+    if (kind === "insert_before" || kind === "insert_after") {
+      const line = readLineParam(op.line);
+      const text = typeof op.text === "string" ? op.text : undefined;
+      if (line === undefined || text === undefined) {
+        return { error: `${kind} operations need line, expectedText and text.` };
+      }
+      const replace = kind === "insert_before" ? `${text}\n${expectedText}` : `${expectedText}\n${text}`;
+      edits.push({ startLine: line, endLine: line, expectedText, replace });
+      continue;
+    }
+    return {
+      error:
+        "`op` must be one of replace, delete, insert_before, or insert_after.",
+    };
+  }
+  return parseLineEdits(edits);
 }
 
 /** Verify every hunk against the CURRENT file content, then apply them

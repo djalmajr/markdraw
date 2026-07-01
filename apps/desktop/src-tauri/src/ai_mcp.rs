@@ -17,7 +17,10 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
-use rmcp::model::{CallToolRequestParams, CallToolResult, Content, TaskSupport};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, PromptMessageContent,
+    ReadResourceRequestParams, ResourceContents, TaskSupport,
+};
 use rmcp::service::{RoleClient, RunningService};
 use rmcp::transport::auth::AuthClient;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -39,6 +42,8 @@ type McpClient = RunningService<RoleClient, ()>;
 /// connect time (so listing tools later needs no network round-trip).
 struct Connected {
     client: McpClient,
+    prompts: Vec<McpPromptInfo>,
+    resources: Vec<McpResourceInfo>,
     tools: Vec<McpToolInfo>,
 }
 
@@ -110,11 +115,73 @@ pub struct McpToolInfo {
 pub struct McpServerStatus {
     pub id: String,
     pub connected: bool,
+    pub prompt_count: usize,
+    pub resource_count: usize,
     pub tool_count: usize,
     /// An OAuth-gated HTTP server with no usable stored tokens: the UI shows an
     /// "Authorize" action that triggers [`ai_mcp_authorize`]. Always `false` for
     /// a connected server.
     pub requires_auth: bool,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct McpResourceInfo {
+    pub server: String,
+    pub uri: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u32>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPromptArgumentInfo {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPromptInfo {
+    pub server: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<Vec<McpPromptArgumentInfo>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpResourceContent {
+    pub server: String,
+    pub uri: String,
+    pub mime_type: Option<String>,
+    pub text: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPromptContent {
+    pub server: String,
+    pub name: String,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Pure PATH × PATHEXT scan (first hit wins, directories outrank extensions —
@@ -311,6 +378,57 @@ fn tool_infos(server: &str, tools: Vec<rmcp::model::Tool>) -> Vec<McpToolInfo> {
         .collect()
 }
 
+fn resource_infos(server: &str, resources: Vec<rmcp::model::Resource>) -> Vec<McpResourceInfo> {
+    resources
+        .into_iter()
+        .map(|resource| McpResourceInfo {
+            server: server.to_string(),
+            uri: resource.uri.clone(),
+            name: resource.name.clone(),
+            title: resource.title.clone(),
+            description: resource.description.clone(),
+            mime_type: resource.mime_type.clone(),
+            size: resource.size,
+        })
+        .collect()
+}
+
+fn prompt_infos(server: &str, prompts: Vec<rmcp::model::Prompt>) -> Vec<McpPromptInfo> {
+    prompts
+        .into_iter()
+        .map(|prompt| McpPromptInfo {
+            server: server.to_string(),
+            name: prompt.name,
+            title: prompt.title,
+            description: prompt.description,
+            arguments: prompt.arguments.map(|args| {
+                args.into_iter()
+                    .map(|arg| McpPromptArgumentInfo {
+                        name: arg.name,
+                        title: arg.title,
+                        description: arg.description,
+                        required: arg.required,
+                    })
+                    .collect()
+            }),
+        })
+        .collect()
+}
+
+async fn list_resources_best_effort(client: &McpClient, server: &str) -> Vec<McpResourceInfo> {
+    match tokio::time::timeout(CONNECT_TIMEOUT, client.list_all_resources()).await {
+        Ok(Ok(resources)) => resource_infos(server, resources),
+        _ => Vec::new(),
+    }
+}
+
+async fn list_prompts_best_effort(client: &McpClient, server: &str) -> Vec<McpPromptInfo> {
+    match tokio::time::timeout(CONNECT_TIMEOUT, client.list_all_prompts()).await {
+        Ok(Ok(prompts)) => prompt_infos(server, prompts),
+        _ => Vec::new(),
+    }
+}
+
 /// Parse a text block as JSON when it round-trips, else keep it as a string —
 /// gives the model structured data instead of a stringified blob when possible.
 fn parse_text_or_json(text: &str) -> serde_json::Value {
@@ -391,16 +509,22 @@ pub async fn ai_mcp_connect(
                 .map_err(|_| format!("MCP list-tools timed out: {id}"))?
                 .map_err(|e| e.to_string())?;
             let tools = tool_infos(&id, tools);
+            let resources = list_resources_best_effort(&client, &id).await;
+            let prompts = list_prompts_best_effort(&client, &id).await;
+            let prompt_count = prompts.len();
+            let resource_count = resources.len();
             let tool_count = tools.len();
             state.needs_auth.lock().await.remove(&id);
             state
                 .servers
                 .lock()
                 .await
-                .insert(id.clone(), Connected { client, tools });
+                .insert(id.clone(), Connected { client, prompts, resources, tools });
             Ok(McpServerStatus {
                 id,
                 connected: true,
+                prompt_count,
+                resource_count,
                 tool_count,
                 requires_auth: false,
             })
@@ -410,6 +534,8 @@ pub async fn ai_mcp_connect(
             Ok(McpServerStatus {
                 id,
                 connected: false,
+                prompt_count: 0,
+                resource_count: 0,
                 tool_count: 0,
                 requires_auth: true,
             })
@@ -457,6 +583,8 @@ pub async fn ai_mcp_list_servers(
         .map(|(id, conn)| McpServerStatus {
             id: id.clone(),
             connected: true,
+            prompt_count: conn.prompts.len(),
+            resource_count: conn.resources.len(),
             tool_count: conn.tools.len(),
             requires_auth: false,
         })
@@ -467,6 +595,8 @@ pub async fn ai_mcp_list_servers(
             out.push(McpServerStatus {
                 id,
                 connected: false,
+                prompt_count: 0,
+                resource_count: 0,
                 tool_count: 0,
                 requires_auth: true,
             });
@@ -483,6 +613,138 @@ pub async fn ai_mcp_list_tools(state: State<'_, McpManager>) -> Result<Vec<McpTo
         out.extend(conn.tools.iter().cloned());
     }
     Ok(out)
+}
+
+#[tauri::command]
+pub async fn ai_mcp_list_resources(
+    state: State<'_, McpManager>,
+) -> Result<Vec<McpResourceInfo>, String> {
+    let servers = state.servers.lock().await;
+    let mut out = Vec::new();
+    for conn in servers.values() {
+        out.extend(conn.resources.iter().cloned());
+    }
+    Ok(out)
+}
+
+/// Cap on the text a single MCP resource returns. The result crosses IPC and is
+/// injected verbatim into the next prompt, so an oversized/adversarial resource
+/// must not stall the webview, bloat persisted context, or balloon a request.
+const MAX_RESOURCE_CHARS: usize = 200_000;
+
+fn resource_content_text(contents: Vec<ResourceContents>) -> (String, Option<String>) {
+    let mut parts = Vec::new();
+    let mut mime_type = None;
+    for content in contents {
+        match content {
+            ResourceContents::TextResourceContents { text, mime_type: mt, .. } => {
+                if mime_type.is_none() {
+                    mime_type = mt;
+                }
+                parts.push(text);
+            }
+            ResourceContents::BlobResourceContents { blob, mime_type: mt, .. } => {
+                if mime_type.is_none() {
+                    mime_type = mt;
+                }
+                parts.push(format!("[base64 blob omitted: {} chars]", blob.len()));
+            }
+        }
+    }
+    let mut text = parts.join("\n\n");
+    if text.len() > MAX_RESOURCE_CHARS {
+        let mut end = MAX_RESOURCE_CHARS;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+        text.push_str("\n\n[resource truncated: exceeded 200000 characters]");
+    }
+    (text, mime_type)
+}
+
+#[tauri::command]
+pub async fn ai_mcp_read_resource(
+    state: State<'_, McpManager>,
+    server: String,
+    uri: String,
+) -> Result<McpResourceContent, String> {
+    let peer = {
+        let servers = state.servers.lock().await;
+        let conn = servers
+            .get(&server)
+            .ok_or_else(|| format!("MCP server not connected: {server}"))?;
+        conn.client.peer().clone()
+    };
+    let result = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        peer.read_resource(ReadResourceRequestParams::new(uri.clone())),
+    )
+    .await
+    .map_err(|_| format!("MCP read-resource timed out: {server}/{uri}"))?
+    .map_err(|e| e.to_string())?;
+    let (text, mime_type) = resource_content_text(result.contents);
+    Ok(McpResourceContent {
+        server,
+        uri,
+        mime_type,
+        text,
+    })
+}
+
+#[tauri::command]
+pub async fn ai_mcp_list_prompts(
+    state: State<'_, McpManager>,
+) -> Result<Vec<McpPromptInfo>, String> {
+    let servers = state.servers.lock().await;
+    let mut out = Vec::new();
+    for conn in servers.values() {
+        out.extend(conn.prompts.iter().cloned());
+    }
+    Ok(out)
+}
+
+fn prompt_content_text(content: PromptMessageContent) -> String {
+    match content {
+        PromptMessageContent::Text { text } => text,
+        other => serde_json::to_string_pretty(&other).unwrap_or_else(|_| "<non-text content>".to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn ai_mcp_get_prompt(
+    state: State<'_, McpManager>,
+    server: String,
+    name: String,
+    arguments: serde_json::Value,
+) -> Result<McpPromptContent, String> {
+    let peer = {
+        let servers = state.servers.lock().await;
+        let conn = servers
+            .get(&server)
+            .ok_or_else(|| format!("MCP server not connected: {server}"))?;
+        conn.client.peer().clone()
+    };
+    let mut params = GetPromptRequestParams::new(name.clone());
+    if let Some(map) = arguments.as_object().cloned() {
+        params = params.with_arguments(map);
+    }
+    let result = tokio::time::timeout(CONNECT_TIMEOUT, peer.get_prompt(params))
+        .await
+        .map_err(|_| format!("MCP get-prompt timed out: {server}/{name}"))?
+        .map_err(|e| e.to_string())?;
+    let text = result
+        .messages
+        .into_iter()
+        .map(|message| format!("{:?}: {}", message.role, prompt_content_text(message.content)))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    Ok(McpPromptContent {
+        server,
+        name,
+        text,
+        description: result.description,
+    })
 }
 
 /// Which of the three racing events won in [`run_with_cancel`].

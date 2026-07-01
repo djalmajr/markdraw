@@ -21,7 +21,8 @@ mod ai_mcp;
 mod ai_mcp_oauth;
 use ai_mcp::{
     ai_mcp_authorize, ai_mcp_call_tool, ai_mcp_cancel_call, ai_mcp_connect, ai_mcp_disconnect,
-    ai_mcp_list_servers, ai_mcp_list_tools, McpManager,
+    ai_mcp_get_prompt, ai_mcp_list_prompts, ai_mcp_list_resources, ai_mcp_list_servers,
+    ai_mcp_list_tools, ai_mcp_read_resource, McpManager,
 };
 
 // Discovers MCP servers other agent tools (Claude Code, Codex, OpenCode) already
@@ -30,16 +31,31 @@ use ai_mcp::{
 mod mcp_discovery;
 use mcp_discovery::mcp_discover;
 
+// Shared frontmatter/Markdown parsing helpers (YAML-ish `---` blocks + first
+// H1 fallback) used by both skill and rule discovery so the two paths
+// normalize metadata identically.
+mod frontmatter;
+
 // Discovers `SKILL.md` files that other agent tools expose automatically. Like
 // MCP discovery, Rust only reads + normalizes; the JS host dedupes and decides
 // when to inject skill instructions into chat context.
 mod skill_discovery;
 use skill_discovery::skills_discover;
 
+// Discovers sticky rule files from Markdraw and local agent configs.
+mod rule_discovery;
+use rule_discovery::rules_discover;
+
 // Streaming provider HTTP — Rust-side POST + SSE line framing over an ipc
 // Channel (tauri-plugin-http buffers whole responses, so SSE never streamed).
 mod ai_http;
 use ai_http::{ai_http_stream, ai_http_stream_cancel, HttpStreamManager};
+
+// Chat/tool artifacts stored under the app config dir, keyed by chat session.
+mod ai_artifacts;
+use ai_artifacts::{
+    ai_artifact_copy_session, ai_artifact_delete_session, ai_artifact_read, ai_artifact_write,
+};
 
 // Claude Code / Codex subscription via local CLI binaries (JSONL over Channel).
 mod cli_agent;
@@ -83,6 +99,26 @@ pub struct DirEntry {
 pub struct WatchEvent {
     pub paths: Vec<String>,
 }
+
+#[derive(Serialize, Clone)]
+pub struct StartupInfo {
+    pub args: Vec<String>,
+    pub cwd: String,
+    pub paths: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ShellCommandStatus {
+    pub conflict: bool,
+    pub executable_path: String,
+    pub installed: bool,
+    pub managed: bool,
+    pub path_dir_on_path: bool,
+    pub target_dir: String,
+    pub target_path: String,
+}
+
+const SHELL_COMMAND_MARKER: &str = "MARKDRAW_MANAGED_SHELL_COMMAND";
 
 /// Bulky directories that are ALWAYS skipped, regardless of "show hidden".
 /// These are caches/build artifacts/dependencies that would freeze the tree
@@ -244,6 +280,7 @@ async fn save_file_dialog(
         builder = builder.set_directory(std::path::PathBuf::from(&dir));
     }
     let path = builder
+        .add_filter("HTML", &["html", "htm"])
         .add_filter("Markdown", &["md", "markdown"])
         .blocking_save_file();
     Ok(path.map(|p| p.to_string()))
@@ -1008,11 +1045,207 @@ fn toggle_maximize_instant(window: tauri::Window) -> Result<(), String> {
     }
 }
 
-/// Return command-line args passed to the process (for file-open on cold start).
-/// On Windows/Linux, double-clicking an associated file passes the path as argv[1].
+fn canonical_cli_path(cwd: &Path, arg: &str) -> Option<String> {
+    if arg.trim().is_empty() || arg.starts_with('-') {
+        return None;
+    }
+    let path = PathBuf::from(arg);
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    };
+    absolute
+        .canonicalize()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+}
+
+fn canonical_cli_paths(cwd: &Path, args: &[String]) -> Vec<String> {
+    args.iter()
+        .filter_map(|arg| canonical_cli_path(cwd, arg))
+        .collect()
+}
+
+fn cli_help_text() -> &'static str {
+    "Usage: markdraw <path>\n\nOpen a file or folder in Markdraw.\n\nOptions:\n  --help       Show this help.\n  --version    Show the Markdraw version."
+}
+
+fn handle_cli_info_args(args: &[String]) -> bool {
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!("{}", cli_help_text());
+        return true;
+    }
+    if args.iter().any(|arg| arg == "--version" || arg == "-V") {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return true;
+    }
+    false
+}
+
+/// Return startup args plus paths canonicalized relative to the process cwd.
+/// A shell command like `markdraw docs/a.md` depends on this cwd — the app
+/// bundle's own executable directory is not the user's working directory.
 #[tauri::command]
-fn get_startup_args() -> Vec<String> {
-    std::env::args().skip(1).collect()
+fn get_startup_info() -> StartupInfo {
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let paths = canonical_cli_paths(&cwd, &args);
+    StartupInfo {
+        args,
+        cwd: cwd.to_string_lossy().to_string(),
+        paths,
+    }
+}
+
+#[tauri::command]
+fn path_kind(path: String) -> Result<String, String> {
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if metadata.is_dir() {
+        Ok("directory".to_string())
+    } else if metadata.is_file() {
+        Ok("file".to_string())
+    } else {
+        Ok("other".to_string())
+    }
+}
+
+#[cfg(windows)]
+fn shell_command_target_dir() -> Result<PathBuf, String> {
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        return Ok(PathBuf::from(local_app_data)
+            .join("Microsoft")
+            .join("WindowsApps"));
+    }
+    let profile =
+        std::env::var_os("USERPROFILE").ok_or_else(|| "USERPROFILE is not set".to_string())?;
+    Ok(PathBuf::from(profile)
+        .join("AppData")
+        .join("Local")
+        .join("Microsoft")
+        .join("WindowsApps"))
+}
+
+#[cfg(not(windows))]
+fn shell_command_target_dir() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not set".to_string())?;
+    Ok(PathBuf::from(home).join(".local").join("bin"))
+}
+
+#[cfg(windows)]
+fn shell_command_target_path() -> Result<PathBuf, String> {
+    Ok(shell_command_target_dir()?.join("markdraw.cmd"))
+}
+
+#[cfg(not(windows))]
+fn shell_command_target_path() -> Result<PathBuf, String> {
+    Ok(shell_command_target_dir()?.join("markdraw"))
+}
+
+fn path_matches(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn path_dir_on_path(target_dir: &Path) -> bool {
+    std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).any(|entry| path_matches(&entry, target_dir)))
+        .unwrap_or(false)
+}
+
+fn shell_quote_unix(path: &Path) -> String {
+    let s = path.to_string_lossy();
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+#[cfg(windows)]
+fn shell_command_contents(executable: &Path) -> String {
+    format!(
+        "@echo off\r\nrem {SHELL_COMMAND_MARKER}\r\n\"{}\" %*\r\n",
+        executable.to_string_lossy()
+    )
+}
+
+#[cfg(not(windows))]
+fn shell_command_contents(executable: &Path) -> String {
+    format!(
+        "#!/bin/sh\n# {SHELL_COMMAND_MARKER}\nexec {} \"$@\"\n",
+        shell_quote_unix(executable)
+    )
+}
+
+fn shell_command_status_impl() -> Result<ShellCommandStatus, String> {
+    let target_path = shell_command_target_path()?;
+    let target_dir = shell_command_target_dir()?;
+    let executable_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    let content = std::fs::read_to_string(&target_path).ok();
+    let managed = content
+        .as_deref()
+        .map(|text| text.contains(SHELL_COMMAND_MARKER))
+        .unwrap_or(false);
+    let exists = target_path.exists();
+    Ok(ShellCommandStatus {
+        conflict: exists && !managed,
+        executable_path: executable_path.to_string_lossy().to_string(),
+        installed: exists && managed,
+        managed,
+        path_dir_on_path: path_dir_on_path(&target_dir),
+        target_dir: target_dir.to_string_lossy().to_string(),
+        target_path: target_path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn shell_command_status() -> Result<ShellCommandStatus, String> {
+    shell_command_status_impl()
+}
+
+#[tauri::command]
+fn install_shell_command() -> Result<ShellCommandStatus, String> {
+    let status = shell_command_status_impl()?;
+    if status.conflict {
+        return Err(format!(
+            "A non-Markdraw command already exists at {}",
+            status.target_path
+        ));
+    }
+    let target_dir = shell_command_target_dir()?;
+    let target_path = shell_command_target_path()?;
+    let executable_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+    std::fs::write(&target_path, shell_command_contents(&executable_path))
+        .map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&target_path)
+            .map_err(|e| e.to_string())?
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&target_path, permissions).map_err(|e| e.to_string())?;
+    }
+    shell_command_status_impl()
+}
+
+#[tauri::command]
+fn uninstall_shell_command() -> Result<ShellCommandStatus, String> {
+    let status = shell_command_status_impl()?;
+    if status.conflict {
+        return Err(format!(
+            "Refusing to remove non-Markdraw command at {}",
+            status.target_path
+        ));
+    }
+    let target_path = shell_command_target_path()?;
+    if target_path.exists() {
+        std::fs::remove_file(&target_path).map_err(|e| e.to_string())?;
+    }
+    shell_command_status_impl()
 }
 
 /// Show or hide the dock icon on macOS by changing the activation policy.
@@ -1062,6 +1295,11 @@ fn print_webview(webview: tauri::Webview) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let cli_args = std::env::args().skip(1).collect::<Vec<_>>();
+    if handle_cli_info_args(&cli_args) {
+        return;
+    }
+
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
 
@@ -1086,10 +1324,12 @@ pub fn run() {
     #[cfg(not(debug_assertions))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            // When a second instance opens with file args, emit an event
-            // so the frontend can navigate to the file.
-            if let Some(path) = argv.get(1) {
-                let _ = app.emit("open-file", path.clone());
+            // When a second instance opens with path args, emit canonical
+            // absolute paths so the frontend can open a file or workspace.
+            let cwd = PathBuf::from(_cwd);
+            let args = argv.iter().skip(1).cloned().collect::<Vec<_>>();
+            for path in canonical_cli_paths(&cwd, &args) {
+                let _ = app.emit("open-path", path);
             }
             // Focus the existing window and restore dock icon
             if let Some(window) = app.get_webview_window("main") {
@@ -1172,7 +1412,11 @@ pub fn run() {
             read_file_relative,
             read_files_relative,
             find_in_files,
-            get_startup_args,
+            get_startup_info,
+            path_kind,
+            shell_command_status,
+            install_shell_command,
+            uninstall_shell_command,
             set_dock_visible,
             toggle_maximize_instant,
             print_webview,
@@ -1199,11 +1443,20 @@ pub fn run() {
             ai_mcp_list_servers,
             mcp_discover,
             skills_discover,
+            rules_discover,
             ai_mcp_list_tools,
+            ai_mcp_list_resources,
+            ai_mcp_read_resource,
+            ai_mcp_list_prompts,
+            ai_mcp_get_prompt,
             ai_mcp_call_tool,
             ai_mcp_cancel_call,
             ai_http_stream,
             ai_http_stream_cancel,
+            ai_artifact_write,
+            ai_artifact_read,
+            ai_artifact_delete_session,
+            ai_artifact_copy_session,
             cli_detect_binary,
             cli_probe_subscription,
             cli_chat_stream,
@@ -1228,7 +1481,7 @@ pub fn run() {
                 for url in urls {
                     if let Ok(path) = url.to_file_path() {
                         if let Some(path_str) = path.to_str() {
-                            let _ = _app.emit("open-file", path_str.to_string());
+                            let _ = _app.emit("open-path", path_str.to_string());
                         }
                     }
                 }
@@ -1247,6 +1500,42 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, b"").unwrap();
+    }
+
+    #[test]
+    fn canonical_cli_path_resolves_relative_paths_from_cwd() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("docs").join("guide.md");
+        touch(&file);
+
+        let resolved = canonical_cli_path(dir.path(), "docs/guide.md").unwrap();
+
+        assert_eq!(resolved, file.canonicalize().unwrap().to_string_lossy());
+    }
+
+    #[test]
+    fn canonical_cli_path_ignores_flags_and_missing_paths() {
+        let dir = tempdir().unwrap();
+
+        assert!(canonical_cli_path(dir.path(), "--help").is_none());
+        assert!(canonical_cli_path(dir.path(), "missing.md").is_none());
+    }
+
+    #[test]
+    fn cli_info_args_are_handled_before_starting_the_app() {
+        assert!(handle_cli_info_args(&["--help".to_string()]));
+        assert!(handle_cli_info_args(&["--version".to_string()]));
+        assert!(!handle_cli_info_args(&["docs/guide.md".to_string()]));
+        assert!(cli_help_text().contains("markdraw <path>"));
+    }
+
+    #[test]
+    fn shell_command_contents_marks_managed_shim() {
+        let executable = Path::new("/Applications/Markdraw.app/Contents/MacOS/Markdraw");
+        let contents = shell_command_contents(executable);
+
+        assert!(contents.contains(SHELL_COMMAND_MARKER));
+        assert!(contents.contains("Markdraw"));
     }
 
     fn names(entries: &[DirEntry]) -> Vec<&str> {

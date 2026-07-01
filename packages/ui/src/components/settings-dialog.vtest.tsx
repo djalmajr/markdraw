@@ -38,7 +38,7 @@ function setup(overrides: Record<string, unknown> = {}) {
 describe("SettingsDialog", () => {
   it("renders the vertical nav and opens on the AI section (Manage models)", () => {
     const { baseElement } = setup();
-    expect(baseElement.querySelectorAll('[role="tab"]').length).toBe(8);
+    expect(baseElement.querySelectorAll('[role="tab"]').length).toBe(9);
     // The AI section opens on the OpenCode-style Manage models view.
     expect(baseElement.querySelector(".settings-models-search")).not.toBeNull();
     expect(baseElement.querySelector(".settings-provider-list")).toBeNull();
@@ -184,6 +184,56 @@ describe("SettingsDialog", () => {
     // After removal the view returns to Manage models.
     await waitFor(() => {
       expect(baseElement.querySelector(".settings-models-search")).not.toBeNull();
+    });
+  });
+
+  it("Manage models: refresh dedupes providers that share a refresh group", async () => {
+    const onRefreshModels = vi.fn(async () => {});
+    const { baseElement } = setup({
+      aiProviders: [
+        {
+          id: "opencode-go",
+          name: "OpenCode Go",
+          models: ["minimax-m3"],
+          fetchable: true,
+          refreshGroup: "opencode-go",
+        },
+        {
+          id: "opencode-go-chat",
+          name: "OpenCode Go (chat)",
+          models: ["glm-5.2"],
+          fetchable: true,
+          refreshGroup: "opencode-go",
+        },
+      ],
+      allModels: [
+        {
+          id: "OpenCode Go",
+          name: "OpenCode Go",
+          models: [
+            { value: "opencode-go/minimax-m3", label: "MiniMax M3" },
+            { value: "opencode-go-chat/glm-5.2", label: "GLM-5.2" },
+          ],
+        },
+      ],
+      modelCatalogStatus: {
+        "opencode-go": { fetchedAt: 1_700_000_000_000, source: "cache", state: "idle" },
+      },
+      onRefreshModels,
+    });
+    const editBtn = [
+      ...baseElement.querySelectorAll("button.ai-mp-icon-btn"),
+    ].find((b) => /Edit provider: OpenCode Go/i.test(b.getAttribute("aria-label") ?? "")) as HTMLElement;
+    fireEvent.click(editBtn);
+    const refreshBtn = [...baseElement.querySelectorAll("button")].find(
+      (b) => (b.textContent ?? "").trim() === "Refresh models",
+    ) as HTMLElement;
+    expect(baseElement.textContent).toContain("Showing cached models from");
+    fireEvent.click(refreshBtn);
+
+    await waitFor(() => {
+      expect(onRefreshModels).toHaveBeenCalledTimes(1);
+      expect(onRefreshModels).toHaveBeenCalledWith("opencode-go");
     });
   });
 

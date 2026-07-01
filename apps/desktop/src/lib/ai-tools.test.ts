@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from "bun:test";
 import { restoreSecrets, scrubSecrets } from "@markdraw/ai/secret-scrub.ts";
 import {
   buildInProcessTools,
+  contentVersion,
   resolveWorkspacePath,
   rootNamesFor,
   type ExcalidrawGenerateRequest,
@@ -43,6 +44,13 @@ function depsWithExcalidrawSpy() {
 
 const writeTool = (deps: InProcessToolDeps) =>
   buildInProcessTools(deps).find((t) => t.name === "app__excalidraw_write")!;
+
+function expectEditedResult(res: unknown, path: string, replacements: number) {
+  expect(res).toMatchObject({ path, replacements, status: "edited" });
+  const versions = res as { version?: unknown; versionBefore?: unknown };
+  expect(versions.versionBefore).toMatch(/^v/);
+  expect(versions.version).toMatch(/^v/);
+}
 
 describe("app__excalidraw_write tool", () => {
   it("is registered with the app source", () => {
@@ -253,6 +261,129 @@ describe("app__read_active_doc tool", () => {
   });
 });
 
+describe("app__read_skill tool", () => {
+  it("is offered only when discovered skills are available and reads SKILL.md", async () => {
+    const { deps } = depsWithExcalidrawSpy();
+    expect(buildInProcessTools(deps).map((tool) => tool.name)).not.toContain("app__read_skill");
+    deps.getSkills = () => [
+      {
+        content: "# Excalidraw\nUse the builder.",
+        description: "Author diagrams",
+        name: "excalidraw",
+        sources: [{ active: true, path: "/home/.agents/skills/excalidraw/SKILL.md", scope: "global", tool: "codex" }],
+      },
+    ];
+
+    const res = await toolByName(deps, "app__read_skill").execute({ name: "excalidraw" });
+
+    expect(res).toEqual({
+      content: "# Excalidraw\nUse the builder.",
+      description: "Author diagrams",
+      path: "/home/.agents/skills/excalidraw/SKILL.md",
+      skill: "excalidraw",
+      status: "ok",
+      truncated: false,
+    });
+  });
+
+  it("reads a file relative to the active skill directory", async () => {
+    const { deps } = depsWithExcalidrawSpy();
+    deps.getSkills = () => [
+      {
+        content: "# Excalidraw",
+        name: "excalidraw",
+        sources: [{ active: true, path: "/home/.agents/skills/excalidraw/SKILL.md", scope: "global", tool: "codex" }],
+      },
+    ];
+    invokeHandler = async (cmd, args) => {
+      expect(cmd).toBe("read_file");
+      expect(args.path).toBe("/home/.agents/skills/excalidraw/examples/basic.md");
+      return "example";
+    };
+
+    const res = await toolByName(deps, "app__read_skill").execute({
+      name: "excalidraw",
+      path: "examples/basic.md",
+    });
+
+    expect(res).toEqual({
+      content: "example",
+      path: "/home/.agents/skills/excalidraw/examples/basic.md",
+      skill: "excalidraw",
+      status: "ok",
+      truncated: false,
+    });
+    invokeHandler = async (cmd) => {
+      throw new Error(`unexpected invoke of "${cmd}" — install an invokeHandler in the test`);
+    };
+  });
+
+  it("rejects skill-relative traversal before reading", async () => {
+    const { deps } = depsWithExcalidrawSpy();
+    deps.getSkills = () => [
+      {
+        content: "# Excalidraw",
+        name: "excalidraw",
+        sources: [{ active: true, path: "/home/.agents/skills/excalidraw/SKILL.md", scope: "global", tool: "codex" }],
+      },
+    ];
+    const res = (await toolByName(deps, "app__read_skill").execute({
+      name: "excalidraw",
+      path: "../secret",
+    })) as { status: string; message: string };
+
+    expect(res.status).toBe("error");
+    expect(res.message).toContain("outside");
+  });
+});
+
+describe("app__read_rule tool", () => {
+  it("is offered only when discovered rules are available and reads a rule by # identity", async () => {
+    const { deps } = depsWithExcalidrawSpy();
+    expect(buildInProcessTools(deps).map((tool) => tool.name)).not.toContain("app__read_rule");
+    deps.getRules = () => [
+      {
+        content: "# Build Rule\nAlways create requested files with app tools.",
+        description: "Build guard",
+        name: "Build Rule",
+        sources: [
+          { active: true, path: "/repo/.markdraw/rules/build.md", scope: "project", source: "markdraw" },
+        ],
+      },
+    ];
+
+    const res = await toolByName(deps, "app__read_rule").execute({ name: "build-rule" });
+
+    expect(res).toEqual({
+      content: "# Build Rule\nAlways create requested files with app tools.",
+      description: "Build guard",
+      path: "/repo/.markdraw/rules/build.md",
+      rule: "Build Rule",
+      status: "ok",
+      truncated: false,
+    });
+  });
+
+  it("returns an instructional error naming available rules", async () => {
+    const { deps } = depsWithExcalidrawSpy();
+    deps.getRules = () => [
+      {
+        content: "Use operations.",
+        name: "Json Ops",
+        sources: [{ active: true, path: "/repo/rules/json.md", scope: "project", source: "markdraw" }],
+      },
+    ];
+
+    const res = (await toolByName(deps, "app__read_rule").execute({ name: "missing" })) as {
+      message: string;
+      status: string;
+    };
+
+    expect(res.status).toBe("error");
+    expect(res.message).toContain("Json Ops");
+  });
+});
+
 /** Deps with an in-memory fs bridge spy for the creation/read tools. */
 function depsWithFsSpy() {
   const calls: { op: string; args: string[] }[] = [];
@@ -271,6 +402,8 @@ function depsWithFsSpy() {
     readFileRelative: async (_root, rel) => files.get(rel) ?? null,
     writeFileAbs: async (abs, content) => {
       calls.push({ op: "writeFileAbs", args: [abs, content] });
+      const prefix = "/ws/";
+      if (abs.startsWith(prefix)) files.set(abs.slice(prefix.length), content);
     },
   };
   return { calls, deps, files };
@@ -291,7 +424,10 @@ describe("filesystem tools (app__read_file / app__create_*)", () => {
   // The write tools MUST be prompt-gated (human approval) while reads auto-run.
   it("declares prompt approval on creation tools and none on read", () => {
     const { deps } = depsWithFsSpy();
-    expect(toolByName(deps, "app__create_file").approval).toBe("prompt");
+    const createFile = toolByName(deps, "app__create_file");
+    expect(createFile.approval).toBe("prompt");
+    expect(createFile.description).toContain("does not exist yet");
+    expect(createFile.description).toContain("app__excalidraw_generate");
     expect(toolByName(deps, "app__create_folder").approval).toBe("prompt");
     expect(toolByName(deps, "app__read_file").approval).toBeUndefined();
   });
@@ -331,6 +467,7 @@ describe("filesystem tools (app__read_file / app__create_*)", () => {
     expect(await toolByName(deps, "app__read_file").execute({ path: "readme.md" })).toEqual({
       content: "content",
       path: "readme.md",
+      version: contentVersion("content"),
     });
     const missing = (await toolByName(deps, "app__read_file").execute({ path: "ghost.md" })) as {
       status: string;
@@ -357,11 +494,27 @@ describe("app__edit_file tool", () => {
     const tool = toolByName(deps, "app__edit_file");
     expect(tool.approval).toBe("prompt");
     const res = await tool.execute({ find: "old line", path: "doc.md", replace: "new line" });
-    expect(res).toEqual({ path: "doc.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "doc.md", 1);
     expect(calls.at(-1)).toEqual({
       op: "writeFileAbs",
       args: ["/ws/doc.md", "# Title\nnew line\nend"],
     });
+  });
+
+  it("rejects an edit when the supplied read version is stale", async () => {
+    const { calls, deps, files } = depsWithFsSpy();
+    files.set("doc.md", "current");
+    const res = (await toolByName(deps, "app__edit_file").execute({
+      find: "current",
+      path: "doc.md",
+      replace: "next",
+      version: contentVersion("previous"),
+    })) as { status: string; message: string };
+
+    expect(res.status).toBe("error");
+    expect(res.message).toContain("Stale version");
+    expect(res.message).toContain("app__read_file");
+    expect(calls.filter((call) => call.op === "writeFileAbs")).toHaveLength(0);
   });
 
   it("no-match is instructional and points at a near miss (casing)", async () => {
@@ -388,7 +541,7 @@ describe("app__edit_file tool", () => {
     expect(ambiguous.status).toBe("error");
     expect(ambiguous.message).toContain("3 places");
     const res = await tool.execute({ all: true, find: "x", path: "doc.md", replace: "y" });
-    expect(res).toEqual({ path: "doc.md", replacements: 3, status: "edited" });
+    expectEditedResult(res, "doc.md", 3);
     expect(calls.at(-1)?.args[1]).toBe("y ho y ho y");
   });
 
@@ -421,6 +574,7 @@ describe("app__read_file ranged + numbered reads", () => {
       path: "big.md",
       startLine: 2900,
       totalLines: 3000,
+      version: contentVersion(lines.join("\n")),
     });
   });
 
@@ -439,6 +593,7 @@ describe("app__read_file ranged + numbered reads", () => {
       path: "doc.md",
       startLine: 2,
       totalLines: 3,
+      version: contentVersion("alpha\nbravo\ncharlie"),
     });
   });
 
@@ -452,6 +607,7 @@ describe("app__read_file ranged + numbered reads", () => {
       path: "doc.md",
       startLine: 1,
       totalLines: 2,
+      version: contentVersion("a\nb"),
     });
   });
 
@@ -482,6 +638,7 @@ describe("app__read_file ranged + numbered reads", () => {
       path: "doc.md",
       startLine: 3,
       totalLines: 3,
+      version: contentVersion("a\nb\nc"),
     });
   });
 });
@@ -494,7 +651,7 @@ describe("app__edit_file line-anchored edits", () => {
       edits: [{ endLine: 2, expectedText: "l2", replace: "L2", startLine: 2 }],
       path: "doc.md",
     });
-    expect(res).toEqual({ path: "doc.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "doc.md", 1);
     expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "l1\nL2\nl3"] });
   });
 
@@ -510,7 +667,7 @@ describe("app__edit_file line-anchored edits", () => {
       ],
       path: "doc.md",
     });
-    expect(res).toEqual({ path: "doc.md", replacements: 2, status: "edited" });
+    expectEditedResult(res, "doc.md", 2);
     expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "AB\nc\nd\nE1\nE2\nf"] });
   });
 
@@ -573,7 +730,7 @@ describe("app__edit_file line-anchored edits", () => {
       edits: [{ endLine: 2, expectedText: "l2", replace: "L2", startLine: 2 }],
       path: "doc.md",
     });
-    expect(res).toEqual({ path: "doc.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "doc.md", 1);
     expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "l1\r\nL2\r\nl3"] });
   });
 
@@ -586,8 +743,25 @@ describe("app__edit_file line-anchored edits", () => {
       path: "doc.md",
       replace: "ZZZ",
     });
-    expect(res).toEqual({ path: "doc.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "doc.md", 1);
     expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "A\nb"] });
+  });
+
+  it("applies preferred JSON operations before legacy edits", async () => {
+    const { calls, deps, files } = depsWithFsSpy();
+    files.set("doc.md", "a\nb\nc\nd");
+    const res = await toolByName(deps, "app__edit_file").execute({
+      edits: [{ endLine: 1, expectedText: "a", replace: "LEGACY", startLine: 1 }],
+      operations: [
+        { endLine: 2, expectedText: "b", op: "replace", replacement: "B", startLine: 2 },
+        { expectedText: "c", line: 3, op: "insert_after", text: "after-c" },
+        { endLine: 4, expectedText: "d", op: "delete", startLine: 4 },
+      ],
+      path: "doc.md",
+    });
+
+    expectEditedResult(res, "doc.md", 3);
+    expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "a\nB\nc\nafter-c"] });
   });
 });
 
@@ -637,10 +811,42 @@ describe("secret scrubbing round-trip (restoreSecretsIn)", () => {
       path: "env.md",
       replace: `token: ${ph}`,
     });
-    expect(res).toEqual({ path: "env.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "env.md", 1);
     expect(calls.at(-1)).toEqual({
       op: "writeFileAbs",
       args: [`/ws/env.md`, `token: ${SECRET}\nrest`],
+    });
+  });
+
+  it("find/replace returns a version that can be reused for a chained scrubbed edit", async () => {
+    const { calls, deps, files, secretMap } = depsWithScrubbingFs();
+    files.set("env.md", `key: ${SECRET}\nrest`);
+    const read = (await toolByName(deps, "app__read_file").execute({ path: "env.md" })) as {
+      content: string;
+      version: string;
+    };
+    const ph = placeholderFor(secretMap, SECRET);
+    expect(read.content).toBe(`key: ${ph}\nrest`);
+
+    const first = (await toolByName(deps, "app__edit_file").execute({
+      find: `key: ${ph}`,
+      path: "env.md",
+      replace: `token: ${ph}`,
+      version: read.version,
+    })) as { version: string };
+    expect(first.version).toBe(contentVersion(`token: ${ph}\nrest`));
+
+    const second = await toolByName(deps, "app__edit_file").execute({
+      find: "rest",
+      path: "env.md",
+      replace: "done",
+      version: first.version,
+    });
+
+    expectEditedResult(second, "env.md", 1);
+    expect(calls.at(-1)).toEqual({
+      op: "writeFileAbs",
+      args: [`/ws/env.md`, `token: ${SECRET}\ndone`],
     });
   });
 
@@ -656,7 +862,7 @@ describe("secret scrubbing round-trip (restoreSecretsIn)", () => {
       ],
       path: "env.md",
     });
-    expect(res).toEqual({ path: "env.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "env.md", 1);
     expect(calls.at(-1)).toEqual({
       op: "writeFileAbs",
       args: [`/ws/env.md`, `a\ntoken: ${SECRET}\nc`],
@@ -686,7 +892,7 @@ describe("secret scrubbing round-trip (restoreSecretsIn)", () => {
       edits: [{ endLine: 4, expectedText: "target", replace: "TARGET", startLine: 4 }],
       path: "key.md",
     });
-    expect(res).toEqual({ path: "key.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "key.md", 1);
     expect(calls.at(-1)).toEqual({
       op: "writeFileAbs",
       args: [`/ws/key.md`, `intro\n${PEM}\nmiddle\nTARGET\noutro`],
@@ -703,7 +909,7 @@ describe("secret scrubbing round-trip (restoreSecretsIn)", () => {
       ],
       path: "key.md",
     });
-    expect(res).toEqual({ path: "key.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "key.md", 1);
     expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: [`/ws/key.md`, "before\nafter"] });
   });
 
@@ -731,7 +937,7 @@ describe("secret scrubbing round-trip (restoreSecretsIn)", () => {
       path: "doc.md",
       replace: "x",
     });
-    expect(res).toEqual({ path: "doc.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "doc.md", 1);
     expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "plain x text"] });
   });
 });
@@ -928,10 +1134,12 @@ describe("multi-root filesystem tools (root-qualified paths)", () => {
     expect(await tool.execute({ path: "alpha/readme.md" })).toEqual({
       content: "alpha copy",
       path: "alpha/readme.md",
+      version: contentVersion("alpha copy"),
     });
     expect(await tool.execute({ path: "beta/readme.md" })).toEqual({
       content: "beta copy",
       path: "beta/readme.md",
+      version: contentVersion("beta copy"),
     });
   });
 
@@ -984,7 +1192,7 @@ describe("multi-root filesystem tools (root-qualified paths)", () => {
       path: "beta/doc.md",
       replace: "new",
     });
-    expect(res).toEqual({ path: "beta/doc.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "beta/doc.md", 1);
     expect(calls.at(-1)).toEqual({
       op: "writeFileAbs",
       args: ["/ws/beta/doc.md", "new text here"],
@@ -1015,10 +1223,12 @@ describe("multi-root filesystem tools (root-qualified paths)", () => {
     expect(await tool.execute({ path: "docs/a.md" })).toEqual({
       content: "first",
       path: "docs/a.md",
+      version: contentVersion("first"),
     });
     expect(await tool.execute({ path: "docs-2/a.md" })).toEqual({
       content: "second",
       path: "docs-2/a.md",
+      version: contentVersion("second"),
     });
   });
 
@@ -1029,7 +1239,11 @@ describe("multi-root filesystem tools (root-qualified paths)", () => {
     files.set("ws/readme.md", "nested copy");
     files.set("readme.md", "top-level copy");
     const res = await toolByName(deps, "app__read_file").execute({ path: "ws/readme.md" });
-    expect(res).toEqual({ content: "nested copy", path: "ws/readme.md" });
+    expect(res).toEqual({
+      content: "nested copy",
+      path: "ws/readme.md",
+      version: contentVersion("nested copy"),
+    });
   });
 
   it("single root: a root-name prefix falls back (stripped) ONLY when the literal read misses", async () => {
@@ -1038,7 +1252,11 @@ describe("multi-root filesystem tools (root-qualified paths)", () => {
     const { deps, files } = depsWithFsSpy(); // single root "/ws"
     files.set("readme.md", "content");
     const res = await toolByName(deps, "app__read_file").execute({ path: "ws/readme.md" });
-    expect(res).toEqual({ content: "content", path: "ws/readme.md" });
+    expect(res).toEqual({
+      content: "content",
+      path: "ws/readme.md",
+      version: contentVersion("content"),
+    });
   });
 
   it("single root: app__edit_file's fallback writes back the file it actually read", async () => {
@@ -1051,7 +1269,7 @@ describe("multi-root filesystem tools (root-qualified paths)", () => {
       path: "ws/doc.md",
       replace: "new",
     });
-    expect(res).toEqual({ path: "ws/doc.md", replacements: 1, status: "edited" });
+    expectEditedResult(res, "ws/doc.md", 1);
     expect(calls.at(-1)).toEqual({ op: "writeFileAbs", args: ["/ws/doc.md", "new text"] });
   });
 

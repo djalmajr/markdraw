@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AIMessage, AIProvider, AIStreamPart } from "@markdraw/ai/types.ts";
-import { createAiChatStore } from "./create-ai-chat-store.ts";
+import type { PersistedAdvisorNote } from "@markdraw/core/ai-chat-sessions.ts";
+import { createAiChatStore, type ChatTurn } from "./create-ai-chat-store.ts";
 
 /** A controllable provider that replays a fixed list of stream parts. */
 function stubProvider(parts: AIStreamPart[]): AIProvider {
@@ -85,6 +86,26 @@ describe("createAiChatStore", () => {
     expect(store.streaming()).toBe(false);
   });
 
+  it("does not replace a provider error with host validation", async () => {
+    let validations = 0;
+    const store = createAiChatStore({
+      getProvider: () =>
+        stubProvider([
+          { type: "text-delta", text: "partial" },
+          { type: "error", code: "network", message: "offline" },
+        ]),
+      validateAssistantTurn: () => {
+        validations += 1;
+        return "Tool call required.";
+      },
+    });
+
+    await store.sendMessage("create a file");
+
+    expect(validations).toBe(0);
+    expect(store.error()).toEqual({ code: "network", message: "offline" });
+  });
+
   it("does nothing and reports a friendly error when no provider is configured", async () => {
     const store = createAiChatStore({ getProvider: () => null });
     expect(store.providerReady()).toBe(false);
@@ -112,6 +133,24 @@ describe("createAiChatStore", () => {
     ]);
     expect(store.error()).toBeNull();
     expect(store.streaming()).toBe(false);
+  });
+
+  it("does not run host validation after a user abort", async () => {
+    let validations = 0;
+    const store = createAiChatStore({
+      getProvider: () => pausingProvider(),
+      validateAssistantTurn: () => {
+        validations += 1;
+        return "Tool call required.";
+      },
+    });
+
+    const pending = store.sendMessage("hi");
+    store.cancel();
+    await pending;
+
+    expect(validations).toBe(0);
+    expect(store.error()).toBeNull();
   });
 
   it("steering: a message sent while streaming queues, then auto-sends; its promise settles only after its turn ran", async () => {
@@ -230,6 +269,104 @@ describe("createAiChatStore", () => {
     ]);
     // The live signal is cleared once the turn finalizes.
     expect(store.toolActivity()).toEqual([]);
+  });
+
+  it("stores oversized tool results as artifacts with an inline preview", async () => {
+    const writes: Array<{ content: string; kind: string; mime: string; title: string; toolCallId?: string }> = [];
+    const hugeResult = "x".repeat(9_000);
+    const store = createAiChatStore({
+      getProvider: () =>
+        stubProvider([
+          { type: "tool-call", toolCallId: "c1", toolName: "app__search_workspace", args: {} },
+          {
+            type: "tool-result",
+            toolCallId: "c1",
+            toolName: "app__search_workspace",
+            result: hugeResult,
+          },
+          { type: "done" },
+        ]),
+      writeArtifact: async (input) => {
+        writes.push(input);
+        return {
+          byteLength: input.content.length,
+          id: "artifact-1",
+          kind: input.kind,
+          mime: input.mime,
+          title: input.title,
+        };
+      },
+    });
+
+    await store.sendMessage("hi");
+
+    expect(writes).toEqual([
+      {
+        content: hugeResult,
+        kind: "tool-result",
+        mime: "text/plain",
+        title: "app__search_workspace",
+        toolCallId: "c1",
+      },
+    ]);
+    const tool = store.messages().at(-1)?.tools?.[0];
+    expect(tool?.result).toEqual({
+      artifactId: "artifact-1",
+      byteLength: hugeResult.length,
+      preview: hugeResult.slice(0, 2_000),
+      truncated: true,
+    });
+    expect(tool?.resultArtifact).toEqual({
+      byteLength: hugeResult.length,
+      id: "artifact-1",
+      kind: "tool-result",
+      mime: "text/plain",
+      title: "app__search_workspace",
+    });
+  });
+
+  it("surfaces a host validation error while keeping the assistant text visible", async () => {
+    const store = createAiChatStore({
+      getProvider: () =>
+        stubProvider([{ type: "text-delta", text: "Vou criar o arquivo." }, { type: "done" }]),
+      validateAssistantTurn: () => "Tool call required.",
+    });
+    await store.sendMessage("crie um arquivo");
+    expect(store.error()).toEqual({ code: "unknown", message: "Tool call required." });
+    expect(store.messages().at(-1)).toEqual({
+      role: "assistant",
+      content: "Vou criar o arquivo.",
+    });
+  });
+
+  it("attaches advisor notes after a successful assistant turn", async () => {
+    const store = createAiChatStore({
+      getProvider: () =>
+        stubProvider([{ type: "text-delta", text: "Done" }, { type: "done" }]),
+      adviseAssistantTurn: async () => [
+        {
+          id: "advisor-1",
+          message: "Check that the file was actually written.",
+          severity: "warning",
+          title: "Advisor",
+        },
+      ],
+    });
+
+    await store.sendMessage("hi");
+
+    expect(store.messages().at(-1)).toEqual({
+      advisorNotes: [
+        {
+          id: "advisor-1",
+          message: "Check that the file was actually written.",
+          severity: "warning",
+          title: "Advisor",
+        },
+      ],
+      content: "Done",
+      role: "assistant",
+    });
   });
 
   it("captures the usage part and attaches it to the finalized assistant turn", async () => {
@@ -507,6 +644,43 @@ describe("createAiChatStore", () => {
     expect(store.error()?.message).toBe("No AI provider configured");
   });
 
+  it("compactHistory replaces older turns with a visible summary", () => {
+    const initialMessages: ChatTurn[] = Array.from({ length: 45 }, (_, index) => {
+      if (index === 3) {
+        return {
+          role: "assistant",
+          content: `message-${index}`,
+          tools: [
+            {
+              toolCallId: "tool-1",
+              toolName: "app__read_file",
+              status: "done",
+            },
+          ],
+        };
+      }
+      return index % 2 === 0
+        ? { role: "user", content: `message-${index}` }
+        : { role: "assistant", content: `message-${index}` };
+    });
+    const store = createAiChatStore({
+      getProvider: () => stubProvider([{ type: "done" }]),
+      initialMessages,
+    });
+
+    store.compactHistory();
+
+    const compacted = store.messages();
+    expect(compacted).toHaveLength(41);
+    expect(compacted[0]).toMatchObject({
+      role: "assistant",
+      kind: "compaction",
+    });
+    expect(compacted[0]!.content).toContain("Compacted 5 older chat turns.");
+    expect(compacted[0]!.content).toContain("Tools used earlier: app__read_file");
+    expect(compacted.at(-1)).toEqual({ role: "user", content: "message-44" });
+  });
+
   it("resolves and forwards tools to the provider chat opts", async () => {
     let receivedTools: unknown;
     const provider: AIProvider = {
@@ -533,5 +707,167 @@ describe("createAiChatStore", () => {
     await store.sendMessage("hi");
     expect(Array.isArray(receivedTools)).toBe(true);
     expect((receivedTools as Array<{ name: string }>)[0]?.name).toBe("app__noop");
+  });
+
+  it("sends the compaction summary as a user turn so the outgoing history starts with role user", async () => {
+    let received: AIMessage[] | undefined;
+    const provider: AIProvider = {
+      async *chat(messages) {
+        received = messages as AIMessage[];
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const store = createAiChatStore({
+      getProvider: () => provider,
+      initialMessages: [
+        { role: "assistant", kind: "compaction", content: "Compacted 5 older chat turns." },
+        { role: "assistant", content: "a1" },
+      ],
+    });
+    await store.sendMessage("next");
+    // Anthropic rejects an assistant-first /messages request — the compaction
+    // recap must be SENT as a user turn.
+    expect(received?.[0]).toEqual({ role: "user", content: "Compacted 5 older chat turns." });
+    // The stored/displayed turn keeps its assistant role + compaction kind.
+    expect(store.messages()[0]).toEqual({
+      role: "assistant",
+      kind: "compaction",
+      content: "Compacted 5 older chat turns.",
+    });
+  });
+
+  it("commits the answer and stops streaming before the advisor resolves; notes attach after", async () => {
+    let resolveAdvisor: ((notes: PersistedAdvisorNote[]) => void) | undefined;
+    const store = createAiChatStore({
+      getProvider: () => stubProvider([{ type: "text-delta", text: "Done" }, { type: "done" }]),
+      adviseAssistantTurn: () =>
+        new Promise<PersistedAdvisorNote[]>((resolve) => {
+          resolveAdvisor = resolve;
+        }),
+    });
+    let settled = false;
+    const pending = store.sendMessage("hi").then(() => {
+      settled = true;
+    });
+    // Drain until the turn finalizes; the advisor promise stays pending.
+    for (let i = 0; i < 20 && (store.streaming() || !resolveAdvisor); i++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    // The answer is committed and streaming stopped even though the advisor has
+    // not resolved (and sendMessage's promise is still pending).
+    expect(store.streaming()).toBe(false);
+    expect(store.messages().at(-1)).toEqual({ role: "assistant", content: "Done" });
+    expect(settled).toBe(false);
+    // Once the advisor resolves, its notes patch the committed turn.
+    resolveAdvisor!([{ id: "n1", message: "check", severity: "info", title: "Advisor" }]);
+    await pending;
+    expect(settled).toBe(true);
+    expect(store.messages().at(-1)).toEqual({
+      role: "assistant",
+      content: "Done",
+      advisorNotes: [{ id: "n1", message: "check", severity: "info", title: "Advisor" }],
+    });
+  });
+
+  it("fires onAssistantTurn on a completed turn even when validation reports an error", async () => {
+    const seen: string[] = [];
+    const store = createAiChatStore({
+      getProvider: () => stubProvider([{ type: "text-delta", text: "PLAN" }, { type: "done" }]),
+      validateAssistantTurn: () => "Tool call required.",
+      onAssistantTurn: (content) => seen.push(content),
+    });
+    await store.sendMessage("design X");
+    // The validation error is surfaced…
+    expect(store.error()).toEqual({ code: "unknown", message: "Tool call required." });
+    // …but the completed text is still handed to onAssistantTurn (the plan write
+    // is decoupled from the validation gate).
+    expect(seen).toEqual(["PLAN"]);
+  });
+
+  it("does not fire onAssistantTurn when the turn is aborted before completing", async () => {
+    const seen: string[] = [];
+    const store = createAiChatStore({
+      getProvider: () => pausingProvider(),
+      onAssistantTurn: (content) => seen.push(content),
+    });
+    const pending = store.sendMessage("hi");
+    store.cancel();
+    await pending;
+    expect(seen).toEqual([]);
+    // The partial reply is still kept as history.
+    expect(store.messages().at(-1)).toEqual({ role: "assistant", content: "par" });
+  });
+
+  it("clear() drops a queued validation reminder so it does not leak into the next conversation", async () => {
+    const sent: string[] = [];
+    let validations = 0;
+    const provider: AIProvider = {
+      async *chat(messages) {
+        sent.push((messages.at(-1)?.content as string) ?? "");
+        yield { type: "text-delta", text: "reply" };
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const store = createAiChatStore({
+      getProvider: () => provider,
+      validateAssistantTurn: () => {
+        validations += 1;
+        // Only the first turn queues a reminder.
+        return validations === 1
+          ? { message: "Tool call required.", reminder: "REMINDER-TEXT", signature: "sig" }
+          : undefined;
+      },
+    });
+    await store.sendMessage("first");
+    store.clear();
+    await store.sendMessage("second");
+    // The reminder queued by the (cleared) first conversation must not prepend to
+    // the fresh conversation's first outgoing message.
+    expect(sent.at(-1)).toBe("second");
+    expect(sent.at(-1)).not.toContain("REMINDER-TEXT");
+  });
+
+  it("compacts only the OUTGOING context on a long thread; the stored transcript is preserved", async () => {
+    let received: AIMessage[] | undefined;
+    const provider: AIProvider = {
+      async *chat(messages) {
+        received = messages as AIMessage[];
+        yield { type: "text-delta", text: "ok" };
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const initial: ChatTurn[] = Array.from({ length: 122 }, (_, i) => ({
+      role: i % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      content: `m${i}`,
+    }));
+    const store = createAiChatStore({ getProvider: () => provider, initialMessages: initial });
+    await store.sendMessage("next");
+    // The full transcript stays durable — nothing dropped from messages().
+    expect(store.messages().length).toBe(124);
+    expect(store.messages()[0]).toEqual({ role: "user", content: "m0" });
+    expect(store.messages().at(-1)).toEqual({ role: "assistant", content: "ok" });
+    // The model received a COMPACTED view (summary + last 40 turns), starting
+    // with the compaction recap as a user turn.
+    expect(received!.length).toBe(41);
+    expect(received![0]!.role).toBe("user");
+    expect(received![0]!.content).toContain("Compacted");
   });
 });

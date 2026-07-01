@@ -693,7 +693,7 @@ describe("AppState — right-panel tab model (specials + pin)", () => {
     }, aiConfig);
   });
 
-  it("exportChat forwards a Markdown transcript to onExportChat", async () => {
+  it("exportChat forwards Markdown and HTML transcripts to onExportChat", async () => {
     const onExportChat = vi.fn();
     const provider = {
       async *chat() {
@@ -713,10 +713,17 @@ describe("AppState — right-panel tab model (specials + pin)", () => {
         await state.aiSessions.storeFor(id)!.sendMessage("hi");
         state.exportChat(id);
         expect(onExportChat).toHaveBeenCalledTimes(1);
-        const payload = onExportChat.mock.calls[0]![0] as { title: string; markdown: string };
+        const payload = onExportChat.mock.calls[0]![0] as {
+          html: string;
+          markdown: string;
+          title: string;
+        };
         expect(payload.markdown).toContain("## You");
         expect(payload.markdown).toContain("hi");
         expect(payload.markdown).toContain("hello world");
+        expect(payload.html).toContain("<!doctype html>");
+        expect(payload.html).toContain("hi");
+        expect(payload.html).toContain("hello world");
       },
       { createAIProvider: () => provider, onExportChat },
     );
@@ -896,6 +903,7 @@ describe("AppState — AI Plan/Build mode", () => {
   // assert the mode gating. Yields a non-empty turn so onPlanComplete can fire.
   function captureProvider() {
     const calls: Array<{
+      messages: { role: string; content: string }[];
       onApprovalRequest?: (req: ToolApprovalRequest) => Promise<boolean>;
       system?: string;
       tools?: AITool[];
@@ -911,6 +919,7 @@ describe("AppState — AI Plan/Build mode", () => {
         },
       ) {
         calls.push({
+          messages: _messages,
           onApprovalRequest: opts?.onApprovalRequest,
           system: opts?.system,
           tools: opts?.tools,
@@ -965,7 +974,9 @@ describe("AppState — AI Plan/Build mode", () => {
       async (state) => {
         const id = state.newChat();
         await state.aiSessions.storeFor(id)!.sendMessage("hi");
-        expect(calls.at(-1)?.system).toBeUndefined();
+        expect(calls.at(-1)?.system).toContain("BUILD mode");
+        expect(calls.at(-1)?.system).toContain("app__create_file");
+        expect(calls.at(-1)?.system).toContain("app__excalidraw_generate");
         expect(calls.at(-1)?.tools).toEqual(fakeTools);
         await expect(
           calls.at(-1)?.onApprovalRequest?.({
@@ -981,6 +992,80 @@ describe("AppState — AI Plan/Build mode", () => {
         getAITools: () => fakeTools,
         onPlanComplete,
         onToolApprovalRequest: approvalGate,
+      },
+    );
+  });
+
+  it("build mode injects a per-turn execution requirement for file creation requests", async () => {
+    const { calls, provider } = captureProvider();
+    await withState(
+      async (state) => {
+        const id = state.newChat();
+        await state.aiSessions.storeFor(id)!.sendMessage("$excalidraw crie um diagrama de login");
+        const sent = calls.at(-1)?.messages.at(-1)?.content ?? "";
+        expect(sent).toContain("Execution requirement for this turn");
+        expect(sent).toContain("app__excalidraw_generate");
+      },
+      { createAIProvider: () => provider, getAITools: () => fakeTools },
+    );
+  });
+
+  it("build mode flags file creation replies that finish without any tool call", async () => {
+    const { provider } = captureProvider();
+    await withState(
+      async (state) => {
+        const id = state.newChat();
+        const store = state.aiSessions.storeFor(id)!;
+        await store.sendMessage("$excalidraw crie um diagrama de login");
+        expect(store.error()?.message).toContain("No file was created");
+        expect(store.messages().at(-1)).toEqual({
+          role: "assistant",
+          content: "PLAN BODY",
+        });
+      },
+      { createAIProvider: () => provider, getAITools: () => fakeTools },
+    );
+  });
+
+  it("build mode runs the advisor only when watchdog context exists and filters read-only tools", async () => {
+    const { calls, provider } = captureProvider();
+    const tools: AITool[] = [
+      {
+        description: "read",
+        execute: async () => ({}),
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        name: "app__read_file",
+        source: "app",
+      },
+      {
+        description: "edit",
+        execute: async () => ({}),
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        name: "app__edit_file",
+        source: "app",
+      },
+    ];
+
+    await withState(
+      async (state) => {
+        const id = state.newChat();
+        const store = state.aiSessions.storeFor(id)!;
+        await store.sendMessage("hi");
+
+        expect(calls).toHaveLength(2);
+        expect(calls[0]?.system).toContain("BUILD mode");
+        expect(calls[1]?.system).toContain("Build-mode advisor");
+        expect(calls[1]?.tools?.map((tool) => tool.name)).toEqual(["app__read_file"]);
+        expect(store.messages().at(-1)?.advisorNotes?.[0]).toMatchObject({
+          message: "PLAN BODY",
+          severity: "info",
+          title: "Advisor",
+        });
+      },
+      {
+        createAIProvider: () => provider,
+        getAdvisorContext: () => "WATCHDOG: verify tool-backed claims.",
+        getAITools: () => tools,
       },
     );
   });
@@ -1062,13 +1147,16 @@ describe("AppState — custom instructions in the system prompt (omp#1)", () => 
     return { calls, provider };
   }
 
-  it("append in build mode: the system prompt is exactly the instructions text", async () => {
+  it("append in build mode: the functional build prompt is kept before instructions", async () => {
     const { calls, provider } = captureProvider();
     await withState(
       async (state) => {
         const id = state.newChat();
         await state.aiSessions.storeFor(id)!.sendMessage("hi");
-        expect(calls.at(-1)?.system).toBe("Be terse.");
+        const system = calls.at(-1)?.system ?? "";
+        expect(system.startsWith("You are in BUILD mode")).toBe(true);
+        expect(system).toContain("app__create_file");
+        expect(system.endsWith("\n\nBe terse.")).toBe(true);
       },
       {
         createAIProvider: () => provider,
@@ -1095,13 +1183,19 @@ describe("AppState — custom instructions in the system prompt (omp#1)", () => 
     );
   });
 
-  it("replace in build mode: the system prompt is exactly the instructions text", async () => {
+  it("replace in build mode: the functional build prompt is ALWAYS kept, text appended", async () => {
+    // Domain rule: the build prompt encodes the file-writing/tool contract —
+    // "replace" must not strip it, or Build mode can narrate instead of
+    // creating the requested file.
     const { calls, provider } = captureProvider();
     await withState(
       async (state) => {
         const id = state.newChat();
         await state.aiSessions.storeFor(id)!.sendMessage("hi");
-        expect(calls.at(-1)?.system).toBe("You are a pirate.");
+        const system = calls.at(-1)?.system ?? "";
+        expect(system.startsWith("You are in BUILD mode")).toBe(true);
+        expect(system).toContain("app__excalidraw_generate");
+        expect(system.endsWith("\n\nYou are a pirate.")).toBe(true);
       },
       {
         createAIProvider: () => provider,
@@ -1130,13 +1224,13 @@ describe("AppState — custom instructions in the system prompt (omp#1)", () => 
     );
   });
 
-  it("no instructions (callback returns undefined): behavior unchanged in both modes", async () => {
+  it("no instructions: build and plan use their functional prompts", async () => {
     const { calls, provider } = captureProvider();
     await withState(
       async (state) => {
         const id = state.newChat();
         await state.aiSessions.storeFor(id)!.sendMessage("hi");
-        expect(calls.at(-1)?.system).toBeUndefined();
+        expect(calls.at(-1)?.system).toContain("BUILD mode");
         state.setAiMode("plan");
         await state.aiSessions.storeFor(id)!.sendMessage("again");
         expect(calls.at(-1)?.system).toContain("PLAN mode");
@@ -1148,16 +1242,18 @@ describe("AppState — custom instructions in the system prompt (omp#1)", () => 
     );
   });
 
-  it("replace branch toggling modes: build is exactly the text, plan keeps its prompt", async () => {
+  it("replace branch toggling modes: build and plan both keep their functional prompts", async () => {
     // Exercises the EXPLICIT mode branch: build-mode "replace" returns the
-    // instructions text alone (no plan-prompt leakage after a mode round
-    // trip), while plan mode keeps its functional prompt on the same session.
+    // build prompt with instructions appended (no plan-prompt leakage after a
+    // mode round trip), while plan mode keeps its own functional prompt.
     const { calls, provider } = captureProvider();
     await withState(
       async (state) => {
         const id = state.newChat();
         await state.aiSessions.storeFor(id)!.sendMessage("hi");
-        expect(calls.at(-1)?.system).toBe("You are a pirate.");
+        const firstBuildSystem = calls.at(-1)?.system ?? "";
+        expect(firstBuildSystem.startsWith("You are in BUILD mode")).toBe(true);
+        expect(firstBuildSystem.endsWith("\n\nYou are a pirate.")).toBe(true);
         state.setAiMode("plan");
         await state.aiSessions.storeFor(id)!.sendMessage("plan it");
         const planSystem = calls.at(-1)?.system ?? "";
@@ -1165,7 +1261,9 @@ describe("AppState — custom instructions in the system prompt (omp#1)", () => 
         expect(planSystem.endsWith("\n\nYou are a pirate.")).toBe(true);
         state.setAiMode("build");
         await state.aiSessions.storeFor(id)!.sendMessage("build it");
-        expect(calls.at(-1)?.system).toBe("You are a pirate.");
+        const secondBuildSystem = calls.at(-1)?.system ?? "";
+        expect(secondBuildSystem.startsWith("You are in BUILD mode")).toBe(true);
+        expect(secondBuildSystem.endsWith("\n\nYou are a pirate.")).toBe(true);
       },
       {
         createAIProvider: () => provider,

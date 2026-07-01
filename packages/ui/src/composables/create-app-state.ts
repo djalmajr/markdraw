@@ -6,25 +6,29 @@ import {
   onMount,
   type Setter,
 } from "solid-js";
+import * as m from "@markdraw/i18n";
 import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@markdraw/core/types.ts";
+import { djb2 } from "@markdraw/core/hash.ts";
 import { createPaneManager, type PaneManager } from "./create-pane-manager.ts";
 import { createAiChatSessions } from "./create-ai-chat-sessions.ts";
-import type { ChatTurn } from "./create-ai-chat-store.ts";
+import type { ChatTurn, ToolActivity, TurnValidationResult } from "./create-ai-chat-store.ts";
 import { createAiInlineStore } from "./create-ai-inline-store.ts";
 import {
   type AiContextItem,
+  type AiDraftInsertion,
   type AiInlineReference,
   buildContextPreamble,
   dedupeTokenLabel,
 } from "./ai-context.ts";
 import { getChatSessionsIndex } from "@markdraw/core/ai-chat-sessions.ts";
+import type { PersistedToolActivity } from "@markdraw/core/ai-chat-sessions.ts";
 import {
   getRightPanelTabsState,
   setRightPanelTabsState,
   type SpecialTabState,
 } from "@markdraw/core/right-panel-tabs.ts";
 import { getStoredAiMode, setStoredAiMode, type AIChatMode } from "@markdraw/core/ai-prefs.ts";
-import { formatChatTranscript } from "../lib/chat-export.ts";
+import { formatChatTranscript, formatChatTranscriptHtml } from "../lib/chat-export.ts";
 import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
 import type { CustomInstructions } from "@markdraw/ai/slash-commands.ts";
 import type { ConvertOptions, ConvertResult } from "@markdraw/core/converter.ts";
@@ -143,6 +147,15 @@ export interface AiMentionContext {
   absolutePath?: string;
 }
 
+export interface AiMcpResourceContext {
+  content: string;
+  label?: string;
+  mimeType?: string;
+  server: string;
+  title?: string;
+  uri: string;
+}
+
 /** One checklist entry of the live AI plan (model-maintained, user-steered). */
 export interface AiPlanItem {
   done: boolean;
@@ -159,6 +172,7 @@ interface AppStateConfig {
   convertAdoc: (opts: ConvertOptions) => Promise<ConvertResult>;
   convertMarkdown: (opts: ConvertOptions) => Promise<ConvertResult>;
   getStoredTheme: () => ThemeMode;
+  getWorkspaceRoot?: () => string | null | undefined;
   printPage?: () => void | Promise<void>;
   /** When provided, the per-document signals on AppState (html,
    *  editorContent, …) proxy through this manager's active pane. The
@@ -184,11 +198,34 @@ interface AppStateConfig {
     mode: AIChatMode;
     userMessage: string;
   }) => string | undefined;
+  getRuleContext?: (request: {
+    history: ChatTurn[];
+    mode: AIChatMode;
+    userMessage: string;
+  }) => string | undefined;
+  validateRuleTurn?: (request: {
+    assistantText: string;
+    history: ChatTurn[];
+    mode: AIChatMode;
+    tools: ToolActivity[];
+    userMessage: string;
+  }) => TurnValidationResult | undefined;
+  getAdvisorContext?: () => string | undefined;
   /** Persist a plan produced in Plan mode (the host writes it to
    *  `.markdraw/plans`). Called with the assistant's plan text. */
   onPlanComplete?: (content: string) => void;
   /** Export a chat transcript (the host shows a Save dialog + writes the file). */
-  onExportChat?: (payload: { title: string; markdown: string }) => void;
+  onExportChat?: (payload: { html: string; markdown: string; title: string }) => void;
+  copyChatArtifacts?: (sourceSessionId: string, targetSessionId: string) => void | Promise<void>;
+  deleteChatArtifacts?: (sessionId: string) => void | Promise<void>;
+  writeChatArtifact?: (input: {
+    content: string;
+    kind: NonNullable<PersistedToolActivity["resultArtifact"]>["kind"];
+    mime: string;
+    sessionId: string;
+    title: string;
+    toolCallId?: string;
+  }) => Promise<NonNullable<PersistedToolActivity["resultArtifact"]>>;
   /** Host Accept/Reject gate for prompt-tier tool calls, enforced by the
    *  engine (ChatOptions.onApprovalRequest) — tools are passed unwrapped. */
   onToolApprovalRequest?: (req: {
@@ -600,16 +637,25 @@ export function createAppState(config: AppStateConfig) {
   // in the chat composer with the same per-message lifecycle as @-mentions.
   // The panel consumes this signal via its `inlineReference` prop.
   const [aiInlineReference, setAiInlineReference] = createSignal<AiInlineReference | null>(null);
+  const [aiDraftInsertion, setAiDraftInsertion] = createSignal<AiDraftInsertion | null>(null);
   /** Ask the composer to insert an inline "@token" referencing `itemId`.
    *  `seq` is monotonic so an identical reference still retriggers. */
   function requestAiInlineReference(itemId: string, token: string): void {
     setAiInlineReference((prev) => ({ itemId, seq: (prev?.seq ?? 0) + 1, token }));
+  }
+  function requestAiDraftInsertion(text: string): void {
+    if (!text.trim()) return;
+    setAiDraftInsertion((prev) => ({ seq: (prev?.seq ?? 0) + 1, text }));
+    focusAiComposer();
   }
   /** Panel ack: the reference was consumed. Clearing (instead of letting it
    *  linger) is what lets a freshly-MOUNTED panel treat any non-null value as
    *  pending — ⌘I with the chat tab closed still inserts its token. */
   function clearAiInlineReference(): void {
     setAiInlineReference(null);
+  }
+  function clearAiDraftInsertion(): void {
+    setAiDraftInsertion(null);
   }
   function dismissActiveFileContext(): void {
     setActiveFileContextDismissed(true);
@@ -690,6 +736,28 @@ export function createAppState(config: AppStateConfig) {
     });
   }
 
+  function addMcpResourceContext(resource: AiMcpResourceContext): void {
+    const label = dedupeTokenLabel(
+      resource.label ?? resource.title ?? resource.uri.split(/[\\/]/).pop() ?? resource.uri,
+      aiContextItems(),
+    );
+    const id = `mcp-resource:${resource.server}:${resource.uri}`;
+    addAiContext({
+      id,
+      kind: "mcp-resource",
+      label,
+      path: resource.uri,
+      content: [
+        `MCP server: ${resource.server}`,
+        resource.mimeType ? `MIME type: ${resource.mimeType}` : undefined,
+        "",
+        resource.content,
+      ].filter((line): line is string => line !== undefined).join("\n"),
+    });
+    requestAiInlineReference(id, label);
+    focusAiComposer();
+  }
+
   // Chat mode: "build" (full tools, auto-run), "ask" (full tools, prompt for
   // every tool call), or "plan" (no tools — produce a plan saved to
   // .markdraw/plans).
@@ -703,12 +771,155 @@ export function createAppState(config: AppStateConfig) {
     "attached context, produce a clear, structured implementation plan in " +
     "Markdown (goal, steps, files to touch, risks). The plan will be saved for " +
     "the user to execute later in Build mode. Output only the plan.";
+  const BUILD_SYSTEM_PROMPT =
+    "You are in BUILD mode inside Markdraw. When the user asks you to create, " +
+    "write, save, or modify a workspace file, perform the action by calling the " +
+    "available app tool before claiming it is done. Do not merely describe a plan " +
+    "unless the user explicitly asks for a plan. For editable Excalidraw diagrams " +
+    "or .excalidraw targets, prefer app__excalidraw_generate for a declarative " +
+    "diagram and app__excalidraw_write when the user gives Mermaid or wants to " +
+    "draw into an existing canvas. For other new files, use app__create_file with " +
+    "the complete initial content. For existing workspace files, use app__edit_file. " +
+    "Keep exploratory reads and searches brief: gather only what is necessary, " +
+    "then call the write/create tool. After a successful write, report the exact " +
+    "workspace-relative path. If a tool fails, report the failure and the next " +
+    "concrete step instead of implying the file was created.";
+  const BUILD_TURN_EXECUTION_PROMPT =
+    "Execution requirement for this turn: this looks like a file, folder, or " +
+    "diagram creation/edit request. You must call the appropriate app tool " +
+    "(app__excalidraw_generate, app__excalidraw_write, app__create_file, " +
+    "app__create_folder, or app__edit_file) before giving the final answer. " +
+    "Do not answer only with future-tense text such as 'I will', 'Vou', or " +
+    "'Let me'. If you cannot call a tool, state that explicitly.";
+  const ADVISOR_SYSTEM_PROMPT =
+    "You are Markdraw's Build-mode advisor. Review the primary assistant's last " +
+    "turn for concrete correctness risks, missed file/tool actions, stale state, " +
+    "or unsafe claims. You are advisory only: do not modify files, do not ask the " +
+    "user to approve anything, and keep output to at most two short bullets. If " +
+    "there is no actionable issue, respond exactly: OK.";
+  const ADVISOR_READ_TOOL_NAMES = new Set([
+    "app__list_files",
+    "app__read_active_doc",
+    "app__read_file",
+    "app__read_rule",
+    "app__read_skill",
+    "app__search_workspace",
+  ]);
+  const BUILD_ACTION_RE =
+    /\b(add|build|continue|create|draw|edit|generate|make|modify|retry|save|update|write|again|atualizar|continue|criacao|criar|crie|desenhar|desenhe|editar|edite|faca|fazer|gere|gerar|modificar|novamente|prossiga|salvar|salve|tente)\b/;
+  const BUILD_TARGET_RE =
+    /\b(adoc|asciidoc|auth|canvas|diagram|diagrama|document|documento|excalidraw|file|flow|fluxo|folder|arquivo|html|login|markdown|md|pasta|workspace)\b|\.(adoc|asciidoc|excalidraw|html|md|txt)\b/;
 
-  /** Build-mode base system prompt — none today (the tool set speaks for
-   *  itself); typed so the custom-instructions merge below composes correctly
-   *  the day a base is introduced. */
-  function buildBaseSystemPrompt(): string | undefined {
-    return undefined;
+  function normalizeBuildText(text: string): string {
+    return text
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .toLowerCase();
+  }
+
+  function isBuildExecutionRequest(history: ChatTurn[], userMessage: string): boolean {
+    const latest = normalizeBuildText(userMessage);
+    // The build TARGET must appear in the latest message or the one right before
+    // it. A target named several turns ago (e.g. a diagram discussed earlier)
+    // must not turn a later conversational reply that merely contains an action
+    // word into a false "No file was created" error. (history.at(-1) is the
+    // current user turn, so at(-2) is the immediately-preceding turn.)
+    const nearby = normalizeBuildText([history.at(-2)?.content ?? "", userMessage].join("\n"));
+    const recent = normalizeBuildText(
+      [...history.slice(-6).map((turn) => turn.content), userMessage].join("\n"),
+    );
+    const latestHasAction = BUILD_ACTION_RE.test(latest);
+    const recentHasAction = BUILD_ACTION_RE.test(recent);
+    const nearbyHasTarget = BUILD_TARGET_RE.test(nearby);
+    const isRetry = /\b(novamente|retry|again|tente)\b/.test(latest);
+    return nearbyHasTarget && (latestHasAction || (isRetry && recentHasAction));
+  }
+
+  /** Build-mode base system prompt. It is functional, not stylistic: it keeps
+   *  file-writing requests tied to Markdraw's app tools before any custom
+   *  instruction text is merged in. */
+  function buildBaseSystemPrompt(): string {
+    return BUILD_SYSTEM_PROMPT;
+  }
+
+  function advisorNoteId(text: string): string {
+    return `advisor-${djb2(text)}`;
+  }
+
+  function advisorSeverity(text: string): "info" | "warning" | "blocker" {
+    const lower = text.toLowerCase();
+    if (/\b(blocker|blocked|critical|must not ship)\b/.test(lower)) return "blocker";
+    if (/\b(warn|risk|missing|failed|unsafe)\b/.test(lower)) return "warning";
+    return "info";
+  }
+
+  /** Hard bound on the advisor's second LLM call so a slow/hung provider can't
+   *  stall turn finalization (and the steering queue that waits on it). */
+  const ADVISOR_TIMEOUT_MS = 30_000;
+
+  async function adviseBuildTurn(request: {
+    assistantText: string;
+    history: ChatTurn[];
+    mode?: string;
+    tools: ToolActivity[];
+    userMessage: string;
+  }) {
+    // Gate on the turn's OWN mode (threaded from the store), not the panel-global
+    // aiMode() which may have changed while a background turn streamed.
+    if (request.mode !== "build") return [];
+    const advisorContext = config.getAdvisorContext?.()?.trim();
+    if (!advisorContext) return [];
+    const provider = config.createAIProvider?.();
+    if (!provider) return [];
+    const messages = [
+      {
+        role: "user" as const,
+        content: [
+          advisorContext,
+          "[User request]",
+          request.userMessage,
+          "[Primary assistant answer]",
+          request.assistantText,
+          "[Primary assistant tools]",
+          request.tools.map((tool) => `${tool.toolName}: ${tool.status}`).join("\n") || "none",
+        ].filter(Boolean).join("\n\n"),
+      },
+    ];
+    let tools: AITool[] = [];
+    try {
+      tools = (config.getAITools ? await config.getAITools() : []).filter((tool) =>
+        ADVISOR_READ_TOOL_NAMES.has(tool.name),
+      );
+    } catch {
+      tools = [];
+    }
+    let text = "";
+    const advisorController = new AbortController();
+    const timeout = setTimeout(() => advisorController.abort(), ADVISOR_TIMEOUT_MS);
+    try {
+      const stream = provider.chat(messages, {
+        system: ADVISOR_SYSTEM_PROMPT,
+        signal: advisorController.signal,
+        ...(tools.length ? { tools, maxSteps: 3 } : {}),
+      });
+      for await (const part of stream) {
+        if (part.type === "text-delta") text += part.text;
+        else if (part.type === "error") break;
+        else if (part.type === "done") break;
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+    const trimmed = text.trim();
+    if (!trimmed || /^ok\.?$/i.test(trimmed)) return [];
+    return [
+      {
+        id: advisorNoteId(trimmed),
+        message: trimmed,
+        severity: advisorSeverity(trimmed),
+        title: m.ai_advisor_title(),
+      },
+    ];
   }
 
   // ── AI live plan (omp#3) ────────────────────────────────────────────
@@ -750,10 +961,13 @@ export function createAppState(config: AppStateConfig) {
   // ephemeral store. The provider is injected by the host.
   const aiSessions = createAiChatSessions({
     getProvider: () => config.createAIProvider?.() ?? null,
-    // Plan mode runs tool-less and under a planning system prompt; Build mode
-    // exposes the full host tool set over an (empty today) base prompt.
-    // Custom instructions (omp#1) merge on top, branching explicitly on
-    // instructions.mode so the semantics survive a future base prompt.
+    getWorkspaceRoot: () => config.getWorkspaceRoot?.() ?? Array.from(roots().keys())[0] ?? null,
+    // Plan mode runs tool-less under a planning system prompt; Build mode
+    // exposes the full host tool set over the functional BUILD_SYSTEM_PROMPT.
+    // Custom instructions (omp#1) merge on top: because both base prompts encode
+    // a functional contract (tool-less planning / file-writing tools), they are
+    // ALWAYS kept — instructions APPEND after a blank line even under
+    // `mode: "replace"`, so a bare replace can't strip the contract.
     system: () => {
       const instructions = config.getCustomInstructions?.();
       if (aiMode() === "plan") {
@@ -765,8 +979,7 @@ export function createAppState(config: AppStateConfig) {
       }
       const base = buildBaseSystemPrompt();
       if (!instructions) return base;
-      if (instructions.mode === "replace") return instructions.text;
-      return base === undefined ? instructions.text : `${base}\n\n${instructions.text}`;
+      return `${base}\n\n${instructions.text}`;
     },
     getTools: async () => {
       if (aiMode() === "plan") return [];
@@ -774,9 +987,17 @@ export function createAppState(config: AppStateConfig) {
       if (aiMode() !== "ask") return tools;
       return tools.map((tool) => ({ ...tool, approval: "prompt" as const }));
     },
-    onAssistantTurn: (content) => {
-      if (aiMode() === "plan") config.onPlanComplete?.(content);
+    // Snapshot the panel mode when each turn STARTS; the store threads it back
+    // to the finalization hooks so a background turn finalizing after a mode
+    // switch is still validated/advised/persisted as the mode it ran under.
+    getMode: () => aiMode(),
+    onAssistantTurn: (content, mode) => {
+      if (mode === "plan") config.onPlanComplete?.(content);
     },
+    adviseAssistantTurn: adviseBuildTurn,
+    ...(config.copyChatArtifacts ? { copyArtifacts: config.copyChatArtifacts } : {}),
+    ...(config.deleteChatArtifacts ? { deleteArtifacts: config.deleteChatArtifacts } : {}),
+    ...(config.writeChatArtifact ? { writeArtifact: config.writeChatArtifact } : {}),
     getContext: (request) => {
       const items: AiContextItem[] = [];
       // The open document is implicit context (the active-file chip) unless the
@@ -813,7 +1034,18 @@ export function createAppState(config: AppStateConfig) {
         mode: aiMode(),
         userMessage: request.userMessage,
       });
-      const preamble = [skillContext, attachedContext].filter(Boolean).join("\n\n") || undefined;
+      const ruleContext = config.getRuleContext?.({
+        history: request.history,
+        mode: aiMode(),
+        userMessage: request.userMessage,
+      });
+      const buildExecutionPrompt =
+        aiMode() === "build" && isBuildExecutionRequest(request.history, request.userMessage)
+          ? BUILD_TURN_EXECUTION_PROMPT
+          : undefined;
+      const preamble =
+        [ruleContext, skillContext, attachedContext, buildExecutionPrompt].filter(Boolean).join("\n\n") ||
+        undefined;
       const contextItems = items.map((item) => ({
         id: item.id,
         kind: item.kind,
@@ -831,6 +1063,28 @@ export function createAppState(config: AppStateConfig) {
     },
     // Engine-level approval: Ask mode prompts for every tool call. Build mode
     // intentionally omits the gate so calls run automatically.
+    validateAssistantTurn: ({ assistantText, history, mode, tools, userMessage }) => {
+      // The turn's OWN mode (threaded from the store) — a background turn that
+      // finalizes after the panel mode changed must still be validated as the
+      // mode it actually ran under.
+      const turnMode = (mode ?? aiMode()) as AIChatMode;
+      const ruleViolation = config.validateRuleTurn?.({
+        assistantText,
+        history,
+        mode: turnMode,
+        tools,
+        userMessage,
+      });
+      if (ruleViolation) return ruleViolation;
+      if (turnMode !== "build") return undefined;
+      if (!isBuildExecutionRequest(history, userMessage)) return undefined;
+      if (tools.length > 0) return undefined;
+      return {
+        message: m.ai_error_build_no_tool(),
+        reminder: BUILD_TURN_EXECUTION_PROMPT,
+        signature: "build:no-tool",
+      };
+    },
     ...(config.onToolApprovalRequest
       ? {
           onApprovalRequest: (req) =>
@@ -983,6 +1237,15 @@ export function createAppState(config: AppStateConfig) {
     setActiveTabSig(`chat:${id}`);
   }
 
+  function continueLatestChat(): string {
+    const latest = [...aiSessions.allSessions()]
+      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+    if (!latest) return newChat();
+    openChatFromHistory(latest.id);
+    setAiComposerFocusTrigger((value) => value + 1);
+    return latest.id;
+  }
+
   /** Front a chat and pulse the composer-focus trigger (⌘L). Creates a chat if
    *  none is open so ⌘L always lands in a usable composer. */
   function focusAiComposer(): void {
@@ -991,6 +1254,11 @@ export function createAppState(config: AppStateConfig) {
     if (!id) id = aiSessions.createSession();
     activateChatTab(id);
     setAiComposerFocusTrigger((value) => value + 1);
+  }
+
+  function compactActiveChat(): void {
+    aiSessions.activeStore().compactHistory();
+    focusAiComposer();
   }
 
   function tabPresent(tab: string): boolean {
@@ -1130,7 +1398,11 @@ export function createAppState(config: AppStateConfig) {
             },
           ]
         : base;
-    config.onExportChat?.({ title, markdown: formatChatTranscript(title, turns) });
+    config.onExportChat?.({
+      html: formatChatTranscriptHtml(title, turns),
+      markdown: formatChatTranscript(title, turns),
+      title,
+    });
   }
 
   /** Selection popover → "Add to chat": chip the selection + front the chat.
@@ -1585,6 +1857,8 @@ export function createAppState(config: AppStateConfig) {
     setAiActiveTab,
     activateChatTab,
     newChat,
+    continueLatestChat,
+    compactActiveChat,
     openChatFromHistory,
     closeChat,
     archiveChat,
@@ -1608,12 +1882,16 @@ export function createAppState(config: AppStateConfig) {
     removeAiContext,
     reorderAiContext,
     aiInlineReference,
+    aiDraftInsertion,
     requestAiInlineReference,
+    requestAiDraftInsertion,
     clearAiInlineReference,
+    clearAiDraftInsertion,
     dismissActiveFileContext,
     addSelectionToContext,
     addPreviewSelectionToContext,
     addFileMention,
+    addMcpResourceContext,
     selectionPopover,
     setSelectionPopover,
     addSelectionContextFromPopover,

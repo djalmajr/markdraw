@@ -42,6 +42,23 @@ const PersistedToolActivitySchema = v.object({
   status: v.picklist(["running", "done", "error"] as const),
   argsJson: v.nullable(v.string()),
   resultJson: v.nullable(v.string()),
+  resultArtifact: v.optional(
+    v.object({
+      byteLength: v.number(),
+      id: v.string(),
+      kind: v.picklist(["tool-result", "advisor", "export"] as const),
+      mime: v.string(),
+      preview: v.optional(v.string()),
+      title: v.optional(v.string()),
+    }),
+  ),
+});
+
+const PersistedAdvisorNoteSchema = v.object({
+  id: v.string(),
+  message: v.string(),
+  severity: v.picklist(["info", "warning", "blocker"] as const),
+  title: v.optional(v.string()),
 });
 
 // Per-run telemetry attached to an assistant turn (token totals + tool-call
@@ -55,7 +72,7 @@ const PersistedTurnUsageSchema = v.object({
 
 const PersistedChatContextItemSchema = v.object({
   id: v.optional(v.string()),
-  kind: v.picklist(["file", "folder", "selection"] as const),
+  kind: v.picklist(["file", "folder", "mcp-resource", "selection"] as const),
   label: v.string(),
   path: v.optional(v.string()),
   rootId: v.optional(v.string()),
@@ -66,6 +83,8 @@ const PersistedChatContextItemSchema = v.object({
 const PersistedChatMessageSchema = v.object({
   role: v.picklist(["user", "assistant"] as const),
   content: v.string(),
+  kind: v.optional(v.picklist(["normal", "compaction"] as const)),
+  advisorNotes: v.optional(v.array(PersistedAdvisorNoteSchema)),
   context: v.optional(v.array(PersistedChatContextItemSchema)),
   tools: v.optional(v.array(PersistedToolActivitySchema)),
   usage: v.optional(PersistedTurnUsageSchema),
@@ -86,6 +105,9 @@ const PersistedChatSessionMetaSchema = v.object({
    *  sessions persisted before pinning existed still parse; consumers read it
    *  as `isPinned ?? false`. */
   isPinned: v.optional(v.boolean()),
+  /** Workspace root that owned the session when it was created. Optional so
+   *  sessions persisted before workspace scoping still parse. */
+  workspaceRoot: v.optional(v.string()),
 });
 
 // Strict write-boundary schema.
@@ -103,6 +125,7 @@ const ChatSessionsIndexWrapperSchema = v.object({
 const ChatMessagesWrapperSchema = v.array(v.unknown());
 
 type PersistedToolActivity = v.InferOutput<typeof PersistedToolActivitySchema>;
+type PersistedAdvisorNote = v.InferOutput<typeof PersistedAdvisorNoteSchema>;
 type PersistedChatMessage = v.InferOutput<typeof PersistedChatMessageSchema>;
 type PersistedChatSessionMeta = v.InferOutput<typeof PersistedChatSessionMetaSchema>;
 type ChatSessionsIndex = v.InferOutput<typeof ChatSessionsIndexSchema>;
@@ -142,6 +165,7 @@ function toPersistedTool(activity: {
   status: "running" | "done" | "error";
   args?: unknown;
   result?: unknown;
+  resultArtifact?: PersistedToolActivity["resultArtifact"];
 }): PersistedToolActivity {
   return {
     toolCallId: activity.toolCallId,
@@ -150,6 +174,7 @@ function toPersistedTool(activity: {
     status: activity.status,
     argsJson: cappedStringify(activity.args),
     resultJson: cappedStringify(activity.result),
+    ...(activity.resultArtifact !== undefined ? { resultArtifact: activity.resultArtifact } : {}),
   };
 }
 
@@ -163,12 +188,29 @@ function capMessages(messages: PersistedChatMessage[]): PersistedChatMessage[] {
         ? msg.content.slice(0, MAX_MESSAGE_CONTENT_CHARS) + TRUNCATION_SENTINEL
         : msg.content;
     const usage = msg.usage !== undefined ? { usage: msg.usage } : {};
+    const advisorNotes =
+      msg.advisorNotes && msg.advisorNotes.length ? { advisorNotes: msg.advisorNotes.slice(0, 8) } : {};
     const context = msg.context && msg.context.length ? { context: msg.context.slice(0, 16) } : {};
     if (!msg.tools || msg.tools.length === 0) {
-      return { role: msg.role, content, ...context, ...usage };
+      return {
+        role: msg.role,
+        content,
+        ...(msg.kind ? { kind: msg.kind } : {}),
+        ...advisorNotes,
+        ...context,
+        ...usage,
+      };
     }
     const tools = msg.tools.length > MAX_TOOLS_PER_MESSAGE ? msg.tools.slice(0, MAX_TOOLS_PER_MESSAGE) : msg.tools;
-    return { role: msg.role, content, ...context, tools, ...usage };
+    return {
+      role: msg.role,
+      content,
+      ...(msg.kind ? { kind: msg.kind } : {}),
+      ...advisorNotes,
+      ...context,
+      tools,
+      ...usage,
+    };
   });
 }
 
@@ -241,6 +283,7 @@ function normalizeIndex(index: ChatSessionsIndex): ChatSessionsIndex {
       isArchived: s.isArchived,
       isOpen: s.isOpen,
       ...(s.isPinned ? { isPinned: true } : {}),
+      ...(s.workspaceRoot ? { workspaceRoot: s.workspaceRoot } : {}),
     })),
     activeId: index.activeId,
   };
@@ -379,6 +422,7 @@ function searchChatSessions(
 export {
   type ChatSessionsIndex,
   type GroupedChatSessions,
+  type PersistedAdvisorNote,
   type PersistedChatMessage,
   type PersistedChatSessionMeta,
   type PersistedToolActivity,

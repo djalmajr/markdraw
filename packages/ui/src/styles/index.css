@@ -2278,7 +2278,9 @@ body:has(.app.window-frame-toolbar) .doc-body a {
 
 .ai-scroll-bottom-chip:hover {
   border-color: hsl(var(--primary) / 0.28);
-  background: hsl(var(--accent) / 0.65);
+  background: hsl(var(--popover));
+  color: hsl(var(--primary));
+  opacity: 1;
 }
 
 .ai-message {
@@ -2351,6 +2353,20 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   padding-right: 0;
 }
 
+.ai-message-compaction {
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 8px;
+}
+
+.ai-message-compaction .ai-message-role {
+  color: hsl(var(--muted-foreground));
+}
+
+.ai-message-compaction .ai-message-text {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
 /* Tool-call chips on assistant turns (AiToolChips): compact pills naming the
    tool + source server, with running/error accents. */
 .ai-tool-chips {
@@ -2400,6 +2416,47 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   word-break: break-word;
   max-height: 240px;
   overflow-y: auto;
+}
+
+.ai-advisor-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ai-advisor-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 5px;
+  background: hsl(var(--muted) / 0.45);
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ai-advisor-note-warning {
+  border-color: hsl(42 92% 45% / 0.35);
+  background: hsl(42 92% 45% / 0.08);
+}
+
+.ai-advisor-note-blocker {
+  border-color: hsl(var(--destructive) / 0.35);
+  background: hsl(var(--destructive) / 0.08);
+}
+
+.ai-advisor-note-title {
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ai-advisor-note-message {
+  overflow-wrap: anywhere;
 }
 
 .ai-tool-chip-icon {
@@ -3034,6 +3091,14 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   opacity: 0.35;
   cursor: default;
 }
+.ai-queue-btn {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+.ai-queue-btn:hover {
+  background: hsl(var(--primary) / 0.9);
+  color: hsl(var(--primary-foreground));
+}
 .ai-stop-btn {
   background: hsl(var(--secondary));
   color: hsl(var(--foreground));
@@ -3629,6 +3694,50 @@ body:has(.app.window-frame-toolbar) .doc-body a {
 
 .settings-tier-note,
 .settings-hint {
+  font-size: 11px;
+  line-height: 1.35;
+  color: hsl(var(--muted-foreground));
+}
+
+.settings-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.settings-shell-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.settings-shell-command,
+.settings-shell-path {
+  overflow: hidden;
+  padding: 5px 7px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-shell-status {
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.settings-shell-note {
   font-size: 11px;
   line-height: 1.35;
   color: hsl(var(--muted-foreground));
@@ -5386,6 +5495,39 @@ kbd.shortcuts-help-key {
   background: hsl(var(--muted) / 0.55);
   border: 1px solid color-mix(in srgb, hsl(var(--border)) 82%, hsl(var(--muted-foreground)));
   color: hsl(var(--muted-foreground));
+}
+
+.settings-mcp-action-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.settings-mcp-action-chip:hover,
+.settings-mcp-action-chip:focus-visible {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.settings-mcp-action-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-mcp-related {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-mcp-related-title {
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .settings-mcp-auth {

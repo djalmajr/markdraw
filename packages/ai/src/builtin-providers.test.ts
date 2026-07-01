@@ -46,9 +46,13 @@ describe("BUILTIN_PROVIDERS", () => {
     expect(go.options?.baseURL).toBe("https://opencode.ai/zen/go/v1");
     expect(goChat.options?.baseURL).toBe("https://opencode.ai/zen/go/v1");
     expect(go.models["minimax-m3"].name).toBe("MiniMax M3");
+    expect(go.models["qwen3.5-plus"].name).toBe("Qwen3.5 Plus");
+    expect(goChat.models["glm-5.2"].name).toBe("GLM-5.2");
     expect(goChat.models["glm-5"].name).toBe("GLM-5");
-    // Hand-maintained split — opted out of live /models refresh (the endpoint
-    // can't say which API shape each model uses).
+    expect(goChat.models["hy3-preview"].name).toBe("HY3 Preview");
+    expect(new Set([...Object.keys(go.models), ...Object.keys(goChat.models)]).size).toBe(20);
+    // Local endpoint split — the live /models refresh can't say which API shape
+    // each model uses.
     expect(go.curatedModels).toBe(true);
     expect(goChat.curatedModels).toBe(true);
   });

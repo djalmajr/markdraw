@@ -36,7 +36,7 @@ describe("savePlanArtifact", () => {
 });
 
 describe("exportChatArtifact", () => {
-  it("restores placeholders so the file matches the displayed transcript", async () => {
+  it("restores placeholders so the default HTML export matches the displayed transcript", async () => {
     const { deps, placeholder, writes } = artifactDeps();
     const dialogCalls: { defaultDir: string | null; defaultName: string }[] = [];
     const path = await exportChatArtifact(
@@ -48,15 +48,43 @@ describe("exportChatArtifact", () => {
         },
       },
       "/ws",
-      { markdown: `## You\n\nmy key is ${placeholder}`, title: "My Chat" },
+      {
+        html: `<h1>Chat</h1><p>my key is ${placeholder}</p>`,
+        markdown: `## You\n\nmy key is ${placeholder}`,
+        title: "My Chat",
+      },
       NOW,
     );
     expect(dialogCalls).toEqual([
-      { defaultDir: "/ws/.markdraw/chats", defaultName: "my-chat-20260611-080910.md" },
+      { defaultDir: "/ws/.markdraw/chats", defaultName: "my-chat-20260611-080910.html" },
     ]);
-    expect(path).toBe("/picked/my-chat-20260611-080910.md");
+    expect(path).toBe("/picked/my-chat-20260611-080910.html");
     expect(writes).toEqual([
-      { content: `## You\n\nmy key is ${SECRET}`, path: "/picked/my-chat-20260611-080910.md" },
+      {
+        content: `<h1>Chat</h1><p>my key is ${SECRET}</p>`,
+        path: "/picked/my-chat-20260611-080910.html",
+      },
+    ]);
+  });
+
+  it("writes Markdown when the chosen path has a Markdown extension", async () => {
+    const { deps, placeholder, writes } = artifactDeps();
+    const path = await exportChatArtifact(
+      {
+        ...deps,
+        saveFileDialog: async () => "/picked/my-chat.md",
+      },
+      "/ws",
+      {
+        html: `<h1>Chat</h1><p>my key is ${placeholder}</p>`,
+        markdown: `## You\n\nmy key is ${placeholder}`,
+        title: "My Chat",
+      },
+      NOW,
+    );
+    expect(path).toBe("/picked/my-chat.md");
+    expect(writes).toEqual([
+      { content: `## You\n\nmy key is ${SECRET}`, path: "/picked/my-chat.md" },
     ]);
   });
 
@@ -65,7 +93,7 @@ describe("exportChatArtifact", () => {
     const path = await exportChatArtifact(
       { ...deps, saveFileDialog: async () => null },
       null,
-      { markdown: "x", title: "t" },
+      { html: "<p>x</p>", markdown: "x", title: "t" },
       NOW,
     );
     expect(path).toBeNull();

@@ -20,6 +20,12 @@ export interface ChatExportDeps extends PlanArtifactDeps {
   saveFileDialog: (defaultDir: string | null, defaultName: string) => Promise<string | null>;
 }
 
+export interface ChatExportPayload {
+  html: string;
+  markdown: string;
+  title: string;
+}
+
 /** Local-time filename stamp: YYYYMMDD-HHMMSS. */
 function artifactStamp(d: Date): string {
   const pad = (n: number): string => String(n).padStart(2, "0");
@@ -48,12 +54,15 @@ export async function savePlanArtifact(
 export async function exportChatArtifact(
   deps: ChatExportDeps,
   root: string | null,
-  payload: { markdown: string; title: string },
+  payload: ChatExportPayload,
   now: Date = new Date(),
 ): Promise<string | null> {
-  const defaultName = `${slugifyTitle(payload.title)}-${artifactStamp(now)}.md`;
+  const defaultName = `${slugifyTitle(payload.title)}-${artifactStamp(now)}.html`;
   const path = await deps.saveFileDialog(root ? `${root}/.markdraw/chats` : null, defaultName);
   if (!path) return null; // user cancelled
-  await deps.writeFile(path, deps.restoreSecrets(payload.markdown));
+  const content = path.toLowerCase().endsWith(".md") || path.toLowerCase().endsWith(".markdown")
+    ? payload.markdown
+    : payload.html;
+  await deps.writeFile(path, deps.restoreSecrets(content));
   return path;
 }

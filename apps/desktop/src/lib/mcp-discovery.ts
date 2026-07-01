@@ -6,6 +6,7 @@
 
 import { invoke } from "./chaos-invoke.ts";
 import type { MCPServerConfig } from "@markdraw/ai/config-schema.ts";
+import { djb2 } from "@markdraw/core/hash.ts";
 
 /** One server as normalized by the Rust `mcp_discover` command. */
 export interface DiscoveredMcpServer {
@@ -65,13 +66,6 @@ export function serverIdentity(s: {
   return s.transport === "http"
     ? `http:${s.url ?? ""}`
     : `stdio:${s.command ?? ""} ${(s.args ?? []).join(" ")}`;
-}
-
-/** Cheap, stable, synchronous hash for the connection id (not security). */
-function djb2(str: string): string {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
 }
 
 /** Which tools may be read, gated on a CONNECTED provider of the matching kind

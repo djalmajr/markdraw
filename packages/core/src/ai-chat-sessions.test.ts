@@ -156,6 +156,15 @@ describe("sessions index round-trip", () => {
     expect(getChatSessionsIndex()!.sessions[0]!.isPinned).toBe(true);
   });
 
+  it("round-trips a session workspace root", () => {
+    const index: ChatSessionsIndex = {
+      sessions: [meta({ workspaceRoot: "/repo" })],
+      activeId: "s1",
+    };
+    setChatSessionsIndex(index);
+    expect(getChatSessionsIndex()).toEqual(index);
+  });
+
   it("migrates pre-pinning sessions (no isPinned key) without dropping them", () => {
     // A session persisted before pinning existed has no isPinned field.
     localStorage.setItem(
@@ -214,6 +223,29 @@ describe("messages round-trip", () => {
     };
     setChatMessages("s1", [turn]);
     expect(getChatMessages("s1")).toEqual([turn]);
+  });
+
+  it("round-trips mcp-resource context and compaction turns", () => {
+    const turns: PersistedChatMessage[] = [
+      {
+        role: "assistant",
+        content: "Older messages compacted.",
+        kind: "compaction",
+      },
+      {
+        role: "user",
+        content: "use this resource",
+        context: [
+          {
+            kind: "mcp-resource",
+            label: "memory://notes",
+            path: "memory://notes",
+          },
+        ],
+      },
+    ];
+    setChatMessages("s1", turns);
+    expect(getChatMessages("s1")).toEqual(turns);
   });
 
   it("writing an empty list removes the key", () => {
@@ -320,6 +352,11 @@ describe("capMessages", () => {
     }));
     const [msg] = capMessages([{ role: "assistant", content: "c", tools }]);
     expect(msg!.tools).toHaveLength(MAX_TOOLS_PER_MESSAGE);
+  });
+
+  it("preserves compaction kind while capping messages", () => {
+    const [msg] = capMessages([{ role: "assistant", content: "summary", kind: "compaction" }]);
+    expect(msg!.kind).toBe("compaction");
   });
 });
 

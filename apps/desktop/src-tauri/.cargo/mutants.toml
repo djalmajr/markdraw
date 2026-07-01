@@ -27,7 +27,6 @@ exclude_re = [
     "open_directory_dialog",
     "set_dock_visible",
     "print_webview",
-    "get_startup_args",
     "run\\b",
 ]
 

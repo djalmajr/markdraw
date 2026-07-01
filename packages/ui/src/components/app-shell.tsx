@@ -30,7 +30,12 @@ import {
   SettingsDialog,
   type IndexingTier,
   type SettingsAiProvider,
+  type SettingsMcpPrompt,
+  type SettingsMcpResource,
   type SettingsMcpServer,
+  type SettingsModelCatalogStatus,
+  type SettingsRule,
+  type SettingsShellCommandStatus,
   type SettingsSkill,
 } from "./settings-dialog.tsx";
 import { QuickOpen } from "./quick-open.tsx";
@@ -107,6 +112,17 @@ interface AppShellProps {
   onAiSlashMenuOpen?: () => void;
   /** Auto-discovered agent skills for the chat composer's "$" autocomplete. */
   aiSkills?: AiSkillEntry[];
+  /** Auto-discovered sticky rules for the chat composer's "#" autocomplete. */
+  aiRules?: Array<{
+    alwaysApply: boolean;
+    condition?: string;
+    description?: string;
+    globs: string[];
+    id: string;
+    name: string;
+    scope: "global" | "project";
+    source: string;
+  }>;
   /** The chat composer's "$" autocomplete just opened — the host refreshes
    *  `aiSkills` so the popover lists fresh entries. */
   onAiSkillsMenuOpen?: () => void;
@@ -132,6 +148,8 @@ interface AppShellProps {
   mcpServers?: SettingsMcpServer[];
   /** Auto-discovered agent skills shown read-only in Settings. */
   skills?: SettingsSkill[];
+  /** Auto-discovered sticky rules shown read-only in Settings. */
+  rules?: SettingsRule[];
   onSaveMcpServer?: (server: {
     id: string;
     name?: string;
@@ -146,6 +164,8 @@ interface AppShellProps {
   onToggleMcpServer?: (id: string, enabled: boolean) => void | Promise<void>;
   onAuthorizeMcpServer?: (id: string) => void | Promise<void>;
   onApproveMcpServer?: (id: string) => void | Promise<void>;
+  onAttachMcpResource?: (resource: SettingsMcpResource) => void | Promise<void>;
+  onInsertMcpPrompt?: (prompt: SettingsMcpPrompt) => void | Promise<void>;
   importOpenCodeMcps?: boolean;
   onImportOpenCodeMcpsChange?: (enabled: boolean) => void;
   indexingTier?: IndexingTier;
@@ -181,6 +201,11 @@ interface AppShellProps {
   onRemoveProvider?: (ids: string[]) => void | Promise<void>;
   /** Re-fetch a provider's live model list (openai-compatible /models). */
   onRefreshModels?: (providerId: string) => void | Promise<void>;
+  modelCatalogStatus?: Record<string, SettingsModelCatalogStatus>;
+  shellCommandStatus?: SettingsShellCommandStatus | null;
+  onRefreshShellCommand?: () => void | Promise<void>;
+  onInstallShellCommand?: () => void | Promise<void>;
+  onUninstallShellCommand?: () => void | Promise<void>;
   onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;
   /** Resolve a file or folder as a chat context chip (desktop reads the file
    *  content, or builds a subtree listing for `kind: "dir"` — `path: ""` means
@@ -629,6 +654,7 @@ export function AppShell(props: AppShellProps) {
           store={s.aiSessions.activeStore()}
           focusTrigger={s.aiComposerFocusTrigger()}
           inlineReference={s.aiInlineReference()}
+          draftInsertion={s.aiDraftInsertion()}
           providerLabel={props.aiProviderLabel}
           modelGroups={props.aiModelGroups}
           currentModel={props.aiCurrentModel}
@@ -644,6 +670,7 @@ export function AppShell(props: AppShellProps) {
           mentionFiles={mentionFiles()}
           slashCommands={props.aiSlashCommands}
           skills={props.aiSkills}
+          rules={props.aiRules}
           onMention={(f) => props.onAddFileMention?.(f)}
           onOpenExternal={props.onOpenExternal}
           onNavigateDocument={props.onNavigate}
@@ -654,6 +681,7 @@ export function AppShell(props: AppShellProps) {
           planItems={s.aiPlan()?.items}
           onClearPlan={s.clearAiPlan}
           onInlineReferenceHandled={s.clearAiInlineReference}
+          onDraftInsertionHandled={s.clearAiDraftInsertion}
           onModeChange={s.setAiMode}
           onTogglePlanItem={s.toggleAiPlanItem}
           reasoningEffort={props.aiReasoning}
@@ -725,13 +753,21 @@ export function AppShell(props: AppShellProps) {
           onConnectProvider={(i) => props.onConnectProvider?.(i)}
           onRemoveProvider={(ids) => props.onRemoveProvider?.(ids)}
           onRefreshModels={(id) => props.onRefreshModels?.(id)}
+          modelCatalogStatus={props.modelCatalogStatus ?? {}}
+          shellCommandStatus={props.shellCommandStatus ?? null}
+          onRefreshShellCommand={() => props.onRefreshShellCommand?.()}
+          onInstallShellCommand={() => props.onInstallShellCommand?.()}
+          onUninstallShellCommand={() => props.onUninstallShellCommand?.()}
           mcpServers={props.mcpServers ?? []}
           skills={props.skills ?? []}
+          rules={props.rules ?? []}
           onSaveMcpServer={(s) => props.onSaveMcpServer?.(s)}
           onRemoveMcpServer={(id) => props.onRemoveMcpServer?.(id)}
           onToggleMcpServer={(id, enabled) => props.onToggleMcpServer?.(id, enabled)}
           onAuthorizeMcpServer={(id) => props.onAuthorizeMcpServer?.(id)}
           onApproveMcpServer={(id) => props.onApproveMcpServer?.(id)}
+          onAttachMcpResource={(resource) => props.onAttachMcpResource?.(resource)}
+          onInsertMcpPrompt={(prompt) => props.onInsertMcpPrompt?.(prompt)}
           importOpenCodeMcps={props.importOpenCodeMcps}
           onImportOpenCodeMcpsChange={(on) => props.onImportOpenCodeMcpsChange?.(on)}
           aiStreaming={props.aiStreaming ?? false}

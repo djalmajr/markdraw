@@ -191,6 +191,75 @@ describe("AiPanel", () => {
     expect(baseElement.querySelectorAll(".ai-mention-item")).toHaveLength(0);
   });
 
+  it("matches @-mentions by workspace-relative path as well as file name", () => {
+    const store = readyStore();
+    const onMention = vi.fn();
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        mentionFiles={[
+          { label: "alpha.md", path: "a/alpha.md", rootId: "r" },
+          { label: "beta.md", path: "b/beta.md", rootId: "r" },
+        ]}
+        onMention={onMention}
+      />
+    ));
+    const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    // Mutation captured: filtering only by label leaves a path query with no menu item.
+    ta.value = "@a/alpha";
+    ta.setSelectionRange(8, 8);
+    fireEvent.input(ta);
+    const items = baseElement.querySelectorAll(".ai-mention-item");
+    expect(items).toHaveLength(1);
+    expect(items[0]!.textContent).toContain("alpha.md");
+    fireEvent.mouseDown(items[0]!);
+    expect(onMention).toHaveBeenCalledWith({ label: "alpha.md", path: "a/alpha.md", rootId: "r" });
+    expect(ta.value).toBe("@alpha.md ");
+  });
+
+  it("materializes a manually typed @<path> reference without using the menu", () => {
+    const store = readyStore();
+    const onMention = vi.fn();
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        mentionFiles={[{ label: "alpha.md", path: "a/alpha.md", rootId: "r" }]}
+        onMention={onMention}
+      />
+    ));
+    const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    ta.value = "read @<a/alpha.md>";
+    ta.setSelectionRange(18, 18);
+    fireEvent.input(ta);
+
+    expect(onMention).toHaveBeenCalledWith({ label: "alpha.md", path: "a/alpha.md", rootId: "r" });
+    expect(baseElement.querySelector(".ai-inline-mention")?.textContent).toBe("@<a/alpha.md>");
+    expect(baseElement.querySelectorAll(".ai-mention-item")).toHaveLength(0);
+  });
+
+  it("materializes a quoted manual @ reference with spaces", () => {
+    const store = readyStore();
+    const onMention = vi.fn();
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        mentionFiles={[{ label: "team notes.md", path: "docs/team notes.md", rootId: "r" }]}
+        onMention={onMention}
+      />
+    ));
+    const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
+    ta.value = 'summarize @"docs/team notes.md"';
+    ta.setSelectionRange(28, 28);
+    fireEvent.input(ta);
+
+    expect(onMention).toHaveBeenCalledWith({
+      label: "team notes.md",
+      path: "docs/team notes.md",
+      rootId: "r",
+    });
+    expect(baseElement.querySelector(".ai-inline-mention")?.textContent).toBe('@"docs/team notes.md"');
+  });
+
   it("offers folders (and the workspace root itself) in the @-mention list with a trailing slash", () => {
     const store = readyStore();
     const onMention = vi.fn();
@@ -933,6 +1002,28 @@ describe("AiPanel — inline @-mention tokens (Cursor-style)", () => {
     return { promise, resolve };
   }
 
+  it("shows a queue action beside Stop while a turn streams and the draft has text", () => {
+    const cancel = vi.fn();
+    const sendMessage = vi.fn(async () => {});
+    const store = stubStore({
+      cancel,
+      sendMessage,
+      streaming: () => true,
+    });
+    const { baseElement } = render(() => <AiPanel store={store} />);
+    const ta = typeText(baseElement, "cadê o arquivo?");
+    // The typed draft must have a visible click target while Stop remains available.
+    const queue = screen.getByRole("button", {
+      name: /queue message|colocar na fila|poner en cola/i,
+    });
+    const stop = screen.getByRole("button", { name: /stop|parar|detener/i });
+    fireEvent.click(queue);
+    expect(sendMessage).toHaveBeenCalledWith("cadê o arquivo?");
+    expect(ta.value).toBe("");
+    fireEvent.click(stop);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it("selecting a mention inserts '@label ' inline, highlights it, and fires onMention", () => {
     const store = readyStore();
     const onMention = vi.fn();
@@ -1617,6 +1708,7 @@ describe("AiPanel — skill references", () => {
     fireEvent.mouseDown(items[0]!);
     const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
     expect(ta.value).toBe("use $agile-proto ");
+    expect(baseElement.querySelector(".ai-inline-mention")?.textContent).toBe("$agile-proto");
     expect(baseElement.querySelectorAll(".ai-skill-item")).toHaveLength(0);
   });
 
@@ -1638,6 +1730,14 @@ describe("AiPanel — skill references", () => {
     await waitFor(() => {
       expect(store.messages()[0]?.content).toBe("$openai-docs");
     });
+  });
+
+  it("formats a manually typed exact '$skill' token like an inline reference", () => {
+    const store = readyStore();
+    const { baseElement } = render(() => <AiPanel store={store} skills={SKILLS} />);
+    typeIntoComposer(baseElement, "use $openai-docs ");
+
+    expect(baseElement.querySelector(".ai-inline-mention")?.textContent).toBe("$openai-docs");
   });
 
   it("shows declared skill slash commands in the '/' list and inserts '/name '", () => {

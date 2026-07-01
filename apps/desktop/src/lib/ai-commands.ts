@@ -24,6 +24,11 @@ interface DirEntryLite {
   path: string;
 }
 
+export interface ContextFileDependency {
+  content: string;
+  path: string;
+}
+
 /** Commands every install ships, overridable by global/project files. */
 export const BUILTIN_COMMANDS: SlashCommandDef[] = [
   {
@@ -40,6 +45,19 @@ export const BUILTIN_COMMANDS: SlashCommandDef[] = [
   },
 ];
 
+export const CONTEXT_FILE_CANDIDATES = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  "GEMINI.md",
+  ".github/copilot-instructions.md",
+];
+
+const CONTEXT_IMPORT_MAX_DEPTH = 5;
+/** Total expanded-content budget for one context file's @-import tree. Bounds a
+ *  content-explosion / prompt-bloat DoS from a deep or fan-out import graph. */
+const CONTEXT_IMPORT_MAX_BYTES = 128 * 1024;
+const CONTEXT_IMPORT_RE = /(^|[\s([])@(?:<([^>\r\n]+)>|([^\s`"')\]},>]+))/g;
+
 /** The command name a directory entry's *.md file defines (extension-insensitive
  *  on case), or null for anything that is not a command file. */
 export function commandNameFromFile(fileName: string): string | null {
@@ -52,6 +70,137 @@ export function commandNameFromFile(fileName: string): string | null {
  *  (appConfigDir may or may not end with one, per platform). */
 export function joinDir(base: string, child: string): string {
   return /[\\/]$/.test(base) ? `${base}${child}` : `${base}/${child}`;
+}
+
+function dirname(path: string): string {
+  const index = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return index >= 0 ? path.slice(0, index) : "";
+}
+
+function normalizePath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const drive = normalized.match(/^[a-zA-Z]:\//)?.[0] ?? "";
+  const absolute = normalized.startsWith("/") || !!drive;
+  const start = drive ? drive.length : absolute ? 1 : 0;
+  const parts: string[] = [];
+  for (const part of normalized.slice(start).split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  if (drive) return `${drive}${parts.join("/")}`;
+  if (absolute) return `/${parts.join("/")}`;
+  return parts.join("/");
+}
+
+function stripTrailingSlash(path: string): string {
+  const normalized = normalizePath(path);
+  return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized;
+}
+
+function isAbsolutePath(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized);
+}
+
+function pathEquals(a: string, b: string): boolean {
+  return normalizePath(a).toLowerCase() === normalizePath(b).toLowerCase();
+}
+
+function isInsideRoot(rootPath: string, path: string): boolean {
+  const root = stripTrailingSlash(rootPath).toLowerCase();
+  const target = normalizePath(path).toLowerCase();
+  return target === root || target.startsWith(`${root}/`);
+}
+
+function relativeToRoot(rootPath: string, path: string): string {
+  const root = stripTrailingSlash(rootPath);
+  const target = normalizePath(path);
+  return pathEquals(root, target) ? "" : target.slice(root.length + 1);
+}
+
+function resolveContextImport(rootPath: string, baseDir: string, token: string): string | null {
+  const trimmed = token.trim();
+  if (!trimmed || trimmed.includes("\0")) return null;
+  if (isAbsolutePath(trimmed)) return null;
+  const target = normalizePath(joinDir(baseDir, trimmed));
+  return isInsideRoot(rootPath, target) ? target : null;
+}
+
+function findContextImports(line: string): string[] {
+  const imports: string[] = [];
+  const segments = line.split("`");
+  for (let index = 0; index < segments.length; index += 2) {
+    const segment = segments[index] ?? "";
+    for (const match of segment.matchAll(CONTEXT_IMPORT_RE)) {
+      const target = match[2] ?? match[3];
+      if (target) imports.push(target);
+    }
+  }
+  return imports;
+}
+
+async function expandContextImports(
+  rootPath: string,
+  filePath: string,
+  raw: string,
+  readFile: (path: string) => Promise<string>,
+  visited: Set<string>,
+  depth: number,
+  budget: { used: number },
+): Promise<string> {
+  if (depth >= CONTEXT_IMPORT_MAX_DEPTH) return raw;
+  const out: string[] = [];
+  const baseDir = dirname(filePath) || rootPath;
+  let fenced = false;
+  for (const line of raw.split(/\r?\n/)) {
+    out.push(line);
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    for (const token of findContextImports(line)) {
+      const target = resolveContextImport(rootPath, baseDir, token);
+      // `visited` is never cleared: each file is inlined at most once across the
+      // whole tree (not just the current path), so a diamond/fan-out graph can't
+      // re-expand the same file exponentially. The byte budget caps total size.
+      if (!target || visited.has(target)) continue;
+      if (budget.used >= CONTEXT_IMPORT_MAX_BYTES) continue;
+      visited.add(target);
+      try {
+        const content = await readFile(target);
+        budget.used += content.length;
+        const expanded = await expandContextImports(rootPath, target, content, readFile, visited, depth + 1, budget);
+        out.push("");
+        out.push(`<context-import path="${relativeToRoot(rootPath, target)}">`);
+        out.push(expanded.trim());
+        out.push("</context-import>");
+      } catch {
+        // Missing/unreadable imports are ignored; stale references should not
+        // make the whole instructions load fail.
+      }
+    }
+  }
+  return out.join("\n").trim();
+}
+
+export function expandContextFile(
+  rootPath: string,
+  filePath: string,
+  raw: string,
+  readFile: (path: string) => Promise<string> = readFileContent,
+): Promise<string> {
+  return expandContextImports(
+    stripTrailingSlash(rootPath),
+    normalizePath(filePath),
+    raw,
+    readFile,
+    new Set([normalizePath(filePath)]),
+    0,
+    { used: raw.length },
+  );
 }
 
 async function loadCommandsFromDir(
@@ -106,4 +255,34 @@ export async function loadCustomInstructions(
   } catch {
     return null;
   }
+}
+
+/** Workspace-level agent/context files (AGENTS.md, CLAUDE.md, etc.) expanded
+ *  with bounded @file imports. Returned as append-only instructions so the app
+ *  still owns the base system prompt and `.markdraw/instructions.md` semantics. */
+export async function loadContextInstructions(
+  rootPath: string | null,
+): Promise<CustomInstructions | null> {
+  if (!rootPath) return null;
+  const blocks: ContextFileDependency[] = [];
+  const root = stripTrailingSlash(rootPath);
+  for (const relativePath of CONTEXT_FILE_CANDIDATES) {
+    const filePath = normalizePath(joinDir(root, relativePath));
+    try {
+      const raw = await readFileContent(filePath);
+      const expanded = await expandContextFile(root, filePath, raw);
+      if (expanded.trim()) blocks.push({ content: expanded.trim(), path: relativePath });
+    } catch {
+      // Optional context file not present.
+    }
+  }
+  if (blocks.length === 0) return null;
+  return {
+    mode: "append",
+    text: [
+      "[Workspace context files]",
+      ...blocks.map((block) => `<context-file path="${block.path}">\n${block.content}\n</context-file>`),
+      "[/Workspace context files]",
+    ].join("\n\n"),
+  };
 }

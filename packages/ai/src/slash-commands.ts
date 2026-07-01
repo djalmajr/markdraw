@@ -23,8 +23,13 @@ export interface CustomInstructions {
 /** Valid command names: lowercase alphanumeric start, then [a-z0-9_-]. */
 const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
-/** Literal token replaced by the user's arguments on expansion. */
-const ARGUMENTS_TOKEN = "$ARGUMENTS";
+/** Expansion tokens matched against the template in a single pass: `$ARGUMENTS`
+ *  (the whole raw arg string) or a `$1`..`$9` positional. Single-pass means the
+ *  text inserted for one token is never re-scanned for another, so a literal
+ *  `$3` (or even `$ARGUMENTS`) arriving via the user's args stays verbatim. The
+ *  lone capture group is the positional digit; it is `undefined` for an
+ *  `$ARGUMENTS` match. */
+const EXPANSION_TOKEN_RE = /\$ARGUMENTS|\$([1-9])/g;
 
 interface FrontmatterSplit {
   body: string;
@@ -89,16 +94,73 @@ export function mergeSlashCommands(...lists: SlashCommandDef[][]): SlashCommandD
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Split slash-command args into shell-like words. Handles single/double quotes
+ *  and backslash escaping without trying to be a full shell parser. */
+export function parseSlashArgs(args: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let escaping = false;
+  for (const char of args) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+    if (quote === "'") {
+      // Inside single quotes everything is literal — even a backslash — until
+      // the closing quote, matching POSIX single-quote semantics.
+      if (char === "'") quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        out.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (escaping) current += "\\";
+  if (current) out.push(current);
+  return out;
+}
+
 /**
  * Expand a command template with the user's arguments: every literal
- * `$ARGUMENTS` occurrence is replaced by `args` (which may be ""). A template
- * without the token still receives non-empty args, appended after a blank
- * line, so "/cmd extra context" never silently drops the extra text.
+ * `$ARGUMENTS` occurrence is replaced by `args` (which may be ""). Positional
+ * `$1`..`$9` tokens receive quote-aware arguments. A template without any token
+ * still receives non-empty args, appended after a blank line, so "/cmd extra
+ * context" never silently drops the extra text.
  */
 export function expandSlashCommand(template: string, args: string): string {
-  if (template.includes(ARGUMENTS_TOKEN)) {
-    return template.split(ARGUMENTS_TOKEN).join(args);
-  }
+  const words = parseSlashArgs(args);
+  let hasArguments = false;
+  let hasPositionals = false;
+  const expanded = template.replace(EXPANSION_TOKEN_RE, (_match, positional) => {
+    if (positional === undefined) {
+      hasArguments = true;
+      return args;
+    }
+    hasPositionals = true;
+    return words[Number(positional) - 1] ?? "";
+  });
+  if (hasArguments || hasPositionals) return expanded;
   return args ? `${template}\n\n${args}` : template;
 }
 

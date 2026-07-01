@@ -4,6 +4,7 @@
 // Settings, and injected into chat context only when the current turn matches.
 
 import { invoke } from "./chaos-invoke.ts";
+import { djb2 } from "@markdraw/core/hash.ts";
 
 export type SkillTool = "claude" | "codex" | "opencode";
 export type SkillScope = "global" | "project";
@@ -44,12 +45,6 @@ export function skillIdentity(s: { name: string }): string {
     .toLowerCase()
     .replace(/[^a-z0-9:_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
-}
-
-function djb2(str: string): string {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
 }
 
 const TOOL_PRIORITY: Record<SkillTool, number> = {

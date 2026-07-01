@@ -16,8 +16,10 @@
 import { createEffect, createRoot, createSignal, getOwner, runWithOwner, untrack, type Owner } from "solid-js";
 import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
 import {
+  type PersistedAdvisorNote,
   type PersistedChatMessage,
   type PersistedChatSessionMeta,
+  type PersistedToolActivity,
   deleteChatMessages,
   enforceSessionCap,
   getChatMessages,
@@ -29,6 +31,8 @@ import {
   type AiChatStore,
   type ChatContextResult,
   type ChatTurn,
+  type TurnValidationResult,
+  type ToolActivity,
   createAiChatStore,
 } from "./create-ai-chat-store.ts";
 
@@ -81,8 +85,40 @@ export interface AiChatSessionsConfig {
   /** Explicit context preamble injected into the sent message (shared across
    *  sessions — reflects the current composer context chips). */
   getContext?: (request: { history: ChatTurn[]; userMessage: string }) => ChatContextResult;
-  /** Called when any session's assistant turn finalizes (Plan-mode save). */
-  onAssistantTurn?: (content: string) => void;
+  /** Snapshot of the host chat mode captured when a turn STARTS, forwarded to
+   *  each session store so finalization reflects the turn's OWN mode (not the
+   *  panel-global mode, which can change while a background turn streams). */
+  getMode?: () => string | undefined;
+  /** Called when any session's assistant turn finalizes (Plan-mode save).
+   *  Receives the mode the turn ran under. */
+  onAssistantTurn?: (content: string, mode?: string) => void;
+  /** Optional host guard run after a turn finalizes, before the turn is accepted
+   *  as successful. */
+  validateAssistantTurn?: (request: {
+    assistantText: string;
+    history: ChatTurn[];
+    mode?: string;
+    tools: ToolActivity[];
+    userMessage: string;
+  }) => string | TurnValidationResult | undefined;
+  adviseAssistantTurn?: (request: {
+    assistantText: string;
+    history: ChatTurn[];
+    mode?: string;
+    tools: ToolActivity[];
+    userMessage: string;
+  }) => Promise<PersistedAdvisorNote[]>;
+  copyArtifacts?: (sourceSessionId: string, targetSessionId: string) => void | Promise<void>;
+  deleteArtifacts?: (sessionId: string) => void | Promise<void>;
+  getWorkspaceRoot?: () => string | null | undefined;
+  writeArtifact?: (input: {
+    content: string;
+    kind: NonNullable<PersistedToolActivity["resultArtifact"]>["kind"];
+    mime: string;
+    sessionId: string;
+    title: string;
+    toolCallId?: string;
+  }) => Promise<NonNullable<PersistedToolActivity["resultArtifact"]>>;
   /** Title generation from the first user message; injected for purity/testing. */
   deriveTitle?: (firstUserMessage: string) => string;
   /** Engine-level Accept/Reject gate, forwarded to every session store. */
@@ -140,6 +176,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
       records.get(id)?.dispose();
       records.delete(id);
       deleteChatMessages(id);
+      void config.deleteArtifacts?.(id);
     }
     if (evictedIds.length) setMetas((ms) => ms.filter((m) => !evictedIds.includes(m.id)));
     setChatSessionsIndex(index);
@@ -149,7 +186,9 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     return turns.map((t) => ({
       role: t.role,
       content: t.content,
+      ...(t.kind ? { kind: t.kind } : {}),
       ...(t.context && t.context.length ? { context: t.context } : {}),
+      ...(t.advisorNotes && t.advisorNotes.length ? { advisorNotes: t.advisorNotes } : {}),
       ...(t.tools && t.tools.length ? { tools: t.tools.map(toPersistedTool) } : {}),
       ...(t.usage ? { usage: t.usage } : {}),
     }));
@@ -198,7 +237,21 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
           ...(config.getTools ? { getTools: config.getTools } : {}),
           ...(config.maxSteps != null ? { maxSteps: config.maxSteps } : {}),
           ...(config.getContext ? { getContext: config.getContext } : {}),
+          ...(config.getMode ? { getMode: config.getMode } : {}),
           ...(config.onAssistantTurn ? { onAssistantTurn: config.onAssistantTurn } : {}),
+          ...(config.validateAssistantTurn
+            ? { validateAssistantTurn: config.validateAssistantTurn }
+            : {}),
+          ...(config.adviseAssistantTurn ? { adviseAssistantTurn: config.adviseAssistantTurn } : {}),
+          ...(config.writeArtifact
+            ? {
+                writeArtifact: (input) =>
+                  config.writeArtifact!({
+                    ...input,
+                    sessionId: id,
+                  }),
+              }
+            : {}),
           ...(config.onApprovalRequest ? { onApprovalRequest: config.onApprovalRequest } : {}),
           initialMessages: initial,
         });
@@ -206,10 +259,20 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
         // Persist + auto-title when this session's turns change. Tracks ONLY the
         // store signals; the metas read is untracked to avoid a write→read loop
         // (this effect calls patchMeta, which writes metas).
+        //
+        // The effect's eager FIRST run only reflects the seeded/hydrated state —
+        // and it fires AFTER hydrate() clears `hydrating` (effects are queued),
+        // so without this skip it would stamp lastActiveAt=now on every open
+        // session at boot, destroying persisted ordering (continueLatestChat).
+        let initialized = false;
         createEffect(() => {
           const msgs = store.messages();
           store.streaming(); // re-run on turn finalize / cancel
           if (hydrating) return;
+          if (!initialized) {
+            initialized = true;
+            return;
+          }
           const patch: Partial<PersistedChatSessionMeta> = { lastActiveAt: Date.now() };
           const cur = untrack(() => metas()).find((m) => m.id === id);
           if (cur && cur.title === "") {
@@ -241,6 +304,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     return msgs.map((m) => ({
       role: m.role,
       content: m.content,
+      ...(m.kind ? { kind: m.kind } : {}),
       ...(m.context && m.context.length ? { context: m.context } : {}),
       ...(m.tools && m.tools.length
         ? {
@@ -251,9 +315,11 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
               status: t.status,
               ...(t.argsJson != null ? { args: parse(t.argsJson) } : {}),
               ...(t.resultJson != null ? { result: parse(t.resultJson) } : {}),
+              ...(t.resultArtifact !== undefined ? { resultArtifact: t.resultArtifact } : {}),
             })),
           }
         : {}),
+      ...(m.advisorNotes && m.advisorNotes.length ? { advisorNotes: m.advisorNotes } : {}),
       ...(m.usage ? { usage: m.usage } : {}),
     }));
   }
@@ -283,6 +349,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
   function createSession(opts?: { activate?: boolean; title?: string }): string {
     const id = newId();
     const now = Date.now();
+    const workspaceRoot = config.getWorkspaceRoot?.() ?? undefined;
     setMetas((ms) => [
       ...ms,
       {
@@ -293,6 +360,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
         isArchived: false,
         isOpen: true,
         isPinned: false,
+        ...(workspaceRoot ? { workspaceRoot } : {}),
       },
     ]);
     records.set(id, instantiate(id, []));
@@ -327,12 +395,14 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
         isArchived: false,
         isOpen: true,
         isPinned: false,
+        ...(src.workspaceRoot ? { workspaceRoot: src.workspaceRoot } : {}),
       },
     ]);
     records.set(forkId, instantiate(forkId, turns));
     // Make the copied turns durable immediately (same write path teardown
     // uses) — the per-store effect only persists on the debounce.
     flushMessages(forkId, turns);
+    void config.copyArtifacts?.(id, forkId);
     setActiveId(forkId);
     bump();
     schedulePersistIndex();
@@ -391,6 +461,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     clearTimeout(msgTimers.get(id));
     msgTimers.delete(id);
     deleteChatMessages(id); // immediate — destructive, must not be lost to a debounce
+    void config.deleteArtifacts?.(id);
     setMetas((ms) => ms.filter((m) => m.id !== id));
     if (activeId() === id) setActiveId(neighbor);
     bump();

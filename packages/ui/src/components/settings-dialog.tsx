@@ -18,12 +18,16 @@ import IconPlus from "~icons/lucide/plus";
 import IconSparkles from "~icons/lucide/sparkles";
 import IconPlug from "~icons/lucide/plug";
 import IconBookOpen from "~icons/lucide/book-open";
+import IconScrollText from "~icons/lucide/scroll-text";
 import IconLayers from "~icons/lucide/layers";
 import IconPencil from "~icons/lucide/pencil";
 import IconPalette from "~icons/lucide/palette";
 import IconKeyboard from "~icons/lucide/keyboard";
 import IconRotate from "~icons/lucide/rotate-ccw";
 import IconInfo from "~icons/lucide/info";
+import IconTerminal from "~icons/lucide/terminal";
+import IconFileText from "~icons/lucide/file-text";
+import IconMessageSquareText from "~icons/lucide/message-square-text";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import {
@@ -74,6 +78,7 @@ export type SettingsSection =
   | "ai"
   | "mcp"
   | "skills"
+  | "rules"
   | "indexing"
   | "editor"
   | "appearance"
@@ -81,6 +86,31 @@ export type SettingsSection =
   | "about";
 
 export type McpTransport = "stdio" | "http";
+
+export interface SettingsMcpPromptArgument {
+  description?: string;
+  name: string;
+  required?: boolean;
+  title?: string;
+}
+
+export interface SettingsMcpPrompt {
+  arguments?: SettingsMcpPromptArgument[];
+  description?: string;
+  name: string;
+  server: string;
+  title?: string;
+}
+
+export interface SettingsMcpResource {
+  description?: string;
+  mimeType?: string;
+  name: string;
+  server: string;
+  size?: number;
+  title?: string;
+  uri: string;
+}
 
 export interface SettingsMcpServer {
   args?: string[];
@@ -106,6 +136,10 @@ export interface SettingsMcpServer {
   discovered?: { tools: string[]; scope: string };
   /** A discovered project-scoped server awaiting the user's approval to connect. */
   pendingApproval?: boolean;
+  promptCount?: number;
+  prompts?: SettingsMcpPrompt[];
+  resourceCount?: number;
+  resources?: SettingsMcpResource[];
 }
 
 export interface SettingsSkill {
@@ -119,6 +153,23 @@ export interface SettingsSkill {
     scope: "global" | "project";
     path: string;
     active: boolean;
+  }>;
+}
+
+export interface SettingsRule {
+  alwaysApply: boolean;
+  condition?: string;
+  description?: string;
+  globs: string[];
+  id: string;
+  name: string;
+  scope: "global" | "project";
+  source: string;
+  sources: Array<{
+    active: boolean;
+    path: string;
+    scope: "global" | "project";
+    source: string;
   }>;
 }
 
@@ -151,6 +202,25 @@ export interface SettingsAiProvider {
   connectGroup?: string;
   /** The live model list can be re-fetched (openai-compatible + baseURL). */
   fetchable?: boolean;
+  /** Providers sharing this key are refreshed with a single backend call. */
+  refreshGroup?: string;
+}
+
+export interface SettingsShellCommandStatus {
+  conflict: boolean;
+  executable_path: string;
+  installed: boolean;
+  managed: boolean;
+  path_dir_on_path: boolean;
+  target_dir: string;
+  target_path: string;
+}
+
+export interface SettingsModelCatalogStatus {
+  error?: string;
+  fetchedAt?: number;
+  source?: "cache" | "network";
+  state: "failed" | "idle" | "refreshing";
 }
 
 export interface SettingsDialogProps {
@@ -207,12 +277,15 @@ export interface SettingsDialogProps {
   onRemoveProvider?: (ids: string[]) => void | Promise<void>;
   /** Re-fetch a provider's live model list. */
   onRefreshModels?: (providerId: string) => void | Promise<void>;
+  modelCatalogStatus?: Record<string, SettingsModelCatalogStatus>;
   appVersion?: string;
   platform?: Platform;
   /** Configured MCP servers with live connection/tool status. */
   mcpServers?: SettingsMcpServer[];
   /** Auto-discovered agent skills from Claude/Codex/OpenCode. Read-only. */
   skills?: SettingsSkill[];
+  /** Auto-discovered sticky rules from Markdraw and agent config files. */
+  rules?: SettingsRule[];
   /** Persist (add or update) an MCP server. */
   onSaveMcpServer?: (server: SaveMcpServerInput) => void | Promise<void>;
   /** Remove an MCP server by id. */
@@ -223,6 +296,8 @@ export interface SettingsDialogProps {
   onAuthorizeMcpServer?: (id: string) => void | Promise<void>;
   /** Approve a discovered project-scoped server so it may connect (spawns it). */
   onApproveMcpServer?: (id: string) => void | Promise<void>;
+  onAttachMcpResource?: (resource: SettingsMcpResource) => void | Promise<void>;
+  onInsertMcpPrompt?: (prompt: SettingsMcpPrompt) => void | Promise<void>;
   /** Whether to import MCP servers from the OpenCode CLI's config. */
   importOpenCodeMcps?: boolean;
   onImportOpenCodeMcpsChange?: (enabled: boolean) => void;
@@ -257,6 +332,10 @@ export interface SettingsDialogProps {
   /** Open an external URL in the user's browser — used by the About section's
    *  privacy-policy link (the full policy lives on the marketing site). */
   onOpenExternal?: (url: string) => void;
+  shellCommandStatus?: SettingsShellCommandStatus | null;
+  onRefreshShellCommand?: () => void | Promise<void>;
+  onInstallShellCommand?: () => void | Promise<void>;
+  onUninstallShellCommand?: () => void | Promise<void>;
 }
 
 const THEME_MODES = ["system", "light", "dark"] as const;
@@ -270,6 +349,7 @@ const NAV: ReadonlyArray<{ id: SettingsSection; key: string; icon: () => JSX.Ele
   { id: "ai", key: "settings_nav_ai", icon: () => <IconSparkles width={15} height={15} /> },
   { id: "mcp", key: "settings_nav_mcp", icon: () => <IconPlug width={15} height={15} /> },
   { id: "skills", key: "settings_nav_skills", icon: () => <IconBookOpen width={15} height={15} /> },
+  { id: "rules", key: "settings_nav_rules", icon: () => <IconScrollText width={15} height={15} /> },
   { id: "indexing", key: "settings_nav_indexing", icon: () => <IconLayers width={15} height={15} /> },
   { id: "editor", key: "settings_nav_editor", icon: () => <IconPencil width={15} height={15} /> },
   { id: "appearance", key: "settings_nav_appearance", icon: () => <IconPalette width={15} height={15} /> },
@@ -300,6 +380,98 @@ function SettingsBreadcrumb(props: { segments: string[] }): JSX.Element {
         )}
       </For>
     </nav>
+  );
+}
+
+function ShellCommandSection(props: SettingsDialogProps): JSX.Element {
+  const [action, setAction] = createSignal<"install" | "refresh" | "uninstall" | null>(null);
+  const [error, setError] = createSignal<string | null>(null);
+  const run = async (
+    nextAction: "install" | "refresh" | "uninstall",
+    task: (() => void | Promise<void>) | undefined,
+  ): Promise<void> => {
+    if (!task) return;
+    setError(null);
+    setAction(nextAction);
+    try {
+      await task();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAction(null);
+    }
+  };
+  const statusLabel = (): string => {
+    const status = props.shellCommandStatus;
+    if (!status) return label("settings_shell_status_unknown");
+    if (status.conflict) return label("settings_shell_status_conflict");
+    if (status.installed) return label("settings_shell_status_installed");
+    return label("settings_shell_status_not_installed");
+  };
+  return (
+    <div class="settings-shell">
+      <div class="settings-shell-title">
+        <IconTerminal width={14} height={14} />
+        <span>{(useLocale(), label("settings_shell_title"))}</span>
+      </div>
+      <p class="settings-prose">{(useLocale(), label("settings_shell_desc"))}</p>
+      <div class="settings-shell-command">markdraw &lt;path&gt;</div>
+      <Show when={props.shellCommandStatus}>
+        {(status) => (
+          <>
+            <div class="settings-shell-status">{statusLabel()}</div>
+            <div class="settings-shell-path" title={status().target_path}>
+              {status().target_path}
+            </div>
+            <Show when={status().conflict}>
+              <div class="ai-error">{(useLocale(), label("settings_shell_conflict"))}</div>
+            </Show>
+            <Show when={!status().path_dir_on_path}>
+              <div class="settings-shell-note">
+                {(useLocale(), label("settings_shell_path_missing"))} {status().target_dir}
+              </div>
+            </Show>
+          </>
+        )}
+      </Show>
+      <Show when={error()}>
+        <div class="ai-error">{error()}</div>
+      </Show>
+      <div class="settings-row" style={{ gap: "6px", "margin-top": "8px" }}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void run("refresh", props.onRefreshShellCommand)}
+          loading={action() === "refresh"}
+          disabled={action() !== null}
+        >
+          {(useLocale(), label("settings_shell_refresh"))}
+        </Button>
+        <Show
+          when={props.shellCommandStatus?.installed}
+          fallback={
+            <Button
+              size="sm"
+              onClick={() => void run("install", props.onInstallShellCommand)}
+              loading={action() === "install"}
+              disabled={action() !== null || !!props.shellCommandStatus?.conflict}
+            >
+              {(useLocale(), label("settings_shell_install"))}
+            </Button>
+          }
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void run("uninstall", props.onUninstallShellCommand)}
+            loading={action() === "uninstall"}
+            disabled={action() !== null}
+          >
+            {(useLocale(), label("settings_shell_uninstall"))}
+          </Button>
+        </Show>
+      </div>
+    </div>
   );
 }
 
@@ -356,6 +528,9 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
               <Match when={section() === "skills"}>
                 <SkillsSection {...props} />
               </Match>
+              <Match when={section() === "rules"}>
+                <RulesSection {...props} />
+              </Match>
               <Match when={section() === "indexing"}>
                 <IndexingSection {...props} />
               </Match>
@@ -398,6 +573,7 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                       </Button>
                     </Show>
                   </div>
+                  <ShellCommandSection {...props} />
                 </div>
               </Match>
               <Match when={section() === "editor"}>
@@ -704,11 +880,41 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     return undefined;
   };
   /** Fetchable + connected ids in the group → eligible for "Refresh models". */
-  const groupRefreshableIds = (): string[] =>
-    groupApiIds().filter(
-      (id) =>
-        props.aiProviders.find((p) => p.id === id)?.fetchable && connectedProviderIds().has(id),
-    );
+  const groupRefreshableIds = (): string[] => {
+    const seen = new Set<string>();
+    return groupApiIds().filter((id) => {
+      const provider = props.aiProviders.find((p) => p.id === id);
+      if (!provider?.fetchable || !connectedProviderIds().has(id)) return false;
+      const refreshKey = provider.refreshGroup ?? id;
+      if (seen.has(refreshKey)) return false;
+      seen.add(refreshKey);
+      return true;
+    });
+  };
+  const groupModelCatalogStatus = (): SettingsModelCatalogStatus | undefined => {
+    for (const id of groupApiIds()) {
+      const provider = props.aiProviders.find((p) => p.id === id);
+      if (!provider?.fetchable) continue;
+      const key = provider.refreshGroup ?? id;
+      const status = props.modelCatalogStatus?.[key];
+      if (status) return status;
+    }
+    return undefined;
+  };
+  const modelCatalogStatusText = (): string | null => {
+    const status = groupModelCatalogStatus();
+    if (!status) return null;
+    if (status.state === "refreshing") return label("settings_ai_models_cache_refreshing");
+    const suffix = status.fetchedAt
+      ? ` ${new Intl.DateTimeFormat(useLocale(), { dateStyle: "short", timeStyle: "short" }).format(new Date(status.fetchedAt))}`
+      : "";
+    if (status.state === "failed") {
+      return `${label("settings_ai_models_cache_failed")}${suffix}`;
+    }
+    if (status.source === "cache") return `${label("settings_ai_models_cache_cached")}${suffix}`;
+    if (status.source === "network") return `${label("settings_ai_models_cache_updated")}${suffix}`;
+    return null;
+  };
   const [refreshing, setRefreshing] = createSignal(false);
   async function refreshGroupModels(): Promise<void> {
     const ids = groupRefreshableIds();
@@ -890,6 +1096,9 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
                   {(useLocale(), label("settings_ai_refresh_models"))}
                 </Button>
               </div>
+              <Show when={modelCatalogStatusText()}>
+                {(text) => <div class="settings-tier-note">{text()}</div>}
+              </Show>
             </Show>
           </Show>
           {/* Subscription — for any cli-subscription provider, below the API
@@ -1216,6 +1425,108 @@ function SkillDetail(props: { skill: SettingsSkill; onBack: () => void }): JSX.E
   );
 }
 
+function RuleCard(props: { rule: SettingsRule; onOpen: () => void }): JSX.Element {
+  const active = createMemo(() => props.rule.sources.find((s) => s.active) ?? props.rule.sources[0]);
+  const sourceSummary = createMemo(() => {
+    const source = active();
+    if (!source) return "";
+    return `${label("settings_rules_preferred_source")} ${capitalizeTool(source.source)} · ${scopeLabel(source.scope)}`;
+  });
+
+  return (
+    <button type="button" class="settings-mcp-card settings-skill-card" onClick={props.onOpen}>
+      <div class="settings-mcp-card-header">
+        <span class="settings-mcp-avatar" aria-hidden="true">
+          {props.rule.name.charAt(0).toUpperCase()}
+        </span>
+        <div class="settings-mcp-card-info">
+          <span class="settings-mcp-card-name">{props.rule.name}</span>
+          <Show when={props.rule.description}>
+            <span class="settings-skill-description-preview">{props.rule.description}</span>
+          </Show>
+        </div>
+        <IconChevronRight width={14} height={14} class="settings-skill-card-chevron" aria-hidden="true" />
+      </div>
+      <Show when={sourceSummary()}>
+        <div class="settings-mcp-badge">{(useLocale(), sourceSummary())}</div>
+      </Show>
+      <div class="settings-mcp-tool-chips">
+        <Show when={props.rule.alwaysApply}>
+          <span class="settings-mcp-tool-chip">{(useLocale(), label("settings_rules_always_apply"))}</span>
+        </Show>
+        <Show when={props.rule.condition}>
+          <span class="settings-mcp-tool-chip">{(useLocale(), label("settings_rules_ttsr"))}</span>
+        </Show>
+        <span class="settings-mcp-tool-chip">{capitalizeTool(props.rule.source)}</span>
+      </div>
+    </button>
+  );
+}
+
+function RuleDetail(props: { rule: SettingsRule; onBack: () => void }): JSX.Element {
+  const active = createMemo(() => props.rule.sources.find((s) => s.active) ?? props.rule.sources[0]);
+  return (
+    <div class="settings-section">
+      <SettingsBreadcrumb segments={[(useLocale(), label("settings_nav_rules"))]} />
+      <div class="settings-subpage-header">
+        <button
+          type="button"
+          class="settings-back"
+          aria-label={(useLocale(), label("settings_ai_back"))}
+          onClick={props.onBack}
+        >
+          <IconArrowLeft width={14} height={14} />
+        </button>
+        <h3 class="settings-h3" style={{ margin: "0" }}>{props.rule.name}</h3>
+      </div>
+      <Show when={props.rule.description}>
+        <p class="settings-skill-description">{props.rule.description}</p>
+      </Show>
+      <div class="settings-skill-detail-block">
+        <div class="settings-label">{(useLocale(), label("settings_rules_behavior"))}</div>
+        <div class="settings-mcp-tool-chips">
+          <span class="settings-mcp-tool-chip">
+            {props.rule.alwaysApply ? label("settings_rules_always_apply") : label("settings_rules_on_demand")}
+          </span>
+          <Show when={props.rule.condition}>
+            <span class="settings-mcp-tool-chip">{(useLocale(), label("settings_rules_ttsr"))}</span>
+          </Show>
+        </div>
+      </div>
+      <Show when={props.rule.globs.length > 0}>
+        <div class="settings-skill-detail-block">
+          <div class="settings-label">{(useLocale(), label("settings_rules_globs"))}</div>
+          <div class="settings-mcp-tool-chips">
+            <For each={props.rule.globs}>
+              {(glob) => <span class="settings-mcp-tool-chip">{glob}</span>}
+            </For>
+          </div>
+        </div>
+      </Show>
+      <div class="settings-skill-detail-block">
+        <div class="settings-label">{(useLocale(), label("settings_skills_sources"))}</div>
+        <div class="settings-skill-source-list">
+          <For each={props.rule.sources}>
+            {(source) => (
+              <div
+                class="settings-skill-source-row"
+                classList={{ "settings-skill-source-row-active": source === active() }}
+              >
+                <span class="settings-mcp-tool-chip">
+                  {capitalizeTool(source.source)} · {scopeLabel(source.scope)}
+                </span>
+                <span class="settings-skill-source-path" title={source.path}>
+                  {source.path}
+                </span>
+              </div>
+            )}
+          </For>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SkillsSection(props: SettingsDialogProps): JSX.Element {
   const skills = createMemo(() => props.skills ?? []);
   const [selectedSkillId, setSelectedSkillId] = createSignal<string | null>(null);
@@ -1248,17 +1559,53 @@ function SkillsSection(props: SettingsDialogProps): JSX.Element {
   );
 }
 
+function RulesSection(props: SettingsDialogProps): JSX.Element {
+  const rules = createMemo(() => props.rules ?? []);
+  const [selectedRuleId, setSelectedRuleId] = createSignal<string | null>(null);
+  const selectedRule = createMemo(() => rules().find((rule) => rule.id === selectedRuleId()) ?? null);
+  return (
+    <Show
+      when={selectedRule()}
+      keyed
+      fallback={
+        <div class="settings-section">
+          <h3 class="settings-h3">{(useLocale(), label("settings_rules_title"))}</h3>
+          <p class="settings-prose" style={{ margin: "0 0 6px" }}>
+            {(useLocale(), label("settings_rules_desc"))}
+          </p>
+          <Show
+            when={rules().length > 0}
+            fallback={<p class="settings-prose">{(useLocale(), label("settings_rules_empty"))}</p>}
+          >
+            <div class="settings-mcp-list">
+              <For each={rules()}>
+                {(rule) => <RuleCard rule={rule} onOpen={() => setSelectedRuleId(rule.id)} />}
+              </For>
+            </div>
+          </Show>
+        </div>
+      }
+    >
+      {(rule) => <RuleDetail rule={rule} onBack={() => setSelectedRuleId(null)} />}
+    </Show>
+  );
+}
+
 // Tool chips above this count collapse behind a "Show more (N)" toggle, so a
 // large server (dozens of tools) doesn't dominate the settings list.
+const MCP_PROMPTS_VISIBLE = 4;
+const MCP_RESOURCES_VISIBLE = 4;
 const MCP_TOOLS_VISIBLE = 6;
 
 function McpServerCard(props: {
   server: SettingsMcpServer;
+  onAttachResource: (resource: SettingsMcpResource) => void | Promise<void>;
   onRemove: () => void;
   onToggle: (enabled: boolean) => void;
   onAuthorize: () => void | Promise<void>;
   onApprove: () => void | Promise<void>;
   onEdit: () => void;
+  onInsertPrompt: (prompt: SettingsMcpPrompt) => void | Promise<void>;
 }): JSX.Element {
   const [expanded, setExpanded] = createSignal(false);
   const [authorizing, setAuthorizing] = createSignal(false);
@@ -1290,9 +1637,16 @@ function McpServerCard(props: {
   };
 
   const tools = createMemo(() => props.server.tools ?? []);
+  const prompts = createMemo(() => props.server.prompts ?? []);
+  const resources = createMemo(() => props.server.resources ?? []);
   const visibleTools = createMemo(() =>
     expanded() ? tools() : tools().slice(0, MCP_TOOLS_VISIBLE),
   );
+  const visiblePrompts = createMemo(() => prompts().slice(0, MCP_PROMPTS_VISIBLE));
+  const visibleResources = createMemo(() => resources().slice(0, MCP_RESOURCES_VISIBLE));
+  const promptLabel = (prompt: SettingsMcpPrompt): string => prompt.title ?? prompt.name;
+  const resourceLabel = (resource: SettingsMcpResource): string =>
+    resource.title ?? resource.name ?? resource.uri;
   /** stdio → the spawn line; http → the endpoint. Both read best in mono. */
   const subtitle = (): string =>
     props.server.transport === "stdio"
@@ -1376,6 +1730,48 @@ function McpServerCard(props: {
             </Show>
           </button>
         </Show>
+      </Show>
+      <Show when={resources().length > 0}>
+        <div class="settings-mcp-related">
+          <div class="settings-mcp-related-title">{(useLocale(), label("settings_mcp_resources"))}</div>
+          <div class="settings-mcp-tool-chips">
+            <For each={visibleResources()}>
+              {(resource) => (
+                <button
+                  type="button"
+                  class="settings-mcp-tool-chip settings-mcp-action-chip"
+                  title={resource.description ?? resource.uri}
+                  aria-label={`${label("settings_mcp_attach_resource")}: ${resourceLabel(resource)}`}
+                  onClick={() => void props.onAttachResource(resource)}
+                >
+                  <IconFileText width={11} height={11} aria-hidden="true" />
+                  <span>{resourceLabel(resource)}</span>
+                </button>
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
+      <Show when={prompts().length > 0}>
+        <div class="settings-mcp-related">
+          <div class="settings-mcp-related-title">{(useLocale(), label("settings_mcp_prompts"))}</div>
+          <div class="settings-mcp-tool-chips">
+            <For each={visiblePrompts()}>
+              {(prompt) => (
+                <button
+                  type="button"
+                  class="settings-mcp-tool-chip settings-mcp-action-chip"
+                  title={prompt.description ?? prompt.name}
+                  aria-label={`${label("settings_mcp_insert_prompt")}: ${promptLabel(prompt)}`}
+                  onClick={() => void props.onInsertPrompt(prompt)}
+                >
+                  <IconMessageSquareText width={11} height={11} aria-hidden="true" />
+                  <span>{promptLabel(prompt)}</span>
+                </button>
+              )}
+            </For>
+          </div>
+        </div>
       </Show>
       <Show when={props.server.error}>
         <span class="ai-error">{props.server.error}</span>
@@ -1587,11 +1983,13 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
                         {(server) => (
                           <McpServerCard
                             server={server}
+                            onAttachResource={(resource) => props.onAttachMcpResource?.(resource)}
                             onRemove={() => void props.onRemoveMcpServer?.(server.id)}
                             onToggle={(checked) => void props.onToggleMcpServer?.(server.id, checked)}
                             onAuthorize={() => props.onAuthorizeMcpServer?.(server.id)}
                             onApprove={() => props.onApproveMcpServer?.(server.id)}
                             onEdit={() => openEdit(server)}
+                            onInsertPrompt={(prompt) => props.onInsertMcpPrompt?.(prompt)}
                           />
                         )}
                       </For>

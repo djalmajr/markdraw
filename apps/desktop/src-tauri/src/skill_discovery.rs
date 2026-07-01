@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 
+use crate::frontmatter::{first_heading, frontmatter_value};
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredSkillFile {
@@ -21,92 +23,6 @@ pub struct DiscoveredSkillFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
     pub source_path: String,
-}
-
-fn unquote(s: &str) -> String {
-    let trimmed = s.trim();
-    if trimmed.len() >= 2 {
-        let bytes = trimmed.as_bytes();
-        if (bytes[0] == b'"' && bytes[trimmed.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[trimmed.len() - 1] == b'\'')
-        {
-            return trimmed[1..trimmed.len() - 1].trim().to_string();
-        }
-    }
-    trimmed.to_string()
-}
-
-fn frontmatter_value(content: &str, key: &str) -> Option<String> {
-    let mut lines = content.lines();
-    if lines.next()?.trim() != "---" {
-        return None;
-    }
-    let prefix = format!("{key}:");
-    let mut frontmatter = Vec::new();
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed == "---" {
-            break;
-        }
-        frontmatter.push(line);
-    }
-
-    for (index, line) in frontmatter.iter().enumerate() {
-        let trimmed = line.trim();
-        if let Some(value) = trimmed.strip_prefix(&prefix) {
-            let value = unquote(value);
-            if matches!(value.as_bytes().first(), Some(b'>') | Some(b'|')) {
-                let value = frontmatter_block_value(&frontmatter[index + 1..], value.starts_with('>'));
-                if !value.is_empty() {
-                    return Some(value);
-                }
-            }
-            if !value.is_empty() {
-                return Some(value);
-            }
-        }
-    }
-    None
-}
-
-fn is_frontmatter_key(line: &str) -> bool {
-    if line.starts_with(' ') || line.starts_with('\t') {
-        return false;
-    }
-    let Some((key, _)) = line.split_once(':') else {
-        return false;
-    };
-    !key.is_empty()
-        && key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-}
-
-fn frontmatter_block_value(lines: &[&str], folded: bool) -> String {
-    let mut block = Vec::new();
-    for line in lines {
-        if is_frontmatter_key(line) {
-            break;
-        }
-        block.push(line.trim().to_string());
-    }
-    if folded {
-        block.join(" ")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-    } else {
-        block.join("\n").trim().to_string()
-    }
-}
-
-fn first_heading(content: &str) -> Option<String> {
-    content.lines().find_map(|line| {
-        let trimmed = line.trim();
-        let heading = trimmed.strip_prefix("# ")?;
-        let heading = heading.trim();
-        (!heading.is_empty()).then(|| heading.to_string())
-    })
 }
 
 fn skill_name(path: &Path, content: &str) -> Option<String> {

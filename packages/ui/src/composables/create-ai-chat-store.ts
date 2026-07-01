@@ -10,6 +10,14 @@
 import { createSignal } from "solid-js";
 import * as m from "@markdraw/i18n";
 import type { AIErrorCode, AIMessage, AIProvider, AITool } from "@markdraw/ai/types.ts";
+import type { PersistedAdvisorNote, PersistedToolActivity } from "@markdraw/core/ai-chat-sessions.ts";
+
+const TOOL_RESULT_ARTIFACT_THRESHOLD = 8_000;
+const TOOL_RESULT_PREVIEW_CHARS = 2_000;
+const AUTO_COMPACT_MESSAGE_THRESHOLD = 120;
+const COMPACT_KEEP_MESSAGES = 40;
+
+type ChatArtifactRef = NonNullable<PersistedToolActivity["resultArtifact"]>;
 
 /** One tool invocation surfaced during a turn (MCP server or in-process app
  *  tool). With the non-streaming engine these arrive after the loop resolves,
@@ -22,6 +30,7 @@ export interface ToolActivity {
   args?: unknown;
   status: "running" | "done" | "error";
   result?: unknown;
+  resultArtifact?: ChatArtifactRef;
 }
 
 /** Per-run telemetry captured from the provider's terminal `usage` stream
@@ -34,7 +43,7 @@ export interface TurnUsage {
 
 export interface ChatTurnContextItem {
   id?: string;
-  kind: "file" | "folder" | "selection";
+  kind: "file" | "folder" | "mcp-resource" | "selection";
   label: string;
   path?: string;
   rootId?: string;
@@ -52,6 +61,9 @@ export type ChatContextResult = ChatContextResolution | string | undefined;
 export interface ChatTurn {
   role: "user" | "assistant";
   content: string;
+  kind?: "normal" | "compaction";
+  /** Read-only advisor/watchdog notes attached to this assistant turn. */
+  advisorNotes?: PersistedAdvisorNote[];
   /** Context metadata used for this user turn. The raw context text is not
    *  stored; this is only the small display/debug snapshot shown in chat. */
   context?: ChatTurnContextItem[];
@@ -60,6 +72,12 @@ export interface ChatTurn {
   /** Per-run telemetry, attached when the provider reported it (assistant
    *  turns only). */
   usage?: TurnUsage;
+}
+
+export interface TurnValidationResult {
+  message: string;
+  reminder?: string;
+  signature?: string;
 }
 
 export interface AiChatError {
@@ -104,6 +122,8 @@ export interface AiChatStore {
   cancel(): void;
   /** Clear history, error and any in-flight turn. */
   clear(): void;
+  /** Replace older turns with a visible summary while preserving recent turns. */
+  compactHistory(): void;
   /** The default system prompt applied to turns, if the host configured one
    *  (used by the context-usage display). */
   systemPrompt(): string | undefined;
@@ -131,9 +151,41 @@ export interface AiChatStoreConfig {
    *  outgoing copy carries it. Resolved per send so it reflects the current
    *  context chips. */
   getContext?: (request: { history: ChatTurn[]; userMessage: string }) => ChatContextResult;
+  /** Snapshot of the host chat mode captured when a turn STARTS. Forwarded to
+   *  the finalization hooks below so a mode switch while a background turn
+   *  streams doesn't misroute validation/advice/plan-write. */
+  getMode?: () => string | undefined;
   /** Called when an assistant turn finalizes with non-empty text (used by Plan
-   *  mode to persist the produced plan). */
-  onAssistantTurn?: (content: string) => void;
+   *  mode to persist the produced plan). Receives the mode the turn ran under. */
+  onAssistantTurn?: (content: string, mode?: string) => void;
+  /** Optional host guard run after a turn finalizes, before the turn is accepted
+   *  as successful. Return a message to surface an error while keeping the
+   *  assistant text visible for debugging. */
+  validateAssistantTurn?: (request: {
+    assistantText: string;
+    history: ChatTurn[];
+    mode?: string;
+    tools: ToolActivity[];
+    userMessage: string;
+  }) => string | TurnValidationResult | undefined;
+  /** Optional read-only second-pass advisor. Runs after the primary turn has
+   *  produced text/tools; errors are swallowed by the store. */
+  adviseAssistantTurn?: (request: {
+    assistantText: string;
+    history: ChatTurn[];
+    mode?: string;
+    tools: ToolActivity[];
+    userMessage: string;
+  }) => Promise<PersistedAdvisorNote[]>;
+  /** Optional large-result artifact store. Hosts that cannot persist artifacts
+   *  omit it and keep the current inline preview behavior. */
+  writeArtifact?: (input: {
+    content: string;
+    kind: ChatArtifactRef["kind"];
+    mime: string;
+    title: string;
+    toolCallId?: string;
+  }) => Promise<ChatArtifactRef>;
   /** Engine-level Accept/Reject gate for prompt-tier tools, forwarded into
    *  ChatOptions. When set, pass UNWRAPPED tools (the engine enforces). */
   onApprovalRequest?: (req: {
@@ -151,6 +203,64 @@ function appendTextDelta(current: string, delta: string): string {
   return current + delta;
 }
 
+function normalizeValidationResult(
+  result: string | TurnValidationResult | undefined,
+): TurnValidationResult | undefined {
+  if (!result) return undefined;
+  return typeof result === "string" ? { message: result } : result;
+}
+
+function formatArtifactPreview(value: unknown): string {
+  if (typeof value === "string") return value.slice(0, TOOL_RESULT_PREVIEW_CHARS);
+  try {
+    return JSON.stringify(value, null, 2).slice(0, TOOL_RESULT_PREVIEW_CHARS);
+  } catch {
+    return String(value).slice(0, TOOL_RESULT_PREVIEW_CHARS);
+  }
+}
+
+async function maybeArtifactToolResult(
+  config: AiChatStoreConfig,
+  activity: ToolActivity,
+  result: unknown,
+): Promise<{ result: unknown; resultArtifact?: PersistedToolActivity["resultArtifact"] }> {
+  const writeArtifact = config.writeArtifact;
+  if (!writeArtifact) return { result };
+  const isPlainText = typeof result === "string";
+  let serialized: string;
+  try {
+    serialized = isPlainText ? result : JSON.stringify(result, null, 2);
+  } catch {
+    return { result };
+  }
+  if (serialized.length <= TOOL_RESULT_ARTIFACT_THRESHOLD) return { result };
+  try {
+    const artifact = await writeArtifact({
+      content: serialized,
+      kind: "tool-result",
+      mime: isPlainText ? "text/plain" : "application/json",
+      title: activity.toolName,
+      toolCallId: activity.toolCallId,
+    });
+    return {
+      result: {
+        artifactId: artifact.id,
+        byteLength: artifact.byteLength,
+        preview: formatArtifactPreview(result),
+        truncated: true,
+      },
+      resultArtifact: artifact,
+    };
+  } catch {
+    return {
+      result: {
+        preview: formatArtifactPreview(result),
+        truncated: true,
+      },
+    };
+  }
+}
+
 interface RunTurnOptions {
   context?: ChatContextResolution;
   system?: string;
@@ -161,6 +271,43 @@ function normalizeContextResult(result: ChatContextResult): ChatContextResolutio
   return result ?? {};
 }
 
+function oneLine(text: string, max = 160): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
+}
+
+function buildCompactionTurn(compacted: ChatTurn[], kept: number): ChatTurn {
+  const firstUser = compacted.find((turn) => turn.role === "user");
+  const lastUser = [...compacted].reverse().find((turn) => turn.role === "user");
+  const toolNames = [
+    ...new Set(
+      compacted
+        .flatMap((turn) => turn.tools ?? [])
+        .map((tool) => tool.toolName),
+    ),
+  ].slice(0, 8);
+  const lines = [
+    `Compacted ${compacted.length} older chat turns. The last ${kept} turns remain verbatim below.`,
+    firstUser ? `First user request: ${oneLine(firstUser.content)}` : undefined,
+    lastUser && lastUser !== firstUser ? `Latest compacted user request: ${oneLine(lastUser.content)}` : undefined,
+    toolNames.length ? `Tools used earlier: ${toolNames.join(", ")}` : undefined,
+  ].filter((line): line is string => line !== undefined);
+  return {
+    role: "assistant",
+    kind: "compaction",
+    content: lines.join("\n"),
+  };
+}
+
+function compactTurns(turns: ChatTurn[]): ChatTurn[] {
+  if (turns.length <= COMPACT_KEEP_MESSAGES + 1) return turns;
+  const compacted = turns.slice(0, -COMPACT_KEEP_MESSAGES);
+  const kept = turns.slice(-COMPACT_KEEP_MESSAGES);
+  if (compacted.length === 0) return turns;
+  if (compacted.length === 1 && compacted[0]?.kind === "compaction") return turns;
+  return [buildCompactionTurn(compacted, kept.length), ...kept];
+}
+
 export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
   const [messages, setMessages] = createSignal<ChatTurn[]>(config.initialMessages ?? []);
   const [streamingText, setStreamingText] = createSignal("");
@@ -169,6 +316,8 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
   const [error, setError] = createSignal<AiChatError | null>(null);
   const [queued, setQueued] = createSignal<string | null>(null);
   let controller: AbortController | null = null;
+  let pendingReminder: TurnValidationResult | null = null;
+  let lastReminderSignature = "";
   // Resolves the steering sender's promise. A send made while a turn streams
   // must NOT settle at queue time: callers (the composer's mention
   // consumption) release the message's context on settlement, and the context
@@ -195,6 +344,12 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
         userMessage: history[lastIndex]?.content ?? "",
       }),
     );
+  }
+
+  function takePendingReminder(): string | undefined {
+    const reminder = pendingReminder?.reminder;
+    pendingReminder = null;
+    return reminder;
   }
 
   function appendUserTurn(
@@ -255,6 +410,9 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     }
 
     setError(null);
+    // No destructive auto-compaction: the full transcript stays the durable
+    // source of truth (export/search/scrollback keep every turn). Long threads
+    // are compacted only in the OUTGOING copy sent to the model (see runTurn).
     const { context, history } = appendUserTurn(messages(), trimmed);
     setMessages(history);
     await runTurn(history, { ...(opts ?? {}), context });
@@ -325,15 +483,36 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     // Per-run telemetry (the `usage` part precedes `done`); attached to the
     // finalized assistant turn in the finally-append below.
     let turnUsage: TurnUsage | undefined;
+    let turnAborted = false;
+    let turnFailed = false;
+    // Set only when the stream reaches its natural `done` terminal — the signal
+    // that the assistant finished producing its text (see the onAssistantTurn
+    // gate in the finally block below).
+    let turnCompleted = false;
+    // The host chat mode captured at turn START, forwarded to the finalization
+    // hooks so a mode switch while a background turn streams doesn't misroute
+    // validation / advice / the plan-write (they must reflect the turn's mode).
+    const turnMode = config.getMode?.();
 
     // Inject the explicit context (attached files/selections) into the latest
     // user message that's SENT to the model — the stored/displayed turn above
     // stays clean so the chat doesn't show the raw context dump.
-    const lastIndex = history.length - 1;
+    // Compact only the OUTGOING context when the thread is long — messages()
+    // and persistence keep the full transcript untouched (durable source of
+    // truth). Short threads are sent verbatim.
+    const sentHistory =
+      history.length >= AUTO_COMPACT_MESSAGE_THRESHOLD ? compactTurns(history) : history;
+    const lastIndex = sentHistory.length - 1;
     const context = opts?.context ?? resolveContext(history);
-    const aiMessages: AIMessage[] = history.map((t, i) => ({
-      role: t.role,
-      content: i === lastIndex && context.preamble ? `${context.preamble}\n\n${t.content}` : t.content,
+    const reminder = takePendingReminder();
+    const contextPreamble = [context.preamble, reminder].filter(Boolean).join("\n\n") || undefined;
+    const aiMessages: AIMessage[] = sentHistory.map((t, i) => ({
+      // The compaction summary is a synthetic recap of dropped turns; send it as
+      // a USER turn so the outgoing history still starts with role "user"
+      // (Anthropic rejects an assistant-first /messages request). Its stored
+      // display turn keeps role "assistant" + kind "compaction".
+      role: t.kind === "compaction" ? "user" : t.role,
+      content: i === lastIndex && contextPreamble ? `${contextPreamble}\n\n${t.content}` : t.content,
     }));
 
     // Resolve tools lazily so newly-connected MCP servers are picked up. A
@@ -381,10 +560,21 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
             (typeof part.result === "object" &&
               part.result !== null &&
               (part.result as { isError?: boolean }).isError === true);
+          const currentActivity = toolActivity().find((a) => a.toolCallId === part.toolCallId);
+          const artifacted = currentActivity
+            ? await maybeArtifactToolResult(config, currentActivity, part.result)
+            : { result: part.result };
           setToolActivity((prev) =>
             prev.map((a) =>
               a.toolCallId === part.toolCallId
-                ? { ...a, status: isError ? "error" : "done", result: part.result }
+                ? {
+                    ...a,
+                    status: isError ? "error" : "done",
+                    result: artifacted.result,
+                    ...(artifacted.resultArtifact !== undefined
+                      ? { resultArtifact: artifacted.resultArtifact }
+                      : {}),
+                  }
                 : a,
             ),
           );
@@ -396,16 +586,21 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
           };
         } else if (part.type === "error") {
           // `aborted` is user-initiated — keep the partial reply, no error UI.
-          if (part.code !== "aborted") {
+          if (part.code === "aborted") {
+            turnAborted = true;
+          } else {
+            turnFailed = true;
             setError({ code: part.code, message: part.message });
           }
           break;
         } else if (part.type === "done") {
+          turnCompleted = true;
           break;
         }
         // `citation` parts are ignored until file:line grounding lands.
       }
     } catch (e) {
+      turnFailed = true;
       setError({
         code: "unknown",
         message: e instanceof Error ? e.message : String(e),
@@ -413,22 +608,69 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     } finally {
       const finalText = streamingText();
       const turnTools = toolActivity();
-      if (finalText.length > 0 || turnTools.length > 0) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: finalText,
-            ...(turnTools.length ? { tools: turnTools } : {}),
-            ...(turnUsage ? { usage: turnUsage } : {}),
-          },
-        ]);
+      const shouldValidateTurn = !turnAborted && !turnFailed;
+      const validationResult = shouldValidateTurn
+        ? normalizeValidationResult(config.validateAssistantTurn?.({
+            assistantText: finalText,
+            history,
+            mode: turnMode,
+            tools: turnTools,
+            userMessage: history.at(-1)?.content ?? "",
+          }))
+        : undefined;
+      if (validationResult) {
+        setError({ code: "unknown", message: validationResult.message });
+        const signature = validationResult.signature ?? validationResult.message;
+        if (validationResult.reminder && signature !== lastReminderSignature) {
+          pendingReminder = validationResult;
+          lastReminderSignature = signature;
+        }
       }
-      if (finalText.trim().length > 0) config.onAssistantTurn?.(finalText);
+      // Commit the assistant turn and stop streaming BEFORE the read-only
+      // advisor pass: a slow or never-resolving advisor must not strand the
+      // answer or hold streaming() true. Advisor notes patch this same turn
+      // once (if) they arrive.
+      let committedTurn: ChatTurn | undefined;
+      if (finalText.length > 0 || turnTools.length > 0) {
+        committedTurn = {
+          role: "assistant",
+          content: finalText,
+          ...(turnTools.length ? { tools: turnTools } : {}),
+          ...(turnUsage ? { usage: turnUsage } : {}),
+        };
+        const turn = committedTurn;
+        setMessages((prev) => [...prev, turn]);
+      }
+      // Plan mode persists the plan from a COMPLETED turn (the stream reached
+      // `done`) with non-empty text — independent of the validation gate, so a
+      // plan that trips a rule (or a turn that errors right after finishing) is
+      // still written; aborted-early / empty turns never reach here.
+      if (turnCompleted && finalText.trim().length > 0) {
+        config.onAssistantTurn?.(finalText, turnMode);
+      }
       setStreamingText("");
       setToolActivity([]);
       setStreaming(false);
       controller = null;
+      // Second-pass advisor: after the turn is committed and streaming stopped.
+      // Errors are swallowed; notes patch the just-committed turn in place.
+      if (committedTurn && shouldValidateTurn && !validationResult && config.adviseAssistantTurn) {
+        const target = committedTurn;
+        try {
+          const advisorNotes = await config.adviseAssistantTurn({
+            assistantText: finalText,
+            history,
+            mode: turnMode,
+            tools: turnTools,
+            userMessage: history.at(-1)?.content ?? "",
+          });
+          if (advisorNotes.length) {
+            setMessages((prev) => prev.map((t) => (t === target ? { ...t, advisorNotes } : t)));
+          }
+        } catch {
+          // advisor failures never surface — the committed turn stands as-is.
+        }
+      }
     }
   }
 
@@ -450,6 +692,16 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     setStreamingText("");
     setToolActivity([]);
     setError(null);
+    // A queued validation reminder / de-dupe signature belongs to the
+    // conversation being cleared — dropping them stops a stale reminder (or a
+    // suppressed genuine repeat) leaking into the next conversation.
+    pendingReminder = null;
+    lastReminderSignature = "";
+  }
+
+  function compactHistory(): void {
+    if (streaming()) return;
+    setMessages((prev) => compactTurns(prev));
   }
 
   function systemPrompt(): string | undefined {
@@ -478,6 +730,7 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
     sendMessage,
     cancel,
     clear,
+    compactHistory,
     systemPrompt,
     listTools,
   };

@@ -12,10 +12,51 @@ import { expandRecord, type HostResolvers } from "@markdraw/ai/resolve-credentia
 export interface McpServerStatus {
   id: string;
   connected: boolean;
+  promptCount?: number;
+  resourceCount?: number;
   toolCount: number;
   /** OAuth-gated HTTP server with no usable stored tokens — the UI offers an
    *  "Authorize" action wired to {@link authorizeMcpServer}. */
   requiresAuth?: boolean;
+}
+
+export interface McpPromptArgumentInfo {
+  description?: string;
+  name: string;
+  required?: boolean;
+  title?: string;
+}
+
+export interface McpPromptContent {
+  description?: string;
+  name: string;
+  server: string;
+  text: string;
+}
+
+export interface McpPromptInfo {
+  arguments?: McpPromptArgumentInfo[];
+  description?: string;
+  name: string;
+  server: string;
+  title?: string;
+}
+
+export interface McpResourceContent {
+  mimeType?: string;
+  server: string;
+  text: string;
+  uri: string;
+}
+
+export interface McpResourceInfo {
+  description?: string;
+  mimeType?: string;
+  name: string;
+  server: string;
+  size?: number;
+  title?: string;
+  uri: string;
 }
 
 /** Last-known config per server id — what auto-reconnect replays. Captured on
@@ -161,6 +202,30 @@ export function disconnectMcpServer(id: string): Promise<void> {
 
 export function listMcpServers(): Promise<McpServerStatus[]> {
   return invoke<McpServerStatus[]>("ai_mcp_list_servers");
+}
+
+export function listMcpResources(): Promise<McpResourceInfo[]> {
+  return invoke<McpResourceInfo[]>("ai_mcp_list_resources");
+}
+
+export function readMcpResource(server: string, uri: string): Promise<McpResourceContent> {
+  return invoke<McpResourceContent>("ai_mcp_read_resource", { server, uri });
+}
+
+export function listMcpPrompts(): Promise<McpPromptInfo[]> {
+  return invoke<McpPromptInfo[]>("ai_mcp_list_prompts");
+}
+
+export function getMcpPrompt(
+  server: string,
+  name: string,
+  argumentsValue: Record<string, unknown> = {},
+): Promise<McpPromptContent> {
+  return invoke<McpPromptContent>("ai_mcp_get_prompt", {
+    server,
+    name,
+    arguments: argumentsValue,
+  });
 }
 
 /** Connect every enabled server in parallel (Promise.allSettled — a slow or

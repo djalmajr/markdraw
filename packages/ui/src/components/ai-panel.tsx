@@ -21,10 +21,11 @@ import IconFileText from "~icons/lucide/file-text";
 import IconFolder from "~icons/lucide/folder";
 import IconTextSelect from "~icons/lucide/text-select";
 import type { AIChatMode } from "@markdraw/core/ai-prefs.ts";
+import { ruleIdentity } from "@markdraw/core/ai-rules.ts";
 import { isSupportedFile } from "@markdraw/core/utils.ts";
 import { expandSlashCommand, type SlashCommandDef } from "@markdraw/ai/slash-commands.ts";
 import type { AiChatStore } from "../composables/create-ai-chat-store.ts";
-import type { AiContextItem, AiInlineReference } from "../composables/ai-context.ts";
+import type { AiContextItem, AiDraftInsertion, AiInlineReference } from "../composables/ai-context.ts";
 import { Button } from "./ui/button.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { ScrollArea } from "./ui/scroll-area.tsx";
@@ -54,10 +55,26 @@ export interface AiSkillEntry {
   scope: "global" | "project";
 }
 
+export interface AiRuleEntry {
+  alwaysApply: boolean;
+  condition?: string;
+  description?: string;
+  globs: string[];
+  id: string;
+  name: string;
+  scope: "global" | "project";
+  source: string;
+}
+
 /** A tracked composer token: an @-mention (whose context item the host
- *  resolves ASYNC) or a direct context-item reference (selection chips — the
- *  item exists synchronously when the token is born). */
-type TrackedRef = { entry: AiMentionEntry; kind: "mention" } | { itemId: string; kind: "item" };
+ *  resolves ASYNC), a direct context-item reference (selection chips — the item
+ *  exists synchronously when the token is born), or a $skill token (visual-only,
+ *  because the orchestrator resolves the skill from the raw text). */
+type TrackedRef =
+  | { entry: AiMentionEntry; kind: "mention" }
+  | { itemId: string; kind: "item" }
+  | { kind: "rule"; rule: AiRuleEntry }
+  | { kind: "skill"; skill: AiSkillEntry };
 type SlashMatch =
   | { command: SlashCommandDef; description?: string; kind: "command"; name: string }
   | { description?: string; kind: "skill"; name: string; skill: AiSkillEntry };
@@ -102,11 +119,13 @@ export interface AiPanelProps {
    *  (selection chips) into the composer. `seq` bumps retrigger insertion
    *  even for an identical reference. */
   inlineReference?: AiInlineReference | null;
+  draftInsertion?: AiDraftInsertion | null;
   /** Ack for `inlineReference`: the panel consumed it, the host clears the
    *  signal. Keeps a pending reference distinguishable from a stale one, so
    *  a panel that MOUNTS with a reference present (chat tab was closed when
    *  the user hit ⌘I) still inserts the token instead of swallowing it. */
   onInlineReferenceHandled?: () => void;
+  onDraftInsertionHandled?: () => void;
   onRemoveContext?: (id: string) => void;
   /** The context-item IDS behind the composer's inline tokens, in TEXTUAL
    *  order, emitted right before a send — the host reorders its context array
@@ -133,6 +152,10 @@ export interface AiPanelProps {
    *  "$name" token remains in the user's text; the host/orchestrator uses it to
    *  inject the matching skill instructions. */
   skills?: AiSkillEntry[];
+  /** Auto-discovered sticky rules for the composer's "#" autocomplete. A sent
+   *  "#name" token remains in the user's text; the host/orchestrator uses it to
+   *  inject the matching rule instructions. */
+  rules?: AiRuleEntry[];
   /** The "$" autocomplete just opened — the host can refresh discovered skills. */
   onSkillsMenuOpen?: () => void;
   /** Opens Settings → AI (empty-state CTA). */
@@ -326,6 +349,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     // capture the edit's Enter.
     setSlashQuery(null);
     setSkillQuery(null);
+    setRuleQuery(null);
     // The pending draft's inline tokens die with the draft. The loaded text
     // may contain literal "@..." strings from the original message — those
     // references were consumed at the original send and are NOT re-tracked.
@@ -341,6 +365,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     setMentionQuery(null);
     setSlashQuery(null);
     setSkillQuery(null);
+    setRuleQuery(null);
     // The draft's inline tokens die with it — their context items too.
     clearTrackedTokens();
   }
@@ -363,6 +388,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       setMentionQuery(null);
       setSlashQuery(null);
       setSkillQuery(null);
+      setRuleQuery(null);
       const editTracked = beginTokenConsumption(text);
       settleTokenConsumption(editTracked, props.store.editAndResend(edit.index, text));
       return;
@@ -375,6 +401,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     setMentionQuery(null);
     setSlashQuery(null);
     setSkillQuery(null);
+    setRuleQuery(null);
     // The sent text keeps the inline tokens VERBATIM — the reorder + consume
     // pair runs before the send so the preamble matches the tokens' order.
     const tracked = beginTokenConsumption(text);
@@ -448,6 +475,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       setSlashIndex(0);
       setMentionQuery(null);
       setSkillQuery(null);
+      setRuleQuery(null);
     } else {
       setSlashQuery(null);
     }
@@ -539,11 +567,12 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     }
     const upToCaret = ta.value.slice(0, ta.selectionStart ?? ta.value.length);
     const match = SKILL_RE.exec(upToCaret);
-    if (match) {
+    if (match && !match[2]!.startsWith("<") && !match[2]!.startsWith("\"")) {
       setSkillQuery(match[2]!);
       setSkillIndex(0);
       setMentionQuery(null);
       setSlashQuery(null);
+      setRuleQuery(null);
     } else {
       setSkillQuery(null);
     }
@@ -568,7 +597,71 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       .replace(SKILL_RE, (_full, pre: string) => `${pre}${token} `);
     const next = before + input().slice(caret);
     setInput(next);
+    setInlineRefs((prev) => new Map(prev).set(token, { kind: "skill", skill }));
     setSkillQuery(null);
+    queueMicrotask(() => {
+      ta.focus();
+      ta.setSelectionRange(before.length, before.length);
+    });
+  }
+
+  // ── "#" rule autocomplete ──────────────────────────────────────────────
+  const RULE_RE = /(^|\s)#([^\s#]*)$/;
+  const [ruleQuery, setRuleQuery] = createSignal<string | null>(null);
+  const [ruleIndex, setRuleIndex] = createSignal(0);
+
+  // Delegates to core's ruleIdentity so the composer's inserted `#name` token
+  // stays in lockstep with the host's rule lookup (ai-tools.ts findRule).
+  function ruleInvocationName(rule: AiRuleEntry): string {
+    return ruleIdentity(rule);
+  }
+
+  const ruleMatches = createMemo(() => {
+    const q = ruleQuery();
+    if (q === null || !props.rules?.length) return [];
+    const ql = q.toLowerCase();
+    return props.rules
+      .filter((rule) => ruleInvocationName(rule).includes(ql))
+      .sort((a, b) => {
+        const an = ruleInvocationName(a);
+        const bn = ruleInvocationName(b);
+        const ap = an.startsWith(ql) ? 0 : 1;
+        const bp = bn.startsWith(ql) ? 0 : 1;
+        return ap - bp || an.localeCompare(bn);
+      })
+      .slice(0, 8);
+  });
+
+  function syncRule(ta: HTMLTextAreaElement): void {
+    if (!props.rules?.length) {
+      setRuleQuery(null);
+      return;
+    }
+    const upToCaret = ta.value.slice(0, ta.selectionStart ?? ta.value.length);
+    const match = RULE_RE.exec(upToCaret);
+    if (match) {
+      setRuleQuery(match[2]!);
+      setRuleIndex(0);
+      setMentionQuery(null);
+      setSlashQuery(null);
+      setSkillQuery(null);
+    } else {
+      setRuleQuery(null);
+    }
+  }
+
+  function selectRule(rule: AiRuleEntry): void {
+    const ta = textarea;
+    if (!ta) return;
+    const caret = ta.selectionStart ?? input().length;
+    const token = `#${ruleInvocationName(rule)}`;
+    const before = input()
+      .slice(0, caret)
+      .replace(RULE_RE, (_full, pre: string) => `${pre}${token} `);
+    const next = before + input().slice(caret);
+    setInput(next);
+    setInlineRefs((prev) => new Map(prev).set(token, { kind: "rule", rule }));
+    setRuleQuery(null);
     queueMicrotask(() => {
       ta.focus();
       ta.setSelectionRange(before.length, before.length);
@@ -577,6 +670,8 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
 
   // ── @-mention autocomplete ─────────────────────────────────────────────
   const MENTION_RE = /(^|\s)@([^\s@]*)$/;
+  const TYPED_REFERENCE_RE =
+    /(^|\s)(@<([^>\n]+)>|@"([^"\n]+)"|@'([^'\n]+)'|@([^\s@]+)|\$"([^"\n]+)"|\$([a-z0-9:_-]+)|#([a-z0-9:_-]+))/gi;
   const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
   const [mentionIndex, setMentionIndex] = createSignal(0);
 
@@ -610,9 +705,15 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
 
   /** Identity of any tracked ref. Item refs use "item\n<id>" — a format the
    *  mention identity (kind\nrootId\npath) can never produce, since "item" is
-   *  not a mention kind. */
-  const refIdentity = (ref: TrackedRef): string =>
-    ref.kind === "mention" ? mentionIdentity(ref.entry) : `item\n${ref.itemId}`;
+   *  not a mention kind. Skill/rule refs never match context chips. */
+  function refIdentity(ref: TrackedRef): string {
+    if (ref.kind === "mention") return mentionIdentity(ref.entry);
+    if (ref.kind === "item") return `item\n${ref.itemId}`;
+    if (ref.kind === "skill") return `skill\n${ref.skill.id}`;
+    return `rule\n${ref.rule.id}`;
+  }
+
+  const isContextTrackedRef = (ref: TrackedRef): boolean => ref.kind !== "skill" && ref.kind !== "rule";
 
   /** The same identity for a host context item, or null when the host
    *  attached it without path/rootId (then only the label can match). */
@@ -620,6 +721,82 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     item.kind !== "selection" && item.path !== undefined && item.rootId !== undefined
       ? `${item.kind}\n${item.rootId}\n${item.path}`
       : null;
+
+  function normalizedReferenceTarget(value: string): string {
+    return value.trim().replace(/^[./\\]+/, "").replace(/\\/g, "/");
+  }
+
+  function mentionReferenceCandidates(entry: AiMentionEntry): string[] {
+    const candidates = new Set<string>();
+    const path = normalizedReferenceTarget(entry.path);
+    const label = normalizedReferenceTarget(entry.label.replace(/\/+$/, ""));
+    if (path) candidates.add(path);
+    if (label) candidates.add(label);
+    if (entry.kind === "dir") {
+      if (path) candidates.add(`${path}/`);
+      if (label) candidates.add(`${label}/`);
+    }
+    if (entry.rootLabel && entry.path) {
+      candidates.add(normalizedReferenceTarget(`${entry.rootLabel}/${entry.path}`));
+    }
+    if (entry.path === "") {
+      candidates.add(normalizedReferenceTarget(entry.rootLabel ?? entry.label));
+    }
+    return [...candidates];
+  }
+
+  function findMentionByReference(rawTarget: string): AiMentionEntry | undefined {
+    const target = normalizedReferenceTarget(rawTarget);
+    if (!target) return undefined;
+    return props.mentionFiles?.find((entry) =>
+      mentionReferenceCandidates(entry).some((candidate) => candidate === target),
+    );
+  }
+
+  function findSkillByReference(rawTarget: string): AiSkillEntry | undefined {
+    const target = normalizedReferenceTarget(rawTarget).toLowerCase();
+    if (!target) return undefined;
+    return props.skills?.find((skill) => skillInvocationName(skill) === target);
+  }
+
+  function findRuleByReference(rawTarget: string): AiRuleEntry | undefined {
+    const target = normalizedReferenceTarget(rawTarget).toLowerCase();
+    if (!target) return undefined;
+    return props.rules?.find((rule) => ruleInvocationName(rule) === target);
+  }
+
+  function reconcileTypedReferences(text: string): void {
+    if (!props.mentionFiles?.length && !props.skills?.length && !props.rules?.length) return;
+    const additions = new Map<string, TrackedRef>();
+    TYPED_REFERENCE_RE.lastIndex = 0;
+    for (const match of text.matchAll(TYPED_REFERENCE_RE)) {
+      const token = match[2];
+      if (!token || inlineRefs().has(token) || additions.has(token)) continue;
+      if (token.startsWith("@")) {
+        const entry = findMentionByReference(match[3] ?? match[4] ?? match[5] ?? match[6] ?? "");
+        if (!entry) continue;
+        additions.set(token, { entry, kind: "mention" });
+        props.onMention?.(entry);
+        continue;
+      }
+      const skill = findSkillByReference(match[7] ?? match[8] ?? "");
+      if (skill) {
+        additions.set(token, { kind: "skill", skill });
+        continue;
+      }
+      const rule = findRuleByReference(match[9] ?? "");
+      if (rule) additions.set(token, { kind: "rule", rule });
+    }
+    if (additions.size === 0) return;
+    setInlineRefs((prev) => {
+      const next = new Map(prev);
+      for (const [token, ref] of additions) next.set(token, ref);
+      return next;
+    });
+    setMentionQuery(null);
+    setSkillQuery(null);
+    setRuleQuery(null);
+  }
 
   /** Remove the resolved context item behind `entry` — matched by identity
    *  (label+kind only for items without path/rootId) — or, when the host
@@ -642,7 +819,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
    *  pendingRemovals path applies. */
   function removeTrackedRef(ref: TrackedRef): void {
     if (ref.kind === "mention") removeMentionItem(ref.entry);
-    else props.onRemoveContext?.(ref.itemId);
+    else if (ref.kind === "item") props.onRemoveContext?.(ref.itemId);
   }
 
   // Async-orphan sweep: a token died before its item resolved — drop the item
@@ -748,11 +925,15 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       if (ref) byPosition.push([token, ref]);
     }
     const ids: string[] = [];
+    let hasContextRef = false;
     for (const [, ref] of byPosition) {
       if (ref.kind === "item") {
+        hasContextRef = true;
         ids.push(ref.itemId);
         continue;
       }
+      if (ref.kind === "skill" || ref.kind === "rule") continue;
+      hasContextRef = true;
       // A mention whose item hasn't landed yet (the host resolves content
       // ASYNC) has no id to rank by — it is skipped from the reorder list and
       // keeps its arrival position in the context array.
@@ -765,10 +946,11 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       );
       if (item) ids.push(item.id);
     }
-    props.onReorderContext?.(ids);
+    if (hasContextRef) props.onReorderContext?.(ids);
     setConsumedRefs((prev) => {
       const next = new Map(prev);
       for (const ref of tracked.values()) {
+        if (!isContextTrackedRef(ref)) continue;
         const identity = refIdentity(ref);
         next.set(identity, (next.get(identity) ?? 0) + 1);
       }
@@ -785,7 +967,8 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
    *  releases one consumption count; its item is removed only when no other
    *  in-flight send or live composer token still references the identity. */
   function settleTokenConsumption(tracked: Map<string, TrackedRef>, sent: Promise<void>): void {
-    if (tracked.size === 0) {
+    const contextTracked = new Map([...tracked].filter(([, ref]) => isContextTrackedRef(ref)));
+    if (contextTracked.size === 0) {
       void sent;
       return;
     }
@@ -794,7 +977,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     const release = (): void => {
       const released: TrackedRef[] = [];
       const next = new Map(consumedRefs());
-      for (const ref of tracked.values()) {
+      for (const ref of contextTracked.values()) {
         const identity = refIdentity(ref);
         const count = next.get(identity) ?? 0;
         if (count <= 1) {
@@ -805,7 +988,9 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
         }
       }
       setConsumedRefs(next);
-      const live = new Set([...inlineRefs().values()].map(refIdentity));
+      const live = new Set(
+        [...inlineRefs().values()].filter(isContextTrackedRef).map(refIdentity),
+      );
       for (const ref of released) {
         if (!live.has(refIdentity(ref))) removeTrackedRef(ref);
       }
@@ -819,7 +1004,9 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
    *  host attached without path/rootId — keep showing. */
   const hiddenChipIdentities = createMemo<Set<string>>(() => {
     const identities = new Set(consumedRefs().keys());
-    for (const ref of inlineRefs().values()) identities.add(refIdentity(ref));
+    for (const ref of inlineRefs().values()) {
+      if (isContextTrackedRef(ref)) identities.add(refIdentity(ref));
+    }
     return identities;
   });
 
@@ -848,6 +1035,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     for (let n = 2; ; n += 1) {
       const tracked = inlineRefs().get(token);
       if (!tracked) break;
+      if (tracked.kind === "skill") break;
       if (tracked.kind === "item" && tracked.itemId === itemId) {
         ta.focus();
         return;
@@ -869,6 +1057,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     setMentionQuery(null);
     setSlashQuery(null);
     setSkillQuery(null);
+    setRuleQuery(null);
     setInlineRefs((prev) => new Map(prev).set(token, { itemId, kind: "item" }));
     const caret = at + inserted.length;
     queueMicrotask(() => {
@@ -901,6 +1090,33 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     ),
   );
 
+  createEffect(
+    on(
+      () => props.draftInsertion?.seq,
+      (seq) => {
+        const insertion = props.draftInsertion;
+        if (!insertion || seq === undefined) return;
+        if (!textarea || !textarea.isConnected) return;
+        const current = input();
+        const prefix = current.trim() ? `${current.trimEnd()}\n\n` : "";
+        const next = `${prefix}${insertion.text}`;
+        setInput(next);
+        queueMicrotask(() => {
+          textarea?.focus();
+          textarea?.setSelectionRange(next.length, next.length);
+        });
+        props.onDraftInsertionHandled?.();
+      },
+    ),
+  );
+
+  // NOTE: reconcileTypedReferences runs ONLY from the textarea's input event
+  // (see onInput below), mirroring reconcileTokens' discipline. A blanket
+  // `createEffect(() => reconcileTypedReferences(input()))` used to also fire on
+  // PROGRAMMATIC setInput (edit-load, chat-switch, draft/mention insertion),
+  // which re-ran onMention and re-attached a past message's references as if
+  // freshly typed. Programmatic paths manage their own refs/context.
+
   /** The input split on tracked tokens (longest-first on ties) for the
    *  highlight backdrop — plain text nodes + pill spans, never innerHTML. */
   const highlightSegments = createMemo<{ text: string; token: boolean }[]>(() => {
@@ -930,6 +1146,16 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     return segments;
   });
 
+  function mentionEntryMatchesQuery(entry: AiMentionEntry, query: string): boolean {
+    const label = entry.label.toLowerCase();
+    const path = entry.path.toLowerCase();
+    if (label.includes(query) || path.includes(query)) return true;
+    return (
+      entry.rootLabel !== undefined &&
+      `${entry.rootLabel}/${entry.path}`.toLowerCase().includes(query)
+    );
+  }
+
   // Workspace roots (path === "") are pinned: matched separately and NEVER
   // subject to the 8-entry cap, or files would fill the cap and make the
   // roots unreachable in any real workspace. An empty query matches all roots.
@@ -937,7 +1163,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     const q = mentionQuery();
     if (q === null || !props.mentionFiles?.length) return [];
     const ql = q.toLowerCase();
-    return props.mentionFiles.filter((f) => f.path === "" && f.label.toLowerCase().includes(ql));
+    return props.mentionFiles.filter((f) => f.path === "" && mentionEntryMatchesQuery(f, ql));
   });
 
   const fileMatches = createMemo(() => {
@@ -945,7 +1171,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     if (q === null || !props.mentionFiles?.length) return [];
     const ql = q.toLowerCase();
     return props.mentionFiles
-      .filter((f) => f.path !== "" && f.label.toLowerCase().includes(ql))
+      .filter((f) => f.path !== "" && mentionEntryMatchesQuery(f, ql))
       .slice(0, 8);
   });
 
@@ -965,6 +1191,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       setMentionIndex(0);
       setSlashQuery(null);
       setSkillQuery(null);
+      setRuleQuery(null);
     } else {
       setMentionQuery(null);
     }
@@ -1048,6 +1275,30 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       if (e.key === "Escape") {
         e.preventDefault();
         setSkillQuery(null);
+        return;
+      }
+    }
+    // While the "#" rule list is open, the arrows/Enter/Escape drive it.
+    if (ruleQuery() !== null && ruleMatches().length) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setRuleIndex((i) => Math.min(i + 1, ruleMatches().length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setRuleIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+        e.preventDefault();
+        const rule = ruleMatches()[ruleIndex()];
+        if (rule) selectRule(rule);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setRuleQuery(null);
         return;
       }
     }
@@ -1149,8 +1400,10 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
               {(msg, i) => (
                 <AiMessage
                   content={displayed(msg.content)}
+                  advisorNotes={msg.advisorNotes}
                   context={msg.context}
                   displayText={props.displayText}
+                  kind={msg.kind}
                   role={msg.role}
                   tools={msg.tools}
                   usage={msg.usage}
@@ -1160,7 +1413,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
                   onEdit={
                     // Gated on idle like onRetry — editAndResend no-ops while a
                     // turn streams, so offering the pencil then would mislead.
-                    msg.role === "user" && !props.store.streaming()
+                    msg.role === "user" && msg.kind !== "compaction" && !props.store.streaming()
                       ? () => startEditing(i(), msg.content)
                       : undefined
                   }
@@ -1168,6 +1421,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
                   // while a fresh turn is already streaming.
                   onRetry={
                     msg.role === "assistant" &&
+                    msg.kind !== "compaction" &&
                     i() === props.store.messages().length - 1 &&
                     !props.store.streaming()
                       ? () => void props.store.retryLast()
@@ -1393,6 +1647,30 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
             </For>
           </div>
         </Show>
+        <Show when={ruleQuery() !== null && ruleMatches().length > 0}>
+          <div class="ai-mention-list ai-skill-list">
+            <For each={ruleMatches()}>
+              {(rule, i) => (
+                <button
+                  class="ai-mention-item ai-skill-item"
+                  classList={{ "ai-mention-item-active": i() === ruleIndex() }}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectRule(rule);
+                  }}
+                  onMouseEnter={() => setRuleIndex(i())}
+                >
+                  <span class="ai-mention-name ai-skill-name">#{ruleInvocationName(rule)}</span>
+                  <Show when={rule.description}>
+                    <span class="ai-mention-path">{rule.description}</span>
+                  </Show>
+                  <span class="ai-mention-root-badge">{rule.source}</span>
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
         {/* Highlight backdrop UNDER the textarea: same box + identical text
             metrics, so each tracked token's pill sits exactly behind the
             textarea's own glyphs (the textarea text renders above the pill —
@@ -1415,11 +1693,14 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
               placeholder={(useLocale(), m.ai_composer_placeholder())}
               value={input()}
               onInput={(e) => {
-                setInput(e.currentTarget.value);
-                reconcileTokens(e.currentTarget.value);
+                const next = e.currentTarget.value;
+                setInput(next);
+                reconcileTokens(next);
+                reconcileTypedReferences(next);
                 syncMention(e.currentTarget);
                 syncSlash(e.currentTarget);
                 syncSkill(e.currentTarget);
+                syncRule(e.currentTarget);
               }}
               onKeyDown={onKeyDown}
               onScroll={(e) => {
@@ -1444,15 +1725,28 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
                 </button>
               }
             >
-              <button
-                type="button"
-                class="ai-send-btn ai-stop-btn"
-                onClick={() => props.store.cancel()}
-                aria-label={(useLocale(), m.ai_composer_stop())}
-                title={(useLocale(), m.ai_composer_stop())}
-              >
-                <IconSquare width={12} height={12} />
-              </button>
+              <>
+                <Show when={input().trim()}>
+                  <button
+                    type="button"
+                    class="ai-send-btn ai-queue-btn"
+                    onClick={submit}
+                    aria-label={(useLocale(), m.ai_composer_queue())}
+                    title={(useLocale(), m.ai_composer_queue())}
+                  >
+                    <IconArrowUp width={16} height={16} />
+                  </button>
+                </Show>
+                <button
+                  type="button"
+                  class="ai-send-btn ai-stop-btn"
+                  onClick={() => props.store.cancel()}
+                  aria-label={(useLocale(), m.ai_composer_stop())}
+                  title={(useLocale(), m.ai_composer_stop())}
+                >
+                  <IconSquare width={12} height={12} />
+                </button>
+              </>
             </Show>
           </div>
         </div>

@@ -73,8 +73,8 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     kind: "anthropic", // /messages
     name: "OpenCode Go",
     options: { baseURL: "https://opencode.ai/zen/go/v1" },
-    // Hand-maintained: the live /models can't say which API shape each model
-    // uses, so we keep the /messages-vs-/chat split curated (no live refresh).
+    // The live /models list is refreshed dynamically; endpoint routing stays
+    // curated locally because the endpoint does not declare the API shape.
     curatedModels: true,
     models: {
       "minimax-m3": { name: "MiniMax M3" },
@@ -83,22 +83,28 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
       "qwen3.7-max": { name: "Qwen3.7 Max" },
       "qwen3.7-plus": { name: "Qwen3.7 Plus" },
       "qwen3.6-plus": { name: "Qwen3.6 Plus" },
+      "qwen3.5-plus": { name: "Qwen3.5 Plus" },
     },
   },
   "opencode-go-chat": {
     kind: "openai-compatible", // /chat/completions
     name: "OpenCode Go (chat)",
     options: { baseURL: "https://opencode.ai/zen/go/v1" },
-    curatedModels: true, // see opencode-go — hand-maintained split
+    curatedModels: true, // see opencode-go — local endpoint split
     models: {
+      "glm-5.2": { name: "GLM-5.2" },
       "glm-5.1": { name: "GLM-5.1" },
       "glm-5": { name: "GLM-5" },
       "kimi-k2.7-code": { name: "Kimi K2.7 Code" },
       "kimi-k2.6": { name: "Kimi K2.6" },
+      "kimi-k2.5": { name: "Kimi K2.5" },
       "deepseek-v4-pro": { name: "DeepSeek V4 Pro" },
       "deepseek-v4-flash": { name: "DeepSeek V4 Flash" },
+      "mimo-v2-pro": { name: "MiMo-V2-Pro" },
+      "mimo-v2-omni": { name: "MiMo-V2-Omni" },
       "mimo-v2.5": { name: "MiMo-V2.5" },
       "mimo-v2.5-pro": { name: "MiMo-V2.5-Pro" },
+      "hy3-preview": { name: "HY3 Preview" },
     },
   },
   // OpenCode Zen (https://opencode.ai/zen/v1) — distinct catalog; models live from /models.

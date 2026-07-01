@@ -91,6 +91,17 @@ describe("createAiChatSessions — lifecycle", () => {
     });
   });
 
+  it("createSession stores the current workspace root when provided", async () => {
+    await withRoot(() => {
+      const mgr = createAiChatSessions({
+        getProvider: () => stubProvider(),
+        getWorkspaceRoot: () => "/repo",
+      });
+      const id = mgr.createSession();
+      expect(mgr.allSessions().find((s) => s.id === id)?.workspaceRoot).toBe("/repo");
+    });
+  });
+
   it("closing the active chat activates the nearest neighbor", async () => {
     await withRoot(() => {
       const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
@@ -167,7 +178,10 @@ describe("createAiChatSessions — lifecycle", () => {
 describe("createAiChatSessions — fork", () => {
   it("forkSession copies the messages into a new active session that evolves separately", async () => {
     await withRoot(async () => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider("ok") });
+      const mgr = createAiChatSessions({
+        getProvider: () => stubProvider("ok"),
+        getWorkspaceRoot: () => "/repo",
+      });
       const a = mgr.createSession();
       await mgr.storeFor(a)!.sendMessage("hello");
       const fork = mgr.forkSession(a);
@@ -183,6 +197,7 @@ describe("createAiChatSessions — fork", () => {
       expect(mgr.storeFor(fork!)).not.toBe(mgr.storeFor(a));
       // Title carries over from the source.
       expect(mgr.allSessions().find((s) => s.id === fork)?.title).toBe("hello");
+      expect(mgr.allSessions().find((s) => s.id === fork)?.workspaceRoot).toBe("/repo");
       // Separate evolution: a send on the fork must not touch the source.
       const sourceBefore = mgr.storeFor(a)!.messages();
       await mgr.storeFor(fork!)!.sendMessage("only in fork");

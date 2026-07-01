@@ -11,7 +11,8 @@ import { invoke } from "./lib/chaos-invoke.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
-import { exportChatArtifact, savePlanArtifact } from "./lib/ai-artifacts.ts";
+import { exportChatArtifact, savePlanArtifact, type ChatExportPayload } from "./lib/ai-artifacts.ts";
+import { copyChatArtifacts, deleteChatArtifacts, writeChatArtifact } from "./lib/ai-chat-artifacts.ts";
 import { createMockProvider } from "@markdraw/ai/mock-provider.ts";
 import type { AIConfig, MCPServerConfig } from "@markdraw/ai/config-schema.ts";
 import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
@@ -61,7 +62,15 @@ import {
   aiIndexSync,
   type EmbeddingMeta,
 } from "./lib/ai-index.ts";
-import { fetchModels } from "@markdraw/ai/model-catalog.ts";
+import {
+  fetchModels,
+  fetchModelsWithCache,
+  isOpenCodeGoProviderId,
+  openCodeGoModelName,
+  openCodeGoRefreshGroup,
+  partitionOpenCodeGoModels,
+  type ModelCatalogSource,
+} from "@markdraw/ai/model-catalog.ts";
 import { loadAIConfig, loadUserAIConfig, saveAIConfig } from "./lib/ai-config.ts";
 import { buildMcpTools } from "@markdraw/ai/mcp-tools.ts";
 import {
@@ -70,7 +79,13 @@ import {
   connectEnabledServers,
   connectMcpServer,
   disconnectMcpServer,
+  getMcpPrompt,
+  listMcpPrompts,
+  listMcpResources,
   listMcpServers,
+  readMcpResource,
+  type McpPromptInfo,
+  type McpResourceInfo,
   type McpServerStatus,
 } from "./lib/ai-mcp.ts";
 import {
@@ -93,6 +108,13 @@ import {
   type DiscoveredSkillEntry,
 } from "./lib/skill-discovery.ts";
 import {
+  buildRulesForPrompt,
+  discoverRules,
+  evaluateRulesForTurn,
+  normalizeRules,
+  type DiscoveredRuleEntry,
+} from "./lib/rule-discovery.ts";
+import {
   buildInProcessTools,
   type ExcalidrawGenerateOutcome,
   type ExcalidrawGenerateRequest,
@@ -105,7 +127,11 @@ import {
 import { composeBelow } from "@markdraw/diagram/compose.ts";
 import { generate } from "@markdraw/diagram/generate.ts";
 import { sceneToFile } from "@markdraw/diagram/scene.ts";
-import { loadCustomInstructions, loadSlashCommands } from "./lib/ai-commands.ts";
+import {
+  loadContextInstructions,
+  loadCustomInstructions,
+  loadSlashCommands,
+} from "./lib/ai-commands.ts";
 import {
   buildMemoryScopesInstruction,
   loadMemoryScopes,
@@ -184,10 +210,34 @@ const cliHost = createCliHost();
 const EMPTY_EXCALIDRAW_SCENE =
   '{"type":"excalidraw","version":2,"source":"markdraw","elements":[]}';
 
+interface ShellCommandStatus {
+  conflict: boolean;
+  executable_path: string;
+  installed: boolean;
+  managed: boolean;
+  path_dir_on_path: boolean;
+  target_dir: string;
+  target_path: string;
+}
+
+interface StartupInfo {
+  args: string[];
+  cwd: string;
+  paths: string[];
+}
+
+interface ModelCatalogStatus {
+  error?: string;
+  fetchedAt?: number;
+  source?: ModelCatalogSource;
+  state: "failed" | "idle" | "refreshing";
+}
+
 export function App() {
   // AI provider catalog (ai.json merged over builtins). Starts with builtins so
   // a provider is resolvable before the async load completes; refreshed onMount.
   const [aiConfig, setAiConfig] = createSignal<AIConfig>(withBuiltins({}));
+  const [modelCatalogStatus, setModelCatalogStatus] = createSignal<Record<string, ModelCatalogStatus>>({});
 
   // MCP (Model Context Protocol) client. The Rust manager (src-tauri/ai_mcp.rs)
   // owns connections for both transports; this bridge drives tool discovery and
@@ -196,10 +246,13 @@ export function App() {
   const [mcpStatuses, setMcpStatuses] = createSignal<McpServerStatus[]>([]);
   // Tool names grouped by server id — feeds the settings card tool chips.
   const [mcpTools, setMcpTools] = createSignal<Record<string, string[]>>({});
+  const [mcpResources, setMcpResources] = createSignal<Record<string, McpResourceInfo[]>>({});
+  const [mcpPrompts, setMcpPrompts] = createSignal<Record<string, McpPromptInfo[]>>({});
   // MCP servers discovered from other agent tools (Claude/Codex/OpenCode), deduped
   // + hashed. Global ones auto-connect; project ones wait for approval.
   const [discoveredMcp, setDiscoveredMcp] = createSignal<DiscoveredEntry[]>([]);
   const [discoveredSkills, setDiscoveredSkills] = createSignal<DiscoveredSkillEntry[]>([]);
+  const [discoveredRules, setDiscoveredRules] = createSignal<DiscoveredRuleEntry[]>([]);
   // OpenCode has no first-class provider, so its discovery rides this toggle.
   const [importOpenCode, setImportOpenCode] = createSignal(getImportOpenCodeMcps());
 
@@ -419,6 +472,7 @@ export function App() {
     convertAdoc,
     convertMarkdown,
     getStoredTheme,
+    getWorkspaceRoot: () => Array.from(rootPaths().values())[0] ?? null,
     printPage: () => invoke("print_webview"),
     // Real engine driven by ai-prefs + keychain, with a mock fallback (DJA-11F).
     createAIProvider: () => buildAIProvider(),
@@ -429,16 +483,55 @@ export function App() {
     // `.ai-memory.toml` — appended so the model queries the right project(s).
     getCustomInstructions: () => {
       const base = aiInstructions();
+      const context = aiContextInstructions();
       const note = mcpStatuses().some((s) => s.connected)
         ? buildMemoryScopesInstruction(aiMemoryScopes())
         : null;
-      if (!note) return base ?? undefined;
-      return base
-        ? { ...base, text: `${base.text}\n\n${note}` }
-        : { mode: "append" as const, text: note };
+      const parts = [base?.text, context?.text, note].filter((text): text is string => !!text);
+      if (parts.length === 0) return undefined;
+      return {
+        mode: base?.mode ?? "append",
+        // Context files (CLAUDE.md/AGENTS.md/…) and their @-imports are external,
+        // possibly-harvested content — scrub secrets before they reach the
+        // (possibly remote) provider, matching the tool-read/file-chip paths.
+        text: scrubAi(parts.join("\n\n")),
+      };
     },
-    getSkillContext: (request) =>
-      buildSkillContextForPrompt(discoveredSkills(), request.userMessage),
+    getSkillContext: (request) => {
+      const context = buildSkillContextForPrompt(discoveredSkills(), request.userMessage);
+      return context ? scrubAi(context) : context;
+    },
+    getRuleContext: (request) => {
+      const context = buildRulesForPrompt(discoveredRules(), request.userMessage);
+      return context ? scrubAi(context) : context;
+    },
+    validateRuleTurn: (request) => {
+      const violation = evaluateRulesForTurn(discoveredRules(), {
+        assistantText: request.assistantText,
+        toolNames: request.tools.map((tool) => tool.toolName),
+        userMessage: request.userMessage,
+      });
+      if (!violation) return undefined;
+      return {
+        message: violation.message,
+        reminder: violation.reminder,
+        signature: violation.signature,
+      };
+    },
+    getAdvisorContext: () => {
+      const watchdogRules = discoveredRules().filter((rule) =>
+        rule.name.toLowerCase().includes("watchdog"),
+      );
+      if (watchdogRules.length === 0) return undefined;
+      // Watchdog rule bodies feed the advisor LLM pass — scrub secrets too.
+      return scrubAi(
+        [
+          "[Watchdog instructions]",
+          ...watchdogRules.map((rule) => rule.content.trim()),
+          "[/Watchdog instructions]",
+        ].join("\n\n"),
+      );
+    },
     // Engine-enforced Accept/Reject for prompt-tier tools (arrow defers the
     // read — the gate is defined further down in this component).
     onToolApprovalRequest: (req) => requestToolApproval(req),
@@ -446,6 +539,9 @@ export function App() {
     onPlanComplete: handlePlanComplete,
     // Chat tab "Export" → native Save As, defaulting to .markdraw/chats.
     onExportChat: handleExportChat,
+    copyChatArtifacts,
+    deleteChatArtifacts,
+    writeChatArtifact,
   });
 
   // Load the AI config (ai.json merged with builtins) once at startup, then
@@ -475,9 +571,27 @@ export function App() {
 
   // ── Settings modal (DJA-15) ────────────────────────────────────────────
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [shellCommandStatus, setShellCommandStatus] = createSignal<ShellCommandStatus | null>(null);
   const [indexingTier, setIndexingTier] = createSignal<IndexingTier>(
     getStoredIndexingTier(),
   );
+  async function refreshShellCommandStatus(): Promise<void> {
+    try {
+      setShellCommandStatus(await invoke<ShellCommandStatus>("shell_command_status"));
+    } catch (error) {
+      console.warn("[shell-command] status failed:", error);
+      setShellCommandStatus(null);
+    }
+  }
+  async function installShellCommand(): Promise<void> {
+    setShellCommandStatus(await invoke<ShellCommandStatus>("install_shell_command"));
+  }
+  async function uninstallShellCommand(): Promise<void> {
+    setShellCommandStatus(await invoke<ShellCommandStatus>("uninstall_shell_command"));
+  }
+  createEffect(() => {
+    if (settingsOpen()) void refreshShellCommandStatus();
+  });
   // Streaming-responses beta toggle. Read fresh by buildAIProvider each turn, so
   // flipping it takes effect on the next message (no provider rebuild needed).
   const [aiStreaming, setAiStreaming] = createSignal(getStoredAiStreaming());
@@ -512,9 +626,14 @@ export function App() {
       connectGroup: p.connectGroup,
       // Live model list can be re-fetched (openai-compatible endpoint with a
       // baseURL, e.g. OpenRouter / Ollama / OpenCode Zen) → show "Refresh models".
-      // `curatedModels` opts a baseURL provider OUT (OpenCode Go: hand-maintained
-      // split the live /models can't reproduce). CLI kinds are curated implicitly.
-      fetchable: !isCliProviderKind(p.kind) && !!p.options?.baseURL && !p.curatedModels,
+      // `curatedModels` opts a baseURL provider OUT except for OpenCode Go:
+      // it has a dynamic /models list, but Markdraw still partitions it locally
+      // between /messages and /chat/completions.
+      fetchable:
+        !isCliProviderKind(p.kind) &&
+        !!p.options?.baseURL &&
+        (!p.curatedModels || isOpenCodeGoProviderId(id)),
+      refreshGroup: openCodeGoRefreshGroup(id),
     })),
   );
 
@@ -808,6 +927,99 @@ export function App() {
     return ids;
   }
 
+  function openCodeGoModelsRecord(models: Array<{ id: string; name?: string }>): Record<string, { name: string }> {
+    return Object.fromEntries(
+      models.map((model) => [model.id, { name: model.name ?? openCodeGoModelName(model.id) }]),
+    );
+  }
+
+  async function openCodeGoApiKey(apiKeyOverride?: string): Promise<string | undefined> {
+    if (apiKeyOverride) return apiKeyOverride;
+    const go = aiConfig().provider["opencode-go"];
+    const goChat = aiConfig().provider["opencode-go-chat"];
+    return (
+      go?.options?.apiKey ??
+      goChat?.options?.apiKey ??
+      (await getApiKey("opencode-go")) ??
+      (await getApiKey("opencode-go-chat")) ??
+      undefined
+    );
+  }
+
+  async function refreshOpenCodeGoModels(apiKeyOverride?: string): Promise<void> {
+    const go = aiConfig().provider["opencode-go"];
+    const goChat = aiConfig().provider["opencode-go-chat"];
+    const baseURL = go?.options?.baseURL ?? goChat?.options?.baseURL;
+    if (!baseURL) return;
+    setModelCatalogStatus((current) => ({
+      ...current,
+      "opencode-go": { ...current["opencode-go"], state: "refreshing" },
+    }));
+    let result: Awaited<ReturnType<typeof fetchModelsWithCache>>;
+    try {
+      result = await fetchModelsWithCache({
+        apiKey: await openCodeGoApiKey(apiKeyOverride),
+        baseURL,
+        fetchImpl: tauriFetch as unknown as typeof globalThis.fetch,
+        headers: go?.options?.headers ?? goChat?.options?.headers,
+        storage: localStorage,
+      });
+    } catch (error) {
+      setModelCatalogStatus((current) => ({
+        ...current,
+        "opencode-go": {
+          error: error instanceof Error ? error.message : String(error),
+          state: "failed",
+        },
+      }));
+      throw error;
+    }
+    const partitioned = partitionOpenCodeGoModels(result.models);
+    if (partitioned.unknown.length > 0) {
+      console.warn(
+        "[markdraw] OpenCode Go models skipped because their API shape is unknown:",
+        partitioned.unknown.map((model) => model.id),
+      );
+    }
+    if (partitioned.messages.length === 0 && partitioned.chatCompletions.length === 0) {
+      setModelCatalogStatus((current) => ({
+        ...current,
+        "opencode-go": {
+          error: result.error,
+          fetchedAt: result.fetchedAt,
+          source: result.source,
+          state: result.error ? "failed" : "idle",
+        },
+      }));
+      return;
+    }
+
+    const user = await loadUserAIConfig();
+    const provider = { ...(user.provider ?? {}) };
+    if (partitioned.messages.length > 0) {
+      provider["opencode-go"] = {
+        ...(provider["opencode-go"] ?? {}),
+        models: openCodeGoModelsRecord(partitioned.messages),
+      };
+    }
+    if (partitioned.chatCompletions.length > 0) {
+      provider["opencode-go-chat"] = {
+        ...(provider["opencode-go-chat"] ?? {}),
+        models: openCodeGoModelsRecord(partitioned.chatCompletions),
+      };
+    }
+    await saveAIConfig(JSON.stringify({ ...user, provider }));
+    setModelCatalogStatus((current) => ({
+      ...current,
+      "opencode-go": {
+        error: result.error,
+        fetchedAt: result.fetchedAt,
+        source: result.source,
+        state: result.error ? "failed" : "idle",
+      },
+    }));
+  }
+
   async function saveAiProvider(opts: {
     providerId: string;
     apiKey: string;
@@ -887,6 +1099,18 @@ export function App() {
       return;
     }
     if (apiKey) await setApiKey(providerId, apiKey);
+    if (isOpenCodeGoProviderId(providerId)) {
+      if (providerId === "opencode-go") {
+        try {
+          await refreshOpenCodeGoModels(apiKey);
+        } catch (error) {
+          console.warn("[markdraw] OpenCode Go model refresh failed during connect:", error);
+        }
+      }
+      setAiConfig(await loadAIConfig());
+      await refreshConnectedProviders();
+      return;
+    }
     if (provider && Object.keys(provider.models).length === 0 && provider.options?.baseURL) {
       let ids: string[] = [];
       try {
@@ -923,6 +1147,11 @@ export function App() {
   async function refreshModels(providerId: string): Promise<void> {
     const provider = aiConfig().provider[providerId];
     if (!provider?.options?.baseURL || isCliProviderKind(provider.kind)) return;
+    if (isOpenCodeGoProviderId(providerId)) {
+      await refreshOpenCodeGoModels();
+      setAiConfig(await loadAIConfig());
+      return;
+    }
     const key = (await getApiKey(providerId)) ?? "";
     let ids: string[] = [];
     try {
@@ -1001,6 +1230,8 @@ export function App() {
         return excalidrawSceneToOutline(await api.getScene(), file.name);
       },
       getWorkspaceRoots: () => Array.from(rootPaths().values()),
+      getSkills: () => discoveredSkills(),
+      getRules: () => discoveredRules(),
       proposeEdit: proposeAiEdit,
       restoreSecretsIn: restoreAi,
       scrubSecretsIn: scrubAi,
@@ -1071,7 +1302,7 @@ export function App() {
    *  `<root>/.markdraw/chats/<slug>-<stamp>.md` (the dir is created on demand).
    *  Store turns keep `[secret-N]` placeholders by design — the artifact
    *  writer restores them so the file matches the displayed transcript. */
-  async function handleExportChat(payload: { title: string; markdown: string }): Promise<void> {
+  async function handleExportChat(payload: ChatExportPayload): Promise<void> {
     const root = Array.from(rootPaths().values())[0] ?? null;
     try {
       const path = await exportChatArtifact(
@@ -1125,13 +1356,71 @@ export function App() {
   async function refreshMcpStatuses(): Promise<void> {
     try {
       setMcpStatuses(await listMcpServers());
-      const grouped: Record<string, string[]> = {};
-      for (const tool of await mcpBridge.listTools()) {
-        (grouped[tool.server] ??= []).push(tool.name);
+      const [tools, resources, prompts] = await Promise.all([
+        mcpBridge.listTools(),
+        listMcpResources(),
+        listMcpPrompts(),
+      ]);
+      const groupedTools: Record<string, string[]> = {};
+      for (const tool of tools) {
+        (groupedTools[tool.server] ??= []).push(tool.name);
       }
-      setMcpTools(grouped);
+      const groupedResources: Record<string, McpResourceInfo[]> = {};
+      for (const resource of resources) {
+        (groupedResources[resource.server] ??= []).push(resource);
+      }
+      const groupedPrompts: Record<string, McpPromptInfo[]> = {};
+      for (const prompt of prompts) {
+        (groupedPrompts[prompt.server] ??= []).push(prompt);
+      }
+      setMcpTools(groupedTools);
+      setMcpResources(groupedResources);
+      setMcpPrompts(groupedPrompts);
     } catch {
       // best-effort UI state
+    }
+  }
+
+  async function attachMcpResource(resource: McpResourceInfo): Promise<void> {
+    try {
+      const content = await readMcpResource(resource.server, resource.uri);
+      state.addMcpResourceContext({
+        content: content.text,
+        label: resource.title ?? resource.name,
+        mimeType: content.mimeType ?? resource.mimeType,
+        server: resource.server,
+        title: resource.title,
+        uri: resource.uri,
+      });
+    } catch (error) {
+      console.warn(`[mcp] read resource failed for "${resource.server}:${resource.uri}":`, error);
+    }
+  }
+
+  function promptDraftTemplate(prompt: McpPromptInfo): string {
+    const args = prompt.arguments ?? [];
+    const required = args.filter((arg) => arg.required);
+    const lines = [
+      `Use MCP prompt "${prompt.name}" from server "${prompt.server}".`,
+      prompt.description ? `Description: ${prompt.description}` : undefined,
+      required.length > 0 ? "Required arguments:" : undefined,
+      ...required.map((arg) => `- ${arg.name}: `),
+    ].filter((line): line is string => line !== undefined);
+    return lines.join("\n");
+  }
+
+  async function insertMcpPrompt(prompt: McpPromptInfo): Promise<void> {
+    const required = (prompt.arguments ?? []).filter((arg) => arg.required);
+    if (required.length > 0) {
+      state.requestAiDraftInsertion(promptDraftTemplate(prompt));
+      return;
+    }
+    try {
+      const content = await getMcpPrompt(prompt.server, prompt.name);
+      state.requestAiDraftInsertion(content.text || promptDraftTemplate(prompt));
+    } catch (error) {
+      console.warn(`[mcp] get prompt failed for "${prompt.server}:${prompt.name}":`, error);
+      state.requestAiDraftInsertion(promptDraftTemplate(prompt));
     }
   }
 
@@ -1194,6 +1483,20 @@ export function App() {
     } catch (e) {
       console.warn("[skills] discovery failed:", e);
       if (isLatest()) setDiscoveredSkills([]);
+    }
+  }
+
+  const ruleDiscoveryGuard = createGenerationGuard();
+  async function refreshDiscoveredRules(): Promise<void> {
+    const isLatest = ruleDiscoveryGuard.begin();
+    const roots = Array.from(rootPaths().values());
+    try {
+      const raw = await discoverRules(roots);
+      const entries = normalizeRules(raw);
+      if (isLatest()) setDiscoveredRules(entries);
+    } catch (e) {
+      console.warn("[rules] discovery failed:", e);
+      if (isLatest()) setDiscoveredRules([]);
     }
   }
 
@@ -1346,6 +1649,10 @@ export function App() {
         // Only show an authorize error while the server still needs auth — once
         // it connects, requiresAuth flips false and the message auto-clears.
         error: st?.requiresAuth ? mcpAuthErrors().get(s.id) : undefined,
+        promptCount: st?.promptCount ?? 0,
+        prompts: mcpPrompts()[s.id],
+        resourceCount: st?.resourceCount ?? 0,
+        resources: mcpResources()[s.id],
         toolCount: st?.toolCount ?? 0,
         tools: mcpTools()[s.id],
         command: s.command,
@@ -1369,6 +1676,10 @@ export function App() {
         enabled: true,
         connected: st?.connected ?? false,
         requiresAuth: st?.requiresAuth ?? false,
+        promptCount: st?.promptCount ?? 0,
+        prompts: mcpPrompts()[e.id],
+        resourceCount: st?.resourceCount ?? 0,
+        resources: mcpResources()[e.id],
         toolCount: st?.toolCount ?? 0,
         tools: mcpTools()[e.id],
         command: e.command,
@@ -1402,6 +1713,23 @@ export function App() {
     },
   );
 
+  const rulesView = createMemo(() => {
+    const openRoots = new Set(rootPaths().values());
+    return discoveredRules()
+      .filter((rule) => rule.scope === "global" || (!!rule.root && openRoots.has(rule.root)))
+      .map((rule) => ({
+        alwaysApply: rule.alwaysApply,
+        condition: rule.condition,
+        description: rule.description,
+        globs: rule.globs,
+        id: rule.id,
+        name: rule.name,
+        scope: rule.scope,
+        source: rule.source,
+        sources: rule.sources,
+      }));
+  });
+
   // TabStore lives inside each PaneStore (see `createPaneStore`). The
   // host treats whichever pane is currently active as the "default"
   // tab store — read/write operations route there. As panes change
@@ -1418,6 +1746,8 @@ export function App() {
   // may settle out of order, and a stale load must not clobber a fresh one.
   const [aiSlashCommands, setAiSlashCommands] = createSignal<SlashCommandDef[]>([]);
   const [aiInstructions, setAiInstructions] = createSignal<CustomInstructions | null>(null);
+  const [aiContextInstructions, setAiContextInstructions] =
+    createSignal<CustomInstructions | null>(null);
   // ai-memory scopes from every open root's `.ai-memory.toml` (multi-workspace).
   const [aiMemoryScopes, setAiMemoryScopes] = createSignal<MemoryScope[]>([]);
   const aiCommandsGuard = createGenerationGuard();
@@ -1431,6 +1761,9 @@ export function App() {
     void loadCustomInstructions(root).then((instructions) => {
       if (isLatest()) setAiInstructions(instructions);
     });
+    void loadContextInstructions(root).then((instructions) => {
+      if (isLatest()) setAiContextInstructions(instructions);
+    });
     // Memory scoping reads ALL roots (not just the primary), so a query can
     // span every open workspace that carries an `.ai-memory.toml`.
     void loadMemoryScopes(allRoots).then((scopes) => {
@@ -1442,6 +1775,7 @@ export function App() {
   createEffect(() => {
     rootPaths();
     void refreshDiscoveredSkills();
+    void refreshDiscoveredRules();
   });
 
   // Quick Open (Cmd/Ctrl+P) overlay visibility — owned here so the keyboard
@@ -1729,10 +2063,18 @@ export function App() {
     });
   });
 
-  // ── File open via OS file associations ──────────────────────────────────
-  // Handles both cold start (argv) and already-running (single-instance event).
-  async function openFileByAbsolutePath(absolutePath: string): Promise<void> {
-    // Extract the directory (root) and filename from the absolute path
+  // ── Path open via CLI / OS file associations ────────────────────────────
+  // Handles cold start (argv), already-running single-instance events, and
+  // macOS file-open events. Directories become workspace roots; supported
+  // files open their parent as root and load the file.
+  async function openPathByAbsolutePath(absolutePath: string): Promise<void> {
+    const kind = await invoke<string>("path_kind", { path: absolutePath }).catch(() => null);
+    if (kind === "directory") {
+      await folder.openFolderPath(absolutePath);
+      return;
+    }
+    if (kind !== "file") return;
+
     const normalized = absolutePath.replace(/\\/g, "/");
     const lastSlash = normalized.lastIndexOf("/");
     if (lastSlash < 0) return;
@@ -1754,18 +2096,17 @@ export function App() {
 
   // Cold start: check if the app was launched with a file argument
   onMount(() => {
-    void invoke<string[]>("get_startup_args").then((args) => {
-      const filePath = args.find((a) => !a.startsWith("-") && isSupportedFile(a));
-      if (filePath) void openFileByAbsolutePath(filePath);
+    void invoke<StartupInfo>("get_startup_info").then((info) => {
+      for (const path of info.paths) void openPathByAbsolutePath(path);
     }).catch(() => {
       // No args or command not available
     });
   });
 
-  // Already running: single-instance plugin forwards file path via event
+  // Already running: single-instance plugin forwards path via event.
   onMount(() => {
-    const unlisten = listen<string>("open-file", (event) => {
-      if (event.payload) void openFileByAbsolutePath(event.payload);
+    const unlisten = listen<string>("open-path", (event) => {
+      if (event.payload) void openPathByAbsolutePath(event.payload);
     });
     onCleanup(() => { void unlisten.then((fn) => fn()); });
   });
@@ -2950,6 +3291,24 @@ export function App() {
         run: () => state.focusAiComposer(),
       },
       {
+        id: "ai.freshChat",
+        group: "AI",
+        title: (useLocale(), m.command_ai_fresh_chat()),
+        run: () => state.newChat(),
+      },
+      {
+        id: "ai.continueLatestChat",
+        group: "AI",
+        title: (useLocale(), m.command_ai_continue_chat()),
+        run: () => state.continueLatestChat(),
+      },
+      {
+        id: "ai.compactChat",
+        group: "AI",
+        title: (useLocale(), m.command_ai_compact_chat()),
+        run: () => state.compactActiveChat(),
+      },
+      {
         id: "ai.inlineAction",
         group: "AI",
         title: (useLocale(), m.command_add_selection_to_chat()),
@@ -3077,7 +3436,7 @@ export function App() {
     try {
       await writeFile(dest, content);
       // Open the real file so editing continues there (becomes the active tab).
-      await openFileByAbsolutePath(dest);
+      await openPathByAbsolutePath(dest);
       return true;
     } catch (e) {
       console.error("save scratch failed:", e);
@@ -3513,6 +3872,7 @@ export function App() {
       // loader (the open transition itself debounces; latest-wins guard above).
       onAiSlashMenuOpen={reloadAiCommands}
       aiSkills={skillsView()}
+      aiRules={rulesView()}
       onAiSkillsMenuOpen={refreshDiscoveredSkills}
       onSelectAiModel={selectAiModel}
       onOpenSettings={() => setSettingsOpen(true)}
@@ -3557,13 +3917,21 @@ export function App() {
       onConnectProvider={connectProvider}
       onRemoveProvider={removeProvider}
       onRefreshModels={refreshModels}
+      modelCatalogStatus={modelCatalogStatus()}
+      shellCommandStatus={shellCommandStatus()}
+      onRefreshShellCommand={refreshShellCommandStatus}
+      onInstallShellCommand={installShellCommand}
+      onUninstallShellCommand={uninstallShellCommand}
       mcpServers={mcpServersView()}
       skills={skillsView()}
+      rules={rulesView()}
       onSaveMcpServer={saveMcpServer}
       onRemoveMcpServer={removeMcpServer}
       onToggleMcpServer={toggleMcpServer}
       onAuthorizeMcpServer={authorizeMcpServerById}
       onApproveMcpServer={approveDiscoveredMcp}
+      onAttachMcpResource={attachMcpResource}
+      onInsertMcpPrompt={insertMcpPrompt}
       importOpenCodeMcps={importOpenCode()}
       onImportOpenCodeMcpsChange={toggleImportOpenCode}
       showRecentHistory={true}

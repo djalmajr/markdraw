@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   expandSlashCommand,
   mergeSlashCommands,
+  parseSlashArgs,
   parseInstructionsFile,
   parseSlashCommandFile,
   type SlashCommandDef,
@@ -133,6 +134,50 @@ describe("expandSlashCommand", () => {
 
   it("keeps multi-line args intact", () => {
     expect(expandSlashCommand("Do:\n$ARGUMENTS", "line1\nline2")).toBe("Do:\nline1\nline2");
+  });
+
+  it("expands positional args", () => {
+    expect(expandSlashCommand("Review $1 in mode $2.", "docs/api.md strict")).toBe(
+      "Review docs/api.md in mode strict.",
+    );
+  });
+
+  it("parses quoted positional args", () => {
+    expect(expandSlashCommand("Create $1 named $2.", "file \"release notes.md\"")).toBe(
+      "Create file named release notes.md.",
+    );
+  });
+
+  it("does not append raw args when positional tokens were used", () => {
+    expect(expandSlashCommand("Read $1.", "docs/a.md extra")).toBe("Read docs/a.md.");
+  });
+
+  it("does not re-expand a literal $N that arrives via user args", () => {
+    expect(expandSlashCommand("Note: $ARGUMENTS", "keep $1 literal")).toBe("Note: keep $1 literal");
+  });
+
+  it("keeps user-supplied $ARGUMENTS/$N text verbatim (single-pass expansion)", () => {
+    expect(expandSlashCommand("$1 and $ARGUMENTS", "$ARGUMENTS more")).toBe(
+      "$ARGUMENTS and $ARGUMENTS more",
+    );
+  });
+});
+
+describe("parseSlashArgs", () => {
+  it("splits plain args on whitespace", () => {
+    expect(parseSlashArgs("one two  three")).toEqual(["one", "two", "three"]);
+  });
+
+  it("keeps quoted args together and unescapes characters", () => {
+    expect(parseSlashArgs("'one two' \"three \\\"four\\\"\" five\\ six")).toEqual([
+      "one two",
+      'three "four"',
+      "five six",
+    ]);
+  });
+
+  it("preserves backslashes inside single quotes (POSIX literal semantics)", () => {
+    expect(parseSlashArgs("'C:\\Users\\bob'")).toEqual(["C:\\Users\\bob"]);
   });
 });
 

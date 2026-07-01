@@ -18,6 +18,7 @@ import type {
   ToolActivity,
   TurnUsage,
 } from "../composables/create-ai-chat-store.ts";
+import type { PersistedAdvisorNote } from "@markdraw/core/ai-chat-sessions.ts";
 import { renderChatMarkdown } from "../lib/chat-markdown.ts";
 
 const AI_WAITING_STATUS_MAX_DELAY_MS = 15_000;
@@ -26,6 +27,7 @@ const AI_TYPEWRITER_INTERVAL_MS = 18;
 
 export interface AiMessageProps {
   content: string;
+  kind?: "normal" | "compaction";
   /** Display-only transform applied to expanded tool chip text (e.g. restore
    *  scrubbed secret placeholders). The host already transforms `content`. */
   displayText?: (text: string) => string;
@@ -34,6 +36,8 @@ export interface AiMessageProps {
   streaming?: boolean;
   /** Tool activity to surface as compact chips with this turn. */
   tools?: ToolActivity[];
+  /** Advisor/watchdog notes attached to this assistant turn. */
+  advisorNotes?: PersistedAdvisorNote[];
   /** Context snapshot used by this user turn. Raw context stays out of
    *  history; these small labels make the effective prompt auditable. */
   context?: ChatTurnContextItem[];
@@ -70,6 +74,12 @@ function formatToolValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function formatArtifactLabel(tool: ToolActivity): string {
+  const artifact = tool.resultArtifact;
+  if (!artifact) return "";
+  return `${m.ai_artifact_saved()} ${artifact.id} (${artifact.byteLength} B)`;
 }
 
 function toolActivityKind(tool: ToolActivity): "create-file" | "create-folder" | "edit-file" | "read-file" | "read-doc" | "list-files" | "search" | "plan" | "generic" {
@@ -340,12 +350,14 @@ export function AiToolChips(props: AiToolChipsProps): JSX.Element {
     if (!tool) return "";
     const result = formatToolValue(tool.result);
     const args = formatToolValue(tool.args);
+    const artifact = formatArtifactLabel(tool);
     const raw = result
       ? result
       : args
         ? `${toolDisplayName(tool.toolName)} ${args}`
         : toolDisplayName(tool.toolName);
-    return props.displayText?.(raw) ?? raw;
+    const text = artifact ? `${raw}\n\n${artifact}` : raw;
+    return props.displayText?.(text) ?? text;
   };
   return (
     <div class="ai-tool-chips">
@@ -381,6 +393,27 @@ export function AiToolChips(props: AiToolChipsProps): JSX.Element {
       <Show when={expandedTool()}>
         <pre class="ai-tool-output">{expandedText()}</pre>
       </Show>
+    </div>
+  );
+}
+
+function AdvisorNotes(props: { notes: PersistedAdvisorNote[] }): JSX.Element {
+  return (
+    <div class="ai-advisor-notes">
+      <For each={props.notes}>
+        {(note) => (
+          <div
+            class="ai-advisor-note"
+            classList={{
+              "ai-advisor-note-blocker": note.severity === "blocker",
+              "ai-advisor-note-warning": note.severity === "warning",
+            }}
+          >
+            <span class="ai-advisor-note-title">{note.title || (useLocale(), m.ai_advisor_title())}</span>
+            <span class="ai-advisor-note-message">{note.message}</span>
+          </div>
+        )}
+      </For>
     </div>
   );
 }
@@ -487,6 +520,7 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
       classList={{
         "ai-message-user": props.role === "user",
         "ai-message-assistant": props.role === "assistant",
+        "ai-message-compaction": props.kind === "compaction",
       }}
     >
       <div class="ai-message-role">
@@ -533,6 +567,9 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
           </Show>
         </Show>
       </div>
+      <Show when={props.advisorNotes && props.advisorNotes.length > 0}>
+        <AdvisorNotes notes={props.advisorNotes!} />
+      </Show>
       {/* Hover action bar (revealed by CSS on .ai-message:hover). */}
       <div class="ai-msg-actions">
         <Show when={usageStats()}>
