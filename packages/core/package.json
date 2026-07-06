@@ -19,7 +19,7 @@
     "fuzz:ci": "bun run fuzz:frontmatter && bun run fuzz:scan-includes && bun run fuzz:xrefs && bun run fuzz:schemas"
   },
   "dependencies": {
-    "@asciidoctor/core": "^3.0.4",
+    "@asciidoctor/core": "^4.0.1",
     "@mdit/plugin-alert": "^0.23.2",
     "@traptitech/markdown-it-katex": "^3.6.0",
     "clsx": "^2.1.1",
