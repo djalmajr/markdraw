@@ -109,7 +109,7 @@ tokio = { version = "1", features = [
 # Dev-only: registered with #[cfg(debug_assertions)] in lib.rs so release
 # builds get stripped by LTO. Lets AI agents drive the running app via the
 # tauri-mcp-server tools (screenshots, JS exec, IPC monitoring).
-tauri-plugin-mcp-bridge = "0.11"
+tauri-plugin-mcp-bridge = "0.12"
 
 # `keyring` stores AI provider API keys in the OS secure store (DJA-11E).
 # v3 requires picking a native backend per platform via features.
