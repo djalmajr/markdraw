@@ -50,7 +50,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # over stdio (spawned child process) or Streamable HTTP. Lives in Rust because
 # the webview can't spawn processes and MCP-over-HTTP from the webview hits the
 # same SSE-delivery wall that forced generateText over streamText. See ai_mcp.rs.
-rmcp = { version = "1", default-features = false, features = [
+rmcp = { version = "2", default-features = false, features = [
     "client",
     "transport-child-process",
     "transport-streamable-http-client-reqwest",
