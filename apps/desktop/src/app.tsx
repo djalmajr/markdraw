@@ -1473,13 +1473,19 @@ export function App() {
   // Flag to suppress auto-save during tab switches
   let isTabSwitching = false;
 
-  // File watcher (watches current file + includes for content changes)
+  // File watcher (watches current file + includes for content changes).
+  // Also fires for our own autosave writes, so the refresh keeps unsaved edits.
   const watcher = new FileWatcher(async () => {
     const file = state.selectedFile();
     if (!file) return;
 
     try {
-      await loader.loadFileContent(file, false, true);
+      const changedElsewhere = await loader.refreshFromDisk(file);
+      // Re-index only for an outside edit: autosave no longer writes back
+      // after a reload, which used to re-index as a side effect. Not on every
+      // event — each autosave fires one, and re-indexing re-chunks (and, on
+      // the Complete tier, re-embeds) the whole document.
+      if (changedElsewhere) reindexActiveFile();
       tabStore().updateActiveTabContent({
         editorContent: state.editorContent(),
         savedContent: state.savedContent(),
@@ -1634,6 +1640,10 @@ export function App() {
     if (!state.selectedFile()) return;
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => {
+      // Nothing to write when the buffer equals the last save (a watcher
+      // reload or an undo back to it). Writing it anyway would overwrite an
+      // external change made since, and wake the watcher for nothing.
+      if (state.editorContent() === state.savedContent()) return;
       // Save, then re-index the saved file (the Rust staleness diff makes this
       // cheap — only the changed doc is re-chunked/embedded).
       void Promise.resolve(folder.handleEditorSave()).then(() => reindexActiveFile());
