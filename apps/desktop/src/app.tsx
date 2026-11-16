@@ -1480,11 +1480,12 @@ export function App() {
     if (!file) return;
 
     try {
-      await loader.refreshFromDisk(file);
-      // Keep the AI index in step with outside edits too: autosave no longer
-      // writes back after a reload, which used to re-index as a side effect.
-      // Cheap when nothing changed (the Rust side diffs for staleness).
-      reindexActiveFile();
+      const changedElsewhere = await loader.refreshFromDisk(file);
+      // Re-index only for an outside edit: autosave no longer writes back
+      // after a reload, which used to re-index as a side effect. Not on every
+      // event — each autosave fires one, and re-indexing re-chunks (and, on
+      // the Complete tier, re-embeds) the whole document.
+      if (changedElsewhere) reindexActiveFile();
       tabStore().updateActiveTabContent({
         editorContent: state.editorContent(),
         savedContent: state.savedContent(),

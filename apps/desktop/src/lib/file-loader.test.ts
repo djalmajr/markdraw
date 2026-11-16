@@ -506,7 +506,10 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     const done = refresh();
     await new Promise((r) => setTimeout(r, 0));
     resolveRead!("saved"); // disk == last save: this is our own write
-    await done;
+    // Not an outside edit: the caller must not re-index (autosave already did).
+    // Mutation captured: reporting every refresh as a change re-embeds the
+    // whole document after each autosave.
+    expect(await done).toBe(false);
 
     expect(pane.editorContent()).toBe("saved typed later");
     expect(pane.savedContent()).toBe("saved");
@@ -537,7 +540,9 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     const done = refresh();
     await new Promise((r) => setTimeout(r, 0));
     resolveRead!("changed elsewhere");
-    await done;
+    // Mutation captured: never reporting a change leaves the AI index stale
+    // after outside edits.
+    expect(await done).toBe(true);
 
     expect(pane.editorContent()).toBe("changed elsewhere");
     expect(pane.savedContent()).toBe("changed elsewhere");
@@ -551,7 +556,7 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     const done = refresh();
     await new Promise((r) => setTimeout(r, 0));
     resolveRead!("changed elsewhere");
-    await done;
+    expect(await done).toBe(false);
 
     expect(pane.editorContent()).toBe("a typed");
     expect(pane.savedContent()).toBe("a");

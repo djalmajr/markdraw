@@ -36,16 +36,19 @@ export function createFileLoader(deps: FileLoaderDeps) {
   const latestRefresh = new WeakMap<object, number>();
 
   async function loadFileContent(entry: FSEntry, pushHistory = true, force = false, rootId?: string) {
-    return load(entry, { pushHistory, force, rootId, external: false });
+    await load(entry, { pushHistory, force, rootId, external: false });
   }
 
   /** Re-read the open file after a watcher event without clobbering unsaved
    *  edits — the event is often our own autosave (see external-reload.ts). */
-  async function refreshFromDisk(entry: FSEntry, rootId?: string) {
-    return load(entry, { pushHistory: false, force: true, rootId, external: true });
+  async function refreshFromDisk(entry: FSEntry, rootId?: string): Promise<boolean> {
+    // true only when the buffer adopted the disk text: the file changed
+    // elsewhere (our own autosave writes and include changes don't count).
+    return (await load(entry, { pushHistory: false, force: true, rootId, external: true })) === true;
   }
 
-  async function load(entry: FSEntry, opts: LoadOptions) {
+  /** Resolves true when a watcher refresh adopted the disk text. */
+  async function load(entry: FSEntry, opts: LoadOptions): Promise<boolean | undefined> {
     const { pushHistory, force, rootId, external } = opts;
     // Pin the target pane at call time. AppState's per-doc setters
     // (setHtml, setEditorContent, …) are proxies that route to
@@ -173,7 +176,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
         targetPane.setSavedContent(content);
         watcher.setTarget({ filePath: absolutePath, includePaths: [], rootPath: root });
         if (state.autoRefresh()) watcher.start();
-        return;
+        return external;
       }
 
       // Pre-scan include paths and batch-read them in a single IPC call
@@ -230,6 +233,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
       if (state.autoRefresh()) {
         watcher.start();
       }
+      return external && adoptDisk;
     } catch (e) {
       console.error("Failed to convert file:", e);
       targetPane.setHtml(`<div class="error">Error converting file: ${e}</div>`);
