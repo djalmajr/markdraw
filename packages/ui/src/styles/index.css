@@ -309,19 +309,22 @@
 }
 
 .toolbar-window-frame {
-  min-height: 28px;
+  min-height: var(--toolbar-frame-min-h, 28px);
   padding: 2px var(--toolbar-frame-inset-right, 8px) 2px var(--toolbar-frame-inset-left, 8px);
   gap: 6px;
 }
 
-/* Custom Windows caption buttons (minimize/maximize/close). On macOS the
-   native `titleBarStyle: Overlay` handles this via traffic lights, so this
-   component is only rendered on Windows. */
+/* Custom caption buttons (minimize/maximize/close). On macOS the native
+   `titleBarStyle: Overlay` handles this via traffic lights, so this
+   component is only rendered on Windows and Linux. */
 .win-controls {
   position: fixed;
   top: 0;
   right: 0;
   display: flex;
+  /* The window-frame toolbar is 33px here (--toolbar-frame-min-h): the
+     buttons fill it down to its 1px bottom border. Fixed, not --toolbar-h:
+     that drops to 0 while the toolbar is hidden (reader mode, no tabs). */
   height: 32px;
   z-index: 1000;
   -webkit-app-region: no-drag;
@@ -329,7 +332,7 @@
 
 .win-controls-btn {
   width: 46px;
-  height: 32px;
+  height: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;

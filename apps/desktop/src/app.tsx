@@ -150,6 +150,13 @@ import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
 import { setupTray } from "./lib/tray.ts";
 import { decideCloseAction } from "./lib/window-close.ts";
+import {
+  ALL_WINDOW_CAPABILITIES,
+  captionButtonsInset,
+  hidesNativeMenuBar,
+  usesCustomWindowFrame,
+  type WindowCapabilities,
+} from "./lib/window-frame.ts";
 import { exit } from "@tauri-apps/plugin-process";
 import {
   _devSetDownloadProgress,
@@ -1638,18 +1645,33 @@ export function App() {
     watcher.destroy();
   });
 
+  // Caption buttons the compositor acts on (custom-frame platforms only).
+  const [windowCaps, setWindowCaps] = createSignal<WindowCapabilities>(ALL_WINDOW_CAPABILITIES);
+
   // Native app menu (macOS menu bar, Windows/Linux window menu) and tray icon.
   // Both are fire-and-forget; errors are logged but don't break the app.
   onMount(() => {
     // macOS traffic lights sit in the top-left corner of the overlay title
     // bar. Reserve space so toolbar controls don't overlap them.
-    // On Windows the custom WindowControls (min/max/close) are drawn in the
-    // top-right — reserve space for them.
+    // On Windows and Linux the custom WindowControls (min/max/close) are drawn
+    // in the top-right — reserve space for them.
     if (navigator.platform.startsWith("Mac")) {
       document.documentElement.style.setProperty("--toolbar-frame-inset-left", "78px");
-    } else if (navigator.platform.startsWith("Win")) {
-      // Custom caption buttons — 46×32 each × 3 = 138px (matches Win11 native).
-      document.documentElement.style.setProperty("--toolbar-frame-inset-right", "138px");
+    } else if (usesCustomWindowFrame(navigator.platform)) {
+      // Custom caption buttons, 46×32 each (matches Win11 native). The bar
+      // grows to hold them: 32px plus its 1px bottom border.
+      const applyCaptionInset = (caps: WindowCapabilities) =>
+        document.documentElement.style.setProperty("--toolbar-frame-inset-right", captionButtonsInset(caps));
+      applyCaptionInset(windowCaps());
+      document.documentElement.style.setProperty("--toolbar-frame-min-h", "33px");
+      // Drop the buttons the compositor won't act on (Linux tiling compositors
+      // don't minimize); everything else reports all of them.
+      invoke<WindowCapabilities>("window_capabilities")
+        .then((caps) => {
+          setWindowCaps(caps);
+          applyCaptionInset(caps);
+        })
+        .catch((e) => console.error("Failed to read window capabilities:", e));
     }
 
     void setupAppMenu({
@@ -1665,7 +1687,9 @@ export function App() {
       onToggleToc: () => state.setTocVisible((v) => !v),
       onThemeChange: (mode) => state.handleThemeChange(mode),
       onFind: () => state.triggerPreviewFind(),
-    }).catch((e) => console.error("Failed to set up app menu:", e));
+    })
+      .then(() => (hidesNativeMenuBar(navigator.platform) ? invoke("hide_window_menu") : undefined))
+      .catch((e) => console.error("Failed to set up app menu:", e));
 
     // No system tray in dev — keeps the dev instance from cluttering the menu
     // bar / colliding with a running prod build (which owns the real tray).
@@ -3495,11 +3519,13 @@ export function App() {
     onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
   });
 
-  const isWindows = navigator.platform.startsWith("Win");
+  const customWindowFrame = usesCustomWindowFrame(navigator.platform);
 
   return (
     <>
-      {isWindows && <WindowControls />}
+      {customWindowFrame && (
+        <WindowControls minimize={windowCaps().minimize} maximize={windowCaps().maximize} />
+      )}
       <AppShell
       state={state}
       hasRoot={rootPaths().size > 0}
@@ -3571,7 +3597,7 @@ export function App() {
       showNavButtons={rootPaths().size > 0 || tabStore().tabs().length > 0}
       showToolbar={rootPaths().size > 0 || tabStore().tabs().length > 0}
       showSidebar={state.sidebarVisible() && rootPaths().size > 0}
-      showWindowControls={navigator.platform.startsWith("Win")}
+      showWindowControls={customWindowFrame}
       showCloseBehaviorToggle={true}
       toolbarFilePath={
         isScratchPath(state.selectedFile()?.path)

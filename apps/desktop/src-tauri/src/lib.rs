@@ -63,6 +63,10 @@ use ai_index::{
 mod html_preview;
 use html_preview::{html_preview_clear_overlay, html_preview_register, html_preview_set_overlay};
 
+// Window actions the compositor performs (Linux: xdg wm_capabilities), so the
+// custom caption buttons only offer what works.
+mod window_caps;
+
 // Pure-Rust helpers split out of this file so the Miri sub-crate
 // (`tools/miri-helpers-tests`) can exercise them without pulling in
 // the full Tauri dep graph. The `ctor` macro inside
@@ -1053,6 +1057,43 @@ fn toggle_maximize_instant(window: tauri::Window) -> Result<(), String> {
     }
 }
 
+/// Hide the window's menu bar but keep its accelerators (Ctrl+O has no JS
+/// handler). Linux uses this once the app menu is set: the toolbar is the menu
+/// there, as on Windows. No-op on macOS, where the menu lives in the system
+/// menu bar.
+#[tauri::command]
+fn hide_window_menu(window: tauri::Window) -> Result<(), String> {
+    window.hide_menu().map_err(|e| e.to_string())?;
+    // GTK 3 only activates a menu bar's accelerators while the bar is mapped,
+    // so a hidden bar would silently drop every shortcut. Queued after
+    // hide_menu's own main-thread work, so the bar exists by then.
+    #[cfg(target_os = "linux")]
+    {
+        let win = window.clone();
+        window
+            .run_on_main_thread(move || {
+                use gtk::prelude::*;
+                let Ok(vbox) = win.default_vbox() else { return };
+                for child in vbox.children() {
+                    if let Ok(bar) = child.downcast::<gtk::MenuBar>() {
+                        bar.connect_can_activate_accel(|_, _| true);
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Which caption buttons can do something here. The Linux probe talks to the
+/// compositor, so it runs off the main thread.
+#[tauri::command]
+async fn window_capabilities() -> window_caps::WindowCapabilities {
+    tauri::async_runtime::spawn_blocking(window_caps::current)
+        .await
+        .unwrap_or(window_caps::WindowCapabilities::ALL)
+}
+
 /// Return command-line args passed to the process (for file-open on cold start).
 /// On Windows/Linux, double-clicking an associated file passes the path as argv[1].
 #[tauri::command]
@@ -1176,14 +1217,15 @@ pub fn run() {
                     }
                 }
             }
-            // Windows-only: drop the native window frame. `titleBarStyle:
-            // "Overlay"` in the config is a macOS-only setting, so Windows
-            // keeps native decorations — and the app already draws its own
-            // caption buttons there (`<WindowControls />` in app.tsx), which
-            // showed BOTH sets of min/max/close. Disabling decorations at
-            // runtime avoids duplicating the whole `app.windows` array into a
-            // tauri.windows.conf.json (platform configs replace arrays whole).
-            #[cfg(target_os = "windows")]
+            // Windows and Linux: drop the native window frame. `titleBarStyle:
+            // "Overlay"` in the config is a macOS-only setting, so both keep
+            // native decorations (on Linux, the GTK header bar) — and the app
+            // draws its own caption buttons there (`<WindowControls />` in
+            // app.tsx), which showed BOTH sets of min/max/close. Disabling
+            // decorations at runtime avoids duplicating the whole
+            // `app.windows` array into per-platform configs (platform configs
+            // replace arrays whole).
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_decorations(false);
             }
@@ -1220,6 +1262,8 @@ pub fn run() {
             get_startup_args,
             set_dock_visible,
             toggle_maximize_instant,
+            hide_window_menu,
+            window_capabilities,
             print_webview,
             write_file,
             rename_file,

@@ -125,6 +125,14 @@ keyring = { version = "3", features = ["windows-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service"] }
+# Ask the compositor which window actions it supports (xdg_toplevel
+# wm_capabilities) — see window_caps.rs. Already in the tree via the clipboard
+# plugin's wl-clipboard-rs.
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
+# Keep the hidden menu bar's accelerators alive (hide_window_menu). Same
+# version Tauri's GTK runtime uses.
+gtk = "0.18"
 
 [target.'cfg(unix)'.dependencies]
 # Process-group kill (killpg) so the login-shell PATH probe can terminate the
