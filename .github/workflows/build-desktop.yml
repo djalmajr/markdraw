@@ -38,7 +38,15 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          # A stable release lists everything since the previous STABLE tag:
+          # prerelease tags (v*-*) are skipped, or v0.26.1's notes (also the
+          # updater prompt's text) would only cover what came after v0.26.1-1.
+          # A prerelease lists what's new since the previous tag of any kind.
+          if [[ "$TAG" == *-* ]]; then
+            PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          else
+            PREVIOUS_TAG="$(git describe --tags --abbrev=0 --exclude='v*-*' "${TAG}^" 2>/dev/null || true)"
+          fi
           export TAG PREVIOUS_TAG
           python <<'PY'
           import os
