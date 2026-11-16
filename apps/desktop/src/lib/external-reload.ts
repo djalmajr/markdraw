@@ -11,7 +11,8 @@ export type ExternalReload =
   /** Disk matches the last save: our own write, or an included file changed.
    *  Keep the buffer; only re-render the preview from it. */
   | "rerender"
-  /** The file changed elsewhere and the buffer has no unsaved edits: adopt it. */
+  /** The file changed elsewhere and the buffer has no unsaved edits, or the
+   *  disk already holds exactly the buffer: adopt it (clears the dirty mark). */
   | "reload"
   /** The file changed elsewhere but there are unsaved edits: they win, and the
    *  next autosave writes them over the external change. */
@@ -23,6 +24,6 @@ export function decideExternalReload(state: {
   current: string;
 }): ExternalReload {
   if (state.disk === state.saved) return "rerender";
-  if (state.current === state.saved) return "reload";
+  if (state.current === state.saved || state.disk === state.current) return "reload";
   return "keep-local";
 }

@@ -28,6 +28,10 @@ interface LoadOptions {
 
 export function createFileLoader(deps: FileLoaderDeps) {
   const { rootPaths, state, watcher } = deps;
+  // Bumped by every watcher refresh. Refreshes can overlap (a slow conversion
+  // outlives the next watcher event); only the newest may apply its result,
+  // or an older disk version would win.
+  let refreshSeq = 0;
 
   async function loadFileContent(entry: FSEntry, pushHistory = true, force = false, rootId?: string) {
     return load(entry, { pushHistory, force, rootId, external: false });
@@ -58,6 +62,15 @@ export function createFileLoader(deps: FileLoaderDeps) {
       targetPane.selectedFile()?.path === entry.path
       && targetPane.selectedRootId() === targetRootId;
     if (!force && isSameFile) return;
+    const seq = external ? ++refreshSeq : 0;
+    // A watcher refresh runs in the background and must drop its result once
+    // a newer refresh started or the pane switched to another file (tab
+    // switch) — otherwise this file's text could land in another tab.
+    const superseded = () =>
+      external
+      && (seq !== refreshSeq
+        || targetPane.selectedFile()?.path !== entry.path
+        || targetPane.selectedRootId() !== targetRootId);
 
     targetPane.setSelectedRootId(targetRootId);
     targetPane.setSelectedFile(entry);
@@ -94,7 +107,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
       targetPane.setEditorContent("");
       targetPane.setSavedContent("");
       void watcher.stop();
-      targetPane.setLoading(false);
+      if (!external) targetPane.setLoading(false);
       return;
     }
 
@@ -121,6 +134,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
         return;
       }
 
+      if (superseded()) return;
       // A watcher refresh decides between the disk and the live buffer.
       // `source` is the text to render; `adoptDisk` whether the buffer takes
       // the disk text. A normal load always adopts the disk.
@@ -139,15 +153,17 @@ export function createFileLoader(deps: FileLoaderDeps) {
           adoptDisk = false;
         }
       }
-      // The user may type while we read includes and convert; a refresh must
-      // never apply a result over text newer than what it was based on.
-      const bufferMoved = () => external && targetPane.editorContent() !== bufferAtRead;
+      // Includes and conversion are async: by the time they finish, the
+      // refresh may be outdated, or the user may have typed — never apply a
+      // result over text newer than what it was based on.
+      const stale = () =>
+        superseded() || (external && targetPane.editorContent() !== bufferAtRead);
 
       // Non-previewable text (json, txt, yaml, …) skips conversion entirely
       // and opens straight in the editor. The createEffect in app state
       // forces "edit" mode because canPreview() is false for these.
       if (!isSupportedFile(entry.path)) {
-        if (!adoptDisk || bufferMoved()) return;
+        if (!adoptDisk) return;
         targetPane.setHtml("");
         targetPane.setFrontmatter(null);
         targetPane.setEditorContent(content);
@@ -188,7 +204,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
       // Yield again before DOM update to prevent long frame
       await new Promise((r) => setTimeout(r, 0));
 
-      if (bufferMoved()) return;
+      if (stale()) return;
       targetPane.setHtml(result.html);
       targetPane.setFrontmatter(result.frontmatter);
       if (adoptDisk) {

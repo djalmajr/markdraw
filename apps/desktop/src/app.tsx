@@ -1635,6 +1635,10 @@ export function App() {
     if (!state.selectedFile()) return;
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => {
+      // Nothing to write when the buffer equals the last save (a watcher
+      // reload or an undo back to it). Writing it anyway would overwrite an
+      // external change made since, and wake the watcher for nothing.
+      if (state.editorContent() === state.savedContent()) return;
       // Save, then re-index the saved file (the Rust staleness diff makes this
       // cheap — only the changed doc is re-chunked/embedded).
       void Promise.resolve(folder.handleEditorSave()).then(() => reindexActiveFile());

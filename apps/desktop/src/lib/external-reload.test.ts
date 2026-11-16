@@ -19,6 +19,12 @@ describe("decideExternalReload", () => {
     expect(decideExternalReload({ disk: "x", saved: "a", current: "a" })).toBe("reload");
   });
 
+  it("adopts the disk when it already holds the buffer, clearing the dirty mark", () => {
+    // Mutation captured: treating this as "keep-local" leaves the buffer
+    // marked unsaved although the file on disk is identical.
+    expect(decideExternalReload({ disk: "ab", saved: "a", current: "ab" })).toBe("reload");
+  });
+
   it("keeps unsaved edits over an external change", () => {
     // Mutation captured: preferring the disk here discards what the user is
     // typing whenever another program touches the file.

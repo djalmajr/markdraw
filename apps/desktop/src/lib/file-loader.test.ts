@@ -25,6 +25,8 @@ installLocalStorageMock();
 const FAKE_FILE_CONTENT = "= intro.adoc\n\nbody\n";
 let resolveRead: ((value: string) => void) | undefined;
 let rejectRead: ((err: Error) => void) | undefined;
+// Every pending read, in call order (overlapping refreshes need their own).
+let readResolvers: Array<(value: string) => void> = [];
 let readFileByPathMock: (
   rootPath: string,
   relativePath: string,
@@ -39,6 +41,7 @@ mock.module("./fs.ts", () => ({
     new Promise<string>((resolve, reject) => {
       resolveRead = resolve;
       rejectRead = reject;
+      readResolvers.push(resolve);
     }),
   readFileByPath: (rootPath: string, relativePath: string) =>
     readFileByPathMock(rootPath, relativePath),
@@ -455,6 +458,7 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
   });
 
   async function setup(saved: string, current: string) {
+    readResolvers = [];
     const paneManager = createPaneManager();
     const pane = paneManager.activePane();
     const entry = { kind: "file" as const, name: "README.md", path: "README.md" };
@@ -463,14 +467,14 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     pane.setSavedContent(saved);
     pane.setEditorContent(current);
 
-    let releaseConvert: (() => void) | undefined;
+    const convertReleases: Array<() => void> = [];
     let holdConvert = false;
     const state = {
       paneManager,
       pushNavHistory: () => {},
       autoRefresh: () => false,
       convert: async (_path: string, content: string) => {
-        if (holdConvert) await new Promise<void>((r) => { releaseConvert = r; });
+        if (holdConvert) await new Promise<void>((r) => { convertReleases.push(r); });
         return { html: `<p>${content}</p>`, frontmatter: null, toc: null, meta: {} };
       },
       set _readFile(_v: unknown) {},
@@ -488,7 +492,8 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
       pane,
       refresh: () => loader.refreshFromDisk(entry, "root-0"),
       holdConvert: () => { holdConvert = true; },
-      releaseConvert: () => releaseConvert?.(),
+      /** Let the n-th held conversion (call order) finish. */
+      releaseConvert: (n = 0) => convertReleases[n]?.(),
     };
   }
 
@@ -516,6 +521,7 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     await new Promise((r) => setTimeout(r, 0));
     resolveRead!("changed elsewhere"); // clean buffer + external change → reload
     await new Promise((r) => setTimeout(r, 0));
+    expect(pane.loading()).toBe(false); // background work: no loading flash
     pane.setEditorContent("a typed meanwhile"); // the user types mid-conversion
     releaseConvert();
     await done;
@@ -534,5 +540,71 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     expect(pane.editorContent()).toBe("changed elsewhere");
     expect(pane.savedContent()).toBe("changed elsewhere");
     expect(pane.html()).toBe("<p>changed elsewhere</p>");
+  });
+
+  it("keeps unsaved edits when the file changes elsewhere", async () => {
+    // Mutation captured: falling through to adopt the disk on "keep-local"
+    // replaces what the user is typing with the other program's version.
+    const { pane, refresh } = await setup("a", "a typed");
+    const done = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    resolveRead!("changed elsewhere");
+    await done;
+
+    expect(pane.editorContent()).toBe("a typed");
+    expect(pane.savedContent()).toBe("a");
+  });
+
+  it("clears the dirty mark when the disk already holds the buffer", async () => {
+    const { pane, refresh } = await setup("a", "ab");
+    const done = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    resolveRead!("ab");
+    await done;
+
+    expect(pane.editorContent()).toBe("ab");
+    expect(pane.savedContent()).toBe("ab");
+  });
+
+  it("lets the newest of two overlapping refreshes win", async () => {
+    // Refresh 1 reads v1 and converts slowly; meanwhile the file changes again
+    // and refresh 2 reads v2. Mutation captured: without the refresh counter,
+    // refresh 1 applies v1 and refresh 2 then drops v2 (the buffer "moved").
+    const { pane, refresh, holdConvert, releaseConvert } = await setup("a", "a");
+    holdConvert();
+    const first = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    readResolvers[0]!("v1");
+    await new Promise((r) => setTimeout(r, 0));
+    const second = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    readResolvers[1]!("v2");
+    await new Promise((r) => setTimeout(r, 0));
+    releaseConvert(0);
+    await first;
+    releaseConvert(1);
+    await second;
+
+    expect(pane.editorContent()).toBe("v2");
+    expect(pane.savedContent()).toBe("v2");
+    expect(pane.html()).toBe("<p>v2</p>");
+  });
+
+  it("never puts the file's text into another tab opened during the disk read", async () => {
+    // Mutation captured: without the selected-file check, the refresh compares
+    // against the new tab's (clean) buffer and adopts README.md's disk text
+    // into it — autosave would then write it into the other file.
+    const { pane, refresh } = await setup("readme", "readme");
+    const done = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    pane.setSelectedFile({ kind: "file", name: "other.md", path: "other.md" });
+    pane.setSavedContent("other");
+    pane.setEditorContent("other");
+    resolveRead!("readme changed elsewhere");
+    await done;
+
+    expect(pane.selectedFile()?.path).toBe("other.md");
+    expect(pane.editorContent()).toBe("other");
+    expect(pane.savedContent()).toBe("other");
   });
 });
