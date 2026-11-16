@@ -11,6 +11,26 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v soho >/dev/null 2>&1 || exit 0; soho hook reminder"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v soho >/dev/null 2>&1 || exit 0; soho hook doctor"
+          }
+        ]
+      }
     ]
   }
 }

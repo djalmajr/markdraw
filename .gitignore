@@ -122,3 +122,4 @@ apps/desktop/src-tauri/playwright/
 # CLAUDE.md files (except root)
 **/CLAUDE.md
 !/CLAUDE.md
+.soho/
