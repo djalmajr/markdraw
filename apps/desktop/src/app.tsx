@@ -150,7 +150,13 @@ import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
 import { setupTray } from "./lib/tray.ts";
 import { decideCloseAction } from "./lib/window-close.ts";
-import { hidesNativeMenuBar, usesCustomWindowFrame } from "./lib/window-frame.ts";
+import {
+  ALL_WINDOW_CAPABILITIES,
+  captionButtonsInset,
+  hidesNativeMenuBar,
+  usesCustomWindowFrame,
+  type WindowCapabilities,
+} from "./lib/window-frame.ts";
 import { exit } from "@tauri-apps/plugin-process";
 import {
   _devSetDownloadProgress,
@@ -1639,6 +1645,9 @@ export function App() {
     watcher.destroy();
   });
 
+  // Caption buttons the compositor acts on (custom-frame platforms only).
+  const [windowCaps, setWindowCaps] = createSignal<WindowCapabilities>(ALL_WINDOW_CAPABILITIES);
+
   // Native app menu (macOS menu bar, Windows/Linux window menu) and tray icon.
   // Both are fire-and-forget; errors are logged but don't break the app.
   onMount(() => {
@@ -1649,10 +1658,20 @@ export function App() {
     if (navigator.platform.startsWith("Mac")) {
       document.documentElement.style.setProperty("--toolbar-frame-inset-left", "78px");
     } else if (usesCustomWindowFrame(navigator.platform)) {
-      // Custom caption buttons — 46×32 each × 3 = 138px (matches Win11 native).
-      document.documentElement.style.setProperty("--toolbar-frame-inset-right", "138px");
-      // The bar grows to hold them: 32px plus its 1px bottom border.
+      // Custom caption buttons, 46×32 each (matches Win11 native). The bar
+      // grows to hold them: 32px plus its 1px bottom border.
+      const applyCaptionInset = (caps: WindowCapabilities) =>
+        document.documentElement.style.setProperty("--toolbar-frame-inset-right", captionButtonsInset(caps));
+      applyCaptionInset(windowCaps());
       document.documentElement.style.setProperty("--toolbar-frame-min-h", "33px");
+      // Drop the buttons the compositor won't act on (Linux tiling compositors
+      // don't minimize); everything else reports all of them.
+      invoke<WindowCapabilities>("window_capabilities")
+        .then((caps) => {
+          setWindowCaps(caps);
+          applyCaptionInset(caps);
+        })
+        .catch((e) => console.error("Failed to read window capabilities:", e));
     }
 
     void setupAppMenu({
@@ -3504,7 +3523,9 @@ export function App() {
 
   return (
     <>
-      {customWindowFrame && <WindowControls />}
+      {customWindowFrame && (
+        <WindowControls minimize={windowCaps().minimize} maximize={windowCaps().maximize} />
+      )}
       <AppShell
       state={state}
       hasRoot={rootPaths().size > 0}

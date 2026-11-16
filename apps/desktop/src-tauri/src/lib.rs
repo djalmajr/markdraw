@@ -63,6 +63,10 @@ use ai_index::{
 mod html_preview;
 use html_preview::{html_preview_clear_overlay, html_preview_register, html_preview_set_overlay};
 
+// Window actions the compositor performs (Linux: xdg wm_capabilities), so the
+// custom caption buttons only offer what works.
+mod window_caps;
+
 // Pure-Rust helpers split out of this file so the Miri sub-crate
 // (`tools/miri-helpers-tests`) can exercise them without pulling in
 // the full Tauri dep graph. The `ctor` macro inside
@@ -1017,6 +1021,15 @@ fn hide_window_menu(window: tauri::Window) -> Result<(), String> {
     window.hide_menu().map_err(|e| e.to_string())
 }
 
+/// Which caption buttons can do something here. The Linux probe talks to the
+/// compositor, so it runs off the main thread.
+#[tauri::command]
+async fn window_capabilities() -> window_caps::WindowCapabilities {
+    tauri::async_runtime::spawn_blocking(window_caps::current)
+        .await
+        .unwrap_or(window_caps::WindowCapabilities::ALL)
+}
+
 /// Return command-line args passed to the process (for file-open on cold start).
 /// On Windows/Linux, double-clicking an associated file passes the path as argv[1].
 #[tauri::command]
@@ -1186,6 +1199,7 @@ pub fn run() {
             set_dock_visible,
             toggle_maximize_instant,
             hide_window_menu,
+            window_capabilities,
             print_webview,
             write_file,
             rename_file,

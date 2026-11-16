@@ -19,3 +19,22 @@ export function usesCustomWindowFrame(platform: string): boolean {
 export function hidesNativeMenuBar(platform: string): boolean {
   return platform.startsWith("Linux");
 }
+
+/** Window actions the compositor performs (`window_capabilities` command). */
+export interface WindowCapabilities {
+  minimize: boolean;
+  maximize: boolean;
+}
+
+/** What every platform but some Linux compositors supports; also the fallback. */
+export const ALL_WINDOW_CAPABILITIES: WindowCapabilities = { minimize: true, maximize: true };
+
+/**
+ * Right inset the toolbar reserves for the caption buttons: 46px each (the
+ * Win11 size). Close is always there; minimize/maximize only when the
+ * compositor performs them (tiling compositors such as Hyprland don't minimize).
+ */
+export function captionButtonsInset(caps: WindowCapabilities): string {
+  const buttons = 1 + Number(caps.minimize) + Number(caps.maximize);
+  return `${buttons * 46}px`;
+}

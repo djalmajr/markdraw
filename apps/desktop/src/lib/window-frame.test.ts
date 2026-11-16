@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { hidesNativeMenuBar, usesCustomWindowFrame } from "./window-frame.ts";
+import {
+  ALL_WINDOW_CAPABILITIES,
+  captionButtonsInset,
+  hidesNativeMenuBar,
+  usesCustomWindowFrame,
+} from "./window-frame.ts";
 
 // `navigator.platform` values as reported by each webview.
 const LINUX = "Linux x86_64";
@@ -31,5 +36,21 @@ describe("hidesNativeMenuBar", () => {
     expect(hidesNativeMenuBar(LINUX)).toBe(true);
     expect(hidesNativeMenuBar(WINDOWS)).toBe(false);
     expect(hidesNativeMenuBar(MAC)).toBe(false);
+  });
+});
+
+describe("captionButtonsInset", () => {
+  it("reserves room for all three buttons when the compositor supports them", () => {
+    expect(captionButtonsInset(ALL_WINDOW_CAPABILITIES)).toBe("138px");
+  });
+
+  it("shrinks when the compositor can't minimize (e.g. Hyprland)", () => {
+    // Mutation captured: ignoring `minimize` keeps a 46px gap where the
+    // hidden button used to be.
+    expect(captionButtonsInset({ minimize: false, maximize: true })).toBe("92px");
+  });
+
+  it("always keeps the close button", () => {
+    expect(captionButtonsInset({ minimize: false, maximize: false })).toBe("46px");
   });
 });
