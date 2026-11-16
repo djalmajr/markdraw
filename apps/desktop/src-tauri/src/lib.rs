@@ -1012,13 +1012,32 @@ fn toggle_maximize_instant(window: tauri::Window) -> Result<(), String> {
     }
 }
 
-/// Hide the window's menu bar but keep the menu attached, so its accelerators
-/// (Ctrl+O has no JS handler) keep working. Linux uses this once the app menu
-/// is set: the toolbar is the menu there, as on Windows. No-op on macOS, where
-/// the menu lives in the system menu bar.
+/// Hide the window's menu bar but keep its accelerators (Ctrl+O has no JS
+/// handler). Linux uses this once the app menu is set: the toolbar is the menu
+/// there, as on Windows. No-op on macOS, where the menu lives in the system
+/// menu bar.
 #[tauri::command]
 fn hide_window_menu(window: tauri::Window) -> Result<(), String> {
-    window.hide_menu().map_err(|e| e.to_string())
+    window.hide_menu().map_err(|e| e.to_string())?;
+    // GTK 3 only activates a menu bar's accelerators while the bar is mapped,
+    // so a hidden bar would silently drop every shortcut. Queued after
+    // hide_menu's own main-thread work, so the bar exists by then.
+    #[cfg(target_os = "linux")]
+    {
+        let win = window.clone();
+        window
+            .run_on_main_thread(move || {
+                use gtk::prelude::*;
+                let Ok(vbox) = win.default_vbox() else { return };
+                for child in vbox.children() {
+                    if let Ok(bar) = child.downcast::<gtk::MenuBar>() {
+                        bar.connect_can_activate_accel(|_, _| true);
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Which caption buttons can do something here. The Linux probe talks to the

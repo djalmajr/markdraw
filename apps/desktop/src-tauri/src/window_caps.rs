@@ -27,11 +27,15 @@ impl WindowCapabilities {
 }
 
 /// `xdg_toplevel.wm_capabilities` values (xdg-shell.xml, enum `wm_capabilities`).
+/// Only the Linux probe (and the tests) decode them.
+#[cfg(any(target_os = "linux", test))]
 const CAP_MAXIMIZE: u32 = 2;
+#[cfg(any(target_os = "linux", test))]
 const CAP_MINIMIZE: u32 = 4;
 
 /// Decode the event's array argument: native-endian `u32` capability values.
 /// Per the protocol, an action missing from the array is unsupported.
+#[cfg(any(target_os = "linux", test))]
 pub fn from_wm_capabilities(raw: &[u8]) -> WindowCapabilities {
     let caps: Vec<u32> = raw.as_chunks::<4>().0.iter().map(|c| u32::from_ne_bytes(*c)).collect();
     WindowCapabilities {
@@ -218,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_array_means_neither() {
+    fn decodes_each_capability_on_its_own() {
         // Mutation captured: swapping the 2/4 constants flips these fields.
         assert_eq!(
             from_wm_capabilities(&raw(&[4])),

@@ -2669,6 +2669,7 @@ dependencies = [
  "async-trait",
  "criterion",
  "futures-util",
+ "gtk",
  "http",
  "ignore",
  "keyring",

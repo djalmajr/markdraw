@@ -322,8 +322,10 @@
   top: 0;
   right: 0;
   display: flex;
-  /* As tall as the toolbar they sit in, minus its bottom border. */
-  height: calc(var(--toolbar-h, 33px) - 1px);
+  /* The window-frame toolbar is 33px here (--toolbar-frame-min-h): the
+     buttons fill it down to its 1px bottom border. Fixed, not --toolbar-h:
+     that drops to 0 while the toolbar is hidden (reader mode, no tabs). */
+  height: 32px;
   z-index: 1000;
   -webkit-app-region: no-drag;
 }
