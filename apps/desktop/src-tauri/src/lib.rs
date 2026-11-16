@@ -1,4 +1,4 @@
-use notify_debouncer_mini::{new_debouncer, DebouncedEvent};
+use notify_debouncer_mini::{new_debouncer_opt, DebouncedEvent};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -744,11 +744,56 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
-struct WatcherHolder(Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>>);
+type FsDebouncer = notify_debouncer_mini::Debouncer<ContentWatcher>;
 
-struct DirWatcherHolder(
-    Mutex<Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>>,
-);
+struct WatcherHolder(Mutex<Option<FsDebouncer>>);
+
+struct DirWatcherHolder(Mutex<Option<FsDebouncer>>);
+
+/// Event kinds that mean the file or tree changed: create, remove, modify,
+/// and close-after-write.
+const CONTENT_EVENTS: notify::event::EventKindMask =
+    notify::event::EventKindMask::CORE.union(notify::event::EventKindMask::ACCESS_CLOSE);
+
+/// Read-only opens are not changes. Linux (inotify) reports them, and the
+/// frontend reloads the watched file on every event, so letting them through
+/// turns each reload's own read into the next reload.
+fn is_content_change(kind: &notify::EventKind) -> bool {
+    CONTENT_EVENTS.matches(kind)
+}
+
+/// `RecommendedWatcher` that drops non-content events before the debouncer
+/// sees them.
+pub struct ContentWatcher(notify::RecommendedWatcher);
+
+impl notify::Watcher for ContentWatcher {
+    fn new<F: notify::EventHandler>(mut handler: F, config: notify::Config) -> notify::Result<Self> {
+        notify::RecommendedWatcher::new(
+            move |res: notify::Result<notify::Event>| match res {
+                Ok(event) if !is_content_change(&event.kind) => {}
+                res => handler.handle_event(res),
+            },
+            config,
+        )
+        .map(Self)
+    }
+
+    fn watch(&mut self, path: &Path, mode: notify::RecursiveMode) -> notify::Result<()> {
+        self.0.watch(path, mode)
+    }
+
+    fn unwatch(&mut self, path: &Path) -> notify::Result<()> {
+        self.0.unwatch(path)
+    }
+
+    fn configure(&mut self, option: notify::Config) -> notify::Result<bool> {
+        self.0.configure(option)
+    }
+
+    fn kind() -> notify::WatcherKind {
+        notify::RecommendedWatcher::kind()
+    }
+}
 
 /// Build a debouncing watcher over `paths`. `recursive` selects RecursiveMode
 /// (false → just the file/dir itself; true → all descendants). `on_change`
@@ -759,12 +804,12 @@ pub fn make_watcher<F>(
     debounce: Duration,
     recursive: bool,
     on_change: F,
-) -> Result<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>, String>
+) -> Result<FsDebouncer, String>
 where
     F: Fn(Vec<String>) + Send + 'static,
 {
-    let mut debouncer = new_debouncer(
-        debounce,
+    let mut debouncer = new_debouncer_opt::<_, ContentWatcher>(
+        notify_debouncer_mini::Config::default().with_timeout(debounce),
         move |events: Result<Vec<DebouncedEvent>, notify::Error>| {
             if let Ok(events) = events {
                 let changed: Vec<String> = events
@@ -1777,6 +1822,72 @@ mod tests {
         assert!(
             !any_nested,
             "non-recursive watcher leaked a descendant event: {batches:?}",
+        );
+    }
+
+    // Regression: on Linux, notify 8 reports read-only opens (IN_OPEN /
+    // IN_CLOSE_NOWRITE). The file watcher reloads the open file on every
+    // event, and that reload reads the file — so each reload queued the next
+    // one, every ~500 ms, and each reload put the disk text back into the
+    // editor state. Autosave then wrote the old text: edits never persisted.
+    #[test]
+    fn is_content_change_ignores_read_only_access() {
+        use notify::event::{AccessKind, AccessMode, EventKind};
+        assert!(!is_content_change(&EventKind::Access(AccessKind::Open(AccessMode::Any))));
+        assert!(!is_content_change(&EventKind::Access(AccessKind::Close(AccessMode::Read))));
+    }
+
+    #[test]
+    fn is_content_change_keeps_writes_and_tree_changes() {
+        use notify::event::{
+            AccessKind, AccessMode, CreateKind, DataChange, EventKind, ModifyKind, RemoveKind,
+            RenameMode,
+        };
+        for kind in [
+            EventKind::Create(CreateKind::File),
+            EventKind::Remove(RemoveKind::File),
+            EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            EventKind::Access(AccessKind::Close(AccessMode::Write)),
+            EventKind::Any,
+        ] {
+            assert!(is_content_change(&kind), "{kind:?} must reach the app");
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn make_watcher_ignores_reads_of_the_watched_file() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("doc.md");
+        fs::write(&file, b"# doc\n").unwrap();
+
+        let (buf, cb) = collect_changes();
+        let _debouncer = make_watcher(
+            &[file.to_string_lossy().into()],
+            Duration::from_millis(100),
+            false,
+            cb,
+        )
+        .unwrap();
+
+        std::thread::sleep(Duration::from_millis(150));
+        // What the reload does: read the file it is watching.
+        for _ in 0..3 {
+            let _ = fs::read_to_string(&file).unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(
+            buf.lock().unwrap().is_empty(),
+            "reading the watched file must not count as a change: {:?}",
+            buf.lock().unwrap(),
+        );
+
+        // A real write still gets through.
+        fs::write(&file, b"# doc\n\nedited\n").unwrap();
+        assert!(
+            wait_for_event(&buf, Duration::from_secs(3)),
+            "a write to the watched file must still dispatch",
         );
     }
 
