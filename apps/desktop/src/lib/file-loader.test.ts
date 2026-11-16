@@ -440,3 +440,99 @@ describe("createFileLoader / loadFileContent — binary non-text marks the pane 
     expect(convertCalled).toBe(false);
   });
 });
+
+describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () => {
+  // The watcher fires for the app's own autosave writes too. Before the fix
+  // the refresh force-reloaded the file, so text typed between the save and
+  // the event (~500ms) dropped out of the editor state and autosave wrote the
+  // old text back.
+  beforeEach(() => {
+    resolveRead = undefined;
+    rejectRead = undefined;
+    readFileByPathMock = async () => null;
+    readFilesRelativeMock = async () => new Map<string, string>();
+    localStorage.clear();
+  });
+
+  async function setup(saved: string, current: string) {
+    const paneManager = createPaneManager();
+    const pane = paneManager.activePane();
+    const entry = { kind: "file" as const, name: "README.md", path: "README.md" };
+    pane.setSelectedRootId("root-0");
+    pane.setSelectedFile(entry);
+    pane.setSavedContent(saved);
+    pane.setEditorContent(current);
+
+    let releaseConvert: (() => void) | undefined;
+    let holdConvert = false;
+    const state = {
+      paneManager,
+      pushNavHistory: () => {},
+      autoRefresh: () => false,
+      convert: async (_path: string, content: string) => {
+        if (holdConvert) await new Promise<void>((r) => { releaseConvert = r; });
+        return { html: `<p>${content}</p>`, frontmatter: null, toc: null, meta: {} };
+      },
+      set _readFile(_v: unknown) {},
+    } as unknown as AppState;
+    const watcher = {
+      setTarget: () => {},
+      start: () => {},
+      stop: () => {},
+      destroy: () => {},
+    } as unknown as Parameters<typeof import("./file-loader.ts").createFileLoader>[0]["watcher"];
+    const rootPaths = () => new Map<string, string>([["root-0", "/tmp/ws"]]);
+    const { createFileLoader } = await import("./file-loader.ts");
+    const loader = createFileLoader({ rootPaths, state, watcher });
+    return {
+      pane,
+      refresh: () => loader.refreshFromDisk(entry, "root-0"),
+      holdConvert: () => { holdConvert = true; },
+      releaseConvert: () => releaseConvert?.(),
+    };
+  }
+
+  it("keeps text typed after our own autosave when its watcher event arrives", async () => {
+    // Mutation captured: adopting the disk text on every refresh (the old
+    // force reload) sets the buffer back to "saved" and loses " typed later".
+    const { pane, refresh } = await setup("saved", "saved typed later");
+    const done = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    resolveRead!("saved"); // disk == last save: this is our own write
+    await done;
+
+    expect(pane.editorContent()).toBe("saved typed later");
+    expect(pane.savedContent()).toBe("saved");
+    expect(pane.html()).toBe("<p>saved typed later</p>");
+    expect(pane.loading()).toBe(false);
+  });
+
+  it("never applies a refresh over text typed while it was converting", async () => {
+    // Mutation captured: dropping the "buffer moved" check lets the disk text
+    // overwrite the keystrokes that landed during the conversion.
+    const { pane, refresh, holdConvert, releaseConvert } = await setup("a", "a");
+    holdConvert();
+    const done = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    resolveRead!("changed elsewhere"); // clean buffer + external change → reload
+    await new Promise((r) => setTimeout(r, 0));
+    pane.setEditorContent("a typed meanwhile"); // the user types mid-conversion
+    releaseConvert();
+    await done;
+
+    expect(pane.editorContent()).toBe("a typed meanwhile");
+    expect(pane.savedContent()).toBe("a");
+  });
+
+  it("adopts an external change when the buffer has no unsaved edits", async () => {
+    const { pane, refresh } = await setup("a", "a");
+    const done = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    resolveRead!("changed elsewhere");
+    await done;
+
+    expect(pane.editorContent()).toBe("changed elsewhere");
+    expect(pane.savedContent()).toBe("changed elsewhere");
+    expect(pane.html()).toBe("<p>changed elsewhere</p>");
+  });
+});

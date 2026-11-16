@@ -1473,13 +1473,14 @@ export function App() {
   // Flag to suppress auto-save during tab switches
   let isTabSwitching = false;
 
-  // File watcher (watches current file + includes for content changes)
+  // File watcher (watches current file + includes for content changes).
+  // Also fires for our own autosave writes, so the refresh keeps unsaved edits.
   const watcher = new FileWatcher(async () => {
     const file = state.selectedFile();
     if (!file) return;
 
     try {
-      await loader.loadFileContent(file, false, true);
+      await loader.refreshFromDisk(file);
       tabStore().updateActiveTabContent({
         editorContent: state.editorContent(),
         savedContent: state.savedContent(),

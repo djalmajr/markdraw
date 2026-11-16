@@ -10,6 +10,7 @@ import {
   readFilesRelative,
 } from "./fs.ts";
 import type { FileWatcher } from "./watcher.ts";
+import { decideExternalReload } from "./external-reload.ts";
 
 interface FileLoaderDeps {
   rootPaths: Accessor<Map<string, string>>;
@@ -17,10 +18,29 @@ interface FileLoaderDeps {
   watcher: FileWatcher;
 }
 
+interface LoadOptions {
+  pushHistory: boolean;
+  force: boolean;
+  rootId?: string;
+  /** A file-watcher refresh: the buffer may hold newer text than the disk. */
+  external: boolean;
+}
+
 export function createFileLoader(deps: FileLoaderDeps) {
   const { rootPaths, state, watcher } = deps;
 
   async function loadFileContent(entry: FSEntry, pushHistory = true, force = false, rootId?: string) {
+    return load(entry, { pushHistory, force, rootId, external: false });
+  }
+
+  /** Re-read the open file after a watcher event without clobbering unsaved
+   *  edits — the event is often our own autosave (see external-reload.ts). */
+  async function refreshFromDisk(entry: FSEntry, rootId?: string) {
+    return load(entry, { pushHistory: false, force: true, rootId, external: true });
+  }
+
+  async function load(entry: FSEntry, opts: LoadOptions) {
+    const { pushHistory, force, rootId, external } = opts;
     // Pin the target pane at call time. AppState's per-doc setters
     // (setHtml, setEditorContent, …) are proxies that route to
     // `paneManager.activePane()` on each call — without pinning, a
@@ -44,7 +64,9 @@ export function createFileLoader(deps: FileLoaderDeps) {
     if (!isSameFile) {
       targetPane.setHtml("");
     }
-    targetPane.setLoading(true);
+    // A watcher refresh is background work (every autosave triggers one):
+    // no loading state, which would flash the preview.
+    if (!external) targetPane.setLoading(true);
 
     if (pushHistory) {
       // Nav stack lives on AppState (global) — same handler whether
@@ -99,10 +121,33 @@ export function createFileLoader(deps: FileLoaderDeps) {
         return;
       }
 
+      // A watcher refresh decides between the disk and the live buffer.
+      // `source` is the text to render; `adoptDisk` whether the buffer takes
+      // the disk text. A normal load always adopts the disk.
+      const bufferAtRead = targetPane.editorContent();
+      let source = content;
+      let adoptDisk = true;
+      if (external) {
+        const decision = decideExternalReload({
+          disk: content,
+          saved: targetPane.savedContent(),
+          current: bufferAtRead,
+        });
+        if (decision === "keep-local") return;
+        if (decision === "rerender") {
+          source = bufferAtRead;
+          adoptDisk = false;
+        }
+      }
+      // The user may type while we read includes and convert; a refresh must
+      // never apply a result over text newer than what it was based on.
+      const bufferMoved = () => external && targetPane.editorContent() !== bufferAtRead;
+
       // Non-previewable text (json, txt, yaml, …) skips conversion entirely
       // and opens straight in the editor. The createEffect in app state
       // forces "edit" mode because canPreview() is false for these.
       if (!isSupportedFile(entry.path)) {
+        if (!adoptDisk || bufferMoved()) return;
         targetPane.setHtml("");
         targetPane.setFrontmatter(null);
         targetPane.setEditorContent(content);
@@ -117,8 +162,8 @@ export function createFileLoader(deps: FileLoaderDeps) {
         ? entry.path.substring(0, entry.path.lastIndexOf("/"))
         : "";
       const scanPaths = isMdFile(entry.path)
-        ? getMarkdownIncludePaths(content, baseDirForIncludes)
-        : getIncludePaths(content, baseDirForIncludes);
+        ? getMarkdownIncludePaths(source, baseDirForIncludes)
+        : getIncludePaths(source, baseDirForIncludes);
 
       let includeFileCache: Map<string, string> | null = null;
       if (scanPaths.length > 0) {
@@ -138,15 +183,18 @@ export function createFileLoader(deps: FileLoaderDeps) {
 
       state._readFile = readFile;
 
-      const result = await state.convert(entry.path, content, readFile);
+      const result = await state.convert(entry.path, source, readFile);
 
       // Yield again before DOM update to prevent long frame
       await new Promise((r) => setTimeout(r, 0));
 
+      if (bufferMoved()) return;
       targetPane.setHtml(result.html);
       targetPane.setFrontmatter(result.frontmatter);
-      targetPane.setEditorContent(content);
-      targetPane.setSavedContent(content);
+      if (adoptDisk) {
+        targetPane.setEditorContent(content);
+        targetPane.setSavedContent(content);
+      }
 
       const includePaths = includeFileCache
         ? Array.from(new Set([...scanPaths, ...includeFileCache.keys()]))
@@ -165,9 +213,9 @@ export function createFileLoader(deps: FileLoaderDeps) {
       console.error("Failed to convert file:", e);
       targetPane.setHtml(`<div class="error">Error converting file: ${e}</div>`);
     } finally {
-      targetPane.setLoading(false);
+      if (!external) targetPane.setLoading(false);
     }
   }
 
-  return { loadFileContent };
+  return { loadFileContent, refreshFromDisk };
 }
