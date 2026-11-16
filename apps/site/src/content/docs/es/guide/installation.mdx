@@ -26,3 +26,11 @@ Haz el AppImage descargado ejecutable antes de correrlo:
 `chmod +x Markdraw_*.AppImage`
 
 El paquete <code>.deb</code> se puede instalar con el gestor de paquetes de tu distro.
+
+## Linux: Omarchy (Hyprland)
+
+En los workspaces flotantes de Omarchy, Hyprland añade su propia barra de título sobre cada ventana, y Markdraw queda con dos juegos de botones de ventana. Para dejar solo la barra de Markdraw, agrega esta línea al final de <code>~/.config/hypr/hyprland.lua</code>:
+
+`o.window("^([Mm]arkdraw)$", { ["hyprbars:no_bar"] = true })`
+
+Hyprland aplica el cambio al guardar el archivo. El botón de Omarchy para minimizar al dock está en esa barra, así que también desaparece.

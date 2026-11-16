@@ -83,6 +83,10 @@ const guideSections = [
       p("guide_installation_linux_p"),
       code("chmod +x Markdraw_*.AppImage"),
       p("guide_installation_linux_deb"),
+      h3("guide_installation_omarchy_h3"),
+      p("guide_installation_omarchy_p"),
+      code('o.window("^([Mm]arkdraw)$", { ["hyprbars:no_bar"] = true })'),
+      p("guide_installation_omarchy_note"),
     ],
   },
   {
