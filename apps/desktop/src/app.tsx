@@ -150,6 +150,7 @@ import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
 import { setupTray } from "./lib/tray.ts";
 import { decideCloseAction } from "./lib/window-close.ts";
+import { hidesNativeMenuBar, usesCustomWindowFrame } from "./lib/window-frame.ts";
 import { exit } from "@tauri-apps/plugin-process";
 import {
   _devSetDownloadProgress,
@@ -1643,13 +1644,15 @@ export function App() {
   onMount(() => {
     // macOS traffic lights sit in the top-left corner of the overlay title
     // bar. Reserve space so toolbar controls don't overlap them.
-    // On Windows the custom WindowControls (min/max/close) are drawn in the
-    // top-right — reserve space for them.
+    // On Windows and Linux the custom WindowControls (min/max/close) are drawn
+    // in the top-right — reserve space for them.
     if (navigator.platform.startsWith("Mac")) {
       document.documentElement.style.setProperty("--toolbar-frame-inset-left", "78px");
-    } else if (navigator.platform.startsWith("Win")) {
+    } else if (usesCustomWindowFrame(navigator.platform)) {
       // Custom caption buttons — 46×32 each × 3 = 138px (matches Win11 native).
       document.documentElement.style.setProperty("--toolbar-frame-inset-right", "138px");
+      // The bar grows to hold them: 32px plus its 1px bottom border.
+      document.documentElement.style.setProperty("--toolbar-frame-min-h", "33px");
     }
 
     void setupAppMenu({
@@ -1665,7 +1668,9 @@ export function App() {
       onToggleToc: () => state.setTocVisible((v) => !v),
       onThemeChange: (mode) => state.handleThemeChange(mode),
       onFind: () => state.triggerPreviewFind(),
-    }).catch((e) => console.error("Failed to set up app menu:", e));
+    })
+      .then(() => (hidesNativeMenuBar(navigator.platform) ? invoke("hide_window_menu") : undefined))
+      .catch((e) => console.error("Failed to set up app menu:", e));
 
     // No system tray in dev — keeps the dev instance from cluttering the menu
     // bar / colliding with a running prod build (which owns the real tray).
@@ -3495,11 +3500,11 @@ export function App() {
     onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
   });
 
-  const isWindows = navigator.platform.startsWith("Win");
+  const customWindowFrame = usesCustomWindowFrame(navigator.platform);
 
   return (
     <>
-      {isWindows && <WindowControls />}
+      {customWindowFrame && <WindowControls />}
       <AppShell
       state={state}
       hasRoot={rootPaths().size > 0}
@@ -3571,7 +3576,7 @@ export function App() {
       showNavButtons={rootPaths().size > 0 || tabStore().tabs().length > 0}
       showToolbar={rootPaths().size > 0 || tabStore().tabs().length > 0}
       showSidebar={state.sidebarVisible() && rootPaths().size > 0}
-      showWindowControls={navigator.platform.startsWith("Win")}
+      showWindowControls={customWindowFrame}
       showCloseBehaviorToggle={true}
       toolbarFilePath={
         isScratchPath(state.selectedFile()?.path)

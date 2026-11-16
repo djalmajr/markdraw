@@ -1008,6 +1008,15 @@ fn toggle_maximize_instant(window: tauri::Window) -> Result<(), String> {
     }
 }
 
+/// Hide the window's menu bar but keep the menu attached, so its accelerators
+/// (Ctrl+O has no JS handler) keep working. Linux uses this once the app menu
+/// is set: the toolbar is the menu there, as on Windows. No-op on macOS, where
+/// the menu lives in the system menu bar.
+#[tauri::command]
+fn hide_window_menu(window: tauri::Window) -> Result<(), String> {
+    window.hide_menu().map_err(|e| e.to_string())
+}
+
 /// Return command-line args passed to the process (for file-open on cold start).
 /// On Windows/Linux, double-clicking an associated file passes the path as argv[1].
 #[tauri::command]
@@ -1131,14 +1140,15 @@ pub fn run() {
                     }
                 }
             }
-            // Windows-only: drop the native window frame. `titleBarStyle:
-            // "Overlay"` in the config is a macOS-only setting, so Windows
-            // keeps native decorations — and the app already draws its own
-            // caption buttons there (`<WindowControls />` in app.tsx), which
-            // showed BOTH sets of min/max/close. Disabling decorations at
-            // runtime avoids duplicating the whole `app.windows` array into a
-            // tauri.windows.conf.json (platform configs replace arrays whole).
-            #[cfg(target_os = "windows")]
+            // Windows and Linux: drop the native window frame. `titleBarStyle:
+            // "Overlay"` in the config is a macOS-only setting, so both keep
+            // native decorations (on Linux, the GTK header bar) — and the app
+            // draws its own caption buttons there (`<WindowControls />` in
+            // app.tsx), which showed BOTH sets of min/max/close. Disabling
+            // decorations at runtime avoids duplicating the whole
+            // `app.windows` array into per-platform configs (platform configs
+            // replace arrays whole).
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_decorations(false);
             }
@@ -1175,6 +1185,7 @@ pub fn run() {
             get_startup_args,
             set_dock_visible,
             toggle_maximize_instant,
+            hide_window_menu,
             print_webview,
             write_file,
             rename_file,
