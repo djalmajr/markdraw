@@ -457,11 +457,11 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     localStorage.clear();
   });
 
-  async function setup(saved: string, current: string) {
+  async function setup(saved: string, current: string, path = "README.md") {
     readResolvers = [];
     const paneManager = createPaneManager();
     const pane = paneManager.activePane();
-    const entry = { kind: "file" as const, name: "README.md", path: "README.md" };
+    const entry = { kind: "file" as const, name: path, path };
     pane.setSelectedRootId("root-0");
     pane.setSelectedFile(entry);
     pane.setSavedContent(saved);
@@ -490,6 +490,8 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     const loader = createFileLoader({ rootPaths, state, watcher });
     return {
       pane,
+      paneManager,
+      loader,
       refresh: () => loader.refreshFromDisk(entry, "root-0"),
       holdConvert: () => { holdConvert = true; },
       /** Let the n-th held conversion (call order) finish. */
@@ -606,5 +608,58 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     expect(pane.selectedFile()?.path).toBe("other.md");
     expect(pane.editorContent()).toBe("other");
     expect(pane.savedContent()).toBe("other");
+  });
+
+  it("drops a plain-text file's refresh when another tab opened during the read", async () => {
+    // Plain text (txt/json/yaml) applies right after the decision, so the
+    // check after the disk read is its only guard. Mutation captured: removing
+    // that check adopts notes.txt's disk text into the other tab.
+    const { pane, refresh } = await setup("notes", "notes", "notes.txt");
+    const done = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    pane.setSelectedFile({ kind: "file", name: "other.txt", path: "other.txt" });
+    pane.setSavedContent("other");
+    pane.setEditorContent("other");
+    resolveRead!("notes changed elsewhere");
+    await done;
+
+    expect(pane.editorContent()).toBe("other");
+    expect(pane.savedContent()).toBe("other");
+  });
+
+  it("a refresh of another pane's file doesn't cancel this pane's refresh", async () => {
+    // Pane 0's refresh is converting when the user clicks pane 1 and a second
+    // watcher event refreshes pane 1's file. Mutation captured: one counter
+    // shared by all panes drops pane 0's refresh, leaving it on stale text.
+    const { pane: pane0, paneManager, loader, holdConvert, releaseConvert, refresh } =
+      await setup("a", "a");
+    paneManager.splitFromActive();
+    paneManager.setActivePane(0);
+    holdConvert();
+    const first = refresh(); // pane 0, README.md
+    await new Promise((r) => setTimeout(r, 0));
+    readResolvers[0]!("a changed elsewhere");
+    await new Promise((r) => setTimeout(r, 0));
+
+    paneManager.setActivePane(1);
+    const pane1 = paneManager.activePane();
+    const other = { kind: "file" as const, name: "other.md", path: "other.md" };
+    pane1.setSelectedRootId("root-0");
+    pane1.setSelectedFile(other);
+    pane1.setSavedContent("b");
+    pane1.setEditorContent("b");
+    const second = loader.refreshFromDisk(other, "root-0");
+    await new Promise((r) => setTimeout(r, 0));
+    readResolvers[1]!("b");
+    await new Promise((r) => setTimeout(r, 0));
+
+    releaseConvert(0);
+    await first;
+    releaseConvert(1);
+    await second;
+
+    expect(pane0.editorContent()).toBe("a changed elsewhere");
+    expect(pane0.savedContent()).toBe("a changed elsewhere");
+    expect(pane1.editorContent()).toBe("b");
   });
 });

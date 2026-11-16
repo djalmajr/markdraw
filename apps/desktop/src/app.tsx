@@ -1481,6 +1481,10 @@ export function App() {
 
     try {
       await loader.refreshFromDisk(file);
+      // Keep the AI index in step with outside edits too: autosave no longer
+      // writes back after a reload, which used to re-index as a side effect.
+      // Cheap when nothing changed (the Rust side diffs for staleness).
+      reindexActiveFile();
       tabStore().updateActiveTabContent({
         editorContent: state.editorContent(),
         savedContent: state.savedContent(),

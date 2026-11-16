@@ -28,10 +28,12 @@ interface LoadOptions {
 
 export function createFileLoader(deps: FileLoaderDeps) {
   const { rootPaths, state, watcher } = deps;
-  // Bumped by every watcher refresh. Refreshes can overlap (a slow conversion
-  // outlives the next watcher event); only the newest may apply its result,
-  // or an older disk version would win.
+  // Watcher refreshes can overlap (a slow conversion outlives the next
+  // watcher event); only the newest refresh of a pane may apply its result,
+  // or an older disk version would win. Per pane: a refresh of another pane's
+  // file must not cancel this one.
   let refreshSeq = 0;
+  const latestRefresh = new WeakMap<object, number>();
 
   async function loadFileContent(entry: FSEntry, pushHistory = true, force = false, rootId?: string) {
     return load(entry, { pushHistory, force, rootId, external: false });
@@ -63,12 +65,13 @@ export function createFileLoader(deps: FileLoaderDeps) {
       && targetPane.selectedRootId() === targetRootId;
     if (!force && isSameFile) return;
     const seq = external ? ++refreshSeq : 0;
+    if (external) latestRefresh.set(targetPane, seq);
     // A watcher refresh runs in the background and must drop its result once
     // a newer refresh started or the pane switched to another file (tab
     // switch) — otherwise this file's text could land in another tab.
     const superseded = () =>
       external
-      && (seq !== refreshSeq
+      && (latestRefresh.get(targetPane) !== seq
         || targetPane.selectedFile()?.path !== entry.path
         || targetPane.selectedRootId() !== targetRootId);
 
@@ -197,6 +200,8 @@ export function createFileLoader(deps: FileLoaderDeps) {
         return fileContent;
       };
 
+      // An outdated refresh must not replace a newer one's include reader.
+      if (superseded()) return;
       state._readFile = readFile;
 
       const result = await state.convert(entry.path, source, readFile);
