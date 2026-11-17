@@ -1178,6 +1178,34 @@ async fn hyprland_window_control() -> bool {
     }
 }
 
+/// "dark" or "light" from GTK's dark-theme setting, which tao sets from the
+/// freedesktop portal when the window is created and on every switch.
+#[cfg(target_os = "linux")]
+fn gtk_theme(settings: &gtk::Settings) -> &'static str {
+    use gtk::prelude::*;
+    if settings.is_gtk_application_prefer_dark_theme() {
+        "dark"
+    } else {
+        "light"
+    }
+}
+
+/// The desktop's current light/dark scheme (Linux; `None` elsewhere). Read
+/// from the same GTK setting the `system-theme-changed` event follows, not
+/// from the window's theme, which tao keeps as it was when the window was
+/// created. A sync command, so it runs on the main thread like GTK needs.
+#[cfg(target_os = "linux")]
+#[tauri::command]
+fn system_theme() -> Option<&'static str> {
+    gtk::Settings::default().map(|settings| gtk_theme(&settings))
+}
+
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn system_theme() -> Option<&'static str> {
+    None
+}
+
 /// Hide the window's menu bar but keep its accelerators (Ctrl+O has no JS
 /// handler). Linux uses this once the app menu is set: the toolbar is the menu
 /// there, as on Windows. No-op on macOS, where the menu lives in the system
@@ -1357,6 +1385,20 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_decorations(false);
             }
+            // Tell the front-end when the desktop switches between light and
+            // dark (the Linux tray icon follows it). tao watches the
+            // freedesktop portal, but sends the change with a placeholder
+            // window id that Tauri drops, so `onThemeChanged` never fires for
+            // it. What does happen is that tao sets this GTK setting to match,
+            // here on the main thread, so watch it instead.
+            #[cfg(target_os = "linux")]
+            if let Some(settings) = gtk::Settings::default() {
+                use gtk::prelude::*;
+                let handle = app.handle().clone();
+                settings.connect_gtk_application_prefer_dark_theme_notify(move |settings| {
+                    let _ = handle.emit("system-theme-changed", gtk_theme(settings));
+                });
+            }
             let _ = app;
             Ok(())
         })
@@ -1396,6 +1438,7 @@ pub fn run() {
             show_main_window,
             hyprland_window_control,
             hide_window_menu,
+            system_theme,
             window_capabilities,
             print_webview,
             write_file,
