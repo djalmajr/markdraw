@@ -1,4 +1,5 @@
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /** `minimize`/`maximize` default to shown; Linux hides the ones its compositor
@@ -8,9 +9,9 @@ export function WindowControls(props: { minimize?: boolean; maximize?: boolean }
 
   onMount(() => {
     const win = getCurrentWindow();
-    void win.isMaximized().then(setIsMax);
+    void invoke<boolean>("window_is_maximized").then(setIsMax);
     const unlistenPromise = win.onResized(() => {
-      void win.isMaximized().then(setIsMax);
+      void invoke<boolean>("window_is_maximized").then(setIsMax);
     });
     onCleanup(() => {
       void unlistenPromise.then((fn) => fn());
@@ -38,7 +39,7 @@ export function WindowControls(props: { minimize?: boolean; maximize?: boolean }
           class="win-controls-btn"
           aria-label={isMax() ? "Restore" : "Maximize"}
           title={isMax() ? "Restore" : "Maximize"}
-          onClick={() => void win().toggleMaximize()}
+          onClick={() => void invoke("toggle_maximize_instant")}
         >
           {isMax() ? (
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1">

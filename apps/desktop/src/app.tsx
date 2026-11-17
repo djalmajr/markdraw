@@ -8,6 +8,7 @@ import { makeTabId, type TabState } from "@markdraw/core/tabs.ts";
 import { getVersion } from "@tauri-apps/api/app";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "./lib/chaos-invoke.ts";
+import { installHyprlandMaximize } from "./lib/hyprland-maximize.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
@@ -1653,6 +1654,15 @@ export function App() {
   onCleanup(() => {
     clearTimeout(autoSaveTimer);
     watcher.destroy();
+  });
+
+  onMount(() => {
+    let disposed = false;
+    let remove = () => {};
+    void invoke<boolean>("hyprland_window_control").then((active) => {
+      if (active && !disposed) remove = installHyprlandMaximize(window, invoke);
+    });
+    onCleanup(() => { disposed = true; remove(); });
   });
 
   // Caption buttons the compositor acts on (custom-frame platforms only).

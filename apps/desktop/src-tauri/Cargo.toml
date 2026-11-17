@@ -133,6 +133,9 @@ wayland-protocols = { version = "0.32", features = ["client"] }
 # Keep the hidden menu bar's accelerators alive (hide_window_menu). Same
 # version Tauri's GTK runtime uses.
 gtk = "0.18"
+# Connect to Hyprland's IPC socket with a timeout (hyprland.rs); std's
+# UnixStream has no connect_timeout. Already in the tree via tokio.
+socket2 = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 # Process-group kill (killpg) so the login-shell PATH probe can terminate the
