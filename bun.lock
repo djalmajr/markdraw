@@ -11,7 +11,7 @@
     },
     "apps/desktop": {
       "name": "@markdraw/desktop",
-      "version": "0.26.1-1",
+      "version": "0.26.1-2",
       "dependencies": {
         "@markdraw/ai": "workspace:*",
         "@markdraw/core": "workspace:*",
