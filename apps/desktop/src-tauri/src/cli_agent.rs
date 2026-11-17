@@ -947,10 +947,9 @@ mod tests {
         write_exec(&cli, "#!/usr/bin/env fakeinterp\n");
         // PATH points only at our dir: the shebang's `env fakeinterp` must resolve
         // through it for the CLI to launch at all.
-        let out = std::process::Command::new(&cli)
-            .env("PATH", &dir)
-            .output()
-            .unwrap();
+        let out =
+            output_when_not_busy(|| std::process::Command::new(&cli).env("PATH", &dir).output())
+                .unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
             out.status.success(),
@@ -958,6 +957,63 @@ mod tests {
             String::from_utf8_lossy(&out.stderr)
         );
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "INTERP_OK");
+    }
+
+    /// Run a command, retrying for up to two seconds while exec fails with
+    /// ETXTBSY ("Text file busy"). Linux refuses to exec a file that any
+    /// process holds open for writing, and a test running in parallel that
+    /// spawns a process holds the handles of a script written here for a
+    /// moment: its child inherits them across the fork until its own exec.
+    /// That comes from the test setup, not from the code under test. The
+    /// interpreter's exec happens in the child (`env`), which reports it on
+    /// stderr instead of returning the error.
+    #[cfg(not(windows))]
+    fn output_when_not_busy(
+        mut run: impl FnMut() -> std::io::Result<std::process::Output>,
+    ) -> std::io::Result<std::process::Output> {
+        let mut attempts = 1;
+        loop {
+            let out = run();
+            let busy = match &out {
+                Err(e) => e.kind() == std::io::ErrorKind::ExecutableFileBusy,
+                Ok(o) => {
+                    !o.status.success()
+                        && String::from_utf8_lossy(&o.stderr).contains("Text file busy")
+                }
+            };
+            if !busy || attempts == 100 {
+                return out;
+            }
+            attempts += 1;
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn busy_script_runs_once_its_writer_lets_go() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("markdraw-busytest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("busy");
+        let mut writer = std::fs::File::create(&script).unwrap();
+        writer.write_all(b"#!/bin/sh\necho FREE\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // While the script is open for writing, exec is refused.
+        let busy = std::process::Command::new(&script).output().unwrap_err();
+        assert_eq!(busy.kind(), std::io::ErrorKind::ExecutableFileBusy);
+
+        // The writer lets go a moment later, as a forked child does at its exec.
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(writer);
+        });
+        let out = output_when_not_busy(|| std::process::Command::new(&script).output());
+        release.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(String::from_utf8_lossy(&out.unwrap().stdout).trim(), "FREE");
     }
 
     #[test]
