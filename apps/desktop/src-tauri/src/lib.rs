@@ -65,6 +65,8 @@ use html_preview::{html_preview_clear_overlay, html_preview_register, html_previ
 
 // Window actions the compositor performs (Linux: xdg wm_capabilities), so the
 // custom caption buttons only offer what works.
+#[cfg(any(target_os = "linux", test))]
+mod hyprland;
 mod window_caps;
 
 // Pure-Rust helpers split out of this file so the Miri sub-crate
@@ -1049,11 +1051,52 @@ fn toggle_maximize_instant(webview: tauri::Webview) -> Result<(), String> {
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
-fn toggle_maximize_instant(window: tauri::Window) -> Result<(), String> {
+async fn toggle_maximize_instant(window: tauri::Window) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if let Some(path) = hyprland::active_socket() {
+        if matches!(
+            tauri::async_runtime::spawn_blocking(move || hyprland::toggle(
+                &path,
+                std::process::id()
+            ))
+            .await,
+            Ok(Ok(()))
+        ) {
+            return Ok(());
+        }
+    }
     if window.is_maximized().map_err(|e| e.to_string())? {
         window.unmaximize().map_err(|e| e.to_string())
     } else {
         window.maximize().map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+async fn window_is_maximized(window: tauri::Window) -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    if let Some(path) = hyprland::active_socket() {
+        if let Ok(Ok((_, maximized))) =
+            tauri::async_runtime::spawn_blocking(move || hyprland::state(&path, std::process::id()))
+                .await
+        {
+            return Ok(maximized);
+        }
+    }
+    window.is_maximized().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn hyprland_window_control() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        tauri::async_runtime::spawn_blocking(|| hyprland::active_socket().is_some())
+            .await
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
     }
 }
 
@@ -1262,6 +1305,8 @@ pub fn run() {
             get_startup_args,
             set_dock_visible,
             toggle_maximize_instant,
+            window_is_maximized,
+            hyprland_window_control,
             hide_window_menu,
             window_capabilities,
             print_webview,
