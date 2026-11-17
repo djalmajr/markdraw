@@ -1301,6 +1301,13 @@ fn print_webview(webview: tauri::Webview) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before GTK starts and before any other thread exists. `wayland,x11`
+    // falls back to X11 if the Wayland connection fails.
+    #[cfg(target_os = "linux")]
+    if hyprland::prefers_wayland(|name| std::env::var(name).ok()) {
+        std::env::set_var("GDK_BACKEND", "wayland,x11");
+    }
+
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
 

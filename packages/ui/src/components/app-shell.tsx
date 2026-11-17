@@ -254,7 +254,7 @@ interface AppShellProps {
   onActivateTab?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void;
   onNewTab?: () => void;
-  onWindowDragStart?: () => void | Promise<void>;
+  onWindowDragStart?: (event?: MouseEvent) => void | Promise<void>;
   onWindowTitleDoubleClick?: () => void | Promise<void>;
 
   /**
