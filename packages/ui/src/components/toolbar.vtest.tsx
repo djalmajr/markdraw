@@ -181,3 +181,30 @@ describe("Toolbar — editor-mode tabs gated by capabilities", () => {
     expect(t["Preview"]).toBe(false);
   });
 });
+
+describe("Toolbar — minimal window frame", () => {
+  it("shows only the menu and leaves window gestures to the drag region", async () => {
+    const drag = vi.fn();
+    const maximize = vi.fn();
+    const { baseElement } = render(() => (
+      <Toolbar {...BASE_PROPS} minimal inWindowFrame controlsOnLeft showNavButtons
+        onOpenFolder={() => {}} onToggleSplit={() => {}} onReload={() => {}}
+        onWindowDragStart={drag} onWindowTitleDoubleClick={maximize} />
+    ));
+    const header = baseElement.querySelector<HTMLElement>("header.toolbar")!;
+    const menu = header.querySelector<HTMLButtonElement>('[aria-label="Menu"]')!;
+    expect(header.classList.contains("toolbar-window-frame")).toBe(true);
+    expect(header.hasAttribute("data-tauri-drag-region")).toBe(true);
+    expect(header.querySelector(".toolbar-left")?.hasAttribute("data-tauri-drag-region")).toBe(true);
+    expect(header.querySelector(".toolbar-right")?.hasAttribute("data-tauri-drag-region")).toBe(true);
+    expect(header.querySelectorAll("button")).toHaveLength(1);
+    fireEvent.mouseDown(header, { button: 0 });
+    fireEvent.dblClick(header);
+    fireEvent.mouseDown(menu, { button: 0 });
+    fireEvent.dblClick(menu);
+    expect(drag).not.toHaveBeenCalled();
+    expect(maximize).not.toHaveBeenCalled();
+    fireEvent.keyDown(menu, { key: "Enter" });
+    await vi.waitFor(() => expect(baseElement.textContent).toContain("Open Folder"));
+  });
+});

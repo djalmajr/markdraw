@@ -837,8 +837,9 @@ export function AppShell(props: AppShellProps) {
         onDragLeave={props.onDragLeave}
         onDrop={props.onDrop}
       >
-        <Show when={props.showToolbar}>
+        <Show when={props.showToolbar || props.showWindowControls}>
           <Toolbar
+            minimal={!props.showToolbar && !!props.showWindowControls}
             canGoBack={s.canGoBack()}
             canGoForward={s.canGoForward()}
             editorMode={s.editorMode()}
