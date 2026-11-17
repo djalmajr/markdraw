@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v soho >/dev/null 2>&1 || exit 0; soho hook reminder"
+            "command": "sh -c 'command -v soho >/dev/null 2>&1 || exit 0; exec soho hook reminder'"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v soho >/dev/null 2>&1 || exit 0; soho hook doctor"
+            "command": "sh -c 'command -v soho >/dev/null 2>&1 || exit 0; exec soho hook doctor'"
           }
         ]
       }

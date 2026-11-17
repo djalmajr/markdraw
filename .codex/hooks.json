@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v soho >/dev/null 2>&1 || exit 0; soho hook reminder --codex",
+            "command": "sh -c 'command -v soho \u003e/dev/null 2\u003e\u00261 || exit 0; exec soho hook reminder --codex'",
             "commandWindows": "soho hook reminder --codex"
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v soho >/dev/null 2>&1 || exit 0; soho hook doctor --codex",
+            "command": "sh -c 'command -v soho \u003e/dev/null 2\u003e\u00261 || exit 0; exec soho hook doctor --codex'",
             "commandWindows": "soho hook doctor --codex"
           }
         ]
