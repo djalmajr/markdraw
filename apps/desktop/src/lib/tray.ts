@@ -4,16 +4,19 @@ import { Image } from "@tauri-apps/api/image";
 import { invoke } from "./chaos-invoke.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/plugin-process";
+import { appCacheDir, runtimeDir } from "@tauri-apps/api/path";
+import { listen } from "@tauri-apps/api/event";
+import {
+  themeFollower,
+  trayIconBase64,
+  trayIconDir,
+  trayIconFor,
+  type TrayTheme,
+} from "./tray-icon.ts";
 
 interface TrayDeps {
   onOpenFolder: () => void;
 }
-
-// Tray icon: black "A" on transparent background (88x88 RGBA PNG, base64).
-// Generated from assets/brand/markdraw-icon-white.svg (colors inverted).
-// Embedded to avoid file path resolution issues between dev and production.
-const TRAY_ICON_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAFgAAABYCAYAAABxlTA0AAAE2ElEQVR42u2cXYgVZRjHf0ezbSvT1cWMipQKYkvypi/ctBVLCiGSwIsuFI0uuqkg6OOqm76oQLrIIOjGAinTCwWlsqXUinCRaE0xjUAzN1sl0fKs7k4X8w4djmd35n2emXnmyPuDB5Y9O+/7f35wzs68886BQCAQCAQCgUAgEAgEAoHyqFkH8GAaMMf9/Bvwt3WgS4EO4GlgAIiaasC91mEdsl3pAQa5WGxzDbq/DXjQAwyTLjepYYLkzFwJ7Ce73KT2u2MDKbyGv9ykXrUOX3VuB+rIBdcJHxXjUgO+Qi43qW9or9PP0liNXm5Sq6ybqRrdwAnyE3wCmGndVJX4kPzkJvWBdVNVoRcYI3/BY8AD1s1ZcxnwI/nLbbzKm2LdpCUvUpzcpF6wbtKKm4AzGQRp6yww17pZCzYLZElro3WzZdOXkzifWmLddFlMAvaUILS59gKTrZsvg6cM5Ca1xrr5opkK/GEoeIj41tMly5uGcpN63VpCUcwFzlVAcB24xVpGEWysgNykPrWWkTcLKyC1uRZaS8mLSbS+7e5TPwErgdtcrXS/04w54LK1PWuUIj6j9d6HDveaZuzV1nK0XAUcUwg45MaYaPxDivGPpYxfeV5WNB8BD2aYow/devJL1pKkTMdv80hzrfeY6yPFPKeAGdayJGguKoaBWR5zae/ptd3Fx3XE67DShlcJ5nxSMd8/wA3W0nx4X9FsP7J9DTXga8W871lLy8qtwIiwyTrxea6UHsXcI7TJJfQGYYMR8EYO87+tmP9ja3lpzAdGhc0dBa7OIcNUN5Ykwyhwp7XEidgmbCwCVuSY4wlFjq3WEsfjfkVTRWzY61fkWWQtsxW7hc2MEG9bzZt5wHlhpp3WMptZJmwkAtYWmOtdRa6HraU28oOwiZNk3wU5D/jc1R0Zj+lCfrn+vbXUhEeEDUTAcxnnmA/81XDcKeCujMc+r8j3kLVcgF3C8L+S7Rm3Zrm+ki9HvqT5rbXcpcLgEfC4Qq6v5BWKnKY7gnYKQ39H+mlZmlwfyTXk77TdVnKXCAOPAQtykusj+V7kC/N9FoKlK1cbcpbrI/kTYeZdZcuV7o5M2/QxDTguHDsi3pZ1zQTjaza/LCpTcL8w5Fsp496jkJvU3SlzvCMcd0dZchcIA54k/d7XFcA+hdxB0k/9piP7CIooabPKl8Jwz2Qcfzbws2D8g8D1Ged4VtjDF0XLvU8Y7DB+X5zhK9lHLsRPHh0U9tJbpOAtwlCStd7ZZPu48JWbIL342FKU3GuBC4JAZ4gvV6VzTiRZKheXSfKU0wWXK3eWC8JEwAHlvONJ1shNOCDsaXnWCXx2F94obGImursVQ8Bi4s/khF+Iz8V/V4xbQ/7AeGYXPoLHhGG6Sb80TmOIWOhaV73o5OIydQuPHVXO3RLNXYs9QGcRoYR0onuUbFkRobrQPWOxztpqA+sUfZxzLgphvSJYlZ60lK4ERvjt+vRmDnBaEGqTtdEWbBL0cZr/v96xMB7Fb//XPgp8Synowm/dY8T1XgpLybasuB35f+oy6HYZ0/o47noulRnAK8TrDI1hzhMv7T1Ge3y9Vs1l3cHFG1UOux7FO+DzEjCL+OS77kL9a6ZLRydwM/HC1BHgT+tAgUAgEAgEAoFAIBAIBAI+/Ad6Ee3F+XKpvwAAAABJRU5ErkJggg==";
 
 function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
@@ -30,7 +33,9 @@ function base64ToBytes(base64: string): Uint8Array {
  *
  * On macOS, `iconAsTemplate: true` makes the OS render the icon as a
  * template image — the black pixels adapt to the menu bar theme (white
- * on dark bar, black on light bar), matching native tray icons.
+ * on dark bar, black on light bar), matching native tray icons. Linux
+ * trays don't tint icons, so there the glyph is picked from the desktop's
+ * color scheme and swapped when it changes (`trayIconFor`).
  */
 /**
  * Stable id for the Markdraw tray entry. Used both when creating
@@ -91,11 +96,27 @@ export async function setupTray(deps: TrayDeps): Promise<void> {
     ],
   });
 
-  const icon = await Image.fromBytes(base64ToBytes(TRAY_ICON_BASE64));
+  const isLinux = navigator.platform.startsWith("Linux");
+  const iconFor = (theme: TrayTheme) =>
+    Image.fromBytes(base64ToBytes(trayIconBase64(navigator.platform, theme)));
+  // Linux only: each glyph's PNG goes to its own directory (see trayIconDir).
+  const iconBase = isLinux
+    ? await runtimeDir()
+        .catch(() => appCacheDir())
+        .catch(() => null)
+    : null;
+  const iconDir = (theme: TrayTheme) =>
+    iconBase ? trayIconDir(iconBase, trayIconFor(navigator.platform, theme)) : undefined;
+  // The desktop's scheme now. Not `getCurrentWindow().theme()`: on Linux tao
+  // keeps the window's theme as it was when the window was created.
+  const systemTheme = () =>
+    isLinux ? invoke<TrayTheme>("system_theme").catch(() => null) : Promise.resolve(null);
+  const theme = await systemTheme();
 
-  await TrayIcon.new({
+  const tray = await TrayIcon.new({
     id: TRAY_ID,
-    icon,
+    icon: await iconFor(theme),
+    tempDirPath: iconDir(theme),
     menu,
     menuOnLeftClick: false,
     iconAsTemplate: true,
@@ -109,4 +130,22 @@ export async function setupTray(deps: TrayDeps): Promise<void> {
       }
     },
   });
+
+  // Follow the desktop's light/dark switch (Linux only; macOS tints the
+  // template image itself). The Rust side emits `system-theme-changed`:
+  // the window's `onThemeChanged` never fires for a desktop switch there.
+  // Once listening, the scheme is read again to catch a switch made while
+  // the tray was being created (`themeFollower` orders it all).
+  if (isLinux) {
+    const follower = themeFollower(theme, async (next) => {
+      const image = await iconFor(next);
+      const dir = iconDir(next);
+      if (dir) await tray.setTempDirPath(dir);
+      await tray.setIcon(image);
+    });
+    await listen<TrayTheme>("system-theme-changed", ({ payload }) => {
+      void follower.event(payload);
+    }).catch(() => {});
+    await follower.reconcile(systemTheme);
+  }
 }
