@@ -59,6 +59,7 @@ interface ToolbarProps {
    *  text — false for images/PDF and unsupported binaries). */
   supportsEdit: boolean;
   inWindowFrame?: boolean;
+  minimal?: boolean;
   /**
    * Render sidebar/TOC toggles and the menu dropdown on the left side of the
    * toolbar instead of the right. Used on Windows, where the right side is
@@ -376,7 +377,8 @@ export function Toolbar(props: ToolbarProps) {
       }}
     >
       <div class="toolbar-left" data-tauri-drag-region={props.inWindowFrame ? "" : undefined}>
-        <Show when={props.controlsOnLeft}>
+        <Show when={props.minimal}>{renderMenu()}</Show>
+        <Show when={!props.minimal && props.controlsOnLeft}>
           {renderMenu()}
           {renderSidebarToggle()}
           {renderTocToggle()}
@@ -385,7 +387,7 @@ export function Toolbar(props: ToolbarProps) {
           {renderCopySource()}
           {renderCopyContent()}
         </Show>
-        <Show when={props.showNavButtons}>
+        <Show when={!props.minimal && props.showNavButtons}>
           <Tooltip>
             <TooltipTrigger
               as="button"
@@ -412,7 +414,7 @@ export function Toolbar(props: ToolbarProps) {
           </Tooltip>
         </Show>
       </div>
-      <Show when={props.showEditorTabs}>
+      <Show when={!props.minimal && props.showEditorTabs}>
         <div class="toolbar-center" data-tauri-drag-region={props.inWindowFrame ? "" : undefined}>
           <Tabs
             value={props.editorMode}
@@ -437,7 +439,7 @@ export function Toolbar(props: ToolbarProps) {
         </div>
       </Show>
       <div class="toolbar-right" data-tauri-drag-region={props.inWindowFrame ? "" : undefined}>
-        <Show when={!props.controlsOnLeft}>
+        <Show when={!props.minimal && !props.controlsOnLeft}>
           {renderOpenFolderButton()}
           {renderReload()}
           {renderCopyContent()}
