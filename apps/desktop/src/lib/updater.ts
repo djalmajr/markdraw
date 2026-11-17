@@ -224,7 +224,7 @@ export async function checkForAppUpdates(silent: boolean): Promise<void> {
       // `SERIALIZE_TO_IPC_FN` import — into their mocked graph.
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       const win = getCurrentWindow();
-      await win.show();
+      await invoke("show_main_window");
       await win.unminimize();
       await win.setFocus();
     } catch {
