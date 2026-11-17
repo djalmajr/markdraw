@@ -1768,7 +1768,7 @@ export function App() {
       }
       // action === "hide": pre-DJA-50 default.
       event.preventDefault();
-      await win.hide();
+      await invoke("hide_main_window");
       await invoke("set_dock_visible", { visible: false });
     });
   });

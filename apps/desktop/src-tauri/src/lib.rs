@@ -1049,11 +1049,89 @@ fn toggle_maximize_instant(webview: tauri::Webview) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[derive(Default)]
+struct WindowMemory {
+    #[cfg(target_os = "linux")]
+    inner: Mutex<hyprland::Memory>,
+}
+
 #[tauri::command]
-async fn toggle_maximize_instant(window: tauri::Window) -> Result<(), String> {
+async fn hide_main_window(window: tauri::Window, app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     if let Some(path) = hyprland::active_socket() {
+        // The geometry has to be read while the window is still mapped, so
+        // this hide awaits the compositor first. A show that starts in the
+        // meantime (tray click, second launch) wins: the ticket tells this
+        // hide it was overtaken, and it leaves the window shown. The check and
+        // the hide run under one lock, which the show takes too.
+        let ticket = hyprland::lock(&app.state::<WindowMemory>().inner).begin_hide();
+        let geometry = tauri::async_runtime::spawn_blocking(move || {
+            hyprland::read_geometry(&path, std::process::id())
+        })
+        .await
+        .ok()
+        .and_then(Result::ok);
+        return hyprland::hide_if_current(
+            &app.state::<WindowMemory>().inner,
+            ticket,
+            geometry.as_ref(),
+            || window.hide(),
+        )
+        .unwrap_or(Ok(()))
+        .map_err(|e| e.to_string());
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = app;
+    window.hide().map_err(|e| e.to_string())
+}
+
+async fn show_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("main window not found")?;
+    #[cfg(target_os = "linux")]
+    {
+        // Same lock as hide_main_window, so a hide still finishing can't
+        // land between taking the saved geometry and showing.
+        let (saved, shown) =
+            hyprland::show_with(&app.state::<WindowMemory>().inner, || window.show());
+        shown.map_err(|e| e.to_string())?;
+        if let (Some(saved), Some(path)) = (saved, hyprland::active_socket()) {
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                hyprland::restore(&path, std::process::id(), saved)
+            })
+            .await;
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    window.show().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn show_main_window(app: AppHandle) -> Result<(), String> {
+    show_window(app).await
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+async fn toggle_maximize_instant(window: tauri::Window, app: AppHandle) -> Result<(), String> {
+    #[cfg(not(target_os = "linux"))]
+    let _ = app;
+    #[cfg(target_os = "linux")]
+    if let Some(path) = hyprland::active_socket() {
+        let state_path = path.clone();
+        if let Ok(Ok(g)) = tauri::async_runtime::spawn_blocking(move || {
+            hyprland::read_geometry(&state_path, std::process::id())
+        })
+        .await
+        {
+            if g.floating && g.fullscreen == 0 {
+                if let Ok(mut memory) = app.state::<WindowMemory>().inner.lock() {
+                    memory.last_rect = Some(g.rect);
+                }
+            }
+        }
         if matches!(
             tauri::async_runtime::spawn_blocking(move || hyprland::toggle(
                 &path,
@@ -1228,8 +1306,11 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(target_os = "macos")]
                 let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-                let _ = window.show();
-                let _ = window.set_focus();
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = show_window(app).await;
+                    let _ = window.set_focus();
+                });
             }
         }));
     }
@@ -1291,6 +1372,7 @@ pub fn run() {
         .register_uri_scheme_protocol(html_preview::SCHEME, |ctx, request| {
             html_preview::serve(ctx.app_handle(), request)
         })
+        .manage(WindowMemory::default())
         .manage(WatcherHolder(Mutex::new(None)))
         .manage(DirWatcherHolder(Mutex::new(None)))
         .manage(McpManager::default())
@@ -1310,6 +1392,8 @@ pub fn run() {
             set_dock_visible,
             toggle_maximize_instant,
             window_is_maximized,
+            hide_main_window,
+            show_main_window,
             hyprland_window_control,
             hide_window_menu,
             window_capabilities,

@@ -59,11 +59,11 @@ export async function setupTray(deps: TrayDeps): Promise<void> {
     action: async () => {
       const win = getCurrentWindow();
       if (await win.isVisible()) {
-        await win.hide();
+        await invoke("hide_main_window");
         await invoke("set_dock_visible", { visible: false });
       } else {
         await invoke("set_dock_visible", { visible: true });
-        await win.show();
+        await invoke("show_main_window");
         await win.setFocus();
       }
     },
@@ -104,7 +104,7 @@ export async function setupTray(deps: TrayDeps): Promise<void> {
       if (event.type === "Click" && event.button === "Left") {
         const win = getCurrentWindow();
         await invoke("set_dock_visible", { visible: true });
-        await win.show();
+        await invoke("show_main_window");
         await win.setFocus();
       }
     },
