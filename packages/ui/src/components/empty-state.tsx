@@ -36,7 +36,7 @@ interface EmptyStateProps {
   onRemoveRecentFile?: (path: string, rootPath: string) => void;
   onRemoveRecentFolder?: (path: string) => void;
   onToggleFavorite?: (file: FavoriteFile) => void;
-  onWindowDragStart?: () => void | Promise<void>;
+  onWindowDragStart?: (event?: MouseEvent) => void | Promise<void>;
   /**
    * Open the keyboard-shortcuts help modal. When supplied, a discreet
    * ghost button shows in the bottom-right corner of the welcome
@@ -108,7 +108,7 @@ export function EmptyState(props: EmptyStateProps) {
     if (!target) return;
     const interactive = target.closest("button,a,input,select,textarea,.drop-zone");
     if (interactive) return;
-    void props.onWindowDragStart();
+    void props.onWindowDragStart(e);
   }
 
   function isItemFavorite(item: RecentItem): boolean {

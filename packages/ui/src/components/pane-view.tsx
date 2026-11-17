@@ -99,7 +99,7 @@ export interface PaneViewProps {
   onOpenFolder?: () => void;
   onOpenRecentFile?: (recentFile: RecentFile) => void | Promise<void>;
   onOpenRecentFolder?: (path: string) => void | Promise<void>;
-  onWindowDragStart?: () => void | Promise<void>;
+  onWindowDragStart?: (event?: MouseEvent) => void | Promise<void>;
   onNavigate?: (path: string, fragment?: string | null) => void;
   onOpenExternal?: (url: string) => void;
   /** Called when the EmptyState's discoverability ghost button is

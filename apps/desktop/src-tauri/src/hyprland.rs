@@ -23,6 +23,24 @@ pub fn active_socket() -> Option<PathBuf> {
     path.exists().then_some(path)
 }
 
+/// Whether to run GTK on Wayland instead of the X11 the AppImage forces.
+///
+/// The AppImage's GTK hook (linuxdeploy-plugin-gtk) exports `GDK_BACKEND=x11`,
+/// so on Hyprland the window runs under XWayland. Hyprland lists
+/// `_NET_WM_MOVERESIZE` as supported but ignores the message, so GTK's
+/// `begin_move_drag` never moves an X11 window and the toolbar can't drag it.
+/// The hook forced X11 because of the bundled libwayland (tauri#8541), which
+/// the release workflow now drops (`scripts/appimage-drop-wayland.sh`).
+/// `APPDIR` is exported by the same hook, so a user's own `GDK_BACKEND=x11`
+/// outside the AppImage is left alone.
+pub fn prefers_wayland(var: impl Fn(&str) -> Option<String>) -> bool {
+    let set = |name| var(name).is_some_and(|v| !v.is_empty());
+    set("APPDIR")
+        && var("GDK_BACKEND").as_deref() == Some("x11")
+        && set("WAYLAND_DISPLAY")
+        && set("HYPRLAND_INSTANCE_SIGNATURE")
+}
+
 fn client(json: &str, pid: u32) -> Result<(String, bool), String> {
     let clients: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let c = clients
@@ -433,6 +451,37 @@ mod tests {
     use super::*;
     fn fixture() -> Geometry {
         geometry(r#"[{"pid":7,"mapped":true,"hidden":false,"address":"0xabc","at":[10,20],"size":[500,400],"monitor":1,"floating":true,"fullscreen":0}]"#, 7).unwrap()
+    }
+
+    #[test]
+    fn appimage_on_hyprland_runs_on_wayland() {
+        let hook = [
+            ("APPDIR", "/tmp/.mount_Markdr"),
+            ("GDK_BACKEND", "x11"),
+            ("WAYLAND_DISPLAY", "wayland-1"),
+            ("HYPRLAND_INSTANCE_SIGNATURE", "abc_1_2"),
+        ];
+        let decide = |vars: &[(&str, &str)]| {
+            prefers_wayland(|name| {
+                vars.iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| v.to_string())
+            })
+        };
+        assert!(decide(&hook));
+        // Each condition is required: missing or empty means keep X11.
+        for i in 0..hook.len() {
+            let mut missing = hook.to_vec();
+            missing.remove(i);
+            assert!(!decide(&missing), "without {}", hook[i].0);
+            let mut empty = hook.to_vec();
+            empty[i].1 = "";
+            assert!(!decide(&empty), "with empty {}", hook[i].0);
+        }
+        // Another backend the user picked is not overridden.
+        let mut other = hook.to_vec();
+        other[1].1 = "wayland";
+        assert!(!decide(&other));
     }
 
     #[test]
