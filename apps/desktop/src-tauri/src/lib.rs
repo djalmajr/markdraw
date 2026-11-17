@@ -1120,6 +1120,10 @@ fn hide_window_menu(window: tauri::Window) -> Result<(), String> {
                 for child in vbox.children() {
                     if let Ok(bar) = child.downcast::<gtk::MenuBar>() {
                         bar.connect_can_activate_accel(|_, _| true);
+                        // Showing a hidden window again (tray, second launch,
+                        // updater) runs show_all on its widgets, which would
+                        // bring this bar back; show_all skips it with this set.
+                        bar.set_no_show_all(true);
                     }
                 }
             })
