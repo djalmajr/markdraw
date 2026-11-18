@@ -1,4 +1,6 @@
-import yaml from "js-yaml";
+// js-yaml 5 has no default export: the public API is a set of flat named
+// exports (see docs/migrate_v4_to_v5.md in nodeca/js-yaml).
+import { load } from "js-yaml";
 
 /**
  * YAML frontmatter parsed from the top of a markdown/asciidoc document.
@@ -36,7 +38,7 @@ export function extractFrontmatter(content: string): {
   if (!match) return { frontmatter: null, body: content };
 
   try {
-    const parsed = yaml.load(match[1]!);
+    const parsed = load(match[1]!);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return { frontmatter: null, body: content };
     }
