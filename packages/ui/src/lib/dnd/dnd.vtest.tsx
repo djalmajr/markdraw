@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { Feedback, DragDropManager } from "@dnd-kit/dom";
@@ -10,6 +10,7 @@ import {
   useDraggable,
   useDroppable,
 } from "./index.ts";
+import { useDragDropManager } from "./context.ts";
 
 // The manager promotes `initializing` → `dragging` on a microtask and the
 // preact signal effects that feed the adapter run on their own queue; a
@@ -73,6 +74,34 @@ function ReactiveProbe(props: { label: string }) {
     },
   });
   return <div ref={(element: HTMLDivElement) => draggable.ref(element)} data-testid="reactive" />;
+}
+
+function feedbackOf(manager: DragDropManager): Feedback | undefined {
+  return manager.plugins.find((plugin): plugin is Feedback => plugin instanceof Feedback);
+}
+
+function ReactiveDraggableId(props: { id: string }) {
+  const draggable = useDraggable({
+    get id() {
+      return props.id;
+    },
+  });
+  return <div ref={(element: HTMLDivElement) => draggable.ref(element)} />;
+}
+
+function ReactiveDroppable(props: { id: string; label: string; disabled: boolean }) {
+  const droppable = useDroppable({
+    get id() {
+      return props.id;
+    },
+    get data() {
+      return { label: props.label };
+    },
+    get disabled() {
+      return props.disabled;
+    },
+  });
+  return <div ref={(element: HTMLDivElement) => droppable.ref(element)} />;
 }
 
 function mount(manager: DragDropManager) {
@@ -158,11 +187,16 @@ describe("registration", () => {
 });
 
 describe("drag operation", () => {
+  // Without this test: dropping the callback's manager argument would leave
+  // callers with `undefined` where the owning manager is expected.
   it("reflects start, target and end, and hands the manager to the caller", async () => {
     const manager = new DragDropManager();
-    const ends: DragEndEvent[] = [];
+    const ends: Array<[DragEndEvent, DragDropManager]> = [];
     const result = render(() => (
-      <DragDropProvider manager={manager} onDragEnd={(event) => ends.push(event)}>
+      <DragDropProvider
+        manager={manager}
+        onDragEnd={(event, endedManager) => ends.push([event, endedManager])}
+      >
         <OperationProbe />
         <Probe id="a" />
         <Probe id="b" />
@@ -195,9 +229,10 @@ describe("drag operation", () => {
     await flush();
 
     expect(ends).toHaveLength(1);
-    expect(ends[0].canceled).toBe(false);
-    expect(ends[0].operation.source?.id).toBe("a");
-    expect(ends[0].operation.target?.id).toBe("b");
+    expect(ends[0][0].canceled).toBe(false);
+    expect(ends[0][0].operation.source?.id).toBe("a");
+    expect(ends[0][0].operation.target?.id).toBe("b");
+    expect(ends[0][1]).toBe(manager);
 
     expect(attr("operation", "data-status")).toBe("idle");
     expect(attr("operation", "data-source")).toBe("");
@@ -246,6 +281,94 @@ describe("drag operation", () => {
   });
 });
 
+describe("reactive identity and data", () => {
+  // Without this test: a changed draggable id would leave a stale registration
+  // and later drags would still be started under the old id.
+  it("re-registers a draggable when its id changes", async () => {
+    const manager = new DragDropManager();
+    const [id, setId] = createSignal("a");
+    try {
+      render(() => (
+        <DragDropProvider manager={manager}>
+          <ReactiveDraggableId id={id()} />
+        </DragDropProvider>
+      ));
+      await flush();
+      expect(manager.registry.draggables.has("a")).toBe(true);
+
+      setId("b");
+      await flush();
+
+      expect(manager.registry.draggables.has("a")).toBe(false);
+      expect(manager.registry.draggables.has("b")).toBe(true);
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  // Without this test: a droppable whose data or disabled flag changes would
+  // keep its old values, so collision filtering would use stale information.
+  it("re-applies a droppable's data and disabled flags", async () => {
+    const manager = new DragDropManager();
+    const [label, setLabel] = createSignal("first");
+    const [disabled, setDisabled] = createSignal(false);
+    try {
+      render(() => (
+        <DragDropProvider manager={manager}>
+          <ReactiveDroppable id="target" label={label()} disabled={disabled()} />
+        </DragDropProvider>
+      ));
+      await flush();
+
+      const droppable = () => manager.registry.droppables.get("target");
+      expect(droppable()?.data).toEqual({ label: "first" });
+      expect(droppable()?.disabled).toBe(false);
+
+      setLabel("second");
+      setDisabled(true);
+      await flush();
+
+      expect(droppable()?.data).toEqual({ label: "second" });
+      expect(droppable()?.disabled).toBe(true);
+    } finally {
+      manager.destroy();
+    }
+  });
+});
+
+describe("provider ownership", () => {
+  // Without this test: a provider that ignored the supplied manager (or
+  // destroyed it on unmount) would silently break every externally driven
+  // integration, including the tests that start operations from the manager.
+  it("uses the supplied manager and leaves its lifecycle to the caller", async () => {
+    const manager = new DragDropManager();
+    let seen: DragDropManager | null = null;
+    function Capture() {
+      seen = useDragDropManager();
+      return <ReactiveDraggableId id="a" />;
+    }
+    const destroy = vi.spyOn(manager, "destroy");
+    try {
+      const result = render(() => (
+        <DragDropProvider manager={manager}>
+          <Capture />
+        </DragDropProvider>
+      ));
+      await flush();
+
+      expect(seen).toBe(manager);
+      expect(manager.registry.draggables.has("a")).toBe(true);
+
+      result.unmount();
+      expect(destroy).not.toHaveBeenCalled();
+      expect(manager.registry.draggables.has("a")).toBe(false);
+    } finally {
+      destroy.mockRestore();
+      manager.destroy();
+    }
+  });
+});
+
 describe("DragOverlay", () => {
   it("renders the overlay while dragging, hands it to the Feedback plugin and clears it", async () => {
     const manager = new DragDropManager();
@@ -277,5 +400,120 @@ describe("DragOverlay", () => {
     expect(feedback()?.overlay).toBeUndefined();
 
     manager.destroy();
+  });
+
+  // Without this test: a disabled overlay could keep the Feedback plugin
+  // pointing at the removed node, which would animate the wrong element.
+  it("clears the plugin pointer when disabled during a drag", async () => {
+    const manager = new DragDropManager();
+    const [disabled, setDisabled] = createSignal(false);
+    const feedback = () => feedbackOf(manager);
+    const result = render(() => (
+      <DragDropProvider manager={manager}>
+        <Probe id="a" />
+        <DragOverlay disabled={disabled()} dropAnimation={null}>
+          overlay
+        </DragOverlay>
+      </DragDropProvider>
+    ));
+    const overlay = () => result.container.querySelector("[data-dnd-overlay]");
+    try {
+      await flush();
+      manager.actions.start({ source: "a", coordinates: { x: 0, y: 0 } });
+      await flush();
+
+      expect(overlay()?.isConnected).toBe(true);
+      expect(feedback()?.overlay).toBe(overlay());
+
+      setDisabled(true);
+      await flush();
+
+      expect(result.container.querySelector("[data-dnd-overlay]")).toBeNull();
+      expect(feedback()?.overlay).toBeUndefined();
+    } finally {
+      if (manager.dragOperation.status.current !== "idle") manager.actions.stop({});
+      result.unmount();
+      manager.destroy();
+    }
+  });
+
+  // Without this test: the first overlay could stay attached to Feedback and
+  // a second drag would animate the stale node instead of its fresh overlay.
+  it("hands a fresh overlay to the plugin on each of two drags", async () => {
+    const manager = new DragDropManager();
+    const feedback = () => feedbackOf(manager);
+    const result = render(() => (
+      <DragDropProvider manager={manager}>
+        <Probe id="a" />
+        <DragOverlay dropAnimation={null}>overlay</DragOverlay>
+      </DragDropProvider>
+    ));
+    let previous: Element | undefined;
+    try {
+      await flush();
+      for (let index = 0; index < 2; index++) {
+        manager.actions.start({ source: "a", coordinates: { x: 0, y: 0 } });
+        await flush();
+
+        const current = feedback()?.overlay;
+        expect(current).toBeDefined();
+        expect(current?.isConnected).toBe(true);
+        expect(current).not.toBe(previous);
+        previous = current;
+
+        manager.actions.stop({});
+        await flush();
+        expect(feedback()?.overlay).toBeUndefined();
+      }
+    } finally {
+      if (manager.dragOperation.status.current !== "idle") manager.actions.stop({});
+      result.unmount();
+      manager.destroy();
+    }
+  });
+
+  // Without this test: clearing Feedback as soon as `stop()` is called would
+  // detach the overlay mid-animation and leave the item without drag feedback.
+  it("keeps the overlay connected while the drop animation is pending", async () => {
+    const manager = new DragDropManager();
+    let finish!: () => void;
+    let calls = 0;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const result = render(() => (
+      <DragDropProvider manager={manager}>
+        <Probe id="a" />
+        <DragOverlay
+          dropAnimation={() => {
+            calls++;
+            return pending;
+          }}
+        >
+          overlay
+        </DragOverlay>
+      </DragDropProvider>
+    ));
+    try {
+      await flush();
+      manager.actions.start({ source: "a", coordinates: { x: 0, y: 0 } });
+      await flush();
+      manager.actions.stop({});
+      await flush();
+
+      expect(calls).toBe(1);
+      expect(manager.dragOperation.status.current).toBe("dropped");
+      expect(result.container.querySelector("[data-dnd-overlay]")?.isConnected).toBe(true);
+
+      finish();
+      await flush();
+      expect(manager.dragOperation.status.current).toBe("idle");
+      expect(result.container.querySelector("[data-dnd-overlay]")).toBeNull();
+    } finally {
+      finish();
+      if (manager.dragOperation.status.current !== "idle") manager.actions.stop({});
+      result.unmount();
+      manager.destroy();
+    }
   });
 });

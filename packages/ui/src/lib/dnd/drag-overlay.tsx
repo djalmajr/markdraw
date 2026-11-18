@@ -45,12 +45,16 @@ export function DragOverlay(props: DragOverlayProps): JSX.Element {
   // The element is handed over from the `ref` below, which runs without an
   // owner (nothing there can register its own cleanup), and Solid never calls a
   // ref again with `undefined` on dispose. So the plugin pointer is cleared
-  // here, once the operation has no source left and `<Show>` has removed the
-  // element from the tree.
+  // here whenever `<Show>` has removed the element: the operation lost its
+  // source, or the overlay became disabled mid-drag. Tracking both values in
+  // the compute keeps the cleanup in step with the `<Show>` condition.
   createEffect(
-    () => operation.source(),
-    (source) => {
-      if (source) return;
+    () => {
+      const source = operation.source();
+      return { source, visible: source ? !isDisabled(source) : false };
+    },
+    ({ visible }) => {
+      if (visible) return;
       const plugin = feedback();
       if (plugin) plugin.overlay = undefined;
     },
