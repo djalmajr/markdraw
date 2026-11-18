@@ -91,4 +91,32 @@ describe("DropdownMenu", () => {
     flush();
     expect(onChange.mock.calls[0][0]).toBe("spaces:4");
   });
+
+  it("atualiza disabled e título do trigger após a montagem", () => {
+    const [disabled, setDisabled] = createSignal(true);
+    const screen = render(() => (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          as="button"
+          disabled={disabled()}
+          title={disabled() ? "Antes" : "Depois"}
+        >
+          Opções
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem>Primeiro</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ));
+    const trigger = screen.getByRole("button", {
+      name: "Opções",
+    }) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(true);
+    expect(trigger.title).toBe("Antes");
+
+    setDisabled(false);
+    flush();
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.title).toBe("Depois");
+  });
 });

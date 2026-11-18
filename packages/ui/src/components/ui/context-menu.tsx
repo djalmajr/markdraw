@@ -59,8 +59,8 @@ const ContextMenuTrigger = (props: {
   render?: (props: Record<string, any>, state: any) => JSX.Element
   [key: string]: any
 }) => {
-  const { as, render, ...others } = props
-  return <MenuContextTrigger render={asRender(as, render)} {...others} />
+  const others = omit(props, "as", "render")
+  return <MenuContextTrigger render={asRender(props.as, props.render)} {...others} />
 }
 
 const contentClasses =

@@ -67,9 +67,9 @@ const PopoverTrigger = (props: {
   render?: (props: Record<string, any>, state: any) => JSX.Element
   [key: string]: any
 }) => {
-  const { as, render, ...others } = props
+  const others = omit(props, "as", "render")
   return (
-    <PopoverTriggerPrimitive render={asRender(as, render)} {...others} />
+    <PopoverTriggerPrimitive render={asRender(props.as, props.render)} {...others} />
   )
 }
 
@@ -82,16 +82,16 @@ const PopoverContent = (props: {
   [key: string]: any
 }) => {
   const layout = useContext(PopoverLayoutContext)
-  const placement = placementToSideAlign(layout().placement)
-  const { class: classProp, side, align, sideOffset, ...others } = props
+  const placement = () => placementToSideAlign(layout().placement)
+  const others = omit(props, "class", "side", "align", "sideOffset")
   return (
     <PopoverContentPrimitive
-      side={side ?? placement.side}
-      align={align ?? placement.align}
-      sideOffset={sideOffset ?? layout().gutter ?? 4}
+      side={props.side ?? placement().side}
+      align={props.align ?? placement().align}
+      sideOffset={props.sideOffset ?? layout().gutter ?? 4}
       class={cn(
         "z-50 w-72 origin-[var(--transform-origin)] rounded-md border bg-popover p-3 text-popover-foreground shadow-none outline-none transition-[opacity,scale] duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 motion-reduce:transition-opacity motion-reduce:data-[starting-style]:scale-100 motion-reduce:data-[ending-style]:scale-100",
-        classProp
+        props.class
       )}
       {...others}
     />

@@ -21,20 +21,24 @@ type TooltipProps = {
 }
 
 /** ui-sdk's Trigger renders a `button`, like Kobalte's did. */
+const asRender = (
+  as: ValidComponent | undefined,
+  render: ((props: Record<string, any>, state: any) => JSX.Element) | undefined
+) =>
+  render ??
+  (as
+    ? (partProps: Record<string, any>) => <Dynamic component={as} {...partProps} />
+    : undefined)
+
 const TooltipTrigger = (props: {
   as?: ValidComponent
   render?: (props: Record<string, any>, state: any) => JSX.Element
   [key: string]: any
 }) => {
-  const { as, render, ...others } = props
-  const asRender =
-    render ??
-    (as
-      ? (partProps: Record<string, any>) => (
-          <Dynamic component={as} {...partProps} />
-        )
-      : undefined)
-  return <TooltipTriggerPrimitive render={asRender} {...others} />
+  const others = omit(props, "as", "render")
+  return (
+    <TooltipTriggerPrimitive render={asRender(props.as, props.render)} {...others} />
+  )
 }
 
 const Tooltip: Component<TooltipProps> = (props) => (

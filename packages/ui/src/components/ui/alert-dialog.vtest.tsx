@@ -77,4 +77,27 @@ describe("AlertDialog", () => {
       screen.baseElement.querySelector(".alert-desc")?.textContent
     ).toBe("Sem volta.");
   });
+
+  it("mantém reativas as props do trigger e do content após a montagem", () => {
+    const [title, setTitle] = createSignal("Antes");
+    const [cls, setCls] = createSignal("classe-antiga");
+    const screen = render(() => (
+      <AlertDialog open>
+        <AlertDialogTrigger title={title()}>Excluir</AlertDialogTrigger>
+        <AlertDialogContent class={cls()}>Corpo</AlertDialogContent>
+      </AlertDialog>
+    ));
+    const trigger = screen.getByRole("button", { name: "Excluir" });
+    const dialog = screen.baseElement.querySelector<HTMLElement>(
+      '[data-slot="alert-dialog-content"]'
+    )!;
+    expect(trigger.title).toBe("Antes");
+    expect(dialog.className).toContain("classe-antiga");
+
+    setTitle("Depois");
+    setCls("classe-nova");
+    flush();
+    expect(trigger.title).toBe("Depois");
+    expect(dialog.className).toContain("classe-nova");
+  });
 });

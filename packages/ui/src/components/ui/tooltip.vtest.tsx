@@ -64,4 +64,30 @@ describe("Tooltip", () => {
       screen.baseElement.querySelector('[data-slot="tooltip-content"]')
     ).toBeTruthy();
   });
+
+  it("atualiza as props do trigger quando o sinal muda após a montagem", () => {
+    const [disabled, setDisabled] = createSignal(true);
+    const screen = render(() => (
+      <Tooltip open>
+        <TooltipTrigger
+          as="button"
+          disabled={disabled()}
+          title={disabled() ? "Antes" : "Depois"}
+        >
+          Ajuda
+        </TooltipTrigger>
+        <TooltipContent>Dica</TooltipContent>
+      </Tooltip>
+    ));
+    const trigger = screen.getByRole("button", {
+      name: "Ajuda",
+    }) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(true);
+    expect(trigger.title).toBe("Antes");
+
+    setDisabled(false);
+    flush();
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.title).toBe("Depois");
+  });
 });

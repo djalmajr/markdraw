@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createSignal } from "solid-js";
 import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -77,5 +79,81 @@ describe("Popover", () => {
     flush();
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("atualiza as props do trigger quando o sinal muda após a montagem", () => {
+    const [title, setTitle] = createSignal("Antes");
+    const [cls, setCls] = createSignal("classe-antiga");
+    const screen = render(() => (
+      <Popover open placement="bottom-end">
+        <PopoverTrigger as="button" title={title()} class={cls()}>
+          Detalhes
+        </PopoverTrigger>
+        <PopoverContent>Corpo</PopoverContent>
+      </Popover>
+    ));
+    const trigger = screen.getByRole("button", { name: "Detalhes" });
+    expect(trigger.title).toBe("Antes");
+    expect(trigger.className).toContain("classe-antiga");
+
+    setTitle("Depois");
+    setCls("classe-nova");
+    flush();
+    expect(trigger.title).toBe("Depois");
+    expect(trigger.className).toContain("classe-nova");
+    expect(trigger.className).not.toContain("classe-antiga");
+  });
+
+  it("atualiza a classe do content quando o sinal muda após a montagem", () => {
+    const [cls, setCls] = createSignal("classe-antiga");
+    const screen = render(() => (
+      <Popover open>
+        <PopoverTrigger as="button">Info</PopoverTrigger>
+        <PopoverContent class={cls()}>Corpo</PopoverContent>
+      </Popover>
+    ));
+    const content = screen.baseElement.querySelector<HTMLElement>(
+      '[data-slot="popover-content"]'
+    )!;
+    expect(content.className).toContain("classe-antiga");
+
+    setCls("classe-nova");
+    flush();
+    expect(content.className).toContain("classe-nova");
+    expect(content.className).not.toContain("classe-antiga");
+  });
+
+  it("emite data-open no trigger para os seletores globais de estado aberto", () => {
+    const screen = render(() => (
+      <Popover>
+        <PopoverTrigger class="ai-mp-trigger">Modelo</PopoverTrigger>
+        <PopoverContent>Opções</PopoverContent>
+      </Popover>
+    ));
+    const trigger = screen.getByText("Modelo");
+    expect(trigger.matches(".ai-mp-trigger[data-open]")).toBe(false);
+
+    fireEvent.click(trigger);
+    flush();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(trigger.matches(".ai-mp-trigger[data-open]")).toBe(true);
+    expect(trigger.matches(".ai-mp-trigger[data-expanded]")).toBe(false);
+  });
+
+  it("usa data-open nos seletores globais de estado aberto", () => {
+    const cssPath = [
+      resolve(process.cwd(), "src/styles/index.css"),
+      resolve(process.cwd(), "packages/ui/src/styles/index.css"),
+    ].find(existsSync)!;
+    const css = readFileSync(cssPath, "utf8");
+    for (const cls of [
+      ".rp-icon-btn",
+      ".ai-mp-trigger",
+      ".ai-mp-trigger-form",
+      ".ai-context-btn",
+    ]) {
+      expect(css).toContain(`${cls}[data-open]`);
+      expect(css).not.toContain(`${cls}[data-expanded]`);
+    }
   });
 });

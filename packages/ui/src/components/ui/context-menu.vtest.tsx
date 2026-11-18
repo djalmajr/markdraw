@@ -78,4 +78,31 @@ describe("ContextMenu", () => {
     flush();
     expect(open()).toBe(true);
   });
+
+  it("atualiza classe e título do trigger após a montagem", () => {
+    const [selected, setSelected] = createSignal(true);
+    const screen = render(() => (
+      <ContextMenu>
+        <ContextMenuTrigger
+          as="div"
+          class={selected() ? "selecionada" : ""}
+          title={selected() ? "Antes" : "Depois"}
+          tabindex="0"
+        >
+          Linha
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem>Abrir</ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    ));
+    const area = screen.getByText("Linha");
+    expect(area.className).toContain("selecionada");
+    expect(area.title).toBe("Antes");
+
+    setSelected(false);
+    flush();
+    expect(area.className).not.toContain("selecionada");
+    expect(area.title).toBe("Depois");
+  });
 });
