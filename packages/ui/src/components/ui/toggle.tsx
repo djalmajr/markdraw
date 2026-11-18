@@ -1,6 +1,5 @@
-import type { ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
-
+import type { ValidComponent } from "@solidjs/web";
+import { omit } from "solid-js";
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import * as ToggleButtonPrimitive from "@kobalte/core/toggle-button"
 import { cva } from "class-variance-authority"
@@ -36,10 +35,10 @@ type ToggleButtonRootProps<T extends ValidComponent = "button"> =
 const Toggle = <T extends ValidComponent = "button">(
   props: PolymorphicProps<T, ToggleButtonRootProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ToggleButtonRootProps, ["class", "variant", "size"])
+  const others = omit(props, "class", "variant", "size")
   return (
     <ToggleButtonPrimitive.Root
-      class={cn(toggleVariants({ variant: local.variant, size: local.size }), local.class)}
+      class={cn(toggleVariants({ variant: props.variant, size: props.size }), props.class)}
       {...others}
     />
   )

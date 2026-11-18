@@ -1,11 +1,4 @@
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  onMount,
-  type Setter,
-} from "solid-js";
+import { createMemo, createSignal, onCleanup, onSettled, type Setter, createTrackedEffect } from "solid-js";
 import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@markdraw/core/types.ts";
 import { createPaneManager, type PaneManager } from "./create-pane-manager.ts";
 import { createAiChatSessions } from "./create-ai-chat-sessions.ts";
@@ -249,7 +242,7 @@ export function createAppState(config: AppStateConfig) {
     document.documentElement.classList.contains("dark"),
   );
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     applyCodeTheme("github-light", false);
   });
 
@@ -259,7 +252,7 @@ export function createAppState(config: AppStateConfig) {
     getStoredFontPrefs(),
   );
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     applyFontPrefs(fontPrefs());
   });
 
@@ -317,9 +310,9 @@ export function createAppState(config: AppStateConfig) {
   // Persist via effects rather than in a handler: these setters are
   // toggled from several call sites (app-shell menu, command palette,
   // __DEV__ helpers), and an effect catches every one of them.
-  createEffect(() => setStoredShowAllDirs(showAllDirs()));
-  createEffect(() => setStoredShowAllFiles(showAllFiles()));
-  createEffect(() => setStoredShowHiddenEntries(showHiddenEntries()));
+  createTrackedEffect(() => setStoredShowAllDirs(showAllDirs()));
+  createTrackedEffect(() => setStoredShowAllFiles(showAllFiles()));
+  createTrackedEffect(() => setStoredShowHiddenEntries(showHiddenEntries()));
   const [respectGitignore, setRespectGitignore] = createSignal(getStoredRespectGitignore());
   const [closeBehavior, setCloseBehavior] = createSignal<CloseBehavior>(getStoredCloseBehavior());
 
@@ -462,7 +455,7 @@ export function createAppState(config: AppStateConfig) {
   // "preview" keeps the toggle's active state honest. Non-previewable text
   // is edit-only. Documents (and unsupported binaries, which show their own
   // notice) are left wherever the user put them.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const k = viewerKind();
     if ((k === "image" || k === "pdf") && editorMode() !== "preview") {
       setEditorMode("preview");
@@ -473,7 +466,7 @@ export function createAppState(config: AppStateConfig) {
 
   // ── System theme listener ───────────────────────────────────────────────
 
-  onMount(() => {
+  onSettled(() => {
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
       if (config.getStoredTheme() === "system") {
@@ -568,7 +561,7 @@ export function createAppState(config: AppStateConfig) {
     if (!f || (k !== "document" && k !== "excalidraw")) return null;
     return { label: f.name, path: f.path };
   });
-  createEffect(() => {
+  createTrackedEffect(() => {
     selectedFile()?.path; // re-show the active-file chip on a file switch
     setActiveFileContextDismissed(false);
   });
@@ -897,7 +890,7 @@ export function createAppState(config: AppStateConfig) {
 
   // Persist the special-tab state + the encoded active tab (chats persist via
   // the sessions manager). Direct write — low frequency, localStorage is cheap.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const specials = rpSpecials();
     setRightPanelTabsState({
       toc: specials.toc,

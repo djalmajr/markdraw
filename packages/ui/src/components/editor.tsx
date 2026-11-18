@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, onCleanup, onSettled, createTrackedEffect } from "solid-js";
 import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   Decoration,
@@ -231,11 +231,9 @@ export function Editor(props: EditorProps) {
   }
 
   createEffect(
-    on(
-      () => props.fileName,
-      (name) => syncLanguage(name),
-      { defer: true },
-    ),
+    () => props.fileName,
+    (name) => syncLanguage(name),
+    { defer: true },
   );
   const invisiblesCompartment = new Compartment();
   const indentCompartment = new Compartment();
@@ -411,7 +409,7 @@ export function Editor(props: EditorProps) {
     return Math.max(0, Math.min(1, ratio));
   }
 
-  onMount(() => {
+  onSettled(() => {
     if (!containerRef) return;
 
     const state = EditorState.create({
@@ -563,14 +561,14 @@ export function Editor(props: EditorProps) {
     };
 
     window.addEventListener("keydown", onWindowKeyDown);
-    onCleanup(() => {
+    return () => {
       cancelAnimationFrame(scrollRaf);
       scrollEl.removeEventListener("scroll", onScroll);
       window.removeEventListener("keydown", onWindowKeyDown);
-    });
+    };
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const newContent = props.content;
     if (!view) return;
     if (view.state.doc.toString() !== newContent) {
@@ -588,7 +586,7 @@ export function Editor(props: EditorProps) {
     }
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (!props.searchOpen) {
       matches = [];
       setMatchCount(0);
@@ -602,7 +600,7 @@ export function Editor(props: EditorProps) {
     lastSearchOpen = props.searchOpen;
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const wrapText = props.wrapText;
     if (!view) return;
     view.dispatch({
@@ -610,7 +608,7 @@ export function Editor(props: EditorProps) {
     });
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const darkMode = props.darkMode;
     if (!view) return;
     view.dispatch({
@@ -618,7 +616,7 @@ export function Editor(props: EditorProps) {
     });
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const showLineNumbers = props.showLineNumbers;
     if (!view) return;
     view.dispatch({
@@ -626,7 +624,7 @@ export function Editor(props: EditorProps) {
     });
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const showInvisibles = props.showInvisibles;
     if (!view) return;
     view.dispatch({
@@ -634,7 +632,7 @@ export function Editor(props: EditorProps) {
     });
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const indentMode = props.indentMode;
     const indentSize = props.indentSize;
     if (!view) return;
@@ -646,14 +644,14 @@ export function Editor(props: EditorProps) {
     });
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const trigger = props.findTrigger;
     if (trigger === lastFindTrigger) return;
     lastFindTrigger = trigger;
     openFind();
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const targetVersion = props.syncScrollTargetVersion;
     if (targetVersion === lastSyncScrollTargetVersion) return;
     lastSyncScrollTargetVersion = targetVersion;
@@ -674,7 +672,7 @@ export function Editor(props: EditorProps) {
     });
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const trigger = props.undoTrigger;
     if (trigger === lastUndoTrigger) return;
     lastUndoTrigger = trigger;
@@ -687,7 +685,7 @@ export function Editor(props: EditorProps) {
   // Go-to-Symbol scroll: caller bumps `scrollToLineVersion` with the
   // 0-indexed line set in `scrollToLine`. We dispatch a CodeMirror
   // selection + scrollIntoView so the line is centered AND focused.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const targetVersion = props.scrollToLineVersion ?? 0;
     if (targetVersion === lastScrollToLineVersion) return;
     lastScrollToLineVersion = targetVersion;
@@ -711,7 +709,7 @@ export function Editor(props: EditorProps) {
     view.focus();
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const trigger = props.redoTrigger;
     if (trigger === lastRedoTrigger) return;
     lastRedoTrigger = trigger;

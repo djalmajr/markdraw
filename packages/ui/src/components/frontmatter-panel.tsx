@@ -1,4 +1,5 @@
-import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, Show, createTrackedEffect } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconText from "~icons/lucide/text";
 import IconTag from "~icons/lucide/tag";
@@ -66,7 +67,7 @@ export function FrontmatterPanel(props: FrontmatterPanelProps) {
   const [collapsed, setCollapsed] = createSignal(false);
 
   // Restore collapse state when the file (storage key) changes
-  createEffect(() => {
+  createTrackedEffect(() => {
     const key = storageKey();
     try {
       setCollapsed(localStorage.getItem(key) === "1");
@@ -215,11 +216,11 @@ export function FrontmatterPanel(props: FrontmatterPanelProps) {
   }
 
   return (
-    <div class="frontmatter-panel" classList={{ "frontmatter-collapsed": collapsed() }}>
+    <div class={["frontmatter-panel", { "frontmatter-collapsed": collapsed() }]} >
       <button
         type="button"
         class="frontmatter-header"
-        aria-expanded={!collapsed()}
+        aria-expanded={!collapsed() ? "true" : "false"}
         onClick={toggle}
       >
         <IconChevronDown class="frontmatter-chevron" width={14} height={14} />

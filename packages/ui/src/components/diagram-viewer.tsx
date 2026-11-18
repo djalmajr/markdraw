@@ -1,5 +1,5 @@
-import { createEffect, createSignal, onCleanup, Show } from "solid-js";
-import { Portal } from "solid-js/web";
+import { createSignal, onCleanup, Show, createTrackedEffect } from "solid-js";
+import { Portal } from "@solidjs/web";
 import { createPanZoom } from "../composables/create-pan-zoom.ts";
 import { ZoomControls } from "./zoom-controls.tsx";
 
@@ -48,7 +48,7 @@ export function DiagramViewer(props: DiagramViewerProps) {
   }
 
   // Reset state and inject SVG when a new diagram is opened.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const svg = props.svg;
     if (!svg) return;
     pz.reset();
@@ -82,7 +82,7 @@ export function DiagramViewer(props: DiagramViewerProps) {
   });
 
   // Apply scale by resizing the SVG itself — keeps the rendering crisp at any zoom.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const s = pz.scale();
     const bw = baseW();
     const bh = baseH();
@@ -95,7 +95,7 @@ export function DiagramViewer(props: DiagramViewerProps) {
   });
 
   // Lock body scroll while open.
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (!props.svg) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -105,7 +105,7 @@ export function DiagramViewer(props: DiagramViewerProps) {
   });
 
   // Global Esc + keyboard shortcuts.
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (!props.svg) return;
     window.addEventListener("keydown", onKeyDown);
     onCleanup(() => window.removeEventListener("keydown", onKeyDown));
@@ -135,8 +135,8 @@ export function DiagramViewer(props: DiagramViewerProps) {
           onClose={props.onClose}
         />
         <div
-          class="diagram-viewer-canvas"
-          classList={{ "diagram-viewer-grabbing": pz.dragging() }}
+          class={["diagram-viewer-canvas", { "diagram-viewer-grabbing": pz.dragging() }]}
+          
           tabindex={-1}
           ref={(el) => {
             canvasRef = el;

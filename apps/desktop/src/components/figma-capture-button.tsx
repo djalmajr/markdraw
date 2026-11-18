@@ -10,7 +10,7 @@
 // inline (we avoid `window.prompt`, which is unreliable inside Tauri's
 // WKWebView).
 
-import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, onCleanup, onSettled, Show, createTrackedEffect } from "solid-js";
 import {
   writeText as tauriWriteText,
   writeImage as tauriWriteImage,
@@ -203,14 +203,14 @@ export function FigmaCaptureButton() {
 
   const key = () => storedKey() || envKey;
 
-  onMount(() => {
+  onSettled(() => {
     patchClipboardForTauri();
     const onHashChange = () => setActive(isCaptureActive());
     window.addEventListener("hashchange", onHashChange);
     onCleanup(() => window.removeEventListener("hashchange", onHashChange));
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (open()) setDraftKey(key());
   });
 

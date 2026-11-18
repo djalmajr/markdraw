@@ -1,5 +1,6 @@
-import { Show, createEffect, createMemo, createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
+import { Show, createMemo, createSignal, For, onCleanup, onSettled, createTrackedEffect } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { Portal } from "@solidjs/web";
 
 export interface PaletteProps<T> {
   open: boolean;
@@ -52,7 +53,7 @@ export function Palette<T>(props: PaletteProps<T>) {
   // initial focus is paired with `select()` so the first keystroke
   // either replaces the previous query (just type) or refines it
   // (press End / arrow keys to deselect first).
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (props.open) {
       queueMicrotask(() => {
         inputRef?.focus();
@@ -63,7 +64,7 @@ export function Palette<T>(props: PaletteProps<T>) {
 
   // Clamp the active index when the result set shrinks (the user types
   // more characters and the matching set narrows).
-  createEffect(() => {
+  createTrackedEffect(() => {
     const length = filtered().length;
     if (activeIndex() >= length) {
       setActiveIndex(Math.max(0, length - 1));
@@ -71,7 +72,7 @@ export function Palette<T>(props: PaletteProps<T>) {
   });
 
   // Auto-scroll the active row into view inside the list container.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const i = activeIndex();
     if (!props.open || !listRef) return;
     const target = listRef.querySelector<HTMLElement>(`[data-palette-index="${i}"]`);
@@ -130,7 +131,7 @@ export function Palette<T>(props: PaletteProps<T>) {
   // A document-level Esc capture covers the case where focus has drifted
   // from the input (e.g. the user clicked the backdrop area outside the
   // panel after picking once and didn't re-focus the input).
-  onMount(() => {
+  onSettled(() => {
     function global(event: KeyboardEvent) {
       if (props.open && event.key === "Escape" && event.target !== inputRef) {
         event.preventDefault();
@@ -138,7 +139,7 @@ export function Palette<T>(props: PaletteProps<T>) {
       }
     }
     document.addEventListener("keydown", global, true);
-    onCleanup(() => document.removeEventListener("keydown", global, true));
+    return () => document.removeEventListener("keydown", global, true);
   });
 
   return (
@@ -205,9 +206,9 @@ export function Palette<T>(props: PaletteProps<T>) {
                       data-palette-index={index()}
                       data-palette-key={props.getKey(item)}
                       role="option"
-                      aria-selected={index() === activeIndex()}
-                      class="quick-open-row"
-                      classList={{ "quick-open-row-active": index() === activeIndex() }}
+                      aria-selected={index() === activeIndex() ? "true" : "false"}
+                      class={["quick-open-row", { "quick-open-row-active": index() === activeIndex() }]}
+                      
                       onMouseDown={(event) => {
                         // Mousedown so we pick before the input loses focus
                         // and any blur handlers fire.

@@ -1,4 +1,5 @@
-import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createSignal, For, onCleanup, Show, createTrackedEffect } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import IconCheck from "~icons/lucide/check";
@@ -353,14 +354,14 @@ export function AiToolChips(props: AiToolChipsProps): JSX.Element {
         {(tool) => (
           <button
             type="button"
-            class="ai-tool-chip"
-            classList={{
+            class={["ai-tool-chip", {
               "ai-tool-chip-running": tool.status === "running",
               "ai-tool-chip-done": tool.status === "done",
               "ai-tool-chip-error": tool.status === "error",
               "ai-tool-chip-open": expandedId() === tool.toolCallId,
-            }}
-            aria-expanded={expandedId() === tool.toolCallId}
+            }]}
+            
+            aria-expanded={expandedId() === tool.toolCallId ? "true" : "false"}
             title={toolActivityLabel(tool)}
             onClick={() =>
               setExpandedId((cur) => (cur === tool.toolCallId ? null : tool.toolCallId))
@@ -422,7 +423,7 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
     }, AI_TYPEWRITER_INTERVAL_MS);
   }
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const target = props.content;
     if (!props.streaming) {
       stopTypewriter();
@@ -483,11 +484,11 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
 
   return (
     <div
-      class="ai-message"
-      classList={{
+      class={["ai-message", {
         "ai-message-user": props.role === "user",
         "ai-message-assistant": props.role === "assistant",
-      }}
+      }]}
+      
     >
       <div class="ai-message-role">
         {props.role === "user"

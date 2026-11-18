@@ -1,4 +1,4 @@
-import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
+import { createSignal, createMemo, For, Show, createTrackedEffect } from "solid-js";
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/solid";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -203,7 +203,7 @@ export function FileTree(props: FileTreeProps) {
   // selectedPath actually changes, so manual collapse isn't undone.
   let lastRevealedPath: string | null = null;
   let lastRevealedRootId: string | null = null;
-  createEffect(() => {
+  createTrackedEffect(() => {
     const sel = props.selectedPath;
     const rootId = props.selectedRootId;
     if (!sel || !rootId) {
@@ -430,18 +430,18 @@ export function FileTree(props: FileTreeProps) {
 
     return (
       <div
-        class="workspace-root-block"
-        classList={{
+        class={["workspace-root-block", {
           "drag-over": isDropTarget(),
           "dragging": draggable.isDragging(),
-        }}
+        }]}
+        
       >
         <div
-          class="workspace-root-header"
-          classList={{
+          class={["workspace-root-header", {
             "workspace-root-active": activeRootId() === rootId && focusedPath() === "",
             "draggable-root": canReorderRoots(),
-          }}
+          }]}
+          
           ref={(el: HTMLDivElement) => {
             draggable.ref(el);
             droppable.ref(el);
@@ -655,7 +655,7 @@ export function FileTree(props: FileTreeProps) {
   // ── Focus / keyboard ───────────────────────────────────────────────────
 
   // Sync the active node when the open file changes (e.g. opened elsewhere).
-  createEffect(() => {
+  createTrackedEffect(() => {
     const sel = props.selectedPath;
     const root = props.selectedRootId;
     if (sel) selectNode(sel, root ?? activeRootId());

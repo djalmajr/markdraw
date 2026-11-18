@@ -1,6 +1,6 @@
-import type { Component, ComponentProps, JSX, ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
-
+import { type Component } from "solid-js";
+import type { ComponentProps, JSX, ValidComponent } from "@solidjs/web";
+import { omit } from "solid-js";
 import * as ContextMenuPrimitive from "@kobalte/core/context-menu"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 
@@ -24,7 +24,7 @@ type ContextMenuContentProps<T extends ValidComponent = "div"> =
 const ContextMenuContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ContextMenuContentProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ContextMenuContentProps, ["class"])
+  const others = omit(props, "class")
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
@@ -32,7 +32,7 @@ const ContextMenuContent = <T extends ValidComponent = "div">(
           // outline-none: focus can land on the menu container (e.g. pointer
           // over a separator); avoid the browser's default blue focus ring.
           "z-50 min-w-32 origin-[var(--kb-menu-content-transform-origin)] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-none outline-none animate-in",
-          local.class
+          props.class
         )}
         {...others}
       />
@@ -48,12 +48,12 @@ type ContextMenuItemProps<T extends ValidComponent = "div"> =
 const ContextMenuItem = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ContextMenuItemProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ContextMenuItemProps, ["class"])
+  const others = omit(props, "class")
   return (
     <ContextMenuPrimitive.Item
       class={cn(
         "relative flex cursor-default select-none items-center rounded-sm px-2 py-1 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        local.class
+        props.class
       )}
       {...others}
     />
@@ -61,8 +61,8 @@ const ContextMenuItem = <T extends ValidComponent = "div">(
 }
 
 const ContextMenuShortcut: Component<ComponentProps<"kbd">> = (props) => {
-  const [local, others] = splitProps(props, ["class"])
-  return <kbd class={cn("menu-shortcut-kbd ml-auto", local.class)} {...others} />
+  const others = omit(props, "class")
+  return <kbd class={cn("menu-shortcut-kbd ml-auto", props.class)} {...others} />
 }
 
 type ContextMenuSeparatorProps<T extends ValidComponent = "hr"> =
@@ -73,10 +73,10 @@ type ContextMenuSeparatorProps<T extends ValidComponent = "hr"> =
 const ContextMenuSeparator = <T extends ValidComponent = "hr">(
   props: PolymorphicProps<T, ContextMenuSeparatorProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ContextMenuSeparatorProps, ["class"])
+  const others = omit(props, "class")
   return (
     <ContextMenuPrimitive.Separator
-      class={cn("-mx-1 my-1 h-px bg-muted", local.class)}
+      class={cn("-mx-1 my-1 h-px bg-muted", props.class)}
       {...others}
     />
   )
@@ -91,16 +91,16 @@ type ContextMenuSubTriggerProps<T extends ValidComponent = "div"> =
 const ContextMenuSubTrigger = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ContextMenuSubTriggerProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ContextMenuSubTriggerProps, ["class", "children"])
+  const others = omit(props, "class", "children")
   return (
     <ContextMenuPrimitive.SubTrigger
       class={cn(
         "flex cursor-default select-none items-center rounded-sm px-2 py-1 text-xs outline-none focus:bg-accent data-[state=open]:bg-accent",
-        local.class
+        props.class
       )}
       {...others}
     >
-      {local.children}
+      {props.children}
       <svg
         xmlns="http://www.w3.org/2000/svg"
         viewBox="0 0 24 24"
@@ -125,12 +125,12 @@ type ContextMenuSubContentProps<T extends ValidComponent = "div"> =
 const ContextMenuSubContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ContextMenuSubContentProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ContextMenuSubContentProps, ["class"])
+  const others = omit(props, "class")
   return (
     <ContextMenuPrimitive.SubContent
       class={cn(
           "z-50 min-w-32 origin-[var(--kb-menu-content-transform-origin)] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-none animate-in",
-        local.class
+        props.class
       )}
       {...others}
     />

@@ -1,93 +1,95 @@
-import type { JSX, ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
+import type { JSX } from "@solidjs/web"
+import { omit, type Component } from "solid-js"
 
-import * as AlertDialogPrimitive from "@kobalte/core/alert-dialog"
-import type { PolymorphicProps } from "@kobalte/core/polymorphic"
+import {
+  AlertDialog as AlertDialogPrimitive,
+  AlertDialogBackdrop as AlertDialogBackdropPrimitive,
+  AlertDialogContent as AlertDialogContentPrimitive,
+  AlertDialogDescription as AlertDialogDescriptionPrimitive,
+  AlertDialogTitle as AlertDialogTitlePrimitive,
+  AlertDialogTrigger as AlertDialogTriggerPrimitive,
+} from "@ui-sdk/solid/alert-dialog"
 
 import { cn } from "@markdraw/core/utils.ts"
 
-const AlertDialog = AlertDialogPrimitive.Root
-const AlertDialogTrigger = AlertDialogPrimitive.Trigger
-const AlertDialogPortal = AlertDialogPrimitive.Portal
+/** ui-sdk's Alert Dialog takes the same `open` / `onOpenChange` pair as
+ *  Kobalte's root, so the root and trigger are re-exported as they were. */
+const AlertDialog = AlertDialogPrimitive
+const AlertDialogTrigger = AlertDialogTriggerPrimitive
 
-type AlertDialogOverlayProps<T extends ValidComponent = "div"> =
-  AlertDialogPrimitive.AlertDialogOverlayProps<T> & {
-    class?: string | undefined
-  }
+type AlertDialogOverlayProps = {
+  class?: string | undefined
+}
 
-const AlertDialogOverlay = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, AlertDialogOverlayProps<T>>
-) => {
-  const [local, others] = splitProps(props as AlertDialogOverlayProps, ["class"])
+/** Kobalte called this part `Overlay`; ui-sdk calls it `Backdrop`. Kept under
+ *  the old name because it is the module's public surface. */
+const AlertDialogOverlay = (props: AlertDialogOverlayProps) => {
   return (
-    <AlertDialogPrimitive.Overlay
+    <AlertDialogBackdropPrimitive
       class={cn(
-        "fixed inset-0 z-50 bg-foreground/[0.18] backdrop-blur-[2px] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0",
-        local.class
+        "fixed inset-0 z-50 bg-foreground/[0.18] backdrop-blur-[2px] data-[open]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[open]:fade-in-0",
+        props.class
       )}
-      {...others}
     />
   )
 }
 
-type AlertDialogContentProps<T extends ValidComponent = "div"> =
-  AlertDialogPrimitive.AlertDialogContentProps<T> & {
-    class?: string | undefined
-    children?: JSX.Element
-  }
+type AlertDialogContentProps = {
+  class?: string | undefined
+  children?: JSX.Element
+}
 
-const AlertDialogContent = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, AlertDialogContentProps<T>>
-) => {
-  const [local, others] = splitProps(props as AlertDialogContentProps, ["class", "children"])
+/** Kobalte rendered the overlay from inside the content's portal; ui-sdk has
+ *  no portal part (popups render in place, or into `container`), so the
+ *  backdrop is rendered beside the content to keep the same DOM result. */
+const AlertDialogContent = (props: AlertDialogContentProps) => {
+  const others = omit(props, "class", "children")
   return (
-    <AlertDialogPortal>
+    <>
       <AlertDialogOverlay />
-      <AlertDialogPrimitive.Content
+      <AlertDialogContentPrimitive
         class={cn(
-          "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-3 border bg-background p-4 shadow-none duration-200 data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95 data-[closed]:slide-out-to-left-1/2 data-[closed]:slide-out-to-top-[48%] data-[expanded]:slide-in-from-left-1/2 data-[expanded]:slide-in-from-top-[48%] sm:rounded-[2px]",
-          local.class
+          "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-3 border bg-background p-4 shadow-none duration-200 data-[open]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[open]:fade-in-0 data-[closed]:zoom-out-95 data-[open]:zoom-in-95 data-[closed]:slide-out-to-left-1/2 data-[closed]:slide-out-to-top-[48%] data-[open]:slide-in-from-left-1/2 data-[open]:slide-in-from-top-[48%] sm:rounded-[2px]",
+          props.class
         )}
         {...others}
       >
-        {local.children}
-      </AlertDialogPrimitive.Content>
-    </AlertDialogPortal>
+        {props.children}
+      </AlertDialogContentPrimitive>
+    </>
   )
 }
 
-type AlertDialogTitleProps<T extends ValidComponent = "h2"> =
-  AlertDialogPrimitive.AlertDialogTitleProps<T> & {
-    class?: string | undefined
-  }
-
-const AlertDialogTitle = <T extends ValidComponent = "h2">(
-  props: PolymorphicProps<T, AlertDialogTitleProps<T>>
-) => {
-  const [local, others] = splitProps(props as AlertDialogTitleProps, ["class"])
-  return <AlertDialogPrimitive.Title class={cn("text-sm font-semibold", local.class)} {...others} />
+type AlertDialogTitleProps = {
+  class?: string | undefined
+  children?: JSX.Element
 }
 
-type AlertDialogDescriptionProps<T extends ValidComponent = "p"> =
-  AlertDialogPrimitive.AlertDialogDescriptionProps<T> & {
-    class?: string | undefined
-  }
-
-const AlertDialogDescription = <T extends ValidComponent = "p">(
-  props: PolymorphicProps<T, AlertDialogDescriptionProps<T>>
-) => {
-  const [local, others] = splitProps(props as AlertDialogDescriptionProps, ["class"])
+const AlertDialogTitle: Component<AlertDialogTitleProps> = (props) => {
+  const others = omit(props, "class", "children")
   return (
-    <AlertDialogPrimitive.Description
-      class={cn("text-xs text-muted-foreground", local.class)}
-      {...others}
-    />
+    <AlertDialogTitlePrimitive class={cn("text-sm font-semibold", props.class)} {...others}>
+      {props.children}
+    </AlertDialogTitlePrimitive>
+  )
+}
+
+type AlertDialogDescriptionProps = {
+  class?: string | undefined
+  children?: JSX.Element
+}
+
+const AlertDialogDescription: Component<AlertDialogDescriptionProps> = (props) => {
+  const others = omit(props, "class", "children")
+  return (
+    <AlertDialogDescriptionPrimitive class={cn("text-xs text-muted-foreground", props.class)} {...others}>
+      {props.children}
+    </AlertDialogDescriptionPrimitive>
   )
 }
 
 export {
   AlertDialog,
-  AlertDialogPortal,
   AlertDialogOverlay,
   AlertDialogTrigger,
   AlertDialogContent,

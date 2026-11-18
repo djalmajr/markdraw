@@ -1,4 +1,4 @@
-import type { Accessor } from "solid-js";
+import { type Accessor } from "solid-js";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { getIncludePaths } from "@markdraw/core/asciidoc.ts";
 import { getMarkdownIncludePaths } from "@markdraw/core/markdown.ts";

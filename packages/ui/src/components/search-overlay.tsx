@@ -1,5 +1,5 @@
-import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { Portal } from "solid-js/web";
+import { createSignal, onCleanup, onSettled, createTrackedEffect } from "solid-js";
+import { Portal } from "@solidjs/web";
 import IconCaseSensitive from "~icons/lucide/case-sensitive";
 import IconLanguages from "~icons/lucide/languages";
 
@@ -277,24 +277,24 @@ export function SearchOverlay(props: SearchOverlayProps) {
     setOptions((prev) => ({ ...prev, ignoreDiacritics: !prev.ignoreDiacritics }));
   }
 
-  onMount(() => {
+  onSettled(() => {
     if (props.visible) {
       inputRef?.focus();
     }
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (props.visible) {
       queueMicrotask(() => inputRef?.focus());
     }
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     setExternalMatchCount(props.matchCount ?? 0);
     setExternalCurrentIndex(props.currentIndex ?? 0);
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const visible = props.visible;
     const currentQuery = query();
     const currentOptions = options();
@@ -336,8 +336,8 @@ export function SearchOverlay(props: SearchOverlayProps) {
         onKeyDown={handleKeyDown}
       />
       <button
-        class="search-option-btn"
-        classList={{ "search-option-btn-active": options().ignoreCase }}
+        class={["search-option-btn", { "search-option-btn-active": options().ignoreCase }]}
+        
         aria-label="Ignore case"
         title="Ignore case"
         onClick={toggleIgnoreCase}
@@ -345,8 +345,8 @@ export function SearchOverlay(props: SearchOverlayProps) {
         <IconCaseSensitive width={13} height={13} />
       </button>
       <button
-        class="search-option-btn"
-        classList={{ "search-option-btn-active": options().ignoreDiacritics }}
+        class={["search-option-btn", { "search-option-btn-active": options().ignoreDiacritics }]}
+        
         aria-label="Ignore accents"
         title="Ignore accents"
         onClick={toggleIgnoreDiacritics}

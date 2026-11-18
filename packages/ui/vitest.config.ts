@@ -1,13 +1,13 @@
 import { defineConfig } from "vitest/config";
-import solid from "vite-plugin-solid";
+import solid from "@solidjs/vite-plugin";
 import Icons from "unplugin-icons/vite";
 
 export default defineConfig({
   plugins: [
-    // hot: false disables solid-refresh (HMR) — pointless in a test run, and
-    // under Bun 1.3.x the injected `@solid-refresh` virtual id gets fed to
-    // fileURLToPath, throwing "argument 'filename' must be a file URL ...".
-    solid({ hot: false }),
+    // refresh: false disables solid-refresh (HMR) — pointless in a test run.
+    // (`hot` was renamed to `refresh` in @solidjs/vite-plugin 3; `hot` is now
+    // a config error.)
+    solid({ refresh: false }),
     // Mirrors the host apps' setup so `~icons/lucide/<name>` resolves to a
     // Solid component during tests. Without this, every component that
     // renders an icon would error during module evaluation.

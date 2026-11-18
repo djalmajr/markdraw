@@ -5,14 +5,14 @@ const AppContext = createContext<AppState>();
 
 export function AppProvider(props: ParentProps<{ state: AppState }>) {
   return (
-    <AppContext.Provider value={props.state}>
+    <AppContext value={props.state}>
       {props.children}
-    </AppContext.Provider>
+    </AppContext>
   );
 }
 
 export function useApp(): AppState {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error("useApp must be used within AppProvider");
-  return ctx;
+  // Solid 2: a default-less context is typed `Context<T>` and useContext throws
+  // ContextNotFoundError itself, so the narrowing wrapper is no longer needed.
+  return useContext(AppContext);
 }

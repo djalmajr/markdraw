@@ -144,7 +144,7 @@ export function EmptyState(props: EmptyStateProps) {
                     {(item) => {
                       const fav = () => isItemFavorite(item);
                       return (
-                        <li class="recent-item" classList={{ "recent-item-pinned": fav() }}>
+                        <li class={["recent-item", { "recent-item-pinned": fav() }]} >
                           <button class="recent-item-main" type="button" onClick={item.onOpen}>
                             <Show
                               when={item.type === "folder"}
@@ -160,8 +160,8 @@ export function EmptyState(props: EmptyStateProps) {
                           <Show when={props.onToggleFavorite && item.favoriteData}>
                             <button
                               aria-label={fav() ? `Unpin ${item.name}` : `Pin ${item.name}`}
-                              class="recent-item-star"
-                              classList={{ "recent-item-star-active": fav() }}
+                              class={["recent-item-star", { "recent-item-star-active": fav() }]}
+                              
                               type="button"
                               onClick={() => props.onToggleFavorite?.(item.favoriteData!)}
                             >

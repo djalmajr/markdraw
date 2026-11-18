@@ -1,4 +1,5 @@
-import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import IconSearch from "~icons/lucide/search";
 import IconSlidersHorizontal from "~icons/lucide/sliders-horizontal";
 import IconCheck from "~icons/lucide/check";
@@ -89,11 +90,11 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     <Popover open={open()} onOpenChange={setOpen} placement="bottom-start" gutter={4}>
       <PopoverTrigger
         as="button"
-        class="ai-mp-trigger"
-        classList={{
+        class={["ai-mp-trigger", {
           "ai-mp-trigger-grow": props.variant !== "form",
           "ai-mp-trigger-form": props.variant === "form",
-        }}
+        }]}
+        
         title={props.currentLabel}
         aria-label={props.currentLabel}
       >
@@ -140,8 +141,8 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
                   {(mdl) => (
                     <button
                       type="button"
-                      class="ai-mp-row"
-                      classList={{ "ai-mp-row-active": mdl.value === props.current }}
+                      class={["ai-mp-row", { "ai-mp-row-active": mdl.value === props.current }]}
+                      
                       onClick={() => pick(mdl.value)}
                     >
                       <span class="ai-mp-row-label">{mdl.label}</span>

@@ -1,4 +1,4 @@
-import { onCleanup, onMount } from "solid-js";
+import { onCleanup, onSettled } from "solid-js";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { isSupportedFile } from "@markdraw/core/utils.ts";
@@ -14,7 +14,7 @@ interface TauriDndDeps {
 export function setupTauriDnd(deps: TauriDndDeps) {
   const { addRoot, loadFileContent, state } = deps;
 
-  onMount(() => {
+  onSettled(() => {
     const webview = getCurrentWebviewWindow();
     const unlisten = webview.onDragDropEvent(async (event) => {
       if (event.payload.type === "over") {

@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
+import { For, Show, createMemo, createSignal, createTrackedEffect } from "solid-js";
 import { useDraggable, useDroppable } from "@dnd-kit/solid";
 import type { TabStore } from "../composables/create-tab-store.ts";
 import type { TabState } from "@markdraw/core/tabs.ts";
@@ -90,7 +90,7 @@ function DraggableTab(props: {
   // doesn't expose a direct callback at this layer, but the boolean
   // flips synchronously when the gesture commits, which is the
   // exact moment we want to pin.
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (draggable.isDragging() && !props.tab.isPinned) {
       props.onPin?.();
     }
@@ -102,8 +102,8 @@ function DraggableTab(props: {
         <TooltipTrigger as="span" class="tab-bar-item-tooltip-trigger" data-tab-id={props.tab.id}>
           <ContextMenuTrigger
             as="div"
-            class={`tab-bar-item ${props.isActive ? "tab-bar-item-active" : ""}`}
-            classList={{ "tab-bar-item-dragging": draggable.isDragging() }}
+            class={[`tab-bar-item ${props.isActive ? "tab-bar-item-active" : ""}`, { "tab-bar-item-dragging": draggable.isDragging() }]}
+            
             data-preview={!props.tab.isPinned ? "true" : undefined}
             ref={(el: HTMLElement) => {
               draggable.ref(el);
@@ -125,8 +125,8 @@ function DraggableTab(props: {
               <span class="tab-bar-item-dirty" />
             </Show>
             <button
-              class="tab-bar-item-close"
-              classList={{ "tab-bar-item-close-dirty": props.isDirty }}
+              class={["tab-bar-item-close", { "tab-bar-item-close-dirty": props.isDirty }]}
+              
               onClick={(e) => {
                 e.stopPropagation();
                 props.onClose();
@@ -183,13 +183,13 @@ export function TabBar(props: TabBarProps) {
   }
 
   // Watch for overflow changes
-  createEffect(() => {
+  createTrackedEffect(() => {
     tabs();
     queueMicrotask(updateScrollState);
   });
 
   // Scroll active tab into view when it changes
-  createEffect(() => {
+  createTrackedEffect(() => {
     const id = activeTabId();
     if (!id || !listRef) return;
     queueMicrotask(() => {
@@ -232,8 +232,8 @@ export function TabBar(props: TabBarProps) {
     <div class="tab-bar">
       <Show when={hasOverflow()}>
         <button
-          class="tab-bar-scroll tab-bar-scroll-left"
-          classList={{ "tab-bar-scroll-disabled": !canScrollLeft() }}
+          class={["tab-bar-scroll tab-bar-scroll-left", { "tab-bar-scroll-disabled": !canScrollLeft() }]}
+          
           onClick={scrollLeft}
         >
           <IconChevronLeft width={14} height={14} />
@@ -267,8 +267,8 @@ export function TabBar(props: TabBarProps) {
       </div>
       <Show when={hasOverflow()}>
         <button
-          class="tab-bar-scroll tab-bar-scroll-right"
-          classList={{ "tab-bar-scroll-disabled": !canScrollRight() }}
+          class={["tab-bar-scroll tab-bar-scroll-right", { "tab-bar-scroll-disabled": !canScrollRight() }]}
+          
           onClick={scrollRight}
         >
           <IconChevronRight width={14} height={14} />

@@ -1,12 +1,5 @@
-import {
-  type JSX,
-  createSignal,
-  mergeProps,
-  onCleanup,
-  onMount,
-  Show,
-  splitProps,
-} from "solid-js";
+import { createSignal, merge, onCleanup, onSettled, Show, omit } from "solid-js";
+import type { JSX } from "@solidjs/web";
 
 import { cn } from "@markdraw/core/utils.ts";
 
@@ -88,20 +81,11 @@ export function thumbGeometry(
 }
 
 const ScrollArea = (props: ScrollAreaProps) => {
-  const merged = mergeProps(
+  const merged = merge(
     { type: "hover" as Visibility, orientation: "vertical" as Orientation, scrollHideDelay: 600 },
     props,
   );
-  const [local, others] = splitProps(merged, [
-    "class",
-    "viewportClass",
-    "contentClass",
-    "type",
-    "orientation",
-    "scrollHideDelay",
-    "viewportRef",
-    "children",
-  ]);
+  const others = omit(merged, "class", "viewportClass", "contentClass", "type", "orientation", "scrollHideDelay", "viewportRef", "children");
 
   let viewport!: HTMLDivElement;
   let content!: HTMLDivElement;
@@ -111,19 +95,19 @@ const ScrollArea = (props: ScrollAreaProps) => {
   const [hovering, setHovering] = createSignal(false);
   const [scrolling, setScrolling] = createSignal(false);
 
-  const wantsV = () => local.orientation === "vertical" || local.orientation === "both";
-  const wantsH = () => local.orientation === "horizontal" || local.orientation === "both";
+  const wantsV = () => merged.orientation === "vertical" || merged.orientation === "both";
+  const wantsH = () => merged.orientation === "horizontal" || merged.orientation === "both";
 
   // Show the bar when its axis overflows AND the chosen visibility says so.
   const reveal = () => {
-    if (local.type === "always" || local.type === "auto") return true;
-    if (local.type === "scroll") return scrolling();
+    if (merged.type === "always" || merged.type === "auto") return true;
+    if (merged.type === "scroll") return scrolling();
     return hovering() || scrolling(); // "hover"
   };
 
   // In "both" mode each bar is inset by the other's thickness, so its track is
   // shortened to match (keeps the thumb travel honest + frees the corner).
-  const barTrack = (client: number) => client - 2 * PAD - (local.orientation === "both" ? BAR : 0);
+  const barTrack = (client: number) => client - 2 * PAD - (merged.orientation === "both" ? BAR : 0);
 
   function recompute() {
     const el = viewport;
@@ -140,16 +124,16 @@ const ScrollArea = (props: ScrollAreaProps) => {
   function flagScrolling() {
     setScrolling(true);
     clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => setScrolling(false), local.scrollHideDelay);
+    hideTimer = setTimeout(() => setScrolling(false), merged.scrollHideDelay);
   }
 
   function onScroll() {
     recompute();
-    if (local.type === "hover" || local.type === "scroll") flagScrolling();
+    if (merged.type === "hover" || merged.type === "scroll") flagScrolling();
   }
 
-  onMount(() => {
-    local.viewportRef?.(viewport);
+  onSettled(() => {
+    merged.viewportRef?.(viewport);
     recompute();
     // Recompute when the viewport OR its content changes size (dynamic lists,
     // images loading, window resize all flow through here).
@@ -216,7 +200,7 @@ const ScrollArea = (props: ScrollAreaProps) => {
 
   return (
     <div
-      class={cn("relative overflow-hidden", local.class)}
+      class={cn("relative overflow-hidden", merged.class)}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
       {...others}
@@ -227,8 +211,8 @@ const ScrollArea = (props: ScrollAreaProps) => {
           "h-full w-full [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
           wantsH() && !wantsV() ? "overflow-x-auto overflow-y-hidden" : "",
           wantsV() && !wantsH() ? "overflow-y-auto overflow-x-hidden" : "",
-          local.orientation === "both" ? "overflow-auto" : "",
-          local.viewportClass,
+          merged.orientation === "both" ? "overflow-auto" : "",
+          merged.viewportClass,
         )}
         onScroll={onScroll}
       >
@@ -238,9 +222,9 @@ const ScrollArea = (props: ScrollAreaProps) => {
             in the vertical-only case. */}
         <div
           ref={content}
-          class={cn("min-h-full min-w-full", wantsH() && "w-max", local.contentClass)}
+          class={cn("min-h-full min-w-full", wantsH() && "w-max", merged.contentClass)}
         >
-          {local.children}
+          {merged.children}
         </div>
       </div>
 
@@ -250,7 +234,7 @@ const ScrollArea = (props: ScrollAreaProps) => {
         <div
           class={cn(
             "absolute right-0 top-0 z-10 flex w-2.5 touch-none select-none p-0.5 transition-opacity duration-150",
-            local.orientation === "both" ? "bottom-2.5" : "h-full",
+            merged.orientation === "both" ? "bottom-2.5" : "h-full",
             barShown(v()) ? "opacity-100" : "pointer-events-none opacity-0",
           )}
           onPointerDown={(e) => {
@@ -271,7 +255,7 @@ const ScrollArea = (props: ScrollAreaProps) => {
         <div
           class={cn(
             "absolute bottom-0 left-0 z-10 flex h-2.5 touch-none select-none p-0.5 transition-opacity duration-150",
-            local.orientation === "both" ? "right-2.5" : "w-full",
+            merged.orientation === "both" ? "right-2.5" : "w-full",
             barShown(h()) ? "opacity-100" : "pointer-events-none opacity-0",
           )}
           onPointerDown={(e) => {

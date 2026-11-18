@@ -1,4 +1,5 @@
-import { createEffect, createMemo, Show, For, onMount, onCleanup, type JSX } from "solid-js";
+import { createMemo, Show, For, onSettled, onCleanup, createTrackedEffect } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { fileKind, fileManagerKind } from "@markdraw/core/utils.ts";
 import * as m from "@markdraw/i18n";
@@ -202,7 +203,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
   // Auto-expand handled centrally in FileTree when selectedPath changes.
 
   // React to expand/collapse all action
-  createEffect(() => {
+  createTrackedEffect(() => {
     const ea = props.expandAction;
     if (ea.version > lastExpandVersion && props.entry.kind === "directory") {
       setExpanded(ea.action === "expand");
@@ -211,7 +212,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
   });
 
   // Listen for custom expand/collapse/rename/copy-path events from keyboard handler
-  onMount(() => {
+  onSettled(() => {
     if (!itemRef) return;
     const onExpand = () => setExpanded(true);
     const onCollapse = () => setExpanded(false);
@@ -300,7 +301,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
   const indent = () => props.depth * INDENT_PER_DEPTH + BASE_PADDING;
 
   // When entering edit mode, focus the .tree-name span and select the basename.
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (!isEditing() || !nameRef) return;
     busyRename = false;
     // Defer to next microtask so the contentEditable attribute is in the DOM
@@ -323,7 +324,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
   });
 
   // If the user navigates to another file/folder while editing, cancel the rename.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const sel = app.selectedFile()?.path;
     if (isEditing() && sel && sel !== props.entry.path) {
       cancelRename();
@@ -332,7 +333,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
 
   // Auto-expand a directory when an inline create targets it, so the CreateRow
   // placeholder is visible even if the folder was collapsed.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const c = app.creatingAt();
     if (c && c.parentPath === props.entry.path && c.rootId === props.rootId && isDirectory() && !expanded()) {
       setExpanded(true);
@@ -671,8 +672,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
 
   return (
     <div
-      class="tree-item-wrapper"
-      classList={{ "drop-into": isDropFolder() }}
+      class={["tree-item-wrapper", { "drop-into": isDropFolder() }]}
+      
       style={isVisible() ? undefined : { display: "none" }}
     >
       <ContextMenu>
@@ -712,8 +713,8 @@ export function FileTreeItem(props: FileTreeItemProps) {
           </span>
           <span
             ref={(el) => (nameRef = el)}
-            class="tree-name"
-            classList={{ "tree-name-editing": isEditing() }}
+            class={["tree-name", { "tree-name-editing": isEditing() }]}
+            
             contentEditable={isEditing()}
             spellcheck={false}
             onKeyDown={handleNameKeyDown}

@@ -1,4 +1,5 @@
-import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { Show, createMemo, createSignal, createTrackedEffect } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import { useDroppable } from "@dnd-kit/solid";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { fileKind, UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
@@ -235,7 +236,7 @@ export function PaneView(props: PaneViewProps) {
   const syncScrollActive = () =>
     pane().editorMode() === "split" && s.syncScroll() && !!pane().selectedFile();
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (syncScrollActive()) return;
     setEditorSyncTargetRatio(null);
     setPreviewSyncTargetRatio(null);
@@ -323,11 +324,11 @@ export function PaneView(props: PaneViewProps) {
   return (
     <div
       ref={paneDroppable.ref}
-      class="pane-view"
-      classList={{
+      class={["pane-view", {
         "pane-view-active": props.isActive,
         "pane-view-drop-target": paneDroppable.isDropTarget(),
-      }}
+      }]}
+      
       data-pane-index={props.paneIndex}
       style={props.flexBasis !== undefined ? { flex: props.flexBasis } : undefined}
       onMouseDown={() => props.onActivate?.()}

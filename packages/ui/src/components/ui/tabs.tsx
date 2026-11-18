@@ -1,6 +1,5 @@
-import type { ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
-
+import type { ValidComponent } from "@solidjs/web";
+import { omit } from "solid-js";
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import * as TabsPrimitive from "@kobalte/core/tabs"
 
@@ -15,12 +14,12 @@ type TabsListProps<T extends ValidComponent = "div"> = TabsPrimitive.TabsListPro
 const TabsList = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, TabsListProps<T>>
 ) => {
-  const [local, others] = splitProps(props as TabsListProps, ["class"])
+  const others = omit(props, "class")
   return (
     <TabsPrimitive.List
       class={cn(
         "inline-flex h-7 items-center justify-center rounded-md bg-[hsl(var(--border))] p-0.5 text-muted-foreground",
-        local.class
+        props.class
       )}
       {...others}
     />
@@ -34,7 +33,7 @@ type TabsTriggerProps<T extends ValidComponent = "button"> = TabsPrimitive.TabsT
 const TabsTrigger = <T extends ValidComponent = "button">(
   props: PolymorphicProps<T, TabsTriggerProps<T>>
 ) => {
-  const [local, others] = splitProps(props as TabsTriggerProps, ["class"])
+  const others = omit(props, "class")
   return (
     <TabsPrimitive.Trigger
       class={cn(
@@ -43,7 +42,7 @@ const TabsTrigger = <T extends ValidComponent = "button">(
         // `disabled` already blocks the click + Kobalte's data-[disabled]
         // prevents the value change, so disabled triggers stay inert.
         "inline-flex h-6 items-center justify-center whitespace-nowrap rounded-sm px-2 py-1 text-xs font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[selected]:bg-background data-[selected]:text-foreground data-[selected]:shadow-none",
-        local.class
+        props.class
       )}
       {...others}
     />
@@ -57,12 +56,12 @@ type TabsContentProps<T extends ValidComponent = "div"> = TabsPrimitive.TabsCont
 const TabsContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, TabsContentProps<T>>
 ) => {
-  const [local, others] = splitProps(props as TabsContentProps, ["class"])
+  const others = omit(props, "class")
   return (
     <TabsPrimitive.Content
       class={cn(
         "mt-1.5 ring-offset-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1",
-        local.class
+        props.class
       )}
       {...others}
     />
@@ -76,12 +75,12 @@ type TabsIndicatorProps<T extends ValidComponent = "div"> = TabsPrimitive.TabsIn
 const TabsIndicator = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, TabsIndicatorProps<T>>
 ) => {
-  const [local, others] = splitProps(props as TabsIndicatorProps, ["class"])
+  const others = omit(props, "class")
   return (
     <TabsPrimitive.Indicator
       class={cn(
         "duration-250ms absolute transition-all data-[orientation=horizontal]:-bottom-px data-[orientation=vertical]:-right-px data-[orientation=horizontal]:h-[2px] data-[orientation=vertical]:w-[2px]",
-        local.class
+        props.class
       )}
       {...others}
     />

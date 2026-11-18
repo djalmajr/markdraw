@@ -94,7 +94,7 @@ describe("Preview", () => {
   });
 
   it("adds .doc-tables-wrap on the article when wrapTables is on, omits it when off", async () => {
-    // Mutation captured: dropping the `classList={{ "doc-tables-wrap": ... }}`
+    // Mutation captured: dropping the `class={{ "doc-tables-wrap": ... }}`
     // binding on the article leaves wide tables stuck in horizontal-scroll
     // mode regardless of the preference. The wrap CSS keys off this class.
     const on = render(() => (

@@ -1,4 +1,5 @@
-import { For, Show, createSignal, type JSX } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import IconCheck from "~icons/lucide/check";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
@@ -46,7 +47,7 @@ export function PillPicker(props: PillPickerProps): JSX.Element {
         title={props.title ?? props.currentLabel}
         aria-label={props.ariaLabel ?? props.currentLabel}
       >
-        <span class="ai-mp-trigger-label" classList={{ "ai-mp-capitalize": props.capitalize }}>
+        <span class={["ai-mp-trigger-label", { "ai-mp-capitalize": props.capitalize }]} >
           {props.currentLabel}
         </span>
         <IconChevronDown width={13} height={13} class="ai-mp-trigger-chevron" />
@@ -57,11 +58,11 @@ export function PillPicker(props: PillPickerProps): JSX.Element {
             {(opt) => (
               <button
                 type="button"
-                class="ai-mp-row"
-                classList={{
+                class={["ai-mp-row", {
                   "ai-mp-row-active": opt.value === props.current,
                   "ai-mp-capitalize": props.capitalize,
-                }}
+                }]}
+                
                 onClick={() => pick(opt.value)}
               >
                 <span class="ai-mp-row-label">{opt.label}</span>

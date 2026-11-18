@@ -1,6 +1,6 @@
-import type { JSX, ValidComponent } from "solid-js"
-import { Match, splitProps, Switch } from "solid-js"
-import { Portal } from "solid-js/web"
+import type { JSX, ValidComponent } from "@solidjs/web";
+import { Match, omit, Switch } from "solid-js";
+import { Portal } from "@solidjs/web"
 
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import * as ToastPrimitive from "@kobalte/core/toast"
@@ -35,14 +35,14 @@ type ToastListProps<T extends ValidComponent = "ol"> = ToastPrimitive.ToastListP
 const Toaster = <T extends ValidComponent = "ol">(
   props: PolymorphicProps<T, ToastListProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ToastListProps, ["class"])
+  const others = omit(props, "class")
   return (
     <Portal>
       <ToastPrimitive.Region>
         <ToastPrimitive.List
           class={cn(
             "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse gap-1.5 p-3 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[360px]",
-            local.class
+            props.class
           )}
           {...others}
         />
@@ -55,10 +55,10 @@ type ToastRootProps<T extends ValidComponent = "li"> = ToastPrimitive.ToastRootP
   VariantProps<typeof toastVariants> & { class?: string | undefined }
 
 const Toast = <T extends ValidComponent = "li">(props: PolymorphicProps<T, ToastRootProps<T>>) => {
-  const [local, others] = splitProps(props as ToastRootProps, ["class", "variant"])
+  const others = omit(props, "class", "variant")
   return (
     <ToastPrimitive.Root
-      class={cn(toastVariants({ variant: local.variant }), local.class)}
+      class={cn(toastVariants({ variant: props.variant }), props.class)}
       {...others}
     />
   )
@@ -70,12 +70,12 @@ type ToastCloseButtonProps<T extends ValidComponent = "button"> =
 const ToastClose = <T extends ValidComponent = "button">(
   props: PolymorphicProps<T, ToastCloseButtonProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ToastCloseButtonProps, ["class"])
+  const others = omit(props, "class")
   return (
     <ToastPrimitive.CloseButton
       class={cn(
         "absolute right-1.5 top-1.5 rounded-md p-1 text-foreground/50 opacity-0 ring-inset transition-opacity focus:opacity-100 focus:outline-none focus:ring-1 focus:ring-ring group-hover:opacity-100 group-[.destructive]:text-destructive-foreground group-[.error]:text-error-foreground group-[.success]:text-success-foreground group-[.warning]:text-warning-foreground",
-        local.class
+        props.class
       )}
       {...others}
     >
@@ -103,8 +103,8 @@ type ToastTitleProps<T extends ValidComponent = "div"> = ToastPrimitive.ToastTit
 const ToastTitle = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ToastTitleProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ToastTitleProps, ["class"])
-  return <ToastPrimitive.Title class={cn("text-xs font-semibold", local.class)} {...others} />
+  const others = omit(props, "class")
+  return <ToastPrimitive.Title class={cn("text-xs font-semibold", props.class)} {...others} />
 }
 
 type ToastDescriptionProps<T extends ValidComponent = "div"> =
@@ -113,8 +113,8 @@ type ToastDescriptionProps<T extends ValidComponent = "div"> =
 const ToastDescription = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ToastDescriptionProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ToastDescriptionProps, ["class"])
-  return <ToastPrimitive.Description class={cn("text-xs opacity-90", local.class)} {...others} />
+  const others = omit(props, "class")
+  return <ToastPrimitive.Description class={cn("text-xs opacity-90", props.class)} {...others} />
 }
 
 function showToast(props: {

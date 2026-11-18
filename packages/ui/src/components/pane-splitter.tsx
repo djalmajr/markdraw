@@ -72,8 +72,8 @@ export function PaneSplitter(props: PaneSplitterProps) {
   return (
     <div
       ref={rootRef}
-      class="pane-splitter"
-      classList={{ "pane-splitter-dragging": dragging() }}
+      class={["pane-splitter", { "pane-splitter-dragging": dragging() }]}
+      
       role="separator"
       aria-orientation="vertical"
       aria-valuenow={Math.round(props.ratio * 100)}

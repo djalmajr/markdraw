@@ -1,5 +1,5 @@
-import type { JSX, ValidComponent } from "solid-js";
-import { splitProps } from "solid-js";
+import type { JSX, ValidComponent } from "@solidjs/web";
+import { omit } from "solid-js";
 import type { PolymorphicProps } from "@kobalte/core/polymorphic";
 import * as ProgressPrimitive from "@kobalte/core/progress";
 
@@ -9,10 +9,10 @@ type ProgressRootProps<T extends ValidComponent = "div"> =
 export function Progress<T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ProgressRootProps<T>>,
 ) {
-  const [local, others] = splitProps(props as ProgressRootProps, ["children"]);
+  const others = omit(props, "children");
   return (
     <ProgressPrimitive.Root {...others}>
-      {local.children}
+      {props.children}
       <ProgressPrimitive.Track class="relative h-1.5 w-full overflow-hidden rounded-[2px] bg-secondary">
         {/* progress-fill: indeterminate gets a looping sweep via CSS — with no
             fill-width var set, the bare Kobalte fill renders FULL, which read

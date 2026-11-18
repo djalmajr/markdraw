@@ -1,6 +1,10 @@
+/* ui-sdk (Solid 2 component base) needs a cascade layer of its own, declared
+   before Tailwind so its built-in rules sit below the app's utilities. */
+@layer ui-sdk;
+
 @import "tailwindcss";
 @import "tw-animate-css";
-
+@import "@ui-sdk/core/web.css" layer(components);
 /* Class-based dark mode — the app toggles `.dark` on <html>. v4 defaults
    to prefers-color-scheme, so register the variant explicitly. */
 @custom-variant dark (&:where(.dark, .dark *));

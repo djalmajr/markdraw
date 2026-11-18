@@ -13,7 +13,7 @@
 // each session an isolated disposal scope nested under the app (no detached-root
 // warning; freed exactly when the session closes).
 
-import { createEffect, createRoot, createSignal, getOwner, runWithOwner, untrack, type Owner } from "solid-js";
+import { createRoot, createSignal, getOwner, runWithOwner, untrack, type Owner, createTrackedEffect } from "solid-js";
 import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
 import {
   type PersistedChatMessage,
@@ -206,7 +206,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
         // Persist + auto-title when this session's turns change. Tracks ONLY the
         // store signals; the metas read is untracked to avoid a write→read loop
         // (this effect calls patchMeta, which writes metas).
-        createEffect(() => {
+        createTrackedEffect(() => {
           const msgs = store.messages();
           store.streaming(); // re-run on turn finalize / cancel
           if (hydrating) return;

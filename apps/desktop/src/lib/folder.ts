@@ -1,4 +1,4 @@
-import type { Accessor, Setter } from "solid-js";
+import { type Accessor, type Setter } from "solid-js";
 import { writeText as clipboardWriteText } from "@tauri-apps/plugin-clipboard-manager";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { FSEntry } from "@markdraw/core/types.ts";

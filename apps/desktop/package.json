@@ -30,7 +30,8 @@
     "@tauri-apps/plugin-updater": "^2.10.1",
     "@zomme/frame": "^1.2.4",
     "pdfjs-dist": "^5.7.284",
-    "solid-js": "^1.9.11"
+    "solid-js": "2.0.1",
+    "@solidjs/web": "2.0.1"
   },
   "devDependencies": {
     "@iconify/json": "^2.2.441",
@@ -43,6 +44,6 @@
     "typescript": "^5.9.3",
     "unplugin-icons": "^23.0.1",
     "vite": "^8.0.14",
-    "vite-plugin-solid": "^2.11.10"
+    "@solidjs/vite-plugin": "3.0.1"
   }
 }

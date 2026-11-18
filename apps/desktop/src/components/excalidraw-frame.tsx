@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { createEffect, createSignal, onCleanup, onMount, untrack } from "solid-js";
+import { createSignal, onCleanup, onSettled, untrack, createTrackedEffect } from "solid-js";
 // Registers the <z-frame> custom element (from the published @zomme/frame core).
 import "@zomme/frame";
 import { SHORTCUTS, detectPlatform } from "@markdraw/core/keyboard-shortcuts.ts";
@@ -106,13 +106,13 @@ function Frame(props: Record<string, unknown> & { name: string; src: string }): 
   // Set `sandbox`/`pathname` BEFORE `src`: the z-frame builds the iframe when
   // `src` lands (reading `pathname` to form the final URL), so setting them
   // afterwards forces a wasteful iframe recreation on mount.
-  createEffect(() => setAttr("name", props.name));
-  createEffect(() => setAttr("sandbox", (props.sandbox as string) ?? "allow-scripts allow-same-origin"));
-  createEffect(() => setAttr("pathname", props.pathname));
-  createEffect(() => setAttr("src", props.src));
-  createEffect(() => setAttr("style", props.style));
+  createTrackedEffect(() => setAttr("name", props.name));
+  createTrackedEffect(() => setAttr("sandbox", (props.sandbox as string) ?? "allow-scripts allow-same-origin"));
+  createTrackedEffect(() => setAttr("pathname", props.pathname));
+  createTrackedEffect(() => setAttr("src", props.src));
+  createTrackedEffect(() => setAttr("style", props.style));
 
-  onMount(() => {
+  onSettled(() => {
     for (const key of Object.keys(props)) {
       if (!isEventKey(key) || typeof props[key] !== "function") continue;
       const eventName = key.slice(2).toLowerCase();
@@ -128,7 +128,7 @@ function Frame(props: Record<string, unknown> & { name: string; src: string }): 
     for (const [eventName, handler] of attached) el.removeEventListener(eventName, handler);
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     for (const key of Object.keys(props)) {
       if (RESERVED.has(key) || isEventKey(key)) continue;
       (el as unknown as Record<string, unknown>)[key] = props[key];
@@ -179,7 +179,7 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
     attempt(1);
   };
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (!props.suppressSave) return;
     clearTimeout(writeTimer);
     writeTimer = undefined;
@@ -187,7 +187,7 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
 
   // (Re)load when the target file changes; flush the previous file's latest edit
   // before switching (and on unmount) via the effect's onCleanup.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const path = props.filePath;
     // Track the reload nonce so a host-side rewrite re-runs this effect and
     // re-reads the file even when `filePath` is unchanged.
@@ -294,7 +294,7 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
       }
     },
   };
-  createEffect(() => {
+  createTrackedEffect(() => {
     const path = props.filePath;
     props.onFrameApi?.(path, api);
     onCleanup(() => props.onFrameApi?.(path, null));

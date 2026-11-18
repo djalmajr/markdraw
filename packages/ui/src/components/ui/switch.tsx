@@ -1,6 +1,5 @@
-import type { JSX, ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
-
+import type { JSX, ValidComponent } from "@solidjs/web";
+import { omit } from "solid-js";
 import type { PolymorphicProps } from "@kobalte/core"
 import * as SwitchPrimitive from "@kobalte/core/switch"
 
@@ -20,10 +19,10 @@ type SwitchRootProps = SwitchPrimitive.SwitchRootProps & {
 const Switch = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, SwitchRootProps>
 ) => {
-  const [local, others] = splitProps(props as SwitchRootProps, ["class", "children"])
+  const others = omit(props, "class", "children")
   return (
-    <SwitchPrimitive.Root class={cn("relative", local.class)} {...others}>
-      {local.children}
+    <SwitchPrimitive.Root class={cn("relative", props.class)} {...others}>
+      {props.children}
     </SwitchPrimitive.Root>
   )
 }
@@ -50,7 +49,7 @@ type SwitchControlProps = SwitchPrimitive.SwitchControlProps & {
 const SwitchControl = <T extends ValidComponent = "input">(
   props: PolymorphicProps<T, SwitchControlProps>
 ) => {
-  const [local, others] = splitProps(props as SwitchControlProps, ["class", "children", "size"])
+  const others = omit(props, "class", "children", "size")
   return (
     <>
       <SwitchPrimitive.Input
@@ -61,12 +60,12 @@ const SwitchControl = <T extends ValidComponent = "input">(
       <SwitchPrimitive.Control
         class={cn(
           "inline-flex shrink-0 cursor-pointer items-center rounded-[2px] border border-input bg-input p-[1px] transition-[color,background-color,border-color,box-shadow] data-[disabled]:cursor-not-allowed data-[checked]:border-primary data-[checked]:bg-primary data-[disabled]:opacity-50",
-          CONTROL_SIZE[local.size ?? "default"],
-          local.class
+          CONTROL_SIZE[props.size ?? "default"],
+          props.class
         )}
         {...others}
       >
-        {local.children}
+        {props.children}
       </SwitchPrimitive.Control>
     </>
   )
@@ -80,13 +79,13 @@ type SwitchThumbProps = SwitchPrimitive.SwitchThumbProps & {
 const SwitchThumb = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, SwitchThumbProps>
 ) => {
-  const [local, others] = splitProps(props as SwitchThumbProps, ["class", "size"])
+  const others = omit(props, "class", "size")
   return (
     <SwitchPrimitive.Thumb
       class={cn(
         "pointer-events-none block translate-x-0 rounded-[2px] bg-background shadow-none ring-0 transition-transform",
-        THUMB_SIZE[local.size ?? "default"],
-        local.class
+        THUMB_SIZE[props.size ?? "default"],
+        props.class
       )}
       {...others}
     />
@@ -98,12 +97,12 @@ type SwitchLabelProps = SwitchPrimitive.SwitchLabelProps & { class?: string | un
 const SwitchLabel = <T extends ValidComponent = "label">(
   props: PolymorphicProps<T, SwitchLabelProps>
 ) => {
-  const [local, others] = splitProps(props as SwitchLabelProps, ["class"])
+  const others = omit(props, "class")
   return (
     <SwitchPrimitive.Label
       class={cn(
         "text-xs font-medium leading-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-70",
-        local.class
+        props.class
       )}
       {...others}
     />

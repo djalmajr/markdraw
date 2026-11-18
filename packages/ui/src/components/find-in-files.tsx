@@ -1,5 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { Portal } from "solid-js/web";
+import { For, Show, createMemo, createSignal, onCleanup, onSettled, createTrackedEffect } from "solid-js";
+import { Portal } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 
@@ -70,7 +70,7 @@ export function FindInFiles(props: FindInFilesProps) {
   // query and result list so the user can dismiss and come back to
   // their work.
   let lastRootId: string | null = null;
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (props.open) {
       const currentRoot = props.rootId;
       if (currentRoot !== lastRootId) {
@@ -97,14 +97,14 @@ export function FindInFiles(props: FindInFilesProps) {
   });
 
   // Keep activeIndex in range when results shrink.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const length = results().length;
     if (activeIndex() >= length) setActiveIndex(Math.max(0, length - 1));
   });
 
   // Trigger a (debounced) search whenever the query, options, or root change
   // while the modal is open.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const current = query();
     const opts = { caseSensitive: caseSensitive() };
     const root = props.rootId;
@@ -175,7 +175,7 @@ export function FindInFiles(props: FindInFilesProps) {
   }
 
   // Document-level Esc capture (mirror of the palette pattern).
-  onMount(() => {
+  onSettled(() => {
     function global(event: KeyboardEvent) {
       if (props.open && event.key === "Escape" && event.target !== inputRef) {
         event.preventDefault();
@@ -183,7 +183,7 @@ export function FindInFiles(props: FindInFilesProps) {
       }
     }
     document.addEventListener("keydown", global, true);
-    onCleanup(() => document.removeEventListener("keydown", global, true));
+    return () => document.removeEventListener("keydown", global, true);
   });
 
   return (
@@ -261,9 +261,9 @@ export function FindInFiles(props: FindInFilesProps) {
                             return (
                               <li
                                 role="option"
-                                aria-selected={isActive()}
-                                class="find-in-files-line"
-                                classList={{ "find-in-files-line-active": isActive() }}
+                                aria-selected={isActive() ? "true" : "false"}
+                                class={["find-in-files-line", { "find-in-files-line-active": isActive() }]}
+                                
                                 onMouseDown={(event) => {
                                   event.preventDefault();
                                   const root = props.rootId;

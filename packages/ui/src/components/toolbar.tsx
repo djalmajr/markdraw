@@ -363,8 +363,8 @@ export function Toolbar(props: ToolbarProps) {
 
   return (
     <header
-      class="toolbar no-print"
-      classList={{ "toolbar-window-frame": !!props.inWindowFrame }}
+      class={["toolbar no-print", { "toolbar-window-frame": !!props.inWindowFrame }]}
+      
       data-tauri-drag-region={props.inWindowFrame ? "" : undefined}
       ref={(el) => {
         const update = () => {

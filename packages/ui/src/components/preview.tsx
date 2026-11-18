@@ -1,4 +1,4 @@
-import { Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
+import { Show, createSignal, onSettled, onCleanup, createTrackedEffect } from "solid-js";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import mermaid from "mermaid";
@@ -31,7 +31,7 @@ import IconMinimize from "~icons/lucide/minimize-2";
 import IconMaximize from "~icons/lucide/maximize-2";
 import IconStretch from "~icons/lucide/move-horizontal";
 import IconExpand from "~icons/lucide/expand";
-import { Portal } from "solid-js/web";
+import { Portal } from "@solidjs/web";
 import { FrontmatterPanel } from "./frontmatter-panel.tsx";
 import { renderKroki } from "@markdraw/core/kroki.ts";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
@@ -790,7 +790,7 @@ export function Preview(props: PreviewProps) {
 
   // Dismiss the image menu on outside-click / Escape / scroll. Deferred so the
   // click that opened it doesn't immediately close it.
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (!sizeMenuImg()) return;
     const close = () => setSizeMenuImg(null);
     const onDown = (ev: MouseEvent) => {
@@ -843,7 +843,7 @@ export function Preview(props: PreviewProps) {
   }
 
   // Ctrl+F to open search overlay
-  onMount(() => {
+  onSettled(() => {
     const handleCtrlF = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "f") {
@@ -855,7 +855,7 @@ export function Preview(props: PreviewProps) {
       }
     };
     window.addEventListener("keydown", handleCtrlF);
-    onCleanup(() => window.removeEventListener("keydown", handleCtrlF));
+    return () => window.removeEventListener("keydown", handleCtrlF);
   });
 
   // ── Preview selection → "Add to chat" popover ─────────────────────────
@@ -865,7 +865,7 @@ export function Preview(props: PreviewProps) {
   // (clicking elsewhere, Escape) hides it. `props.onSelectionPopover` is read
   // per-event so the active-pane wiring in PaneView stays reactive, and the
   // handlers early-return when no consumer is wired.
-  onMount(() => {
+  onSettled(() => {
     let popoverShown = false;
 
     const readSelectionInfo = (): PreviewSelectionInfo | null => {
@@ -912,19 +912,19 @@ export function Preview(props: PreviewProps) {
     });
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const findTrigger = props.findTrigger;
     if (findTrigger === lastFindTrigger) return;
     lastFindTrigger = findTrigger;
     props.onSearchOpenChange(true);
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (!hasArticle()) return;
     setOverlayHost(articleRef?.closest(".preview-panel") as HTMLElement | undefined);
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (!articleRef) return;
 
     const scrollContainer = articleRef.closest(".content") as HTMLElement | null;
@@ -950,7 +950,7 @@ export function Preview(props: PreviewProps) {
     });
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const targetVersion = props.syncScrollTargetVersion;
     if (targetVersion === lastSyncScrollTargetVersion) return;
     lastSyncScrollTargetVersion = targetVersion;
@@ -974,7 +974,7 @@ export function Preview(props: PreviewProps) {
   });
 
   // Listen for theme changes to re-init mermaid
-  onMount(() => {
+  onSettled(() => {
     const observer = new MutationObserver(() => {
       mermaidInitialized = false;
     });
@@ -1122,7 +1122,7 @@ export function Preview(props: PreviewProps) {
   // `textContent = ""` on that shared container — detaching our toc
   // from the DOM but leaving the node alive in `tocNode`. So we re-use
   // the cached node to put it back into the (now emptied) container.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const container = props.tocContainer;
     // Always cleanup first — this also covers the deactivation path,
     // where `container` becomes undefined. Without this, the previous
@@ -1149,7 +1149,7 @@ export function Preview(props: PreviewProps) {
     }
   });
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const _html = props.html;
     // Also track tocVisible so this re-runs when it changes
     const tocVis = props.tocVisible;
@@ -1392,8 +1392,8 @@ export function Preview(props: PreviewProps) {
             articleRef = el;
             setHasArticle(true);
           }}
-          class="doc-body"
-          classList={{ "doc-tables-wrap": props.wrapTables }}
+          class={["doc-body", { "doc-tables-wrap": props.wrapTables }]}
+          
           onClick={handleClick}
         />
       </div>

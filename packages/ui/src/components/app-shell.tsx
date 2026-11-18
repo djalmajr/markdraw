@@ -1,4 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Show, createMemo, createSignal, createTrackedEffect } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import { DragDropProvider, DragOverlay } from "@dnd-kit/solid";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import * as m from "@markdraw/i18n";
@@ -481,7 +482,7 @@ export function AppShell(props: AppShellProps) {
   // `hasToc`; for everything else we clear it and drop the orphan DOM nodes
   // from the shared container so the `<Show when={!s.hasToc()}>` placeholder
   // gets a clean canvas.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const file = s.selectedFile();
     if (file && fileKind(file.name) === "document") return;
     s.setHasToc(false);
@@ -821,8 +822,7 @@ export function AppShell(props: AppShellProps) {
         onClose={() => props.onFindInFilesClose?.()}
       />
       <div
-        class="app"
-        classList={{
+        class={["app", {
           "drag-over": s.dragOver(),
           "window-frame-toolbar": !!props.windowFrameToolbar,
           // Reader / Zen mode — drives the chrome-collapsing rules
@@ -831,7 +831,8 @@ export function AppShell(props: AppShellProps) {
           // hide without unmounting heavy subtrees so toggling is
           // instant.
           "reader-mode": s.readerMode(),
-        }}
+        }]}
+        
         ref={appRef}
         onDragOver={props.onDragOver}
         onDragLeave={props.onDragLeave}

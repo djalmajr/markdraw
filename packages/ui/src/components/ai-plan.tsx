@@ -1,4 +1,5 @@
-import { For, Show, createSignal, type JSX } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import IconChevronDown from "~icons/lucide/chevron-down";
@@ -33,7 +34,7 @@ export function AiPlan(props: AiPlanProps): JSX.Element {
     <div class="ai-plan">
       <div class="ai-plan-header">
         <button
-          aria-expanded={!collapsed()}
+          aria-expanded={!collapsed() ? "true" : "false"}
           class="ai-plan-toggle"
           type="button"
           onClick={() => setCollapsed((value) => !value)}
@@ -60,7 +61,7 @@ export function AiPlan(props: AiPlanProps): JSX.Element {
         <ul class="ai-plan-items">
           <For each={props.items}>
             {(item, index) => (
-              <li class="ai-plan-item" classList={{ "ai-plan-item-done": item.done }}>
+              <li class={["ai-plan-item", { "ai-plan-item-done": item.done }]} >
                 <label class="ai-plan-item-label">
                   <input
                     checked={item.done}

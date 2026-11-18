@@ -1,4 +1,4 @@
-import type { Accessor } from "solid-js";
+import { type Accessor } from "solid-js";
 import type { FSEntry, QualifiedPath } from "@markdraw/core/types.ts";
 import { makeTabId } from "@markdraw/core/tabs.ts";
 import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";

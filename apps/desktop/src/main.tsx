@@ -1,5 +1,5 @@
 /* @refresh reload */
-import { render } from "solid-js/web";
+import { render } from "@solidjs/web";
 import { App } from "./app.tsx";
 import "@markdraw/ui/styles/index.css";
 import { applyCodeTheme, getStoredCodeTheme } from "@markdraw/core/code-theme.ts";

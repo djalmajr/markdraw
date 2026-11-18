@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onSettled, Show, untrack, createTrackedEffect } from "solid-js";
 import { createConverter } from "@markdraw/core/converter.ts";
 import ConvertWorker from "@markdraw/core/convert-worker.ts?worker";
 import type { IndexedFile } from "@markdraw/core/file-index.ts";
@@ -458,27 +458,29 @@ export function App() {
 
   // Load the AI config (ai.json merged with builtins) once at startup, then
   // connect any enabled MCP servers so their tools are ready for the first turn.
-  onMount(async () => {
-    try {
-      const cfg = await loadAIConfig();
-      setAiConfig(cfg);
-      await connectEnabledServers(cfg.mcp);
-      await refreshMcpStatuses();
-    } catch {
-      // keep the builtins-only config
-    }
-    // Independent of config-load success — the builtins-only fallback still
-    // needs its keychain probe so connected providers surface in the pickers.
-    await refreshConnectedProviders();
-    // (MCP discovery from connected tools runs via a reactive effect keyed on
-    // the open roots + provider connectivity — see below.)
-    // A previously-saved "Complete" tier downgrades to "Fast" when no embedding
-    // provider is connected (the Full card is gated, but the stored choice may
-    // predate a disconnect).
-    if (indexingTier() === "full" && !embeddingCapable()) {
-      setIndexingTier("lite");
-      setStoredIndexingTier("lite");
-    }
+  onSettled(() => {
+    void (async () => {
+      try {
+        const cfg = await loadAIConfig();
+        setAiConfig(cfg);
+        await connectEnabledServers(cfg.mcp);
+        await refreshMcpStatuses();
+      } catch {
+        // keep the builtins-only config
+      }
+      // Independent of config-load success — the builtins-only fallback still
+      // needs its keychain probe so connected providers surface in the pickers.
+      await refreshConnectedProviders();
+      // (MCP discovery from connected tools runs via a reactive effect keyed on
+      // the open roots + provider connectivity — see below.)
+      // A previously-saved "Complete" tier downgrades to "Fast" when no embedding
+      // provider is connected (the Full card is gated, but the stored choice may
+      // predate a disconnect).
+      if (indexingTier() === "full" && !embeddingCapable()) {
+        setIndexingTier("lite");
+        setStoredIndexingTier("lite");
+      }
+    })();
   });
 
   // ── Settings modal (DJA-15) ────────────────────────────────────────────
@@ -497,7 +499,7 @@ export function App() {
   // (dodges webview CORS); a failure is non-fatal — the table covers every
   // built-in model on its own.
   const [modelsDevIndex, setModelsDevIndex] = createSignal<ModelsDevReasoningIndex | null>(null);
-  onMount(() => {
+  onSettled(() => {
     void fetchModelsDevReasoning(tauriFetch)
       .then(setModelsDevIndex)
       .catch((err: unknown) => {
@@ -623,7 +625,7 @@ export function App() {
   // doesn't offer the current level — including when it exposes NO picker (empty
   // levels) — snap to "default" so a stale effort isn't sent to a model that
   // doesn't support it; otherwise keep the current level.
-  createEffect(() => {
+  createTrackedEffect(() => {
     const levels = aiReasoningLevels();
     const current = untrack(aiReasoning);
     if (levels.includes(current)) return;
@@ -1226,7 +1228,7 @@ export function App() {
   // Re-discover whenever the open roots, provider connectivity, or the OpenCode
   // toggle change. Fires once on mount too (empty connectivity → no-op until the
   // keychain probe lands), and is latest-wins via the guard inside.
-  createEffect(() => {
+  createTrackedEffect(() => {
     rootPaths();
     connectedProviders();
     importOpenCode();
@@ -1446,8 +1448,8 @@ export function App() {
     });
   }
   // reloadAiCommands reads rootPaths() synchronously, so the effect tracks it.
-  createEffect(() => reloadAiCommands());
-  createEffect(() => {
+  createTrackedEffect(() => reloadAiCommands());
+  createTrackedEffect(() => {
     rootPaths();
     void refreshDiscoveredSkills();
   });
@@ -1584,7 +1586,7 @@ export function App() {
   }
 
   // Toggle auto-refresh (only when roots are open)
-  createEffect(() => {
+  createTrackedEffect(() => {
     if (rootPaths().size === 0) return;
     if (state.autoRefresh()) {
       watcher.start();
@@ -1594,7 +1596,7 @@ export function App() {
   });
 
   // Watch workspace directories for file tree changes (rename/delete/create)
-  createEffect(() => {
+  createTrackedEffect(() => {
     const paths = rootPaths();
     if (paths.size === 0) {
       void invoke("stop_watching_dirs");
@@ -1603,7 +1605,7 @@ export function App() {
     void invoke("watch_dirs", { paths: Array.from(paths.values()) });
   });
 
-  onMount(() => {
+  onSettled(() => {
     const pendingRoots = new Set<string>();
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     const unlisten = listen<{ paths: string[] }>("fs-tree-change", (event) => {
@@ -1634,7 +1636,7 @@ export function App() {
 
   // Auto-save: debounce 1s after editor content changes
   let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
-  createEffect(() => {
+  createTrackedEffect(() => {
     const content = state.editorContent();
     if (isTabSwitching) return;
     if (state.editorMode() === "preview") return;
@@ -1660,7 +1662,7 @@ export function App() {
   // the pointer moves (see `dragOnceMoved`).
   let hyprlandTitleBar = false;
   const startDragging = () => getCurrentWindow().startDragging();
-  onMount(() => {
+  onSettled(() => {
     let disposed = false;
     let remove = () => {};
     void invoke<boolean>("hyprland_window_control").then((active) => {
@@ -1676,7 +1678,7 @@ export function App() {
 
   // Native app menu (macOS menu bar, Windows/Linux window menu) and tray icon.
   // Both are fire-and-forget; errors are logged but don't break the app.
-  onMount(() => {
+  onSettled(() => {
     // macOS traffic lights sit in the top-left corner of the overlay title
     // bar. Reserve space so toolbar controls don't overlap them.
     // On Windows and Linux the custom WindowControls (min/max/close) are drawn
@@ -1803,7 +1805,7 @@ export function App() {
   }
 
   // Cold start: check if the app was launched with a file argument
-  onMount(() => {
+  onSettled(() => {
     void invoke<string[]>("get_startup_args").then((args) => {
       const filePath = args.find((a) => !a.startsWith("-") && isSupportedFile(a));
       if (filePath) void openFileByAbsolutePath(filePath);
@@ -1813,7 +1815,7 @@ export function App() {
   });
 
   // Already running: single-instance plugin forwards file path via event
-  onMount(() => {
+  onSettled(() => {
     const unlisten = listen<string>("open-file", (event) => {
       if (event.payload) void openFileByAbsolutePath(event.payload);
     });
@@ -1824,7 +1826,7 @@ export function App() {
   // @tauri-apps/api/app at runtime instead of bundling at build time so
   // we don't have to rebuild the frontend just to update the displayed
   // version on a hot-reloaded dev session.
-  onMount(() => {
+  onSettled(() => {
     void getVersion().then(setAppVersion).catch(() => {});
   });
 
@@ -1837,7 +1839,7 @@ export function App() {
   // In production, block the native WebView context menu (Reload / Inspect
   // Element). Kobalte's ContextMenu triggers call preventDefault() before this
   // listener fires, so custom menus (file tree, etc.) keep working.
-  onMount(() => {
+  onSettled(() => {
     if (!import.meta.env.PROD) return;
     const handler = (e: Event) => { if (!e.defaultPrevented) e.preventDefault(); };
     document.addEventListener("contextmenu", handler);
@@ -1847,7 +1849,7 @@ export function App() {
   // Check for app updates a few seconds after boot — silent so any network
   // hiccup or "you're up to date" doesn't interrupt the user. The manual
   // menu item still surfaces feedback.
-  onMount(() => {
+  onSettled(() => {
     const updateTimer = window.setTimeout(() => {
       void checkForAppUpdates(true);
     }, 3000);
@@ -2269,7 +2271,7 @@ export function App() {
   // I/O for every workspace event.
   const [workspaceSymbols, setWorkspaceSymbols] = createSignal<readonly WorkspaceSymbol[]>([]);
   let workspaceBuildToken = 0;
-  createEffect(() => {
+  createTrackedEffect(() => {
     const roots = state.rootsList();
     const paths = rootPaths();
     if (roots.length === 0 || paths.size === 0) {
@@ -2332,7 +2334,7 @@ export function App() {
     getTier: () => indexingTier(),
     getEmbedding: () => buildEmbeddingProvider(),
   });
-  createEffect(() => {
+  createTrackedEffect(() => {
     const tier = indexingTier();
     rootPaths(); // re-index when the open roots change
     if (tier === "off") return;
@@ -2358,7 +2360,7 @@ export function App() {
   // Restore tabs when roots become available after startup.
   let sessionRestored = false;
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     // React to rootPaths changing (roots being opened)
     const paths = rootPaths();
     if (paths.size === 0 || sessionRestored) return;
@@ -2418,7 +2420,7 @@ export function App() {
   });
 
   // Snapshot active tab before app hides (close-to-tray)
-  onMount(() => {
+  onSettled(() => {
     const win = getCurrentWindow();
     const unlisten = win.onFocusChanged((focused) => {
       if (!focused.payload) {
@@ -3340,7 +3342,7 @@ export function App() {
   };
 
   // Keyboard shortcuts for tabs
-  onMount(() => {
+  onSettled(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const isMac = navigator.platform.startsWith("Mac");
       const platform: "mac" | "other" = isMac ? "mac" : "other";
@@ -3803,8 +3805,8 @@ export function App() {
               <For each={req().details}>
                 {(detail) => (
                   <div
-                    class="tool-approval-detail"
-                    classList={{ "tool-approval-detail-multiline": detail.multiline }}
+                    class={["tool-approval-detail", { "tool-approval-detail-multiline": detail.multiline }]}
+                    
                   >
                     <div class="tool-approval-detail-label">{detail.label}</div>
                     <pre class="tool-approval-detail-value">{detail.value}</pre>
