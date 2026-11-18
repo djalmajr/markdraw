@@ -62,46 +62,58 @@ export function ContentToolbar(props: ContentToolbarProps) {
       {/* Auto-refresh */}
       <Tooltip>
         <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={props.autoRefresh}
-          onChange={props.onToggleAutoRefresh}
           aria-label="Auto-refresh"
-        >
-          <IconRefreshCw width={14} height={14} />
-        </TooltipTrigger>
+          render={(triggerProps) => (
+            <Toggle
+              {...triggerProps}
+              size="sm"
+              pressed={props.autoRefresh}
+              onChange={props.onToggleAutoRefresh}
+            >
+              <IconRefreshCw width={14} height={14} />
+            </Toggle>
+          )}
+        />
         <TooltipContent>Auto-refresh</TooltipContent>
       </Tooltip>
       {/* Wrap wide tables (fit width) vs horizontal scroll */}
       <Tooltip>
         <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={props.tableWrap}
-          onChange={props.onToggleTableWrap}
           aria-label="Wrap wide tables"
-        >
-          <IconTable width={14} height={14} />
-        </TooltipTrigger>
+          render={(triggerProps) => (
+            <Toggle
+              {...triggerProps}
+              size="sm"
+              pressed={props.tableWrap}
+              onChange={props.onToggleTableWrap}
+            >
+              <IconTable width={14} height={14} />
+            </Toggle>
+          )}
+        />
         <TooltipContent>Wrap wide tables (no horizontal scroll)</TooltipContent>
       </Tooltip>
       <Show when={props.onFind || props.onToggleFind}>
         <Tooltip>
           <TooltipTrigger
-            as={Toggle}
-            size="sm"
-            pressed={!!props.searchOpen}
             aria-label="Find in preview"
-            onChange={() => {
-              if (props.onToggleFind) {
-                props.onToggleFind();
-                return;
-              }
-              props.onFind?.();
-            }}
-          >
-            <IconSearch width={14} height={14} />
-          </TooltipTrigger>
+            render={(triggerProps) => (
+              <Toggle
+                {...triggerProps}
+                size="sm"
+                pressed={!!props.searchOpen}
+                onChange={() => {
+                  if (props.onToggleFind) {
+                    props.onToggleFind();
+                    return;
+                  }
+                  props.onFind?.();
+                }}
+              >
+                <IconSearch width={14} height={14} />
+              </Toggle>
+            )}
+          />
           <TooltipContent>Find in preview</TooltipContent>
         </Tooltip>
       </Show>

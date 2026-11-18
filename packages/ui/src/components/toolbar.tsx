@@ -130,14 +130,18 @@ export function Toolbar(props: ToolbarProps) {
     <Show when={props.hasRoot}>
       <Tooltip>
         <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={props.sidebarVisible}
-          onChange={props.onToggleSidebar}
           aria-label={(useLocale(), m.toolbar_toggle_sidebar())}
-        >
-          <IconPanelLeft width={14} height={14} />
-        </TooltipTrigger>
+          render={(triggerProps) => (
+            <Toggle
+              {...triggerProps}
+              size="sm"
+              pressed={props.sidebarVisible}
+              onChange={props.onToggleSidebar}
+            >
+              <IconPanelLeft width={14} height={14} />
+            </Toggle>
+          )}
+        />
         <TooltipContent>{(useLocale(), m.toolbar_toggle_sidebar())}</TooltipContent>
       </Tooltip>
     </Show>
@@ -146,14 +150,18 @@ export function Toolbar(props: ToolbarProps) {
   const renderTocToggle = () => (
     <Tooltip>
       <TooltipTrigger
-        as={Toggle}
-        size="sm"
-        pressed={props.tocVisible}
-        onChange={props.onToggleToc}
         aria-label={(useLocale(), m.toolbar_toggle_toc())}
-      >
-        <IconPanelRight width={14} height={14} />
-      </TooltipTrigger>
+        render={(triggerProps) => (
+          <Toggle
+            {...triggerProps}
+            size="sm"
+            pressed={props.tocVisible}
+            onChange={props.onToggleToc}
+          >
+            <IconPanelRight width={14} height={14} />
+          </Toggle>
+        )}
+      />
       <TooltipContent>{(useLocale(), m.toolbar_toggle_toc())}</TooltipContent>
     </Tooltip>
   );
@@ -162,14 +170,18 @@ export function Toolbar(props: ToolbarProps) {
     <Show when={props.onToggleSplit && props.hasRoot}>
       <Tooltip>
         <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={!!props.isSplit}
-          onChange={() => props.onToggleSplit?.()}
           aria-label={(useLocale(), m.toolbar_split_editor())}
-        >
-          <IconColumns width={14} height={14} />
-        </TooltipTrigger>
+          render={(triggerProps) => (
+            <Toggle
+              {...triggerProps}
+              size="sm"
+              pressed={!!props.isSplit}
+              onChange={() => props.onToggleSplit?.()}
+            >
+              <IconColumns width={14} height={14} />
+            </Toggle>
+          )}
+        />
         <TooltipContent>{(useLocale(), m.toolbar_split_editor())}</TooltipContent>
       </Tooltip>
     </Show>
