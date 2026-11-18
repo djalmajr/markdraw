@@ -17,7 +17,7 @@ vi.mock("./editor-toolbar.tsx", () => ({ EditorToolbar: () => null }));
 vi.mock("./content-toolbar.tsx", () => ({ ContentToolbar: () => null }));
 vi.mock("./tab-bar.tsx", () => ({ TabBar: () => null }));
 vi.mock("./empty-state.tsx", () => ({ EmptyState: () => null }));
-vi.mock("@dnd-kit/solid", () => ({
+vi.mock("../lib/dnd/index.ts", () => ({
   useDroppable: () => ({ ref: () => {}, isDropTarget: () => false }),
 }));
 

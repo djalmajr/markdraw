@@ -1,5 +1,5 @@
 import { For, Show, createMemo, createSignal, createTrackedEffect } from "solid-js";
-import { useDraggable, useDroppable } from "@dnd-kit/solid";
+import { useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import type { TabStore } from "../composables/create-tab-store.ts";
 import type { TabState } from "@markdraw/core/tabs.ts";
 import {

@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createSignal, createTrackedEffect, createEffect } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { useDragOperation, useDraggable, useDroppable } from "@dnd-kit/solid";
+import { useDragOperation, useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import IconPin from "~icons/lucide/pin";
 import IconPlus from "~icons/lucide/plus";
 import IconEllipsis from "~icons/lucide/ellipsis";

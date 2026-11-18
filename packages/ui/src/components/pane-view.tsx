@@ -1,6 +1,6 @@
 import { Show, createMemo, createSignal, createTrackedEffect } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { useDroppable } from "@dnd-kit/solid";
+import { useDroppable } from "../lib/dnd/index.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { fileKind, UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import { setStoredTableWrap } from "@markdraw/core/editor-prefs.ts";

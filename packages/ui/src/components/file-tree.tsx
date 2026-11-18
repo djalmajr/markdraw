@@ -1,5 +1,5 @@
 import { createSignal, createMemo, For, Show, createTrackedEffect } from "solid-js";
-import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/solid";
+import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import { FileTreeItem } from "./file-tree-item.tsx";
