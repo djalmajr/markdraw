@@ -17,11 +17,16 @@ const getPage = vi.fn(async () => ({
   getViewport: () => ({ width: 600, height: 800 }),
   render: () => ({ promise: Promise.resolve(), cancel: () => {} }),
 }));
+// pdf.js 6: `getDocument` takes a `{ url }` parameter object and returns the
+// loading task that owns the worker; `PDFDocumentProxy` has no `destroy`.
+const destroyTask = vi.fn(async () => {});
+const getDocumentArgs: unknown[] = [];
 vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
-  getDocument: () => ({
-    promise: Promise.resolve({ numPages: 3, getPage, destroy: () => {} }),
-  }),
+  getDocument: (arg: unknown) => {
+    getDocumentArgs.push(arg);
+    return { promise: Promise.resolve({ numPages: 3, getPage }), destroy: destroyTask };
+  },
 }));
 
 import { MediaViewer } from "./media-viewer.tsx";
@@ -95,22 +100,74 @@ describe("MediaViewer — pdf continuous scroll", () => {
     expect(getByLabelText("Fit width")).not.toBeNull();
   });
 
-  it("surfaces a load error instead of a blank canvas", async () => {
+  it("asks pdf.js for the source as a `{ url }` parameter object", async () => {
+    // pdf.js 6 dropped the bare-string `getDocument(src)` form: passing a
+    // string there throws at runtime and renders a blank viewer.
+    getDocumentArgs.length = 0;
+    const { findByText } = render(() => (
+      <MediaViewer kind="pdf" src="asset://doc.pdf" fileName="doc.pdf" />
+    ));
+    await findByText("3 pages");
+    expect(getDocumentArgs[0]).toEqual({ url: "asset://doc.pdf" });
+  });
+
+  it("releases the loading task when the viewer unmounts", async () => {
+    // The loading task owns the pdf.js worker; pdf.js 6 removed
+    // `PDFDocumentProxy.destroy`, so this is the only release path left.
+    destroyTask.mockClear();
+    const { findByText, unmount } = render(() => (
+      <MediaViewer kind="pdf" src="asset://doc.pdf" fileName="doc.pdf" />
+    ));
+    await findByText("3 pages");
+    unmount();
+    expect(destroyTask).toHaveBeenCalled();
+  });
+
+  it("surfaces a load error instead of a blank canvas and releases the task", async () => {
     getPage.mockClear();
-    // Re-mock getDocument to reject for this case only.
+    // Re-mock getDocument to reject for this case only. The task already owns
+    // a pdf.js worker, so a corrupt file must still destroy it.
     const pdfjs = await import("pdfjs-dist");
+    const destroyBroken = vi.fn(async () => {});
     const spy = vi
       .spyOn(pdfjs, "getDocument")
-      .mockReturnValueOnce({ promise: Promise.reject(new Error("bad pdf")) } as ReturnType<
-        typeof pdfjs.getDocument
-      >);
+      .mockReturnValueOnce({
+        promise: Promise.reject(new Error("bad pdf")),
+        destroy: destroyBroken,
+      } as unknown as ReturnType<typeof pdfjs.getDocument>);
 
-    const { findByText } = render(() => (
+    const { findByText, unmount } = render(() => (
       <MediaViewer kind="pdf" src="asset://broken.pdf" fileName="broken.pdf" />
     ));
     await waitFor(() =>
       expect(findByText("Unable to display broken.pdf")).resolves.not.toBeNull(),
     );
+    unmount();
+    expect(destroyBroken).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it("destroys the task once when the first page fails to load", async () => {
+    // The task is stored before getPage(1); the error path and the unmount
+    // cleanup must not both destroy it.
+    const pdfjs = await import("pdfjs-dist");
+    const destroyOnce = vi.fn(async () => {});
+    const failingPage = vi.fn(async () => {
+      throw new Error("page failed");
+    });
+    const spy = vi
+      .spyOn(pdfjs, "getDocument")
+      .mockReturnValueOnce({
+        promise: Promise.resolve({ numPages: 1, getPage: failingPage }),
+        destroy: destroyOnce,
+      } as unknown as ReturnType<typeof pdfjs.getDocument>);
+
+    const { findByText, unmount } = render(() => (
+      <MediaViewer kind="pdf" src="asset://page.pdf" fileName="page.pdf" />
+    ));
+    await findByText("Unable to display page.pdf");
+    unmount();
+    expect(destroyOnce).toHaveBeenCalledTimes(1);
     spy.mockRestore();
   });
 });
