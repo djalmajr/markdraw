@@ -3,7 +3,7 @@
 import { scanIncludes } from "../src/asciidoc.ts";
 import { scanMarkdownIncludes } from "../src/markdown.ts";
 
-export function fuzz(data: Buffer): void {
+export function fuzz(data) {
   const input = data.toString("utf8");
 
   const adoc = scanIncludes(input);

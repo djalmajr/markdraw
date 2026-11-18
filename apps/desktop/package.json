@@ -1,6 +1,6 @@
 {
   "name": "@markdraw/desktop",
-  "version": "0.26.1-5",
+  "version": "0.26.1-6",
   "type": "module",
   "private": true,
   "scripts": {
@@ -36,7 +36,7 @@
     "@iconify/json": "^2.2.558",
     "@tauri-apps/cli": "^2.12.6",
     "@types/bun": "latest",
-    "@types/node": "^25.9.9",
+    "@types/node": "^26.6.6",
     "memlab": "^2.0.6",
     "@tailwindcss/vite": "^4.3.5",
     "tailwindcss": "^4.3.5",
