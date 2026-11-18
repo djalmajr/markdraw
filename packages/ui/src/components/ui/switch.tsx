@@ -1,7 +1,7 @@
 import type { JSX } from "@solidjs/web";
-import { omit } from "solid-js";
+import { createContext, createSignal, omit, useContext } from "solid-js";
 
-import { FieldDescription, FieldError } from "@ui-sdk/solid/field";
+import { FieldDescription, FieldError, useFieldControl } from "@ui-sdk/solid/field";
 import { Switch as SwitchPrimitive, SwitchThumb as SwitchThumbPrimitive } from "@ui-sdk/solid/switch";
 
 import { cn } from "@markdraw/core/utils.ts";
@@ -25,21 +25,46 @@ type SwitchRootProps = {
   children?: JSX.Element
 }
 
+/** The visual track reads the same state the SDK publishes on the button. The
+ *  SDK owns the value (including uncontrolled clicks and form resets); this
+ *  context just makes it available to the plain `<span>` we render as track. */
+type SwitchStateContextValue = {
+  checked: () => boolean
+  disabled: () => boolean
+}
+
+const SwitchStateContext = createContext<SwitchStateContextValue>({
+  checked: () => false,
+  disabled: () => false,
+})
+
 /** The ui-sdk Switch is the control itself (a `role="switch"` button with a
  *  hidden native input). `relative` keeps that absolute input anchored here,
  *  as it was with the old wrapper, so clicking in a scrolled list doesn't
  *  scroll the list to a stale input position. */
 const Switch = (props: SwitchRootProps) => {
+  const field = useFieldControl()
+  const [internalChecked, setInternalChecked] = createSignal(props.defaultChecked ?? false)
   const others = omit(props, "class", "children", "onChange", "validationState")
   return (
-    <SwitchPrimitive
-      class={cn("relative", props.class)}
-      onCheckedChange={(checked) => props.onChange?.(checked)}
-      aria-invalid={props.validationState === "invalid" ? "true" : undefined}
-      {...others}
+    <SwitchStateContext
+      value={{
+        checked: () => props.checked ?? internalChecked(),
+        disabled: () => props.disabled || field?.disabled() || false,
+      }}
     >
-      {props.children}
-    </SwitchPrimitive>
+      <SwitchPrimitive
+        class={cn("relative group", props.class)}
+        onCheckedChange={(checked) => {
+          setInternalChecked(checked)
+          props.onChange?.(checked)
+        }}
+        aria-invalid={props.validationState === "invalid" ? "true" : undefined}
+        {...others}
+      >
+        {props.children}
+      </SwitchPrimitive>
+    </SwitchStateContext>
   )
 }
 
@@ -71,18 +96,26 @@ type SwitchControlProps = {
 }
 
 /** The visual track. The interactive element is the root Switch, so this is
- *  only the box around the thumb; the SDK supplies the hidden input. */
-const SwitchControl = (props: SwitchControlProps) => (
-  <span
-    class={cn(
-      "inline-flex shrink-0 cursor-pointer items-center rounded-[2px] border border-input bg-input p-[1px] transition-[color,background-color,border-color,box-shadow] data-[disabled]:cursor-not-allowed data-[checked]:border-primary data-[checked]:bg-primary data-[disabled]:opacity-50",
-      CONTROL_SIZE[props.size ?? "default"],
-      props.class
-    )}
-  >
-    {props.children}
-  </span>
-)
+ *  only the box around the thumb; the SDK supplies the hidden input. The state
+ *  attributes are mirrored onto this span so its `data-*` Tailwind variants
+ *  keep working; the `group-*` classes also follow the root's own SDK state. */
+const SwitchControl = (props: SwitchControlProps) => {
+  const state = useContext(SwitchStateContext)
+  return (
+    <span
+      data-checked={state.checked() ? "" : undefined}
+      data-unchecked={state.checked() ? undefined : ""}
+      data-disabled={state.disabled() ? "" : undefined}
+      class={cn(
+        "inline-flex shrink-0 cursor-pointer items-center rounded-[2px] border border-input bg-input p-[1px] transition-[color,background-color,border-color,box-shadow] data-[disabled]:cursor-not-allowed data-[checked]:border-primary data-[checked]:bg-primary data-[disabled]:opacity-50 group-data-[checked]:border-primary group-data-[checked]:bg-primary group-data-[disabled]:opacity-50",
+        CONTROL_SIZE[props.size ?? "default"],
+        props.class
+      )}
+    >
+      {props.children}
+    </span>
+  )
+}
 
 type SwitchThumbProps = {
   class?: string | undefined

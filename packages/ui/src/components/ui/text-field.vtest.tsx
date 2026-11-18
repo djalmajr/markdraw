@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render } from "@solidjs/testing-library";
-import { flush } from "solid-js";
+import { createSignal, flush } from "solid-js";
 
 import {
   TextField,
@@ -74,5 +74,24 @@ describe("TextField", () => {
       </TextField>
     ));
     expect((getByRole("textbox") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("keeps value and disabled props reactive after mount", () => {
+    const [value, setValue] = createSignal("before");
+    const [disabled, setDisabled] = createSignal(false);
+    const { getByRole } = render(() => (
+      <TextField>
+        <TextFieldInput value={value()} disabled={disabled()} />
+      </TextField>
+    ));
+    const input = getByRole("textbox") as HTMLInputElement;
+    expect(input.value).toBe("before");
+    expect(input.disabled).toBe(false);
+
+    setValue("after");
+    setDisabled(true);
+    flush();
+    expect(input.value).toBe("after");
+    expect(input.disabled).toBe(true);
   });
 });

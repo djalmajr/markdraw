@@ -1,5 +1,5 @@
 import type { ComponentProps, JSX } from "@solidjs/web";
-import { createContext, omit, useContext } from "solid-js";
+import { createContext, merge, omit, useContext } from "solid-js";
 
 import { Field as FieldPrimitive, FieldDescription, FieldError, FieldLabel } from "@ui-sdk/solid/field";
 import { Input } from "@ui-sdk/solid/input";
@@ -100,7 +100,7 @@ type TextFieldInputProps = Omit<
 
 const TextFieldInput = (rawProps: TextFieldInputProps) => {
   const context = useContext(TextFieldContext)
-  const props = { type: "text" as const, ...rawProps }
+  const props = merge({ type: "text" as const }, rawProps)
   const others = omit(props, "type", "class", "value", "defaultValue", "onValueChange", "readOnly")
   return (
     <Input

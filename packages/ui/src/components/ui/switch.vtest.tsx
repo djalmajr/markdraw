@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render } from "@solidjs/testing-library";
-import { flush } from "solid-js";
+import { createSignal, flush } from "solid-js";
 
 import {
   Switch,
@@ -69,5 +69,32 @@ describe("Switch", () => {
     fireEvent.click(sw);
     flush();
     expect(log).toEqual([]);
+  });
+
+  it("keeps the track state in sync with the switch state", () => {
+    const [checked, setChecked] = createSignal(false);
+    const [disabled, setDisabled] = createSignal(false);
+    const { getByRole } = render(() => (
+      <Switch checked={checked()} disabled={disabled()} onChange={setChecked}>
+        <SwitchControl>
+          <SwitchThumb />
+        </SwitchControl>
+      </Switch>
+    ));
+    const sw = getByRole("switch");
+    const track = sw.querySelector("span")!;
+    expect(track.hasAttribute("data-checked")).toBe(false);
+    expect(track.hasAttribute("data-disabled")).toBe(false);
+
+    fireEvent.click(sw);
+    flush();
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(track.hasAttribute("data-checked")).toBe(true);
+    expect(track.hasAttribute("data-unchecked")).toBe(false);
+
+    setDisabled(true);
+    flush();
+    expect(track.hasAttribute("data-disabled")).toBe(true);
+    expect(sw.hasAttribute("disabled")).toBe(true);
   });
 });
