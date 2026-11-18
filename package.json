@@ -40,8 +40,8 @@
     "prepare": "lefthook install"
   },
   "devDependencies": {
-    "lefthook": "^2.1.6",
-    "type-coverage": "^2.29.7"
+    "lefthook": "^2.2.2",
+    "type-coverage": "^2.31.2"
   },
   "overrides": {
     "jiti": "2.7.0",
