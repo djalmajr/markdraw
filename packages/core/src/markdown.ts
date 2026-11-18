@@ -1,5 +1,8 @@
 // Markdown conversion with include support, mermaid, and extensions
-import MarkdownIt from "markdown-it";
+//
+// markdown-it 15 bundles its own types and exports the instance type as a named
+// export (`type MarkdownIt`), so the default import is only the constructor.
+import MarkdownIt, { type MarkdownIt as MarkdownItInstance } from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
 import mk from "@traptitech/markdown-it-katex";
@@ -199,7 +202,7 @@ function slugify(s: string): string {
 
 // --- Markdown-it setup ---
 
-function createMarkdownIt(): MarkdownIt {
+function createMarkdownIt(): MarkdownItInstance {
   const md = new MarkdownIt({
     html: true,
     linkify: true,
@@ -209,11 +212,16 @@ function createMarkdownIt(): MarkdownIt {
     breaks: true,
   });
 
+  // markdown-it 15 upgraded to linkify-it 6, which no longer recognises fuzzy
+  // links (`example.com`) or credentials in URLs (`http://user:pass@host`) by
+  // default. The preview has always linked both, so opt back in explicitly (the chat renderer sets it to false on
+  // purpose: `.md` is Moldova's TLD — see packages/ui/src/lib/chat-markdown.ts).
+  md.linkify.set({ fuzzyLink: true, urlAuth: true });
+
   // --- Core plugins ---
 
-  // Heading anchors
+  // Heading anchors (no permalink: the TOC supplies the visible links)
   md.use(anchor, {
-    permalink: false,
     slugify,
   });
 
@@ -224,7 +232,17 @@ function createMarkdownIt(): MarkdownIt {
   md.use(mk, { throwOnError: false, errorColor: "#cc0000" });
 
   // --- GitHub-style alerts (NOTE, WARNING, TIP, CAUTION, IMPORTANT) ---
-  md.use(alert);
+  // @mdit/plugin-alert 2.x echoes the label as written (`[!NOTE]` becomes
+  // "NOTE" and goes through renderInline); 0.23.x capitalised it and lowercased
+  // the rest ("Note"). Pin the previous title text so the upgrade changes no
+  // user-visible output (the label is one of the fixed alert names).
+  md.use(alert, {
+    titleRenderer: (tokens, idx) => {
+      const label = tokens[idx]?.content ?? "";
+      const title = label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
+      return `<p class="markdown-alert-title">${title}</p>\n`;
+    },
+  });
 
   // --- Footnotes ---
   md.use(footnote);
@@ -241,13 +259,24 @@ function createMarkdownIt(): MarkdownIt {
   md.use(mark);      // Marked/highlighted text ==text==
 
   // --- Advanced tables (colspan, rowspan, multi-line) ---
-  md.use(multimdTable, {
-    multiline: true,
-    rowspan: true,
-    headerless: true,
-    multibody: true,
-    autolabel: true,
-  });
+  // markdown-it 15 removed the `md.utils` legacy helpers (`assign`, `has`,
+  // `isString`) and `md.utils` is a single object shared by every instance.
+  // markdown-it-multimd-table 4.2.3 reads `md.utils.assign()` once, when it is
+  // registered, so lend it for that call only and take it back: nothing is
+  // patched globally and no other markdown-it instance ever sees the helper.
+  const mdUtils = md.utils as unknown as { assign?: typeof Object.assign };
+  mdUtils.assign = Object.assign;
+  try {
+    md.use(multimdTable, {
+      multiline: true,
+      rowspan: true,
+      headerless: true,
+      multibody: true,
+      autolabel: true,
+    });
+  } finally {
+    delete mdUtils.assign;
+  }
 
   // --- Custom containers (::: type) ---
   // Register common container types
@@ -297,9 +326,9 @@ function createMarkdownIt(): MarkdownIt {
 }
 
 // Singleton instance
-let mdInstance: MarkdownIt | null = null;
+let mdInstance: MarkdownItInstance | null = null;
 
-function getMd(): MarkdownIt {
+function getMd(): MarkdownItInstance {
   if (!mdInstance) {
     mdInstance = createMarkdownIt();
   }
