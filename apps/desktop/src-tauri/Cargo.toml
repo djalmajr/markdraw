@@ -52,6 +52,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # same SSE-delivery wall that forced generateText over streamText. See ai_mcp.rs.
 rmcp = { version = "1", default-features = false, features = [
     "client",
+    "server",
+    "transport-io",
+    "macros",
     "transport-child-process",
     "transport-streamable-http-client-reqwest",
     # Generic MCP OAuth (RFC 9728 discovery + DCR + auth-code/PKCE + refresh) for
@@ -61,6 +64,7 @@ rmcp = { version = "1", default-features = false, features = [
 ] }
 # For typed HTTP header names/values when passing custom MCP auth headers.
 http = "1"
+getrandom = "0.3"
 # Parse Codex's `~/.codex/config.toml` (and per-project `.codex/config.toml`)
 # when discovering MCP servers other agent tools already configure (mcp_discovery.rs).
 # Already compiled transitively; declared direct so the module can `use toml`.
@@ -104,6 +108,7 @@ tokio = { version = "1", features = [
     "sync",
     "time",
     "io-util",
+    "net",
 ] }
 
 # Dev-only: registered with #[cfg(debug_assertions)] in lib.rs so release
@@ -121,6 +126,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["NSS
 keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 keyring = { version = "3", features = ["windows-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

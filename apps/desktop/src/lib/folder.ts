@@ -6,6 +6,7 @@ import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import { copyPath, createDir, createFile, movePath, openDirectory, readTree, renameFile, trashPath, writeFile } from "./fs.ts";
 import { joinRelative, nextAvailableName, withDefaultExtension } from "./fs-paths.ts";
 import type { FileWatcher } from "./watcher.ts";
+import { invoke } from "./chaos-invoke.ts";
 
 interface FolderDeps {
   rootPaths: Accessor<Map<string, string>>;
@@ -17,10 +18,33 @@ interface FolderDeps {
 export function createFolder(deps: FolderDeps) {
   const { rootPaths, setRootPaths, state, watcher } = deps;
 
+  // Serialize authorization changes together with their UI publication. In
+  // particular a close is acknowledged by Rust before it disappears locally;
+  // a later open cannot replay an older snapshot over the closed roots.
+  let rootUpdates = invoke<void>("mcp_set_roots", { roots: [] }).catch(() => {
+    console.error("Could not initialize MCP workspaces");
+  });
+  function updateRoots(change: (next: Map<string, string>) => void, publish: () => void) {
+    const update = rootUpdates.then(async () => {
+      const next = new Map(rootPaths());
+      change(next);
+      await invoke("mcp_set_roots", {
+        roots: Array.from(next.values(), (path) => ({ path, name: getPathName(path) })),
+      });
+      setRootPaths(next);
+      publish();
+    });
+    // A failed update leaves both the registry and local roots unchanged;
+    // subsequent user actions may retry without a poisoned promise queue.
+    rootUpdates = update.catch(() => undefined);
+    return update;
+  }
+
   function getPathName(path: string) {
     const normalizedPath = path.replace(/\\/g, "/");
     const parts = normalizedPath.split("/").filter(Boolean);
-    return parts[parts.length - 1] ?? normalizedPath;
+    const name = parts[parts.length - 1];
+    return !name || name.includes("\0") ? "Root" : name;
   }
 
   async function openFolderPath(path: string): Promise<boolean> {
@@ -42,19 +66,13 @@ export function createFolder(deps: FolderDeps) {
         state.respectGitignore(),
       );
 
-      // Add to rootPaths map
-      setRootPaths((prev) => {
-        const next = new Map(prev);
-        next.set(path, path);
-        return next;
-      });
-
-      // Add root to state
-      state.addRoot({
-        collapsed: false,
-        entries,
-        id: path,
-        name: getPathName(path),
+      await updateRoots((next) => next.set(path, path), () => {
+        state.addRoot({
+          collapsed: false,
+          entries,
+          id: path,
+          name: getPathName(path),
+        });
       });
 
       state.setSelectedRootId(path);
@@ -140,20 +158,14 @@ export function createFolder(deps: FolderDeps) {
     }));
   }
 
-  function handleCloseRoot(rootId: string) {
-    // Remove from rootPaths map
-    setRootPaths((prev) => {
-      const next = new Map(prev);
-      next.delete(rootId);
-      return next;
-    });
-
-    // Remove from state (this handles selectedRootId cleanup)
-    state.removeRoot(rootId);
-
-    // If no roots left, destroy watcher
-    if (rootPaths().size === 0) {
-      watcher.destroy();
+  async function handleCloseRoot(rootId: string) {
+    try {
+      await updateRoots((next) => { next.delete(rootId); }, () => {
+        state.removeRoot(rootId);
+        if (rootPaths().size === 0) watcher.destroy();
+      });
+    } catch {
+      console.error("Could not close workspace: MCP authorization update failed");
     }
   }
 

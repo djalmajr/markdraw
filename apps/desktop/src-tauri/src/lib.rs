@@ -27,6 +27,8 @@ use ai_mcp::{
 // Discovers MCP servers other agent tools (Claude Code, Codex, OpenCode) already
 // configure, at global + per-project scope, normalized for Markdraw. Read-only;
 // the JS host gates which tools to read and approves project servers.
+pub mod mcp_server;
+use mcp_server::mcp_set_roots;
 mod mcp_discovery;
 use mcp_discovery::mcp_discover;
 
@@ -773,7 +775,10 @@ fn is_content_change(kind: &notify::EventKind) -> bool {
 pub struct ContentWatcher(notify::RecommendedWatcher);
 
 impl notify::Watcher for ContentWatcher {
-    fn new<F: notify::EventHandler>(mut handler: F, config: notify::Config) -> notify::Result<Self> {
+    fn new<F: notify::EventHandler>(
+        mut handler: F,
+        config: notify::Config,
+    ) -> notify::Result<Self> {
         notify::RecommendedWatcher::new(
             move |res: notify::Result<notify::Event>| match res {
                 Ok(event) if !is_content_change(&event.kind) => {}
@@ -1352,6 +1357,18 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            let registry = app
+                .state::<std::sync::Arc<mcp_server::Registry>>()
+                .inner()
+                .clone();
+            match mcp_server::AppEndpoint::start(registry) {
+                Ok(endpoint) => {
+                    *app.state::<Mutex<Option<mcp_server::AppEndpoint>>>()
+                        .lock()
+                        .unwrap() = Some(endpoint);
+                }
+                Err(error) => eprintln!("Markdraw MCP endpoint unavailable ({:?})", error.kind()),
+            }
             // Dev: mark the dock icon with a "DEV" badge (runs on the main thread).
             #[cfg(all(debug_assertions, target_os = "macos"))]
             set_dev_dock_badge();
@@ -1421,6 +1438,8 @@ pub fn run() {
         .register_uri_scheme_protocol(html_preview::SCHEME, |ctx, request| {
             html_preview::serve(ctx.app_handle(), request)
         })
+        .manage(std::sync::Arc::new(mcp_server::Registry::default()))
+        .manage(Mutex::new(None::<mcp_server::AppEndpoint>))
         .manage(WindowMemory::default())
         .manage(WatcherHolder(Mutex::new(None)))
         .manage(DirWatcherHolder(Mutex::new(None)))
@@ -1430,6 +1449,7 @@ pub fn run() {
         .manage(IndexManager::default())
         .manage(html_preview::HtmlPreviewState::default())
         .invoke_handler(tauri::generate_handler![
+            mcp_set_roots,
             open_directory_dialog,
             save_file_dialog,
             read_dir,
@@ -1492,6 +1512,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {
+            if matches!(_event, tauri::RunEvent::Exit) {
+                if let Some(endpoint) = _app
+                    .state::<Mutex<Option<mcp_server::AppEndpoint>>>()
+                    .lock()
+                    .unwrap()
+                    .take()
+                {
+                    endpoint.stop();
+                }
+            }
             // macOS: when the OS asks the app to open a file (double-click on
             // an associated .md/.adoc), Tauri delivers it as RunEvent::Opened.
             // We forward the path to the frontend via an event.
@@ -2060,8 +2090,12 @@ mod tests {
     #[test]
     fn is_content_change_ignores_read_only_access() {
         use notify::event::{AccessKind, AccessMode, EventKind};
-        assert!(!is_content_change(&EventKind::Access(AccessKind::Open(AccessMode::Any))));
-        assert!(!is_content_change(&EventKind::Access(AccessKind::Close(AccessMode::Read))));
+        assert!(!is_content_change(&EventKind::Access(AccessKind::Open(
+            AccessMode::Any
+        ))));
+        assert!(!is_content_change(&EventKind::Access(AccessKind::Close(
+            AccessMode::Read
+        ))));
     }
 
     #[test]
