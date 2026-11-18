@@ -39,14 +39,14 @@
     "@iconify/json": "^2.2.558",
     "@solidjs/testing-library": "^0.8.10",
     "@types/markdown-it": "^14.2.0",
-    "@testing-library/jest-dom": "^6.9.1",
-    "@vitest/coverage-v8": "^4.1.12",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@vitest/coverage-v8": "^5.1.1",
     "fast-check": "^4.10.3",
-    "happy-dom": "^20.14.6",
+    "happy-dom": "^21.0.4",
     "typescript": "^5.9.3",
     "unplugin-icons": "^23.0.1",
     "vite": "^8.3.8",
     "vite-plugin-solid": "^2.11.16",
-    "vitest": "^4.1.12"
+    "vitest": "^5.1.1"
   }
 }
