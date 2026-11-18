@@ -3,7 +3,7 @@
 // loops or pathological YAML inputs that hang the parser.
 import { extractFrontmatter } from "../src/frontmatter.ts";
 
-export function fuzz(data: Buffer): void {
+export function fuzz(data) {
   const input = data.toString("utf8");
   const result = extractFrontmatter(input);
 
