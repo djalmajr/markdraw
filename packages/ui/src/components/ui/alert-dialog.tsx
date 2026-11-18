@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web"
-import { omit, type Component } from "solid-js"
+import { omit } from "solid-js"
 
 import {
   AlertDialog as AlertDialogPrimitive,
@@ -12,44 +12,51 @@ import {
 
 import { cn } from "@markdraw/core/utils.ts"
 
-/** ui-sdk's Alert Dialog takes the same `open` / `onOpenChange` pair as
- *  Kobalte's root, so the root and trigger are re-exported as they were. */
-const AlertDialog = AlertDialogPrimitive
-const AlertDialogTrigger = AlertDialogTriggerPrimitive
+/** Same `open` / `onOpenChange` pair Kobalte's root used. */
+const AlertDialog = (props: {
+  open?: boolean
+  defaultOpen?: boolean
+  onOpenChange?: (open: boolean) => void
+  children?: JSX.Element
+  [key: string]: any
+}) => <AlertDialogPrimitive {...props} />
 
-type AlertDialogOverlayProps = {
+const AlertDialogTrigger = (props: { [key: string]: any }) => (
+  <AlertDialogTriggerPrimitive {...props} />
+)
+
+/** Kobalte called this part `Overlay`; ui-sdk calls it `Backdrop`. */
+const AlertDialogOverlay = (props: {
   class?: string | undefined
-}
-
-/** Kobalte called this part `Overlay`; ui-sdk calls it `Backdrop`. Kept under
- *  the old name because it is the module's public surface. */
-const AlertDialogOverlay = (props: AlertDialogOverlayProps) => {
+  [key: string]: any
+}) => {
+  const others = omit(props, "class")
   return (
     <AlertDialogBackdropPrimitive
       class={cn(
-        "fixed inset-0 z-50 bg-foreground/[0.18] backdrop-blur-[2px] data-[open]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[open]:fade-in-0",
+        "fixed inset-0 z-50 bg-foreground/[0.18] backdrop-blur-[2px] transition-opacity duration-200 ease-out data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 motion-reduce:transition-none",
         props.class
       )}
+      {...others}
     />
   )
 }
 
-type AlertDialogContentProps = {
+/** Kobalte rendered the overlay inside the content's portal. The SDK has no
+ *  portal part, so keep the same DOM result by rendering the backdrop beside
+ *  the content. */
+const AlertDialogContent = (props: {
   class?: string | undefined
   children?: JSX.Element
-}
-
-/** Kobalte rendered the overlay from inside the content's portal; ui-sdk has
- *  no portal part (popups render in place, or into `container`), so the
- *  backdrop is rendered beside the content to keep the same DOM result. */
-const AlertDialogContent = (props: AlertDialogContentProps) => {
+  [key: string]: any
+}) => {
   const others = omit(props, "class", "children")
   return (
     <>
       <AlertDialogOverlay />
       <AlertDialogContentPrimitive
         class={cn(
-          "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-3 border bg-background p-4 shadow-none duration-200 data-[open]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[open]:fade-in-0 data-[closed]:zoom-out-95 data-[open]:zoom-in-95 data-[closed]:slide-out-to-left-1/2 data-[closed]:slide-out-to-top-[48%] data-[open]:slide-in-from-left-1/2 data-[open]:slide-in-from-top-[48%] sm:rounded-[2px]",
+          "fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 origin-center gap-3 border bg-background p-4 shadow-none outline-none transition-[opacity,scale] duration-200 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 motion-reduce:transition-opacity motion-reduce:data-[starting-style]:scale-100 motion-reduce:data-[ending-style]:scale-100 sm:rounded-[2px]",
           props.class
         )}
         {...others}
@@ -60,12 +67,11 @@ const AlertDialogContent = (props: AlertDialogContentProps) => {
   )
 }
 
-type AlertDialogTitleProps = {
+const AlertDialogTitle = (props: {
   class?: string | undefined
   children?: JSX.Element
-}
-
-const AlertDialogTitle: Component<AlertDialogTitleProps> = (props) => {
+  [key: string]: any
+}) => {
   const others = omit(props, "class", "children")
   return (
     <AlertDialogTitlePrimitive class={cn("text-sm font-semibold", props.class)} {...others}>
@@ -74,12 +80,11 @@ const AlertDialogTitle: Component<AlertDialogTitleProps> = (props) => {
   )
 }
 
-type AlertDialogDescriptionProps = {
+const AlertDialogDescription = (props: {
   class?: string | undefined
   children?: JSX.Element
-}
-
-const AlertDialogDescription: Component<AlertDialogDescriptionProps> = (props) => {
+  [key: string]: any
+}) => {
   const others = omit(props, "class", "children")
   return (
     <AlertDialogDescriptionPrimitive class={cn("text-xs text-muted-foreground", props.class)} {...others}>

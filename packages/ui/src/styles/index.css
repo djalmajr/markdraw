@@ -1808,7 +1808,7 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   color: hsl(var(--foreground));
   background: hsl(var(--bg-hover));
 }
-.rp-icon-btn[data-expanded] {
+.rp-icon-btn[data-open] {
   color: hsl(var(--foreground));
   background: hsl(var(--bg-selected));
 }
@@ -2092,11 +2092,11 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   font-weight: 400;
 }
 .ai-mp-trigger:hover,
-.ai-mp-trigger[data-expanded] {
+.ai-mp-trigger[data-open] {
   background: hsl(var(--bg-hover-deep));
 }
 .ai-mp-trigger-form:hover,
-.ai-mp-trigger-form[data-expanded] {
+.ai-mp-trigger-form[data-open] {
   border-color: hsl(var(--input));
   background: hsl(var(--background));
 }
@@ -3058,7 +3058,7 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   background: hsl(var(--bg-hover));
   color: hsl(var(--foreground));
 }
-.ai-context-btn[data-expanded] {
+.ai-context-btn[data-open] {
   background: hsl(var(--bg-selected));
   color: hsl(var(--foreground));
 }
