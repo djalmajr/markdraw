@@ -22,7 +22,7 @@ import IconExternalLink from "~icons/lucide/external-link";
 import IconSparkles from "~icons/lucide/sparkles";
 import IconFilePlus from "~icons/lucide/file-plus";
 import IconFolderPlus from "~icons/lucide/folder-plus";
-import { useDraggable, useDroppable } from "@dnd-kit/solid";
+import { useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import { CreateRow } from "./create-row.tsx";
 import { type ItemDndData, siblingDropParent, toItemDndId } from "./tree-dnd.ts";
 import {

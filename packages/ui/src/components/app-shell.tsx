@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createSignal, createTrackedEffect } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import { DragDropProvider, DragOverlay } from "@dnd-kit/solid";
+import { DragDropProvider, DragOverlay } from "../lib/dnd/index.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -408,8 +408,8 @@ export function AppShell(props: AppShellProps) {
    *   - Reading targetPane from a wrong place sends the tab to the
    *     wrong pane.
    */
-  // Use `any` because `@dnd-kit/solid`'s emitted shapes for the drag
-  // event aren't exported as a single nameable type — the runtime
+  // Use `any` because the drag operation shapes coming out of the DnD
+  // adapter aren't exported as a single nameable type — the runtime
   // shape we care about is `event.operation.{source,target}.id`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleTabDragEnd(event: any) {
