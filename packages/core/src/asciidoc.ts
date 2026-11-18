@@ -1,5 +1,11 @@
 // AsciiDoc conversion with include:: support via File System Access API
-import Asciidoctor from "@asciidoctor/core";
+//
+// Asciidoctor.js 4 dropped the `Asciidoctor()` processor factory and the Opal
+// runtime: the public API is a set of module-level named exports (`convert`,
+// `load`, `Extensions`, `Registry`, …) and `convert` is async. The extension
+// registry and its DSL (block/includeProcessor with `named`/`onContext`/
+// `process`) are unchanged.
+import { convert, Extensions } from "@asciidoctor/core";
 import { escapeHtml } from "./utils";
 import { extractFrontmatter, type Frontmatter } from "./frontmatter";
 
@@ -7,8 +13,6 @@ export interface ConvertResult {
   html: string;
   frontmatter: Frontmatter | null;
 }
-
-const asciidoctor = Asciidoctor();
 
 /**
  * Scan raw AsciiDoc text for include:: targets.
@@ -197,8 +201,9 @@ export async function convertAdoc(opts: ConvertOptions): Promise<ConvertResult> 
     fileDirMap.set(resolvedPath, dirOf(resolvedPath));
   }
 
-  // Create a custom extension registry
-  const registry = asciidoctor.Extensions.create();
+  // Create a custom extension registry for this conversion (the include
+  // processor closes over this document's include cache and directory stack).
+  const registry = Extensions.create();
 
   // Register mermaid block processor: [mermaid] blocks become <div class="mermaid">
   // 1. Convert <br/> variants to newlines (used for multi-line labels in sequence diagrams)
@@ -303,7 +308,7 @@ export async function convertAdoc(opts: ConvertOptions): Promise<ConvertResult> 
   // Pre-process inter-document xrefs into proper HTML links
   const processedContent = preprocessXrefs(body);
 
-  const html = asciidoctor.convert(processedContent, {
+  const html = (await convert(processedContent, {
     extension_registry: registry,
     standalone: false,
     safe: "unsafe",
@@ -317,7 +322,7 @@ export async function convertAdoc(opts: ConvertOptions): Promise<ConvertResult> 
       toc: "left",
       toclevels: 4,
     },
-  }) as string;
+  })) as string;
 
   return { html, frontmatter };
 }

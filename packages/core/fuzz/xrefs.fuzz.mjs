@@ -4,7 +4,7 @@
 // asserting it never throws and never escalates into a hang.
 import { convertAdoc } from "../src/asciidoc.ts";
 
-export async function fuzz(data: Buffer): Promise<void> {
+export async function fuzz(data) {
   const input = data.toString("utf8");
   // Cap input size — fuzzers love to throw multi-MB blobs at us, but we want
   // the harness to test parser logic, not buffer-allocation paths.
