@@ -90,6 +90,46 @@ describe("ScrollArea", () => {
     expect(typeof vp!.scrollTop).toBe("number");
   });
 
+  it("pins each axis in the viewport inline style, ahead of the SDK shorthand", () => {
+    for (const [orientation, x, y] of [
+      ["vertical", "hidden", "auto"],
+      ["horizontal", "auto", "hidden"],
+      ["both", "auto", "auto"],
+    ] as const) {
+      const { container } = render(() => (
+        <ScrollArea orientation={orientation}>
+          <p>content</p>
+        </ScrollArea>
+      ));
+      flush();
+      const viewport = container.querySelector(
+        '[data-slot="scroll-area-viewport"]'
+      ) as HTMLElement;
+      expect(viewport.style.getPropertyValue("overflow-x")).toBe(x);
+      expect(viewport.style.getPropertyValue("overflow-y")).toBe(y);
+      expect(viewport.style.getPropertyPriority("overflow-x")).toBe("important");
+      expect(viewport.style.getPropertyPriority("overflow-y")).toBe("important");
+    }
+  });
+
+  it("does not add flex-grow to the vertical thumb", () => {
+    const { container } = render(() => (
+      <ScrollArea>
+        <p>content</p>
+      </ScrollArea>
+    ));
+    flush();
+    const thumb = container.querySelector(
+      '[data-orientation="vertical"] [data-slot="scroll-area-thumb"]'
+    ) as HTMLElement;
+    expect(thumb).toBeTruthy();
+    // happy-dom has no layout: the class proves the axis is not stretched; the
+    // rendered height in the real app is checked by the orchestrator.
+    expect(thumb.classList.contains("flex-1")).toBe(false);
+    expect(thumb.classList.contains("flex-none")).toBe(true);
+    expect(thumb.classList.contains("w-full")).toBe(true);
+  });
+
   it("uses SDK parts and keeps type='always' overflow-only (no phantom bar)", () => {
     const { container } = render(() => (
       <ScrollArea type="always">

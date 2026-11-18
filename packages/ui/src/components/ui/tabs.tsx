@@ -1,5 +1,5 @@
 import type { ComponentProps, JSX } from "@solidjs/web"
-import { omit } from "solid-js"
+import { createContext, omit, useContext } from "solid-js"
 
 import {
   Tabs as TabsPrimitive,
@@ -11,24 +11,34 @@ import {
 
 import { cn } from "@markdraw/core/utils.ts"
 
-/** Kobalte's root used `onChange(value)`; ui-sdk uses `onValueChange(value, details)`.
- *  Keep the old callback (and `value: string`) so `toolbar.tsx` doesn't change. */
+/** The SDK has no root-level `disabled`, so the wrapper carries it to each tab. */
+const TabsDisabledContext = createContext<() => boolean>(() => false)
+
+/** Kobalte's root used `onChange(value)`, `activationMode` and `disabled`;
+ *  ui-sdk uses `onValueChange(value, details)`, `activation` and per-tab `disabled`.
+ *  Keep the old callbacks/props (and `value: string`) so callers don't change. */
 type TabsProps = Omit<ComponentProps<typeof TabsPrimitive>, "value" | "onValueChange"> & {
   value?: string
   onChange?: (value: string) => void
+  activationMode?: "automatic" | "manual"
+  disabled?: boolean
   children?: JSX.Element
   class?: string
 }
 
 const Tabs = (props: TabsProps) => {
-  const others = omit(props, "onChange")
+  const others = omit(props, "onChange", "activationMode", "disabled")
+  const rootDisabled = () => props.disabled === true
   return (
-    <TabsPrimitive
-      {...others}
-      onValueChange={(value) => {
-        if (value !== null) props.onChange?.(value)
-      }}
-    />
+    <TabsDisabledContext value={rootDisabled}>
+      <TabsPrimitive
+        {...others}
+        activation={props.activationMode ?? props.activation}
+        onValueChange={(value) => {
+          if (!rootDisabled() && value !== null) props.onChange?.(value)
+        }}
+      />
+    </TabsDisabledContext>
   )
 }
 
@@ -55,7 +65,8 @@ type TabsTriggerProps = ComponentProps<typeof TabsTriggerPrimitive> & {
 }
 
 const TabsTrigger = (props: TabsTriggerProps) => {
-  const others = omit(props, "class", "children")
+  const others = omit(props, "class", "children", "disabled")
+  const rootDisabled = useContext(TabsDisabledContext)
   return (
     <TabsTriggerPrimitive
       class={cn(
@@ -67,6 +78,7 @@ const TabsTrigger = (props: TabsTriggerProps) => {
         props.class
       )}
       {...others}
+      disabled={props.disabled === true || rootDisabled()}
     >
       {props.children}
     </TabsTriggerPrimitive>
@@ -74,12 +86,14 @@ const TabsTrigger = (props: TabsTriggerProps) => {
 }
 
 type TabsContentProps = ComponentProps<typeof TabsContentPrimitive> & {
+  /** Kobalte's name for the SDK's `keepMounted`. */
+  forceMount?: boolean
   class?: string
   children?: JSX.Element
 }
 
 const TabsContent = (props: TabsContentProps) => {
-  const others = omit(props, "class", "children")
+  const others = omit(props, "class", "children", "forceMount")
   return (
     <TabsContentPrimitive
       class={cn(
@@ -87,6 +101,7 @@ const TabsContent = (props: TabsContentProps) => {
         props.class
       )}
       {...others}
+      keepMounted={props.forceMount || props.keepMounted}
     >
       {props.children}
     </TabsContentPrimitive>

@@ -62,6 +62,64 @@ describe("Tabs — public API used by toolbar.tsx", () => {
     expect(getByRole("tab", { name: "Preview" }).getAttribute("aria-selected")).toBe("false");
   });
 
+  it("keeps Kobalte's activationMode='manual': arrows move focus without selecting", () => {
+    const seen: string[] = [];
+    const { getByRole } = render(() => (
+      <Tabs activationMode="manual" onChange={(v) => seen.push(v)}>
+        <TabsList aria-label="Editor mode">
+          <TabsTrigger value="a">A</TabsTrigger>
+          <TabsTrigger value="b">B</TabsTrigger>
+        </TabsList>
+      </Tabs>
+    ));
+    const a = getByRole("tab", { name: "A" });
+    a.focus();
+    fireEvent.keyDown(a, { key: "ArrowRight" });
+    flush();
+    expect(document.activeElement).toBe(getByRole("tab", { name: "B" }));
+    expect(a.getAttribute("aria-selected")).toBe("true");
+    expect(seen).toEqual([]);
+  });
+
+  it("keeps a disabled root inert: no callback and disabled triggers", () => {
+    const seen: string[] = [];
+    const { getByRole } = render(() => (
+      <Tabs disabled onChange={(v) => seen.push(v)}>
+        <TabsList aria-label="Editor mode">
+          <TabsTrigger value="a">A</TabsTrigger>
+          <TabsTrigger value="b">B</TabsTrigger>
+        </TabsList>
+      </Tabs>
+    ));
+    const b = getByRole("tab", { name: "B" });
+    expect(b.getAttribute("aria-disabled")).toBe("true");
+    expect(b.hasAttribute("data-disabled")).toBe(true);
+    fireEvent.click(b);
+    flush();
+    expect(seen).toEqual([]);
+    expect(b.getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("keeps Kobalte's forceMount: inactive panels stay mounted", () => {
+    const { getByText, container } = render(() => (
+      <Tabs defaultValue="a">
+        <TabsList aria-label="Editor mode">
+          <TabsTrigger value="a">A</TabsTrigger>
+          <TabsTrigger value="b">B</TabsTrigger>
+        </TabsList>
+        <TabsContent value="a">panel A</TabsContent>
+        <TabsContent value="b" forceMount>
+          panel B
+        </TabsContent>
+      </Tabs>
+    ));
+    flush();
+    expect(getByText("panel B")).toBeTruthy();
+    const panels = container.querySelectorAll('[data-slot="tabs-panel"]');
+    expect(panels.length).toBe(2);
+    expect(getByText("panel B").hasAttribute("data-selected")).toBe(false);
+  });
+
   it("honours a controlled value and exposes the SDK indicator/panel parts", () => {
     const [value, setValue] = createSignal("edit");
     const { getByRole, container } = render(() => (

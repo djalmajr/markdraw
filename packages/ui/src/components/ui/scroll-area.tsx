@@ -1,4 +1,4 @@
-import { omit, Show } from "solid-js";
+import { createEffect, omit, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 
 import {
@@ -97,6 +97,29 @@ const ScrollArea = (props: ScrollAreaProps) => {
   const wantsV = () => props.orientation === "vertical" || props.orientation === "both" || !props.orientation;
   const wantsH = () => props.orientation === "horizontal" || props.orientation === "both";
 
+  // The SDK viewport sets an inline `overflow: auto` shorthand, which beats
+  // utility classes. Pin the axis policy as important inline longhands so a
+  // vertical-only area never gains horizontal scroll (and vice versa).
+  const axisPolicy = () => ({
+    x: wantsV() && !wantsH() ? "hidden" : "auto",
+    y: wantsH() && !wantsV() ? "hidden" : "auto",
+  });
+  let viewportEl: HTMLDivElement | undefined;
+  const applyAxisPolicy = (el: HTMLDivElement) => {
+    const { x, y } = axisPolicy();
+    el.style.setProperty("overflow-x", x, "important");
+    el.style.setProperty("overflow-y", y, "important");
+  };
+  createEffect(
+    axisPolicy,
+    (axes) => {
+      if (viewportEl) {
+        viewportEl.style.setProperty("overflow-x", axes.x, "important");
+        viewportEl.style.setProperty("overflow-y", axes.y, "important");
+      }
+    }
+  );
+
   return (
     <ScrollAreaPrimitive
       // The SDK's "always" shows a bar even without overflow; Markdraw has
@@ -109,7 +132,11 @@ const ScrollArea = (props: ScrollAreaProps) => {
       {...others}
     >
       <ScrollAreaViewport
-        ref={props.viewportRef}
+        ref={(el: HTMLDivElement) => {
+          viewportEl = el;
+          props.viewportRef?.(el);
+          applyAxisPolicy(el);
+        }}
         class={cn(
           "h-full w-full border-0 p-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
           wantsH() && !wantsV() ? "overflow-x-auto overflow-y-hidden" : "",
@@ -136,7 +163,7 @@ const ScrollArea = (props: ScrollAreaProps) => {
             props.orientation === "both" ? "bottom-2.5" : "h-full",
           )}
         >
-          <ScrollAreaThumb class="relative flex-1 rounded-[2px] bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/50 data-[dragging]:bg-muted-foreground/50" />
+          <ScrollAreaThumb class="relative w-full flex-none rounded-[2px] bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/50 data-[dragging]:bg-muted-foreground/50" />
         </ScrollAreaScrollbar>
       </Show>
 
