@@ -1,4 +1,4 @@
-import type { JSX } from "@solidjs/web"
+import { type JSX, type ValidComponent, Dynamic } from "@solidjs/web"
 import { omit, type Component } from "solid-js"
 
 import {
@@ -9,21 +9,41 @@ import {
 
 import { cn } from "@markdraw/core/utils.ts"
 
-/** ui-sdk's Trigger renders a `button`, like Kobalte's did. */
-const TooltipTrigger = TooltipTriggerPrimitive
-
 type TooltipProps = {
+  /** Kobalte's name for the SDK's `delay`. */
+  openDelay?: number
+  closeDelay?: number
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
   children?: JSX.Element
+  [key: string]: any
 }
 
-/** Kobalte's root took `gutter`; ui-sdk names the same gap `sideOffset` and
- *  puts it on the content part, so the default lives in `TooltipContent`. */
-const Tooltip: Component<TooltipProps> = (props) => {
-  return <TooltipPrimitive {...props} />
+/** ui-sdk's Trigger renders a `button`, like Kobalte's did. */
+const TooltipTrigger = (props: {
+  as?: ValidComponent
+  render?: (props: Record<string, any>, state: any) => JSX.Element
+  [key: string]: any
+}) => {
+  const { as, render, ...others } = props
+  const asRender =
+    render ??
+    (as
+      ? (partProps: Record<string, any>) => (
+          <Dynamic component={as} {...partProps} />
+        )
+      : undefined)
+  return <TooltipTriggerPrimitive render={asRender} {...others} />
 }
+
+const Tooltip: Component<TooltipProps> = (props) => (
+  <TooltipPrimitive
+    delay={props.delay ?? props.openDelay}
+    closeDelay={props.closeDelay}
+    {...omit(props, "delay", "openDelay", "closeDelay")}
+  />
+)
 
 type TooltipContentProps = {
   class?: string | undefined
@@ -31,17 +51,17 @@ type TooltipContentProps = {
   align?: "start" | "center" | "end"
   sideOffset?: number
   children?: JSX.Element
+  [key: string]: any
 }
 
 const TooltipContent = (props: TooltipContentProps) => {
   const others = omit(props, "class", "children", "sideOffset")
   return (
     <TooltipContentPrimitive
+      // Kobalte's `gutter` became the SDK's `sideOffset` on the content part.
       sideOffset={props.sideOffset ?? 4}
-      // Kobalte exposed `--kb-popover-content-transform-origin`; ui-sdk exposes
-      // the same point as `--transform-origin` on the content element.
       class={cn(
-        "z-50 origin-[var(--transform-origin)] overflow-hidden rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-none animate-in fade-in-0 zoom-in-95",
+        "z-50 origin-[var(--transform-origin)] overflow-hidden rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-none outline-none transition-[opacity,scale] duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none motion-reduce:transition-opacity motion-reduce:data-[starting-style]:scale-100 motion-reduce:data-[ending-style]:scale-100",
         props.class
       )}
       {...others}
