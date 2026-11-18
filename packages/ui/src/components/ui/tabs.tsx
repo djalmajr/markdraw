@@ -1,24 +1,47 @@
-import type { ValidComponent } from "@solidjs/web";
-import { omit } from "solid-js";
-import type { PolymorphicProps } from "@kobalte/core/polymorphic"
-import * as TabsPrimitive from "@kobalte/core/tabs"
+import type { ComponentProps, JSX } from "@solidjs/web"
+import { omit } from "solid-js"
+
+import {
+  Tabs as TabsPrimitive,
+  TabsIndicator as TabsIndicatorPrimitive,
+  TabsList as TabsListPrimitive,
+  TabsPanel as TabsContentPrimitive,
+  TabsTab as TabsTriggerPrimitive,
+} from "@ui-sdk/solid/tabs"
 
 import { cn } from "@markdraw/core/utils.ts"
 
-const Tabs = TabsPrimitive.Root
-
-type TabsListProps<T extends ValidComponent = "div"> = TabsPrimitive.TabsListProps<T> & {
-  class?: string | undefined
+/** Kobalte's root used `onChange(value)`; ui-sdk uses `onValueChange(value, details)`.
+ *  Keep the old callback (and `value: string`) so `toolbar.tsx` doesn't change. */
+type TabsProps = Omit<ComponentProps<typeof TabsPrimitive>, "value" | "onValueChange"> & {
+  value?: string
+  onChange?: (value: string) => void
+  children?: JSX.Element
+  class?: string
 }
 
-const TabsList = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, TabsListProps<T>>
-) => {
+const Tabs = (props: TabsProps) => {
+  const others = omit(props, "onChange")
+  return (
+    <TabsPrimitive
+      {...others}
+      onValueChange={(value) => {
+        if (value !== null) props.onChange?.(value)
+      }}
+    />
+  )
+}
+
+type TabsListProps = ComponentProps<typeof TabsListPrimitive> & {
+  class?: string
+}
+
+const TabsList = (props: TabsListProps) => {
   const others = omit(props, "class")
   return (
-    <TabsPrimitive.List
+    <TabsListPrimitive
       class={cn(
-        "inline-flex h-7 items-center justify-center rounded-md bg-[hsl(var(--border))] p-0.5 text-muted-foreground",
+        "relative inline-flex h-7 items-center justify-center rounded-md bg-[hsl(var(--border))] p-0.5 text-muted-foreground",
         props.class
       )}
       {...others}
@@ -26,60 +49,62 @@ const TabsList = <T extends ValidComponent = "div">(
   )
 }
 
-type TabsTriggerProps<T extends ValidComponent = "button"> = TabsPrimitive.TabsTriggerProps<T> & {
-  class?: string | undefined
+type TabsTriggerProps = ComponentProps<typeof TabsTriggerPrimitive> & {
+  class?: string
+  children?: JSX.Element
 }
 
-const TabsTrigger = <T extends ValidComponent = "button">(
-  props: PolymorphicProps<T, TabsTriggerProps<T>>
-) => {
-  const others = omit(props, "class")
+const TabsTrigger = (props: TabsTriggerProps) => {
+  const others = omit(props, "class", "children")
   return (
-    <TabsPrimitive.Trigger
+    <TabsTriggerPrimitive
       class={cn(
         // Note: we intentionally drop `disabled:pointer-events-none` so the
-        // browser still shows the `not-allowed` cursor on hover. Native button
-        // `disabled` already blocks the click + Kobalte's data-[disabled]
+        // browser still shows the `not-allowed` cursor on hover. A native
+        // button `disabled` blocks the click and ui-sdk's `data-disabled`
         // prevents the value change, so disabled triggers stay inert.
         "inline-flex h-6 items-center justify-center whitespace-nowrap rounded-sm px-2 py-1 text-xs font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[selected]:bg-background data-[selected]:text-foreground data-[selected]:shadow-none",
         props.class
       )}
       {...others}
-    />
+    >
+      {props.children}
+    </TabsTriggerPrimitive>
   )
 }
 
-type TabsContentProps<T extends ValidComponent = "div"> = TabsPrimitive.TabsContentProps<T> & {
-  class?: string | undefined
+type TabsContentProps = ComponentProps<typeof TabsContentPrimitive> & {
+  class?: string
+  children?: JSX.Element
 }
 
-const TabsContent = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, TabsContentProps<T>>
-) => {
-  const others = omit(props, "class")
+const TabsContent = (props: TabsContentProps) => {
+  const others = omit(props, "class", "children")
   return (
-    <TabsPrimitive.Content
+    <TabsContentPrimitive
       class={cn(
-        "mt-1.5 ring-offset-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1",
+        "mt-1.5 ring-offset-background transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 motion-reduce:transition-none",
         props.class
       )}
       {...others}
-    />
+    >
+      {props.children}
+    </TabsContentPrimitive>
   )
 }
 
-type TabsIndicatorProps<T extends ValidComponent = "div"> = TabsPrimitive.TabsIndicatorProps<T> & {
-  class?: string | undefined
+type TabsIndicatorProps = ComponentProps<typeof TabsIndicatorPrimitive> & {
+  class?: string
 }
 
-const TabsIndicator = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, TabsIndicatorProps<T>>
-) => {
+/** ui-sdk measures the selected tab into `--active-tab-*` instead of moving a
+ *  Kobalte indicator itself, so the underline reads those variables. */
+const TabsIndicator = (props: TabsIndicatorProps) => {
   const others = omit(props, "class")
   return (
-    <TabsPrimitive.Indicator
+    <TabsIndicatorPrimitive
       class={cn(
-        "duration-250ms absolute transition-all data-[orientation=horizontal]:-bottom-px data-[orientation=vertical]:-right-px data-[orientation=horizontal]:h-[2px] data-[orientation=vertical]:w-[2px]",
+        "absolute transition-all duration-150 data-[orientation=horizontal]:-bottom-px data-[orientation=vertical]:-right-px data-[orientation=horizontal]:left-[var(--active-tab-left)] data-[orientation=horizontal]:h-[2px] data-[orientation=horizontal]:w-[var(--active-tab-width)] data-[orientation=vertical]:top-[var(--active-tab-top)] data-[orientation=vertical]:h-[var(--active-tab-height)] data-[orientation=vertical]:w-[2px] data-[activation-direction=none]:transition-none motion-reduce:transition-none",
         props.class
       )}
       {...others}

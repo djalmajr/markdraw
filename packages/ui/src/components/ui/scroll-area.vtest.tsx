@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@solidjs/testing-library";
+import { flush } from "solid-js";
 import { ScrollArea, thumbGeometry } from "./scroll-area.tsx";
 
 describe("thumbGeometry", () => {
@@ -87,5 +88,29 @@ describe("ScrollArea", () => {
     expect(vp).toBeInstanceOf(HTMLElement);
     // The host can drive native scroll (e.g. scroll-to-bottom) through it.
     expect(typeof vp!.scrollTop).toBe("number");
+  });
+
+  it("uses SDK parts and keeps type='always' overflow-only (no phantom bar)", () => {
+    const { container } = render(() => (
+      <ScrollArea type="always">
+        <p>fits</p>
+      </ScrollArea>
+    ));
+    flush();
+    const root = container.querySelector('[data-slot="scroll-area"]');
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]');
+    const content = container.querySelector('[data-slot="scroll-area-content"]');
+    const bar = container.querySelector('[data-slot="scroll-area-scrollbar"]');
+    const thumb = container.querySelector('[data-slot="scroll-area-thumb"]');
+    expect(root).toBeTruthy();
+    expect(viewport).toBeTruthy();
+    expect(content).toBeTruthy();
+    expect(bar).toBeTruthy();
+    expect(thumb).toBeTruthy();
+    // Mutation: passing the SDK's "always" straight through keeps the scrollbar
+    // displayed with no thumb when nothing overflows. Markdraw's "always" is
+    // "auto": the SDK sets `display: none` on an overflowing-axis bar that fits.
+    expect((bar as HTMLElement).style.display).toBe("none");
+    expect(bar!.hasAttribute("data-visible")).toBe(false);
   });
 });

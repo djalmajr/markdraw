@@ -1,17 +1,23 @@
-import { createSignal, merge, onCleanup, onSettled, Show, omit } from "solid-js";
+import { omit, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
+
+import {
+  ScrollArea as ScrollAreaPrimitive,
+  ScrollAreaContent,
+  ScrollAreaScrollbar,
+  ScrollAreaThumb,
+  ScrollAreaViewport,
+} from "@ui-sdk/solid/scroll-area";
 
 import { cn } from "@markdraw/core/utils.ts";
 
 /**
- * ScrollArea — a cross-platform overlay scrollbar (shadcn/Radix-style), built
- * from scratch because there's no maintained SolidJS scroll-area primitive
- * (Kobalte/Corvu don't ship one).
+ * ScrollArea — a cross-platform overlay scrollbar (shadcn/Radix-style).
  *
- * The native scrollbar is hidden on the scrolling viewport; a custom thumb is
- * sized + positioned from the scroll metrics and overlaid, so scrollbars look
- * identical on macOS / Windows / Linux (and never reserve layout width). Wheel,
- * touch, and keyboard scrolling stay native — only the visual bar is ours.
+ * The native scrollbar is hidden on the scrolling viewport; the SDK's custom
+ * thumb is sized + positioned from its own scroll metrics and overlaid, so
+ * scrollbars look identical on macOS / Windows / Linux (and never reserve
+ * layout width). Wheel, touch, and keyboard scrolling stay native.
  *
  * Common use mirrors shadcn: size the root, content goes inside.
  *   <ScrollArea class="h-72"> <div class="p-4">…</div> </ScrollArea>
@@ -42,19 +48,13 @@ export type ScrollAreaProps = Omit<JSX.HTMLAttributes<HTMLDivElement>, "ref"> & 
 };
 
 const MIN_THUMB = 20;
-/** The bar's inner padding (`p-0.5` = 2px each side) — the thumb travels inside
- *  it, so the geometry subtracts it from the track. */
-const PAD = 2;
-/** The cross-axis bar thickness (`w-2.5`/`h-2.5` = 10px) — subtracted from the
- *  other axis's track in `orientation="both"` so the bars don't overlap. */
-const BAR = 10;
 
 type Thumb = { size: number; offset: number; overflow: boolean };
 const NO_THUMB: Thumb = { size: 0, offset: 0, overflow: false };
 
 /**
- * Pure thumb geometry for one axis. Exported for unit tests (happy-dom reports
- * 0 for clientHeight/scrollHeight, so the math can't be exercised by rendering).
+ * Pure thumb geometry for one axis. Kept exported for the existing contract
+ * (the SDK now measures the thumb itself, so the component no longer calls it).
  *
  * `viewport`/`content` are the real scroll metrics (drive overflow + the
  * visible/total ratio); `barTrack` is the thumb's pixel travel length (the bar
@@ -81,195 +81,77 @@ export function thumbGeometry(
 }
 
 const ScrollArea = (props: ScrollAreaProps) => {
-  const merged = merge(
-    { type: "hover" as Visibility, orientation: "vertical" as Orientation, scrollHideDelay: 600 },
+  const others = omit(
     props,
+    "class",
+    "viewportClass",
+    "contentClass",
+    "type",
+    "orientation",
+    "scrollHideDelay",
+    "viewportRef",
+    "children",
+    "style",
   );
-  const others = omit(merged, "class", "viewportClass", "contentClass", "type", "orientation", "scrollHideDelay", "viewportRef", "children");
 
-  let viewport!: HTMLDivElement;
-  let content!: HTMLDivElement;
-
-  const [v, setV] = createSignal<Thumb>(NO_THUMB);
-  const [h, setH] = createSignal<Thumb>(NO_THUMB);
-  const [hovering, setHovering] = createSignal(false);
-  const [scrolling, setScrolling] = createSignal(false);
-
-  const wantsV = () => merged.orientation === "vertical" || merged.orientation === "both";
-  const wantsH = () => merged.orientation === "horizontal" || merged.orientation === "both";
-
-  // Show the bar when its axis overflows AND the chosen visibility says so.
-  const reveal = () => {
-    if (merged.type === "always" || merged.type === "auto") return true;
-    if (merged.type === "scroll") return scrolling();
-    return hovering() || scrolling(); // "hover"
-  };
-
-  // In "both" mode each bar is inset by the other's thickness, so its track is
-  // shortened to match (keeps the thumb travel honest + frees the corner).
-  const barTrack = (client: number) => client - 2 * PAD - (merged.orientation === "both" ? BAR : 0);
-
-  function recompute() {
-    const el = viewport;
-    if (!el) return;
-    if (wantsV()) {
-      setV(thumbGeometry(el.clientHeight, el.scrollHeight, el.scrollTop, MIN_THUMB, barTrack(el.clientHeight)));
-    }
-    if (wantsH()) {
-      setH(thumbGeometry(el.clientWidth, el.scrollWidth, el.scrollLeft, MIN_THUMB, barTrack(el.clientWidth)));
-    }
-  }
-
-  let hideTimer: ReturnType<typeof setTimeout> | undefined;
-  function flagScrolling() {
-    setScrolling(true);
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => setScrolling(false), merged.scrollHideDelay);
-  }
-
-  function onScroll() {
-    recompute();
-    if (merged.type === "hover" || merged.type === "scroll") flagScrolling();
-  }
-
-  onSettled(() => {
-    merged.viewportRef?.(viewport);
-    recompute();
-    // Recompute when the viewport OR its content changes size (dynamic lists,
-    // images loading, window resize all flow through here).
-    const ro = new ResizeObserver(() => recompute());
-    ro.observe(viewport);
-    ro.observe(content);
-    onCleanup(() => ro.disconnect());
-  });
-  onCleanup(() => clearTimeout(hideTimer));
-
-  // Drag the thumb: translate pointer delta into scrollTop/scrollLeft. Live
-  // metrics are re-read each move so the mapping stays correct if the content or
-  // viewport resizes mid-drag. Teardown runs on pointerup AND pointercancel
-  // (touch interruption, lost capture) so listeners/closures never leak.
-  function dragThumb(axis: "v" | "h", e: PointerEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const el = viewport;
-    const startPos = axis === "v" ? e.clientY : e.clientX;
-    const startScroll = axis === "v" ? el.scrollTop : el.scrollLeft;
-    const target = e.currentTarget as HTMLElement;
-    try {
-      target.setPointerCapture(e.pointerId);
-    } catch {
-      /* pointer already gone */
-    }
-
-    const onMove = (ev: PointerEvent) => {
-      const thumb = axis === "v" ? v() : h();
-      const client = axis === "v" ? el.clientHeight : el.clientWidth;
-      const scrollMax = axis === "v" ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth;
-      const travel = barTrack(client) - thumb.size;
-      const delta = (axis === "v" ? ev.clientY : ev.clientX) - startPos;
-      const next = travel > 0 ? startScroll + (delta / travel) * scrollMax : startScroll;
-      if (axis === "v") el.scrollTop = next;
-      else el.scrollLeft = next;
-    };
-    const teardown = (ev: PointerEvent) => {
-      if (target.hasPointerCapture(ev.pointerId)) target.releasePointerCapture(ev.pointerId);
-      target.removeEventListener("pointermove", onMove);
-      target.removeEventListener("pointerup", teardown);
-      target.removeEventListener("pointercancel", teardown);
-    };
-    target.addEventListener("pointermove", onMove);
-    target.addEventListener("pointerup", teardown);
-    target.addEventListener("pointercancel", teardown);
-  }
-
-  // Click on the track (not the thumb) pages toward the click. The boundary
-  // origin includes the bar's padding so it lines up with the thumb's top/left.
-  function pageOnTrack(axis: "v" | "h", e: MouseEvent) {
-    const el = viewport;
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    if (axis === "v") {
-      const before = e.clientY < rect.top + PAD + v().offset;
-      el.scrollTop += (before ? -1 : 1) * el.clientHeight * 0.9;
-    } else {
-      const before = e.clientX < rect.left + PAD + h().offset;
-      el.scrollLeft += (before ? -1 : 1) * el.clientWidth * 0.9;
-    }
-  }
-
-  const barShown = (t: Thumb) => t.overflow && reveal();
+  const wantsV = () => props.orientation === "vertical" || props.orientation === "both" || !props.orientation;
+  const wantsH = () => props.orientation === "horizontal" || props.orientation === "both";
 
   return (
-    <div
-      class={cn("relative overflow-hidden", merged.class)}
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
+    <ScrollAreaPrimitive
+      // The SDK's "always" shows a bar even without overflow; Markdraw has
+      // always meant "keep the bar visible when there is something to scroll".
+      // "auto" is the SDK's overflow-only mode.
+      type={props.type === "always" ? "auto" : props.type}
+      scrollHideDelay={props.scrollHideDelay ?? 600}
+      class={cn("relative overflow-hidden border-0", props.class)}
+      style={props.style as string | JSX.CSSProperties | undefined}
       {...others}
     >
-      <div
-        ref={viewport}
+      <ScrollAreaViewport
+        ref={props.viewportRef}
         class={cn(
-          "h-full w-full [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+          "h-full w-full border-0 p-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
           wantsH() && !wantsV() ? "overflow-x-auto overflow-y-hidden" : "",
           wantsV() && !wantsH() ? "overflow-y-auto overflow-x-hidden" : "",
-          merged.orientation === "both" ? "overflow-auto" : "",
-          merged.viewportClass,
+          props.orientation === "both" ? "overflow-auto" : "",
+          props.viewportClass,
         )}
-        onScroll={onScroll}
       >
-        {/* Measured wrapper (ResizeObserver target). `min-w-full`/`min-h-full`
-            keep it ≥ viewport so short content still fills; `w-max` lets it grow
-            past the viewport for horizontal scrolling without shrinking content
-            in the vertical-only case. */}
-        <div
-          ref={content}
-          class={cn("min-h-full min-w-full", wantsH() && "w-max", merged.contentClass)}
+        {/* The SDK's content wrapper; `min-w-full`/`min-h-full` keep it ≥
+            viewport so short content still fills, `w-max` lets it grow past the
+            viewport for horizontal scrolling. */}
+        <ScrollAreaContent
+          class={cn("min-h-full min-w-full p-0", wantsH() && "w-max", props.contentClass)}
         >
-          {merged.children}
-        </div>
-      </div>
+          {props.children}
+        </ScrollAreaContent>
+      </ScrollAreaViewport>
 
-      {/* Vertical bar — inset from the bottom in "both" mode so it clears the
-          horizontal bar's corner. */}
       <Show when={wantsV()}>
-        <div
+        <ScrollAreaScrollbar
+          orientation="vertical"
           class={cn(
-            "absolute right-0 top-0 z-10 flex w-2.5 touch-none select-none p-0.5 transition-opacity duration-150",
-            merged.orientation === "both" ? "bottom-2.5" : "h-full",
-            barShown(v()) ? "opacity-100" : "pointer-events-none opacity-0",
+            "visible right-0 top-0 z-10 w-2.5 touch-none select-none p-0.5 opacity-0 pointer-events-none transition-opacity duration-150 data-[visible]:pointer-events-auto data-[visible]:opacity-100",
+            props.orientation === "both" ? "bottom-2.5" : "h-full",
           )}
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) pageOnTrack("v", e);
-          }}
         >
-          <div
-            class="relative flex-1 rounded-[2px] bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/50"
-            style={{ height: `${v().size}px`, transform: `translateY(${v().offset}px)` }}
-            onPointerDown={(e) => dragThumb("v", e)}
-          />
-        </div>
+          <ScrollAreaThumb class="relative flex-1 rounded-[2px] bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/50 data-[dragging]:bg-muted-foreground/50" />
+        </ScrollAreaScrollbar>
       </Show>
 
-      {/* Horizontal bar — inset from the right in "both" mode to clear the
-          vertical bar's corner. */}
       <Show when={wantsH()}>
-        <div
+        <ScrollAreaScrollbar
+          orientation="horizontal"
           class={cn(
-            "absolute bottom-0 left-0 z-10 flex h-2.5 touch-none select-none p-0.5 transition-opacity duration-150",
-            merged.orientation === "both" ? "right-2.5" : "w-full",
-            barShown(h()) ? "opacity-100" : "pointer-events-none opacity-0",
+            "visible bottom-0 left-0 z-10 h-2.5 w-full touch-none select-none p-0.5 opacity-0 pointer-events-none transition-opacity duration-150 data-[visible]:pointer-events-auto data-[visible]:opacity-100",
+            props.orientation === "both" ? "right-2.5" : "",
           )}
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) pageOnTrack("h", e);
-          }}
         >
-          <div
-            class="relative h-full rounded-[2px] bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/50"
-            style={{ width: `${h().size}px`, transform: `translateX(${h().offset}px)` }}
-            onPointerDown={(e) => dragThumb("h", e)}
-          />
-        </div>
+          <ScrollAreaThumb class="relative h-full rounded-[2px] bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/50 data-[dragging]:bg-muted-foreground/50" />
+        </ScrollAreaScrollbar>
       </Show>
-    </div>
+    </ScrollAreaPrimitive>
   );
 };
 
