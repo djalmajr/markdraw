@@ -1,6 +1,31 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
+// ECMAScript WhiteSpace + LineTerminator: FEFF is included, 0085 is not.
+const JS_SPACE: &str = r"[\t\n\x0B\x0C\r \u{00A0}\u{1680}\u{2000}-\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}]";
+fn expression(pattern: &str) -> Regex {
+    Regex::new(&pattern.replace(r"\s", JS_SPACE)).expect("static secret expression")
+}
+fn js_space(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\x0B' | '\x0C' | '\r' | ' ' | '\u{00A0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200A}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202F}'
+                | '\u{205F}'
+                | '\u{3000}'
+                | '\u{FEFF}'
+    )
+}
+
+// Metadata is a complete short string, so an unterminated PEM is hidden
+// through its end using the same conservative state machine as file reads.
+pub(super) fn short_text(input: &str) -> String {
+    Stream::default().line(input)
+}
+
 // Keep these eight patterns in the same order as packages/ai/src/secret-scrub.ts.
 // JS's word boundaries are ASCII, even when the surrounding text is Unicode.
 static PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -11,9 +36,9 @@ static PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"(?-u:\b)AIza[A-Za-z0-9_-]{30,}(?-u:\b)",
         r"(?-u:\b)AKIA[0-9A-Z]{16}(?-u:\b)",
         r"(?-u:\b)Bearer\s+[A-Za-z0-9._~+/-]{16,}={0,2}",
-        r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?s:.*?)-----END [A-Z ]*PRIVATE KEY-----",
         r#"(?i)(?-u:\b)(?:api[_-]?key|secret|token|password)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{12,}["']?"#,
-    ].into_iter().map(|p| Regex::new(p).expect("static secret expression")).collect()
+    ].into_iter().map(expression).collect()
 });
 
 pub(super) fn scrub(input: &str) -> String {
@@ -47,7 +72,9 @@ impl Stream {
         static END: LazyLock<Regex> =
             LazyLock::new(|| Regex::new(r"-----END [A-Z ]*PRIVATE KEY-----").unwrap());
         static INTRO: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r#"(?-u:\b)(?:(Bearer)\s*|(?i:(api[_-]?key|secret|token|password))\s*([:=])?\s*(["'])?\s*)$"#).unwrap()
+            expression(
+                r#"(?-u:\b)(?:(Bearer)\s*|(?i:(api[_-]?key|secret|token|password))\s*([:=])?\s*(["'])?\s*)$"#,
+            )
         });
         static ASSIGN_VALUE: LazyLock<Regex> =
             LazyLock::new(|| Regex::new(r#"^[A-Za-z0-9._~+/-]{12,}["']?"#).unwrap());
@@ -74,10 +101,10 @@ impl Stream {
             }
         }
         if let Some(mut prefix) = self.continuation.take() {
-            let mut value = text.trim_start();
+            let mut value = text.trim_start_matches(js_space);
             if !prefix.bearer && !prefix.separator {
                 if let Some(after) = value.strip_prefix([':', '=']) {
-                    value = after.trim_start();
+                    value = after.trim_start_matches(js_space);
                     prefix.separator = true;
                 } else if value.is_empty() {
                     self.continuation = Some(prefix);
@@ -87,7 +114,7 @@ impl Stream {
             if prefix.bearer || prefix.separator {
                 if !prefix.bearer && !prefix.quoted {
                     if let Some(after) = value.strip_prefix(['\"', '\'']) {
-                        value = after.trim_start();
+                        value = after.trim_start_matches(js_space);
                         prefix.quoted = true;
                     }
                 }
@@ -123,9 +150,9 @@ impl Stream {
             // ordinary regex minimum. Hide recognizable trailing prefixes
             // BEFORE returning even one value character to the caller.
             static TAIL: LazyLock<Regex> = LazyLock::new(|| {
-                Regex::new(
-                r#"(?-u:\b)(?:sk-[A-Za-z0-9_-]*|gh[pousr]_[A-Za-z0-9]*|xox[baprs]-[A-Za-z0-9-]*|AIza[A-Za-z0-9_-]*|AKIA[0-9A-Z]*|Bearer\s+[A-Za-z0-9._~+/-]*={0,2}|(?i:(?:api[_-]?key|secret|token|password)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]*["']?))$"#
-            ).unwrap()
+                expression(
+                    r#"(?-u:\b)(?:sk-[A-Za-z0-9_-]*|gh[pousr]_[A-Za-z0-9]*|xox[baprs]-[A-Za-z0-9-]*|AIza[A-Za-z0-9_-]*|AKIA[0-9A-Z]*|Bearer\s+[A-Za-z0-9._~+/-]*={0,2}|(?i:(?:api[_-]?key|secret|token|password)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]*["']?))$"#,
+                )
             });
             TAIL.replace(&safe, "[secret]").into_owned()
         } else {
@@ -170,6 +197,72 @@ mod tests {
                 "{}",
                 case["name"]
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod security_fix_tests {
+    use super::*;
+    #[test]
+    fn security_fix_stream_ecmascript_spaces() {
+        for (space, masks) in [
+            ("\u{FEFF}", true),
+            ("\u{0085}", false),
+            ("\u{00A0}", true),
+            (" ", true),
+        ] {
+            for prefix in [
+                "Bearer",
+                "api_key=",
+                "api-key=",
+                "apikey=",
+                "secret=",
+                "token=",
+                "password=",
+                "API_KEY:",
+            ] {
+                let input = format!("{prefix}{space}abcdefghijklmnop");
+                assert_eq!(
+                    Stream::default().line(&input),
+                    if masks { "[secret]" } else { &input },
+                    "{input:?}"
+                );
+                if prefix != "Bearer" {
+                    for (prelude, value) in [
+                        ("token", format!("={space}abcdefghijklmnop")),
+                        ("token=", format!("'{space}abcdefghijklmnop")),
+                    ] {
+                        let mut stream = Stream::default();
+                        stream.line(prelude);
+                        let output = stream.line(&value);
+                        assert_eq!(
+                            output.contains("abcdefghijklmnop"),
+                            !masks,
+                            "separator/quote {value:?}: {output:?}"
+                        );
+                    }
+                }
+                let mut prelude = Stream::default();
+                prelude.line(&format!("{prefix}{space}"));
+                let output = prelude.line("abcdefghijklmnop");
+                assert_eq!(
+                    output.contains("abcdefghijklmnop"),
+                    !masks,
+                    "prelude {input:?}: {output:?}"
+                );
+                let mut stream = Stream::default();
+                stream.line(prefix);
+                let value = format!("{space}abcdefghijklmnop");
+                let output = stream.line(&value);
+                assert_eq!(
+                    output.contains("abcdefghijklmnop"),
+                    !masks,
+                    "continuation {input:?}: {output:?}"
+                );
+                let output = Stream::default().line_with_cut(&format!("{prefix}{space}abc"), true);
+                assert_eq!(output.contains("abc"), !masks, "cut {input:?}: {output:?}");
+            }
         }
     }
 }

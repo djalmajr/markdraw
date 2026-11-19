@@ -201,7 +201,7 @@ impl Registry {
                 break;
             }
             seen += 1;
-            entries.push(json!({"name":scrub::scrub(&name),"path":scrub::scrub(&relative(&path,&name)),"kind":if metadata.is_dir(){"dir"}else{"file"}}));
+            entries.push(json!({"name":scrub::short_text(&name),"path":scrub::short_text(&relative(&path,&name)),"kind":if metadata.is_dir(){"dir"}else{"file"}}));
         }
         let mut result = json!({"entries":entries});
         if more {
@@ -329,12 +329,12 @@ impl Registry {
                             jobs.push(Job::File(path.clone(), index));
                             break;
                         }
-                        if line.contains(&a.query) {
+                        if safe.contains(&a.query) {
                             if matches.len() == SEARCH_LIMIT {
                                 lookahead = Some(Job::File(path.clone(), index));
                                 break;
                             }
-                            matches.push(json!({"path":scrub::scrub(&path),"line":index+1,"text":safe.chars().take(500).collect::<String>()}));
+                            matches.push(json!({"path":scrub::short_text(&path),"line":index+1,"text":safe.chars().take(500).collect::<String>()}));
                         }
                     }
                     if lookahead.is_some() {

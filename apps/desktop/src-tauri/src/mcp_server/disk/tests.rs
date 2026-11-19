@@ -231,7 +231,7 @@ fn secrets_names_search_filters_and_fixed_errors() {
     );
     let search = f.call("search_workspace", json!({"query":"hit"})).unwrap();
     let hits = search["matches"].as_array().unwrap();
-    assert_eq!(hits.len(), 3);
+    assert_eq!(hits.len(), 2);
     for hit in hits {
         assert!(!hit.to_string().contains(secret));
         assert!(!hit.to_string().contains("private-material"));
@@ -387,11 +387,11 @@ fn multiline_assignment_prelude_never_leaks_across_requested_range() {
     let r = f
         .call("search_workspace", json!({"query":"abcdefghijklmnop"}))
         .unwrap();
-    assert_eq!(r["matches"][0]["line"], 3);
-    assert!(!r["matches"][0]["text"]
-        .as_str()
-        .unwrap()
-        .contains("abcdefghijklmnop"));
+    assert_eq!(r["matches"], json!([]));
+    let visible = f
+        .call("search_workspace", json!({"query":"ordinary"}))
+        .unwrap();
+    assert_eq!(visible["matches"][0]["line"], 4);
     let r = f
         .call("read_file", json!({"path":"a","start_line":4}))
         .unwrap();
@@ -481,7 +481,7 @@ fn amendment_all_patterns_hide_every_value_character_across_output_boundaries() 
             .collect::<String>();
         f.write(
             "a",
-            format!("{}{searchable}visible ", "visible \n".repeat(199)),
+            format!("{}{searchable}visible ", "visible \n".repeat(201)),
         );
         let mut cursor = None;
         let mut pages = 0;
@@ -507,7 +507,7 @@ fn amendment_all_patterns_hide_every_value_character_across_output_boundaries() 
         }
         assert!(pages >= 2 && seen > 200);
         let by_value = f.call("search_workspace", json!({"query":"ZQXJ"})).unwrap();
-        assert!(!by_value["matches"].as_array().unwrap().is_empty());
+        assert!(by_value["matches"].as_array().unwrap().is_empty());
         assert_hidden(&by_value, name, "search-value-query");
 
         // Position the first value character at column 498: cutting raw text
@@ -603,4 +603,45 @@ fn amendment_unc_roots_are_rejected_by_every_disk_tool() {
             "{method}"
         );
     }
+}
+
+#[test]
+fn security_fix_incomplete_pem_metadata() {
+    let f = Fixture::new();
+    for name in [
+        "-----BEGIN PRIVATE KEY-----CANARY.md",
+        "-----BEGIN RSA PRIVATE KEY-----CANARY-----END RSA PRIVATE KEY-----.md",
+    ] {
+        f.write(name, "ordinary text");
+    }
+    let listed = f.call("list_files", json!({})).unwrap();
+    assert!(!listed.to_string().contains("CANARY"), "{listed}");
+    let searched = f
+        .call("search_workspace", json!({"query":"ordinary"}))
+        .unwrap();
+    assert_eq!(searched["matches"].as_array().unwrap().len(), 2);
+    assert!(!searched.to_string().contains("CANARY"), "{searched}");
+    f.registry
+        .replace(vec![RootInput {
+            name: "-----BEGIN PRIVATE KEY-----CANARY".into(),
+            path: f.dir.path().canonicalize().unwrap(),
+        }])
+        .unwrap();
+    assert_eq!(f.registry.list().unwrap()["roots"][0]["name"], "[secret]");
+}
+
+#[test]
+fn security_fix_search_matches_only_redacted_text() {
+    let f = Fixture::new();
+    f.write("note.md", "ordinary sk-abcdefghijklmnopqrst\n-----BEGIN PRIVATE KEY-----\nHIDDENPEMVALUE\n-----END PRIVATE KEY-----\nordinary control");
+    for query in ["abcdefghijkl", "HIDDENPEMVALUE", "PRIVATE KEY"] {
+        let result = f.call("search_workspace", json!({"query":query})).unwrap();
+        assert_eq!(result["matches"], json!([]), "{query}: {result}");
+    }
+    let result = f
+        .call("search_workspace", json!({"query":"ordinary"}))
+        .unwrap();
+    assert_eq!(result["matches"].as_array().unwrap().len(), 2);
+    assert_eq!(result["matches"][0]["text"], "ordinary [secret]");
+    assert_eq!(result["matches"][1]["text"], "ordinary control");
 }

@@ -129,12 +129,12 @@ impl Registry {
         Ok(Self::list_roots(&roots))
     }
     fn list_roots(roots: &[Root]) -> Value {
-        json!({"roots": roots.iter().map(|root| json!({"id":root.id,"name":scrub::scrub(&root.name)})).collect::<Vec<_>>()})
+        json!({"roots": roots.iter().map(|root| json!({"id":root.id,"name":scrub::short_text(&root.name)})).collect::<Vec<_>>()})
     }
 }
 
 #[tauri::command]
-pub fn mcp_set_roots<R: tauri::Runtime>(
+pub async fn mcp_set_roots<R: tauri::Runtime>(
     webview: tauri::Webview<R>,
     roots: Vec<RootInput>,
     registry: tauri::State<'_, Arc<Registry>>,
@@ -142,8 +142,10 @@ pub fn mcp_set_roots<R: tauri::Runtime>(
     if webview.label() != "main" {
         return Err("Could not update MCP workspaces".into());
     }
-    registry
-        .replace(roots)
+    let registry = registry.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || registry.replace(roots))
+        .await
+        .map_err(|_| "Could not update MCP workspaces".to_string())?
         .map_err(|_| "Could not update MCP workspaces".into())
 }
 

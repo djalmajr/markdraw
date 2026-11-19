@@ -861,3 +861,136 @@ async fn disk_tools_are_advertised_before_dispatch() {
     client.cancel().await.unwrap();
     server.await.unwrap();
 }
+
+#[test]
+fn security_fix_root_command_yields_until_read_releases() {
+    use std::{
+        future::Future,
+        pin::pin,
+        task::{Context, Poll, Waker},
+        time::Instant,
+    };
+    use tauri::Manager;
+    let registry = Arc::new(Registry::default());
+    registry
+        .replace(vec![RootInput {
+            name: "notes".into(),
+            path: std::env::current_dir().unwrap(),
+        }])
+        .unwrap();
+    let app = tauri::test::mock_builder()
+        .manage(registry.clone())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let _main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let held = registry.clone();
+    let reader = std::thread::spawn(move || {
+        let guard = held.roots.read().unwrap();
+        ready_tx.send(()).unwrap();
+        std::thread::sleep(Duration::from_millis(400));
+        assert_eq!(
+            guard.len(),
+            1,
+            "root must remain authorized until the read ends"
+        );
+    });
+    ready_rx.recv().unwrap();
+    let webview: &tauri::Webview<_> = _main.as_ref();
+    let mut future = pin!(mcp_set_roots(webview.clone(), vec![], app.state()));
+    let started = Instant::now();
+    let poll = future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()));
+    let elapsed = started.elapsed();
+    reader.join().unwrap();
+    assert!(
+        elapsed < Duration::from_millis(200),
+        "first poll blocked for {elapsed:?}"
+    );
+    assert!(
+        matches!(poll, Poll::Pending),
+        "acknowledged before read completed: {poll:?}"
+    );
+    tauri::async_runtime::block_on(future).unwrap();
+    assert_eq!(registry.list().unwrap(), json!({"roots":[]}));
+    let error = tauri::async_runtime::block_on(mcp_set_roots(
+        webview.clone(),
+        vec![RootInput {
+            name: "invalid".into(),
+            path: PathBuf::from("relative"),
+        }],
+        app.state(),
+    ))
+    .unwrap_err();
+    assert_eq!(error, "Could not update MCP workspaces");
+    assert_eq!(registry.list().unwrap(), json!({"roots":[]}));
+}
+
+#[test]
+fn security_fix_root_command_during_36_mib_disk_read() {
+    use std::{
+        future::Future,
+        pin::pin,
+        task::{Context, Poll, Waker},
+        time::Instant,
+    };
+    use tauri::Manager;
+    let dir = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
+    std::fs::write(dir.path().join("large.md"), vec![b'x'; 36 * 1024 * 1024]).unwrap();
+    let registry = Arc::new(Registry::default());
+    registry
+        .replace(vec![RootInput {
+            name: "notes".into(),
+            path: dir.path().canonicalize().unwrap(),
+        }])
+        .unwrap();
+    let id = registry.list().unwrap()["roots"][0]["id"].clone();
+    let app = tauri::test::mock_builder()
+        .manage(registry.clone())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let reading = registry.clone();
+    let reader = std::thread::spawn(move || {
+        reading.disk("read_file", json!({"root_id":id, "path":"large.md"}))
+    });
+    let started = Instant::now();
+    while registry.roots.try_write().is_ok() {
+        assert!(
+            !reader.is_finished(),
+            "disk read finished before lock contention was observed"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "disk did not acquire authorization lock"
+        );
+        std::thread::yield_now();
+    }
+    let webview: &tauri::Webview<_> = main.as_ref();
+    let mut future = pin!(mcp_set_roots(webview.clone(), vec![], app.state()));
+    let started = Instant::now();
+    let poll = future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()));
+    let elapsed = started.elapsed();
+    let read = reader.join().unwrap();
+    assert!(
+        elapsed < Duration::from_millis(200),
+        "first poll blocked for {elapsed:?}; read={read:?}"
+    );
+    assert!(
+        matches!(poll, Poll::Pending),
+        "unexpected immediate acknowledgement: {poll:?}"
+    );
+    match read {
+        Ok(value) => assert_eq!(value["total_lines"], 1),
+        Err(error) => assert_eq!(error, "timed out"),
+    }
+    tauri::async_runtime::block_on(future).unwrap();
+    assert_eq!(registry.list().unwrap(), json!({"roots":[]}));
+}
