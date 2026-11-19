@@ -2299,7 +2299,13 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
         let refused =
             futures_util::future::join_all((0..12).map(|_| call(&resolver, &http, port, 5_000)))
                 .await;
-        assert!(started.elapsed() < Duration::from_millis(500));
+        // Each call builds its own client, serially on this one-thread runtime,
+        // which can take a while on a loaded CI runner. The bound only has to
+        // stay below the calls' 5 s deadline to prove nobody waited for it.
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "the refusals waited for the request deadline"
+        );
         for r in refused {
             assert_eq!(r.unwrap_err(), busy());
         }
