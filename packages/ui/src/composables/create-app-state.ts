@@ -849,12 +849,19 @@ export function createAppState(config: AppStateConfig) {
       : {}),
   });
   // Restore persisted chats (open tabs + active) on boot, while this owner is
-  // live so each rebuilt session store nests under it. The manager's hydrate
-  // seeds its own signals synchronously; detaching only those init writes keeps
-  // them from being mistaken for writes from a component/computation.
-  runWithOwner(null, () =>
-    aiSessions.hydrate(getChatSessionsIndex() ?? { sessions: [], activeId: null }),
-  );
+  // live so each rebuilt session store nests under it. Detaching only these
+  // init writes keeps them from being mistaken for writes from a component/
+  // computation. Solid 2 commits signal writes on the next flush, so reading aiSessions
+  // right here would still see its pre-hydrate (empty) state. Decide the boot
+  // tab from the snapshot passed to hydrate instead, mirroring the manager's
+  // rule that only open, non-archived sessions are live tabs.
+  const persistedChats = getChatSessionsIndex() ?? { sessions: [], activeId: null as string | null };
+  const restoredChats = persistedChats.sessions.filter((m) => m.isOpen && !m.isArchived);
+  const restoredActive =
+    persistedChats.activeId !== null && restoredChats.some((m) => m.id === persistedChats.activeId)
+      ? persistedChats.activeId
+      : null;
+  runWithOwner(null, () => aiSessions.hydrate(persistedChats));
 
   // Inline overlay (DJA-13): floating ⌘I widget on the editor selection.
   const aiInline = createAiInlineStore({
@@ -886,28 +893,26 @@ export function createAppState(config: AppStateConfig) {
   // fall back to the orderKey sort, AFTER the manually-ordered ones.
   const [rpOrder, setRpOrder] = createSignal<string[]>(persistedRp?.order ?? []);
 
-  const restoredActive = aiSessions.activeId();
-  const [aiActiveTab, setActiveTabSig] = createSignal<string>(
-    (() => {
-      const want = persistedRp?.activeTab ?? "";
-      if (want.startsWith("chat:")) {
-        if (aiSessions.sessions().some((s) => s.id === want.slice(5))) return want;
-      } else if (want === "toc" || want === "backlinks") {
-        if (rpSpecials()[want].open) return want;
-      }
-      return restoredActive ? `chat:${restoredActive}` : "";
-    })(),
-  );
+  const initialActiveTab = (() => {
+    const want = persistedRp?.activeTab ?? "";
+    if (want.startsWith("chat:")) {
+      if (restoredChats.some((s) => s.id === want.slice(5))) return want;
+    } else if (want === "toc" || want === "backlinks") {
+      if (rpSpecials()[want].open) return want;
+    }
+    return restoredActive ? `chat:${restoredActive}` : "";
+  })();
+  const [aiActiveTab, setActiveTabSig] = createSignal<string>(initialActiveTab);
   const [aiComposerFocusTrigger, setAiComposerFocusTrigger] = createSignal(0);
 
   // AI-first default: the right panel always boots onto a usable chat. With no
   // open chats and no open specials, create one so the assistant is the first tab.
   // This is boot-time initialization, intentionally outside the component scope.
   runWithOwner(null, () => {
-    if (aiSessions.sessions().length === 0 && !rpSpecials().toc.open && !rpSpecials().backlinks.open) {
+    if (restoredChats.length === 0 && !rpSpecials().toc.open && !rpSpecials().backlinks.open) {
       setActiveTabSig(`chat:${aiSessions.createSession()}`);
-    } else if (aiActiveTab() === "") {
-      const firstChat = aiSessions.sessions()[0];
+    } else if (initialActiveTab === "") {
+      const firstChat = restoredChats[0];
       setActiveTabSig(firstChat ? `chat:${firstChat.id}` : rpSpecials().toc.open ? "toc" : "backlinks");
     }
   });

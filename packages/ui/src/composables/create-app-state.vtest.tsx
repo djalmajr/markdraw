@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, flush, runWithOwner } from "solid-js";
 import type { FSEntry } from "@markdraw/core/types.ts";
+import { setChatSessionsIndex } from "@markdraw/core/ai-chat-sessions.ts";
 import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AITool, ToolApprovalRequest } from "@markdraw/ai/types.ts";
 import { createAppState, type ThemeMode } from "./create-app-state.ts";
@@ -217,6 +218,28 @@ describe("AppState — fonts slice (DJA-42)", () => {
       expect(state.fontPrefs().family).toBe("Inter");
       expect(state.fontPrefs().size).toBe("lg");
     });
+  });
+
+  it("applies the real font preference keys to the document CSS", () => {
+    localStorage.setItem(
+      "markdraw-font-prefs",
+      JSON.stringify({ fontFamily: "serif", fontSize: 24 }),
+    );
+    const css = document.documentElement.style;
+    try {
+      withState((state) => {
+        expect(state.fontPrefs()).toEqual({ fontFamily: "serif", fontSize: 24 });
+        expect(css.getPropertyValue("--doc-font-family")).toContain("Georgia");
+        expect(css.getPropertyValue("--doc-font-size")).toBe("24px");
+        state.handleFontPrefsChange({ fontFamily: "monospace", fontSize: 32 });
+        expect(state.fontPrefs()).toEqual({ fontFamily: "monospace", fontSize: 32 });
+        expect(css.getPropertyValue("--doc-font-family")).toBe("var(--font-mono)");
+        expect(css.getPropertyValue("--doc-font-size")).toBe("32px");
+      });
+    } finally {
+      css.removeProperty("--doc-font-family");
+      css.removeProperty("--doc-font-size");
+    }
   });
 });
 
@@ -444,6 +467,29 @@ describe("AppState — AI multi-chat tab routing", () => {
       expect(state.aiActiveTab().startsWith("chat:")).toBe(true);
       expect(state.aiSessions.sessions()).toHaveLength(1);
     }, aiConfig);
+  });
+
+  it("restores a persisted open chat on two consecutive boots without creating an empty chat", () => {
+    for (let boot = 0; boot < 2; boot++) {
+      setChatSessionsIndex({
+        sessions: [
+          { id: "existing", title: "Saved", createdAt: 1, lastActiveAt: 1, isArchived: false, isOpen: true },
+        ],
+        activeId: "existing",
+      });
+      let dispose!: () => void;
+      const state = createRoot((stop) => {
+        dispose = stop;
+        return createAppState(makeConfig(aiConfig));
+      });
+      flush();
+      try {
+        expect(state.aiSessions.sessions().map((s) => s.id)).toEqual(["existing"]);
+        expect(state.aiActiveTab()).toBe("chat:existing");
+      } finally {
+        dispose();
+      }
+    }
   });
 
   it("focusAiComposer creates a chat when none exist and fronts it", () => {
