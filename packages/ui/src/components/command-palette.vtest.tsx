@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { Command } from "@markdraw/core/command-palette.ts";
@@ -38,6 +39,7 @@ describe("CommandPalette", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a command/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "Toggle" } });
+    flush();
     const options = screen.getAllByRole("option");
     expect(options.length).toBe(1);
     expect(options[0]?.textContent).toContain("Toggle Sidebar");
@@ -52,6 +54,7 @@ describe("CommandPalette", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a command/i) as HTMLInputElement;
     fireEvent.keyDown(input, { key: "Enter" });
+    flush();
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledTimes(1);
@@ -66,6 +69,7 @@ describe("CommandPalette", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a command/i) as HTMLInputElement;
     fireEvent.keyDown(input, { key: "Escape" });
+    flush();
 
     expect(onClose).toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
@@ -86,6 +90,7 @@ describe("CommandPalette", () => {
       el.textContent?.includes("Beta"),
     )!;
     fireEvent.mouseDown(betaRow);
+    flush();
 
     expect(runB).toHaveBeenCalledTimes(1);
     expect(runA).not.toHaveBeenCalled();
@@ -127,6 +132,7 @@ describe("CommandPalette", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a command/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "zzzzz" } });
+    flush();
     expect(screen.getByText(/No matching command/i)).not.toBeNull();
   });
 
@@ -138,10 +144,13 @@ describe("CommandPalette", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a command/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "Toggle" } });
+    flush();
     expect(screen.getAllByRole("option")).toHaveLength(1);
 
     setOpen(false);
+    flush();
     setOpen(true);
+    flush();
 
     const inputAgain = screen.getByPlaceholderText(/Type a command/i) as HTMLInputElement;
     expect(inputAgain.value).toBe("Toggle");
@@ -154,11 +163,13 @@ describe("CommandPalette", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a command/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "Toggle" } });
+    flush();
     expect(screen.getAllByRole("option")).toHaveLength(1);
 
     const clearBtn = baseElement.querySelector<HTMLButtonElement>(".quick-open-clear");
     expect(clearBtn).not.toBeNull();
     fireEvent.mouseDown(clearBtn!);
+    flush();
 
     expect(input.value).toBe("");
     expect(screen.getAllByRole("option").length).toBe(COMMANDS.length);

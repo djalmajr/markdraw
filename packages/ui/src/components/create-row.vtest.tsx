@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { CreateRow } from "./create-row.tsx";
@@ -25,6 +26,7 @@ describe("CreateRow", () => {
 
       trigger.focus();
       fireEvent.blur(input);
+      flush();
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(document.activeElement).toBe(input);
     } finally {
@@ -42,6 +44,7 @@ describe("CreateRow", () => {
     // A blur dispatched synchronously after mount is the menu's restoration —
     // `armed` is still false, so it must be ignored (re-focus), not cancel.
     fireEvent.blur(input);
+    flush();
     expect(onCancel).not.toHaveBeenCalled();
     expect(onCommit).not.toHaveBeenCalled();
   });
@@ -53,7 +56,9 @@ describe("CreateRow", () => {
     ));
     const input = container.querySelector<HTMLInputElement>(".tree-create-input")!;
     fireEvent.input(input, { target: { value: "notes/today.md" } });
+    flush();
     fireEvent.keyDown(input, { key: "Enter" });
+    flush();
     expect(onCommit).toHaveBeenCalledWith("notes/today.md");
   });
 
@@ -64,6 +69,7 @@ describe("CreateRow", () => {
     ));
     const input = container.querySelector<HTMLInputElement>(".tree-create-input")!;
     fireEvent.keyDown(input, { key: "Escape" });
+    flush();
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 

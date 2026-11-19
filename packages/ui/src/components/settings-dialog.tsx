@@ -1634,7 +1634,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
       <input
         class="ai-composer-input settings-input"
         autocomplete="off"
-        readOnly={editingId() !== null}
+        readonly={editingId() !== null}
         value={id()}
         onInput={(e) => setId(e.currentTarget.value)}
       />

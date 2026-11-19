@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onSettled, createTrackedEffect } from "solid-js";
+import { createSignal, onSettled, createEffect } from "solid-js";
 import { Portal } from "@solidjs/web";
 import IconCaseSensitive from "~icons/lucide/case-sensitive";
 import IconLanguages from "~icons/lucide/languages";
@@ -277,46 +277,44 @@ export function SearchOverlay(props: SearchOverlayProps) {
     setOptions((prev) => ({ ...prev, ignoreDiacritics: !prev.ignoreDiacritics }));
   }
 
-  onSettled(() => {
-    if (props.visible) {
-      inputRef?.focus();
-    }
+  createEffect(() => props.visible, (visible) => {
+    if (visible) queueMicrotask(() => inputRef?.focus());
   });
 
-  createTrackedEffect(() => {
-    if (props.visible) {
-      queueMicrotask(() => inputRef?.focus());
-    }
-  });
+  createEffect(
+    () => ({ count: props.matchCount ?? 0, index: props.currentIndex ?? 0 }),
+    ({ count, index }) => {
+      setExternalMatchCount(count);
+      setExternalCurrentIndex(index);
+    },
+  );
 
-  createTrackedEffect(() => {
-    setExternalMatchCount(props.matchCount ?? 0);
-    setExternalCurrentIndex(props.currentIndex ?? 0);
-  });
-
-  createTrackedEffect(() => {
-    const visible = props.visible;
-    const currentQuery = query();
-    const currentOptions = options();
-
-    if (!visible) {
+  createEffect(
+    () => ({
+      visible: props.visible,
+      query: query(),
+      options: options(),
+      external: useExternalEngine(),
+    }),
+    ({ visible, query: currentQuery, options: currentOptions, external }) => {
       clearTimeout(debounceTimer);
-      clearHighlights();
-      return;
-    }
+      if (!visible) {
+        clearHighlights();
+        return;
+      }
 
-    if (useExternalEngine()) {
-      props.onSearchChange?.(currentQuery, currentOptions);
-      return;
-    }
+      if (external) {
+        props.onSearchChange?.(currentQuery, currentOptions);
+        return;
+      }
 
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      highlightMatches(currentQuery, currentOptions);
-    }, 120);
-  });
+      debounceTimer = setTimeout(() => {
+        highlightMatches(currentQuery, currentOptions);
+      }, 120);
+    },
+  );
 
-  onCleanup(() => {
+  onSettled(() => () => {
     clearTimeout(debounceTimer);
     clearHighlights();
   });

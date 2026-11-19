@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { IndexedFile } from "@markdraw/core/file-index.ts";
@@ -48,6 +49,7 @@ describe("QuickOpen", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a file name/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "button" } });
+    flush();
     const options = screen.getAllByRole("option");
     expect(options.length).toBe(1);
     expect(options[0]?.textContent).toContain("button.tsx");
@@ -60,7 +62,9 @@ describe("QuickOpen", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a file name/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "button" } });
+    flush();
     fireEvent.keyDown(input, { key: "Enter" });
+    flush();
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect.mock.calls[0]![0]?.name).toBe("button.tsx");
@@ -73,7 +77,9 @@ describe("QuickOpen", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a file name/i) as HTMLInputElement;
     fireEvent.keyDown(input, { key: "ArrowDown" });
+    flush();
     fireEvent.keyDown(input, { key: "Enter" });
+    flush();
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect.mock.calls[0]![0]).toEqual(FILES[1]);
@@ -87,6 +93,7 @@ describe("QuickOpen", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a file name/i) as HTMLInputElement;
     fireEvent.keyDown(input, { key: "Escape" });
+    flush();
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSelect).not.toHaveBeenCalled();
@@ -114,6 +121,7 @@ describe("QuickOpen", () => {
       el.textContent?.includes("button.tsx"),
     )!;
     fireEvent.mouseDown(buttonRow);
+    flush();
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect.mock.calls[0]![0]?.name).toBe("button.tsx");
@@ -132,6 +140,7 @@ describe("QuickOpen", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a file name/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "xyzzy" } });
+    flush();
     expect(screen.getByText(/No matches/i)).not.toBeNull();
   });
 
@@ -148,10 +157,13 @@ describe("QuickOpen", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a file name/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "button" } });
+    flush();
     expect(screen.getAllByRole("option")).toHaveLength(1);
 
     setOpen(false);
+    flush();
     setOpen(true);
+    flush();
 
     const inputAgain = screen.getByPlaceholderText(/Type a file name/i) as HTMLInputElement;
     expect(inputAgain.value).toBe("button");
@@ -164,11 +176,13 @@ describe("QuickOpen", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a file name/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "button" } });
+    flush();
     expect(screen.getAllByRole("option")).toHaveLength(1);
 
     const clearBtn = baseElement.querySelector<HTMLButtonElement>(".quick-open-clear");
     expect(clearBtn).not.toBeNull();
     fireEvent.mouseDown(clearBtn!);
+    flush();
 
     expect(input.value).toBe("");
     expect(screen.getAllByRole("option").length).toBe(FILES.length);
@@ -192,6 +206,7 @@ describe("QuickOpen", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a file name/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "metric" } });
+    flush();
 
     const row = screen.getByRole("option");
     const marks = row.querySelectorAll("mark.quick-open-hit");

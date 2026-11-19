@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { ShortcutsHelp } from "./shortcuts-help.tsx";
@@ -37,6 +38,7 @@ describe("ShortcutsHelp", () => {
     const onClose = vi.fn();
     render(() => <ShortcutsHelp open onClose={onClose} platform="mac" />);
     fireEvent.keyDown(document, { key: "Escape" });
+    flush();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -50,9 +52,11 @@ describe("ShortcutsHelp", () => {
     const panel = baseElement.querySelector(".shortcuts-help-panel") as HTMLElement;
 
     fireEvent.mouseDown(panel);
+    flush();
     expect(onClose).not.toHaveBeenCalled();
 
     fireEvent.mouseDown(backdrop);
+    flush();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

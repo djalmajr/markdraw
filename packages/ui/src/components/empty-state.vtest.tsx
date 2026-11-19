@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@solidjs/testing-library";
 import { switchLocale } from "@markdraw/i18n/solid";
@@ -22,6 +23,7 @@ describe("EmptyState", () => {
       <EmptyState hasRoot={false} onOpenFolder={onOpenFolder} />
     ));
     fireEvent.click(getByText(/Drop a folder\/file here/));
+    flush();
     expect(onOpenFolder).toHaveBeenCalledTimes(1);
   });
 
@@ -80,8 +82,10 @@ describe("EmptyState", () => {
       />
     ));
     fireEvent.click(getByText("Docs"));
+    flush();
     expect(onOpenRecentFolder).toHaveBeenCalledWith("/tmp/docs");
     fireEvent.click(getByText("guide.md"));
+    flush();
     expect(onOpenRecentFile).toHaveBeenCalledTimes(1);
     // The open-folder CTA still works; click on the empty area, not the entry.
     expect(onOpenFolder).not.toHaveBeenCalled();
@@ -130,6 +134,7 @@ describe("EmptyState", () => {
     );
     expect(star).not.toBeNull();
     fireEvent.click(star!);
+    flush();
     expect(onToggleFavorite).toHaveBeenCalledTimes(1);
     expect(onToggleFavorite.mock.calls[0]![0]).toMatchObject({
       path: "/tmp/docs",
@@ -152,6 +157,7 @@ describe("EmptyState", () => {
     );
     expect(remove).not.toBeNull();
     fireEvent.click(remove!);
+    flush();
     expect(onRemoveRecentFolder).toHaveBeenCalledWith("/tmp/docs");
   });
 
@@ -166,6 +172,7 @@ describe("EmptyState", () => {
       />
     ));
     fireEvent.click(getByText("Clear"));
+    flush();
     expect(onClearRecentHistory).toHaveBeenCalledTimes(1);
   });
 
