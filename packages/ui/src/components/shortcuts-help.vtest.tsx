@@ -42,6 +42,20 @@ describe("ShortcutsHelp", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("releases the document Escape listener on unmount", () => {
+    const onClose = vi.fn();
+    const view = render(() => <ShortcutsHelp open onClose={onClose} platform="mac" />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    flush();
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    onClose.mockClear();
+    view.unmount();
+    fireEvent.keyDown(document, { key: "Escape" });
+    flush();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("clicking the backdrop calls onClose; clicking the panel does not", () => {
     const onClose = vi.fn();
     const { baseElement } = render(() => (

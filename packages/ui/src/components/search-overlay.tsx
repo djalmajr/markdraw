@@ -1,4 +1,4 @@
-import { createSignal, onSettled, createEffect } from "solid-js";
+import { createSignal, onSettled, createEffect, Show } from "solid-js";
 import { Portal } from "@solidjs/web";
 import IconCaseSensitive from "~icons/lucide/case-sensitive";
 import IconLanguages from "~icons/lucide/languages";
@@ -322,7 +322,7 @@ export function SearchOverlay(props: SearchOverlayProps) {
   const displayMatchCount = () => (useExternalEngine() ? externalMatchCount() : internalMatchCount());
   const displayCurrentIndex = () => (useExternalEngine() ? externalCurrentIndex() : internalCurrentIndex());
 
-  const overlay = (
+  const overlay = () => (
     <div class={`search-overlay search-overlay-inline ${props.class ?? ""} ${props.visible ? "" : "search-overlay-hidden"}`}>
       <input
         class="search-input"
@@ -366,9 +366,9 @@ export function SearchOverlay(props: SearchOverlayProps) {
     </div>
   );
 
-  if (props.portalHost) {
-    return <Portal mount={props.portalHost}>{overlay}</Portal>;
-  }
-
-  return overlay;
+  return (
+    <Show when={props.portalHost} fallback={overlay()}>
+      {(host) => <Portal mount={host()}>{overlay()}</Portal>}
+    </Show>
+  );
 }

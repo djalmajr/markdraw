@@ -43,6 +43,24 @@ describe("QuickOpen", () => {
     expect(screen.queryByPlaceholderText(/Type a file name/i)).toBeNull();
   });
 
+  it("clamps the active row to the last visible option when filtering narrows the list", () => {
+    render(() => (
+      <QuickOpen open files={FILES} onSelect={() => {}} onClose={() => {}} />
+    ));
+    const input = screen.getByPlaceholderText(/Type a file name/i) as HTMLInputElement;
+    for (let i = 0; i < 3; i += 1) {
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      flush();
+    }
+    fireEvent.input(input, { target: { value: "button" } });
+    flush();
+
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(1);
+    expect(options[0]?.getAttribute("aria-selected")).toBe("true");
+    expect(input.getAttribute("aria-activedescendant")).toBe(options[0]?.id);
+  });
+
   it("typing a query narrows the visible options", () => {
     render(() => (
       <QuickOpen open files={FILES} onSelect={() => {}} onClose={() => {}} />
