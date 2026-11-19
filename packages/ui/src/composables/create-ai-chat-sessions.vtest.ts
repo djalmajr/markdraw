@@ -277,7 +277,7 @@ describe("createAiChatSessions — hydrate", () => {
     await withRoot((create) => {
       const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
       setChatMessages("open1", [{ role: "user", content: "x" }]);
-      mgr.hydrate({
+      const restored = mgr.hydrate({
         sessions: [
           { id: "open1", title: "Open", createdAt: 1, lastActiveAt: 5, isArchived: false, isOpen: true },
           { id: "arch1", title: "Arch", createdAt: 1, lastActiveAt: 2, isArchived: true, isOpen: false },
@@ -285,6 +285,8 @@ describe("createAiChatSessions — hydrate", () => {
         activeId: "open1",
       });
       flush();
+      expect(restored.sessions.map((s) => s.id)).toEqual(["open1"]);
+      expect(restored.activeId).toBe("open1");
       expect(mgr.sessions().map((s) => s.id)).toEqual(["open1"]);
       expect(mgr.allSessions()).toHaveLength(2);
       expect(mgr.activeId()).toBe("open1");
@@ -302,6 +304,29 @@ describe("createAiChatSessions — hydrate", () => {
       });
       flush();
       expect(mgr.activeId()).toBeNull();
+    });
+  });
+
+  it("returns exactly the rebuilt open sessions and nulls a non-live active id", async () => {
+    await withRoot((create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
+      const restored = mgr.hydrate({
+        sessions: [
+          { id: "open2", title: "Open 2", createdAt: 1, lastActiveAt: 6, isArchived: false, isOpen: true },
+          { id: "closed", title: "Closed", createdAt: 1, lastActiveAt: 5, isArchived: false, isOpen: false },
+          { id: "archived", title: "Archived", createdAt: 1, lastActiveAt: 4, isArchived: true, isOpen: true },
+          { id: "open1", title: "Open 1", createdAt: 1, lastActiveAt: 3, isArchived: false, isOpen: true },
+        ],
+        activeId: "closed", // persisted, but no record was built for it
+      });
+      flush();
+      expect(restored.sessions.map((s) => s.id)).toEqual(["open2", "open1"]);
+      expect(restored.activeId).toBeNull();
+      expect(restored.sessions).toEqual(mgr.sessions());
+      expect(restored.activeId).toBe(mgr.activeId());
+      expect(restored.sessions.every((s) => mgr.storeFor(s.id) !== undefined)).toBe(true);
+      expect(mgr.storeFor("closed")).toBeUndefined();
+      expect(mgr.storeFor("archived")).toBeUndefined();
     });
   });
 });

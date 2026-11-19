@@ -67,8 +67,13 @@ export interface AiChatSessions {
   restoreSession: (id: string) => void;
   deleteSession: (id: string) => void;
 
-  /** Rebuild from persisted state on boot (instantiates only OPEN sessions). */
-  hydrate: (persisted: { sessions: PersistedChatSessionMeta[]; activeId: string | null }) => void;
+  /** Rebuild from persisted state on boot (instantiates only OPEN sessions).
+   *  Returns the live tabs and active id actually rebuilt, so callers need not
+   *  re-derive the open/archived rule from the input snapshot. */
+  hydrate: (persisted: {
+    sessions: PersistedChatSessionMeta[];
+    activeId: string | null;
+  }) => { sessions: PersistedChatSessionMeta[]; activeId: string | null };
   /** Current persistable state (for tests / external writers). */
   snapshot: () => { sessions: PersistedChatSessionMeta[]; activeId: string | null };
 }
@@ -432,19 +437,29 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     return metas();
   }
 
-  function hydrate(persisted: { sessions: PersistedChatSessionMeta[]; activeId: string | null }): void {
+  function hydrate(persisted: {
+    sessions: PersistedChatSessionMeta[];
+    activeId: string | null;
+  }): { sessions: PersistedChatSessionMeta[]; activeId: string | null } {
+    const stored = persisted.sessions.map((m) => ({ ...m }));
+    const restored: PersistedChatSessionMeta[] = [];
+    let active: string | null = null;
     hydrating = true;
     try {
-      setMetas(persisted.sessions.map((m) => ({ ...m })));
-      for (const m of persisted.sessions) {
-        if (m.isOpen && !m.isArchived) records.set(m.id, instantiate(m.id, hydrateTurns(getChatMessages(m.id))));
+      setMetas(stored);
+      for (const m of stored) {
+        if (m.isOpen && !m.isArchived) {
+          records.set(m.id, instantiate(m.id, hydrateTurns(getChatMessages(m.id))));
+          restored.push(m);
+        }
       }
-      const active = persisted.activeId !== null && records.has(persisted.activeId) ? persisted.activeId : null;
+      active = persisted.activeId !== null && records.has(persisted.activeId) ? persisted.activeId : null;
       setActiveId(active);
     } finally {
       hydrating = false;
     }
     bump();
+    return { sessions: restored, activeId: active };
   }
 
   function snapshot(): { sessions: PersistedChatSessionMeta[]; activeId: string | null } {
