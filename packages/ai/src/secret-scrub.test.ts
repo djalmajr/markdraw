@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import vectors from "./secret-scrub.vectors.json";
 import { replaceUnrestoredPlaceholders, restoreSecrets, scrubSecrets } from "./secret-scrub.ts";
 
 // The nonce is random per map, so every assertion goes through this shape
@@ -125,4 +126,15 @@ describe("replaceUnrestoredPlaceholders", () => {
     const restored = restoreSecrets(text, map);
     expect(replaceUnrestoredPlaceholders(restored, "[expired]")).toBe(restored);
   });
+});
+
+describe("shared Rust/TS secret vectors", () => {
+  for (const vector of vectors) {
+    it(vector.name, () => {
+      const { text, map } = scrubSecrets(vector.input);
+      expect(text !== vector.input).toBe(vector.masked);
+      expect(text.replace(/\[secret-[a-z0-9]{6,8}-\d+\]/g, "[secret]")).toBe(vector.expected);
+      expect(restoreSecrets(text, map)).toBe(vector.input);
+    });
+  }
 });
