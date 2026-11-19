@@ -6,6 +6,7 @@ import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AITool, ToolApprovalRequest } from "@markdraw/ai/types.ts";
 import { createAppState, type ThemeMode } from "./create-app-state.ts";
 import { createPaneStore } from "./create-pane-store.ts";
+import type { AiInlineReference } from "./ai-context.ts";
 
 // Storage helpers — happy-dom ships localStorage, but we still clear
 // it between suites so module-level singletons (recent-files cache,
@@ -639,25 +640,55 @@ describe("AppState — AI multi-chat tab routing", () => {
     }, aiConfig);
   });
 
-  it("addSelectionToContext emits aiInlineReference with the chip label, bumping seq", () => {
+  it("addSelectionToContext hands the mounted composer a reference with the chip label, bumping seq", () => {
     withState((state) => {
-      expect(state.aiInlineReference()).toBeNull();
+      const requests: AiInlineReference[] = [];
+      const unregister = state.aiInlineReferenceHost.register((reference) => {
+        requests.push(reference);
+        return true;
+      });
       state.addSelectionToContext({ from: 0, to: 5, text: "hello" });
       const first = state.aiContextItems()[0]!;
-      expect(state.aiInlineReference()).toEqual({
-        itemId: first.id,
-        seq: 1,
-        token: first.label,
-      });
-      // A second selection retriggers with a HIGHER seq (the panel keys its
-      // insertion effect on it).
+      expect(requests).toEqual([{ itemId: first.id, seq: 1, token: first.label }]);
+      // A second selection arrives as its own request with a HIGHER seq.
       state.addSelectionToContext({ from: 6, to: 8, text: "wo" });
       const second = state.aiContextItems()[1]!;
-      expect(state.aiInlineReference()).toEqual({
-        itemId: second.id,
-        seq: 2,
-        token: second.label,
+      expect(requests[1]).toEqual({ itemId: second.id, seq: 2, token: second.label });
+      unregister();
+      // With no composer registered the request waits instead of vanishing.
+      state.addSelectionToContext({ from: 9, to: 10, text: "x" });
+      expect(requests).toHaveLength(2);
+      expect(state.aiInlineReferenceHost.takePending()?.itemId).toBe(state.aiContextItems()[2]!.id);
+    }, aiConfig);
+  });
+
+  it("keeps a reference pending while no composer takes it, and drains it once", () => {
+    withState((state) => {
+      state.requestAiInlineReference("selection:a", "a:sel");
+      expect(state.aiInlineReferenceHost.takePending()).toEqual({
+        itemId: "selection:a",
+        seq: 1,
+        token: "a:sel",
       });
+      // Drained: a composer mounting later has no stale request to replay.
+      expect(state.aiInlineReferenceHost.takePending()).toBeNull();
+
+      // A detached composer (answers false) must not swallow the request —
+      // it stays pending until one in the document answers true.
+      const unregisterDetached = state.aiInlineReferenceHost.register(() => false);
+      state.requestAiInlineReference("selection:b", "b:sel");
+      expect(state.aiInlineReferenceHost.takePending()?.token).toBe("b:sel");
+
+      const taken: string[] = [];
+      const unregisterLive = state.aiInlineReferenceHost.register((reference) => {
+        taken.push(reference.token);
+        return true;
+      });
+      state.requestAiInlineReference("selection:c", "c:sel");
+      expect(taken).toEqual(["c:sel"]);
+      expect(state.aiInlineReferenceHost.takePending()).toBeNull();
+      unregisterLive();
+      unregisterDetached();
     }, aiConfig);
   });
 
@@ -665,12 +696,17 @@ describe("AppState — AI multi-chat tab routing", () => {
     withState((state) => {
       state.addSelectionToContext({ from: 0, to: 3, text: "   " });
       expect(state.aiContextItems()).toHaveLength(0);
-      expect(state.aiInlineReference()).toBeNull();
+      expect(state.aiInlineReferenceHost.takePending()).toBeNull();
     }, aiConfig);
   });
 
   it("addPreviewSelectionToContext labels the chip '<file>:sel' with -2/-3 dedupe", () => {
     withState((state) => {
+      const requests: AiInlineReference[] = [];
+      const unregister = state.aiInlineReferenceHost.register((reference) => {
+        requests.push(reference);
+        return true;
+      });
       const text = "This is a long preview selection that needs truncating";
       state.addPreviewSelectionToContext(text);
       const items = state.aiContextItems();
@@ -680,15 +716,12 @@ describe("AppState — AI multi-chat tab routing", () => {
       // token-friendly form ("preview" — no active file in this stub).
       expect(items[0]!.content).toBe(text);
       expect(items[0]!.label).toBe("preview:sel");
-      expect(state.aiInlineReference()).toEqual({
-        itemId: items[0]!.id,
-        seq: 1,
-        token: "preview:sel",
-      });
+      expect(requests).toEqual([{ itemId: items[0]!.id, seq: 1, token: "preview:sel" }]);
       // A second, different selection dedupes against the existing label.
       state.addPreviewSelectionToContext("another bit");
       expect(state.aiContextItems()[1]!.label).toBe("preview:sel-2");
-      expect(state.aiInlineReference()?.token).toBe("preview:sel-2");
+      expect(requests[1]?.token).toBe("preview:sel-2");
+      unregister();
       // Whitespace-only selections are ignored.
       state.addPreviewSelectionToContext("   \n ");
       expect(state.aiContextItems()).toHaveLength(2);

@@ -230,6 +230,22 @@ export function effectivePaneEditorMode(pane: PaneStore): "edit" | "split" | "pr
   return mode;
 }
 
+/** Host side of the composer's inline references (a selection chip becomes an
+ *  inline "@token" in the chat message). The mounted composer registers a
+ *  consumer while it lives; the host hands each request to it directly, so no
+ *  effect has to watch a request signal and clear it — that self-write is
+ *  Solid's EFFECT_WRITES_OWN_SOURCE. A request made with no mounted composer
+ *  (the chat tab was closed when the user hit ⌘I) waits in a pending slot and
+ *  the next composer drains it. */
+export interface AiInlineReferenceHost {
+  /** Register the mounted composer's consumer; returns its unregister. The
+   *  consumer answers whether it inserted the token (a detached panel says
+   *  no and leaves the request pending for the visible one). */
+  register(consumer: (reference: AiInlineReference) => boolean): () => void;
+  /** Take the request that arrived while no composer was mounted, if any. */
+  takePending(): AiInlineReference | null;
+}
+
 export function createAppState(config: AppStateConfig) {
   // ── Pane manager (per-document signals proxy through here) ─────────────
   // Per the split-panes feature plan, every signal that describes
@@ -611,18 +627,38 @@ export function createAppState(config: AppStateConfig) {
 
   // Inline composer references: a selection chip becomes an inline "@token"
   // in the chat composer with the same per-message lifecycle as @-mentions.
-  // The panel consumes this signal via its `inlineReference` prop.
-  const [aiInlineReference, setAiInlineReference] = createSignal<AiInlineReference | null>(null);
+  // Handed to the mounted composer explicitly (see AiInlineReferenceHost):
+  // a signal the panel watched and then cleared in the same effect re-ran the
+  // effect through its own write (EFFECT_WRITES_OWN_SOURCE).
+  let aiInlineReferenceSeq = 0;
+  /** Requested while no composer was mounted (chat tab closed) — drained by
+   *  the next composer that mounts. */
+  let pendingAiInlineReference: AiInlineReference | null = null;
+  const aiInlineReferenceConsumers = new Set<(reference: AiInlineReference) => boolean>();
+  const aiInlineReferenceHost: AiInlineReferenceHost = {
+    register(consumer) {
+      aiInlineReferenceConsumers.add(consumer);
+      return () => {
+        aiInlineReferenceConsumers.delete(consumer);
+      };
+    },
+    takePending() {
+      const pending = pendingAiInlineReference;
+      pendingAiInlineReference = null;
+      return pending;
+    },
+  };
   /** Ask the composer to insert an inline "@token" referencing `itemId`.
-   *  `seq` is monotonic so an identical reference still retriggers. */
+   *  `seq` is monotonic so two requests for the same item still read as two.
+   *  A consumer that cannot take it (a detached instance) answers false, so
+   *  the request stays pending for the connected composer. */
   function requestAiInlineReference(itemId: string, token: string): void {
-    setAiInlineReference((prev) => ({ itemId, seq: (prev?.seq ?? 0) + 1, token }));
-  }
-  /** Panel ack: the reference was consumed. Clearing (instead of letting it
-   *  linger) is what lets a freshly-MOUNTED panel treat any non-null value as
-   *  pending — ⌘I with the chat tab closed still inserts its token. */
-  function clearAiInlineReference(): void {
-    setAiInlineReference(null);
+    aiInlineReferenceSeq += 1;
+    const reference: AiInlineReference = { itemId, seq: aiInlineReferenceSeq, token };
+    for (const consumer of aiInlineReferenceConsumers) {
+      if (consumer(reference)) return;
+    }
+    pendingAiInlineReference = reference;
   }
   function dismissActiveFileContext(): void {
     setActiveFileContextDismissed(true);
@@ -1628,9 +1664,8 @@ export function createAppState(config: AppStateConfig) {
     addAiContext,
     removeAiContext,
     reorderAiContext,
-    aiInlineReference,
+    aiInlineReferenceHost,
     requestAiInlineReference,
-    clearAiInlineReference,
     dismissActiveFileContext,
     addSelectionToContext,
     addPreviewSelectionToContext,

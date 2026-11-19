@@ -9,7 +9,11 @@ import { getVersion } from "@tauri-apps/api/app";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "./lib/chaos-invoke.ts";
 import { dragOnceMoved, installHyprlandMaximize } from "./lib/hyprland-maximize.ts";
-import { attachFromSelectionSources, selectionShortcutOrigin } from "./lib/selection-shortcut.ts";
+import {
+  attachFromSelectionSources,
+  createPaletteSelectionOrigin,
+  selectionShortcutOrigin,
+} from "./lib/selection-shortcut.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
@@ -1528,6 +1532,12 @@ export function App() {
   const [appVersion, setAppVersion] = createSignal<string>("");
   // Command palette (Cmd/Ctrl+Shift+P).
   const [commandPaletteVisible, setCommandPaletteVisible] = createSignal(false);
+  // The palette has no keystroke of its own, so it cannot tell which surface a
+  // selection command means. Remember the focused surface when it OPENS (the
+  // palette takes the focus afterwards) and run `ai.inlineAction` with that
+  // surface's selection — the editor's remembered range only when the editor
+  // held the focus, else the preview's DOM selection.
+  const commandPaletteSelection = createPaletteSelectionOrigin();
   // Symbol palette (Cmd/Ctrl+Shift+O).
   const [symbolPaletteVisible, setSymbolPaletteVisible] = createSignal(false);
   // Workspace-wide symbol palette (Cmd/Ctrl+T). Shares the
@@ -2964,7 +2974,13 @@ export function App() {
         group: "AI",
         title: (useLocale(), m.command_add_selection_to_chat()),
         run: () => {
-          void attachSelectionToChat().then((attached) => {
+          // Run from the palette, which has no keystroke origin: use the
+          // surface that had the focus when it opened (see
+          // commandPaletteSelection), so a preview selection is not shadowed
+          // by the editor's remembered range.
+          const origin = commandPaletteSelection.origin();
+          if (origin.chatOnly) return;
+          void attachSelectionToChat({ editor: origin.editor }).then((attached) => {
             if (attached) state.focusAiComposer();
           });
         },
@@ -3243,9 +3259,13 @@ export function App() {
           case "quick":
             setQuickOpenVisible((v) => !v);
             break;
-          case "command":
-            setCommandPaletteVisible((v) => !v);
+          case "command": {
+            const open = !commandPaletteVisible();
+            // Captured before the palette's input takes the focus.
+            if (open) commandPaletteSelection.remember(document.activeElement);
+            setCommandPaletteVisible(open);
             break;
+          }
           case "symbol":
             setSymbolPaletteVisible((v) => !v);
             break;

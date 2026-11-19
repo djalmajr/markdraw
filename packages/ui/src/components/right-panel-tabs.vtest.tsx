@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { flush } from "solid-js";
+import { createSignal, flush, OBSERVE } from "solid-js";
+import { attribution } from "solid-js/attribution";
 import {
   RightPanelTabs,
   fromRpTabDndId,
@@ -81,6 +82,39 @@ describe("RightPanelTabs — tabs", () => {
     const { baseElement: b2 } = render(() => <RightPanelTabs {...baseProps({ activeId: "chat:s1" })} />);
     expect(b2.querySelector('[data-rp-tab="chat:s1"]')!.classList.contains("rp-tab-active")).toBe(true);
     expect(b2.querySelector('[data-rp-tab="toc"]')!.classList.contains("rp-tab-active")).toBe(false);
+  });
+
+  it("keeps each row when the host re-emits field-equivalent tab objects", ({ onTestFinished }) => {
+    // The strip model is rebuilt on every host change, handing back fresh
+    // objects for the same tabs. Identity-keyed <For> would dispose and
+    // rebuild every row (losing DOM, hover and focus) — Solid reports it as
+    // UNSTABLE_LIST_IDENTITY. Keying by the tab id keeps the rows.
+    if (!OBSERVE) throw new Error("Solid's diagnostics runtime is required");
+    const diagnostics = OBSERVE.diagnostics.capture();
+    // The list-identity verdict is computed by the attribution engine.
+    const releaseAttribution = attribution.enable({ log: false });
+    onTestFinished(() => {
+      diagnostics.stop();
+      releaseAttribution();
+    });
+    const [tabs, setTabs] = createSignal<RightPanelTab[]>(TABS);
+    const { baseElement } = render(() => <RightPanelTabs {...baseProps()} tabs={tabs()} />);
+    const codes = (): string[] => diagnostics.events.map(({ code }) => code);
+    const row = baseElement.querySelector('[data-rp-tab="chat:s1"]');
+    expect(row).not.toBeNull();
+
+    setTabs(TABS.map((tab) => ({ ...tab })));
+    flush();
+    expect.soft(codes()).not.toContain("UNSTABLE_LIST_IDENTITY");
+    expect(baseElement.querySelector('[data-rp-tab="chat:s1"]')).toBe(row);
+
+    // A rename re-emits the same tab with a new title: the surviving row
+    // renders the new title instead of being rebuilt.
+    setTabs([TABS[0]!, { ...TABS[1]!, title: "Renamed chat" }, TABS[2]!]);
+    flush();
+    expect(baseElement.querySelector('[data-rp-tab="chat:s1"]')).toBe(row);
+    expect(row!.textContent).toContain("Renamed chat");
+    expect(codes()).not.toContain("UNSTABLE_LIST_IDENTITY");
   });
 
   it("clicking a tab emits onSelect with its encoded id", () => {
