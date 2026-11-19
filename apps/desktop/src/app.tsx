@@ -532,21 +532,21 @@ export function App() {
   const [modelsDevIndex, setModelsDevIndex] = createSignal<ModelsDevReasoningIndex | null>(null);
   // Timestamps of the versioned model cache — feeds the refresh tooltips and is
   // re-read after every manual/background refresh (localStorage isn't reactive).
-  const [modelCacheInfo, setModelCacheInfo] = createSignal<
-    Record<string, { fetchedAt?: string; source?: string }>
-  >({});
-  function syncModelCacheInfo(): void {
+  function readModelCacheInfo(): Record<string, { fetchedAt?: string; source?: string }> {
     const cache = readModelCache();
-    setModelCacheInfo(
-      Object.fromEntries(
-        Object.entries(cache).map(([id, entry]) => [
-          id,
-          { fetchedAt: entry.fetchedAt, source: entry.source },
-        ]),
-      ),
+    return Object.fromEntries(
+      Object.entries(cache).map(([id, entry]) => [
+        id,
+        { fetchedAt: entry.fetchedAt, source: entry.source },
+      ]),
     );
   }
-  syncModelCacheInfo();
+  // Seeded at creation: writing a signal in the component body would throw
+  // REACTIVE_WRITE_IN_OWNED_SCOPE and halt the reactive system (Solid 2).
+  const [modelCacheInfo, setModelCacheInfo] = createSignal(readModelCacheInfo());
+  function syncModelCacheInfo(): void {
+    setModelCacheInfo(readModelCacheInfo());
+  }
   onSettled(() => {
     void fetchModelsDevReasoning(tauriFetch)
       .then(setModelsDevIndex)
