@@ -507,11 +507,19 @@ fn cli_kind_for_provider_id(provider: &str) -> Result<&'static str, ModelListErr
 /// Group-id identity (Unix): a process-group id is only guaranteed not to be
 /// reused while some member of the group — the leader, alive or zombie, included
 /// — still exists. So `killpg` is sent only while the leader has NOT been
-/// collected (timeout, oversized stdout, cancellation). Once `wait` collected
-/// the leader, [`ProcessTree::leader_collected`] drops the id and nothing is
-/// signalled any more: the group may be empty and its number recycled by an
-/// unrelated process, so a normal exit never signals the group (a member that
-/// outlives a CLI which exited by itself is likewise outside the guarantee).
+/// collected. Every path honours that:
+///
+/// * timeout, oversized stdout, read error, cancellation: the leader is
+///   uncollected (alive or zombie) and the group is signalled;
+/// * the CLI exits by itself (success or error status): [`leader_exited`]
+///   observes the exit WITHOUT collecting it (`waitid(WNOWAIT)`), the group is
+///   signalled while the zombie leader still reserves the id, and only then does
+///   `Child::wait` (the single collector) reap it, so a helper the CLI left
+///   behind does not outlive the call;
+/// * once the leader is collected, or when its state cannot be observed,
+///   [`ProcessTree::leader_collected`] drops the id and nothing is signalled any
+///   more: the group may be empty and its number recycled by an unrelated
+///   process.
 struct ProcessTree {
     #[cfg(unix)]
     pgid: Option<libc::pid_t>,
@@ -586,8 +594,9 @@ impl ProcessTree {
         }
     }
 
-    /// The direct child (the group leader) has been collected: its group id no
-    /// longer proves anything, so the group is never signalled again. A Windows
+    /// The direct child (the group leader) has been collected, or its state could
+    /// not be observed: its group id no longer proves anything, so the group is
+    /// never signalled again. A Windows
     /// job is a handle, not a number, and stays killable.
     fn leader_collected(&mut self) {
         #[cfg(unix)]
@@ -613,6 +622,47 @@ impl Drop for ProcessTree {
     fn drop(&mut self) {
         self.kill();
     }
+}
+
+/// Block until the process `pid` — a child of this process — has exited, WITHOUT
+/// collecting it: the zombie stays, so its pid (and the group id it leads) stays
+/// reserved. `true` once the exit is observed; `false` when it cannot be (the
+/// child was already collected, `ECHILD`), in which case the group id proves
+/// nothing and the caller must not signal it. Only `waitid` with `WEXITED |
+/// WNOWAIT`, available in `libc` on Linux and macOS.
+#[cfg(unix)]
+fn leader_exited_blocking(pid: libc::pid_t) -> bool {
+    loop {
+        // SAFETY: an all-zero `siginfo_t` is a valid value and `waitid` only
+        // writes into it.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: plain syscall on a live out-pointer; `WNOWAIT` leaves the
+        // child collectable.
+        let rc = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        if rc == 0 {
+            return true;
+        }
+        if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return false;
+        }
+    }
+}
+
+/// [`leader_exited_blocking`] on the blocking pool. Dropping the future (a
+/// cancelled call) leaves that thread waiting until the leader dies, which the
+/// group kill of the dropped [`ProcessTree`] guarantees.
+#[cfg(unix)]
+async fn leader_exited(pid: libc::pid_t) -> bool {
+    tokio::task::spawn_blocking(move || leader_exited_blocking(pid))
+        .await
+        .unwrap_or(false)
 }
 
 /// Windows Job Object plumbing, declared against kernel32/ntdll directly: the
@@ -745,8 +795,10 @@ mod job {
 /// Run `<binary> models` (fixed argv, stdin closed, stderr discarded) and
 /// return its stdout, bounded in time and size. On timeout, oversized stdout
 /// and cancellation the CLI's process tree is killed while the direct child is
-/// still uncollected, and the direct child is then awaited. After the CLI
-/// exited by itself (success or not) nothing is signalled, see [`ProcessTree`].
+/// still uncollected, and the direct child is then awaited. When the CLI exits
+/// by itself (success or not) its exit is observed without collecting it, the
+/// tree is killed, and only then is the direct child collected, see
+/// [`ProcessTree`].
 ///
 /// Shell exception (documented, not a gap): `binary` comes from
 /// `cli_agent::resolve_cli_path`, the same discovery the CLI chat uses. On Unix
@@ -811,6 +863,22 @@ async fn run_models_command_in(
         }
         if buf.len() > max_stdout {
             return (Err(err("too_large", "The CLI output is too large.")), false);
+        }
+        // Unix: the CLI exited by itself. Observe that without collecting the
+        // leader, signal the group while the zombie still reserves its id, and
+        // only then let `wait` (the single collector) reap it. If the exit cannot
+        // be observed the id is not trusted and nothing is signalled.
+        #[cfg(unix)]
+        {
+            let exited = match child.id() {
+                Some(pid) => leader_exited(pid as libc::pid_t).await,
+                None => false,
+            };
+            if exited {
+                group.kill();
+            } else {
+                group.leader_collected();
+            }
         }
         let outcome = match child.wait().await {
             Ok(status) if status.success() => Ok(String::from_utf8_lossy(&buf).into_owned()),
@@ -2680,24 +2748,59 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
             run_models_command_in(bin, max, timeout, ProcessTree::with_killpg(killpg)).await
         }
 
-        /// What a recorded group kill saw: the group id and whether its leader
-        /// was still uncollected at that moment (`kill(pgid, 0)`: a zombie still
-        /// answers, a collected child is ESRCH).
-        type Signals = std::sync::Mutex<Vec<(libc::pid_t, bool)>>;
+        /// What a recorded group kill saw: the group id, whether its leader was
+        /// still uncollected at that moment (`kill(pgid, 0)`: a zombie still
+        /// answers, a collected child is ESRCH) and whether it had already exited
+        /// (a zombie: `waitid(WNOHANG | WNOWAIT)` reports it without collecting).
+        type Signals = std::sync::Mutex<Vec<(libc::pid_t, bool, bool)>>;
+
+        /// The child `pid` has exited and not been collected yet.
+        fn is_zombie(pid: libc::pid_t) -> bool {
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let rc = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid as libc::id_t,
+                    &mut info,
+                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                )
+            };
+            rc == 0 && unsafe { info.si_pid() } == pid
+        }
+
+        /// The child `pid` is no longer ours to wait for: it was collected.
+        fn is_collected(pid: libc::pid_t) -> bool {
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let rc = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid as libc::id_t,
+                    &mut info,
+                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                )
+            };
+            rc == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD)
+        }
 
         fn record(log: &'static Signals, pgid: libc::pid_t, forward: bool) {
             let uncollected = (unsafe { libc::kill(pgid, 0) }) == 0;
-            log.lock().unwrap().push((pgid, uncollected));
+            let zombie = is_zombie(pgid);
+            log.lock().unwrap().push((pgid, uncollected, zombie));
             if forward {
                 real_killpg(pgid);
             }
         }
 
-        /// Exactly one group kill, sent while the leader was still uncollected.
-        fn assert_one_early_signal(log: &'static Signals, what: &str) {
+        /// Exactly one group kill, sent while the leader was still uncollected;
+        /// `exited` is whether the leader had already exited by then.
+        fn assert_one_early_signal(log: &'static Signals, what: &str, exited: bool) {
             let seen = log.lock().unwrap().clone();
             assert_eq!(seen.len(), 1, "{what}: group signals: {seen:?}");
             assert!(seen[0].1, "{what}: the leader was already collected");
+            assert_eq!(
+                seen[0].2, exited,
+                "{what}: leader exited at signal time: {seen:?}"
+            );
         }
 
         async fn read_pid(file: &Path) -> i32 {
@@ -2831,7 +2934,7 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
                 .unwrap_err();
             assert_eq!(e.code, "timeout");
             assert_dies(read_pid(&pidfile).await, "timeout").await;
-            assert_one_early_signal(&LOG, "timeout");
+            assert_one_early_signal(&LOG, "timeout", false);
         }
 
         #[tokio::test]
@@ -2852,7 +2955,7 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
                 .unwrap_err();
             assert_eq!(e.code, "too_large");
             assert_dies(read_pid(&pidfile).await, "oversized stdout").await;
-            assert_one_early_signal(&LOG, "oversized stdout");
+            assert_one_early_signal(&LOG, "oversized stdout", false);
         }
 
         #[tokio::test]
@@ -2876,7 +2979,7 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
             task.abort();
             let _ = task.await;
             assert_dies(grandchild, "cancel").await;
-            assert_one_early_signal(&LOG, "cancel");
+            assert_one_early_signal(&LOG, "cancel", false);
         }
 
         /// The leader has exited and is a zombie (nobody has waited for it: the
@@ -2908,69 +3011,159 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
             task.abort();
             let _ = task.await;
             assert_dies(grandchild, "cancel after leader exit").await;
-            assert_one_early_signal(&LOG, "cancel after leader exit");
+            assert_one_early_signal(&LOG, "cancel after leader exit", true);
         }
 
-        /// A CLI that exits by itself (success) while a same-group member lives
-        /// on: its leader is collected by `wait`, so its group id no longer
-        /// proves anything and nothing is signalled. The member is outside the
-        /// guarantee; the fixture's is a bounded `sleep`, never signalled by
-        /// number.
+        // ── F1 (round 4): a CLI that exits by itself is observed, then the group is
+        // signalled while the zombie leader reserves the id, then it is collected ──
+
+        /// A CLI that leaves a long-lived helper in its group (stdout detached
+        /// from it, so the call sees EOF when the leader exits) and a tail.
+        fn script_with_detached_helper(pidfile: &Path, tail: &str) -> String {
+            format!(
+                "sleep 30 >/dev/null 2>&1 &\necho $! > '{}'\n{tail}",
+                pidfile.display()
+            )
+        }
+
+        /// The leader's own pid, written before the helper starts.
+        fn script_with_pids(mainfile: &Path, pidfile: &Path, tail: &str) -> String {
+            format!(
+                "echo $$ > '{}'\n{}",
+                mainfile.display(),
+                script_with_detached_helper(pidfile, tail)
+            )
+        }
+
         #[tokio::test]
-        async fn a_normal_exit_sends_no_group_signal() {
+        async fn a_normal_exit_signals_the_group_between_the_leader_exit_and_its_collection() {
             static LOG: Signals = std::sync::Mutex::new(Vec::new());
             fn rec(pgid: libc::pid_t) {
-                record(&LOG, pgid, false)
+                record(&LOG, pgid, true)
             }
             let dir = tempfile::tempdir().unwrap();
-            let pidfile = dir.path().join("grandchild.pid");
+            let pidfile = dir.path().join("helper.pid");
+            let mainfile = dir.path().join("main.pid");
             let bin = fake_cli(
                 dir.path(),
                 "daemonizing",
-                &format!(
-                    "sleep 3 >/dev/null 2>&1 &\necho $! > '{}'\necho models-ok",
-                    pidfile.display()
-                ),
+                &script_with_pids(&mainfile, &pidfile, "echo models-ok"),
             );
             let out = run_with(&bin, 1024, Duration::from_secs(10), rec)
                 .await
                 .unwrap();
             assert_eq!(out, "models-ok\n");
-            let seen = LOG.lock().unwrap().clone();
+            // Order: the leader had exited (zombie) and was uncollected when the
+            // group was signalled, once...
+            assert_one_early_signal(&LOG, "normal exit", true);
+            // ...the helper of the same group died before the call returned...
+            assert_dies(read_pid(&pidfile).await, "normal exit").await;
+            // ...and the leader was collected afterwards, by `wait`.
             assert!(
-                seen.is_empty(),
-                "group signalled after a normal exit: {seen:?}"
+                is_collected(read_pid(&mainfile).await),
+                "leader not collected"
             );
-            // Behavioural proof, not only the recorder: the member is untouched.
-            assert!(alive(read_pid(&pidfile).await), "the group was signalled");
         }
 
         #[tokio::test]
-        async fn a_cli_that_exits_with_an_error_sends_no_group_signal() {
+        async fn a_cli_that_exits_with_an_error_signals_the_group_between_the_exit_and_the_collection(
+        ) {
             static LOG: Signals = std::sync::Mutex::new(Vec::new());
             fn rec(pgid: libc::pid_t) {
-                record(&LOG, pgid, false)
+                record(&LOG, pgid, true)
             }
             let dir = tempfile::tempdir().unwrap();
-            let pidfile = dir.path().join("grandchild.pid");
+            let pidfile = dir.path().join("helper.pid");
+            let mainfile = dir.path().join("main.pid");
             let bin = fake_cli(
                 dir.path(),
                 "failing",
-                &format!(
-                    "sleep 3 >/dev/null 2>&1 &\necho $! > '{}'\nexit 3",
-                    pidfile.display()
-                ),
+                &script_with_pids(&mainfile, &pidfile, "exit 3"),
             );
             let e = run_with(&bin, 1024, Duration::from_secs(10), rec)
                 .await
                 .unwrap_err();
             assert_eq!(e.code, "cli_failed");
-            let seen = LOG.lock().unwrap().clone();
+            assert_one_early_signal(&LOG, "error exit", true);
+            assert_dies(read_pid(&pidfile).await, "error exit").await;
             assert!(
-                seen.is_empty(),
-                "group signalled after an error exit: {seen:?}"
+                is_collected(read_pid(&mainfile).await),
+                "leader not collected"
             );
-            assert!(alive(read_pid(&pidfile).await), "the group was signalled");
+        }
+
+        /// stdout is closed while the leader keeps running: the call is blocked
+        /// observing the leader, not reading. Timeout there signals the live
+        /// leader's group once, before collection.
+        #[tokio::test]
+        async fn timeout_while_observing_the_leader_signals_the_group_once() {
+            static LOG: Signals = std::sync::Mutex::new(Vec::new());
+            fn rec(pgid: libc::pid_t) {
+                record(&LOG, pgid, true)
+            }
+            let dir = tempfile::tempdir().unwrap();
+            let pidfile = dir.path().join("helper.pid");
+            let bin = fake_cli(
+                dir.path(),
+                "closed-stdout",
+                &script_with_detached_helper(&pidfile, "exec 1>&-\nsleep 30"),
+            );
+            let started = std::time::Instant::now();
+            let e = run_with(&bin, 1024, Duration::from_millis(600), rec)
+                .await
+                .unwrap_err();
+            assert_eq!(e.code, "timeout");
+            assert!(
+                started.elapsed() < Duration::from_millis(1_500),
+                "kill came late: {:?}",
+                started.elapsed()
+            );
+            assert_dies(read_pid(&pidfile).await, "timeout while observing").await;
+            assert_one_early_signal(&LOG, "timeout while observing", false);
+        }
+
+        /// Same state, cancelled instead: the dropped call signals the group once
+        /// while the leader is uncollected (group guard drops before the `Child`).
+        #[tokio::test]
+        async fn cancelling_while_observing_the_leader_signals_the_group_once() {
+            static LOG: Signals = std::sync::Mutex::new(Vec::new());
+            fn rec(pgid: libc::pid_t) {
+                record(&LOG, pgid, true)
+            }
+            let dir = tempfile::tempdir().unwrap();
+            let pidfile = dir.path().join("helper.pid");
+            let bin = fake_cli(
+                dir.path(),
+                "closed-stdout",
+                &script_with_detached_helper(&pidfile, "exec 1>&-\nsleep 30"),
+            );
+            let task =
+                tokio::spawn(
+                    async move { run_with(&bin, 1024, Duration::from_secs(60), rec).await },
+                );
+            let helper = read_pid(&pidfile).await;
+            // Let the call reach the blocking wait on the leader.
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            assert!(alive(helper));
+            task.abort();
+            let _ = task.await;
+            assert_dies(helper, "cancel while observing").await;
+            assert_one_early_signal(&LOG, "cancel while observing", false);
+        }
+
+        /// `WNOWAIT`: observing the exit leaves the child collectable, and a
+        /// process that is not our child cannot be observed (`ECHILD`) — the
+        /// caller then trusts no group id.
+        #[test]
+        fn observing_a_leader_exit_does_not_collect_it_and_a_stranger_is_unobservable() {
+            let mut child = std::process::Command::new("true").spawn().unwrap();
+            let pid = child.id() as libc::pid_t;
+            assert!(leader_exited_blocking(pid));
+            assert!(is_zombie(pid), "observing collected the leader");
+            assert!(child.wait().unwrap().success(), "child was not collectable");
+            assert!(is_collected(pid));
+            let parent = unsafe { libc::getppid() };
+            assert!(!leader_exited_blocking(parent));
         }
 
         /// Control for the two tests above: the real kill is still wired in the
