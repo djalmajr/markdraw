@@ -10,7 +10,7 @@
 // inline (we avoid `window.prompt`, which is unreliable inside Tauri's
 // WKWebView).
 
-import { createSignal, onCleanup, onSettled, Show, createTrackedEffect } from "solid-js";
+import { createEffect, createSignal, onSettled, Show } from "solid-js";
 import {
   writeText as tauriWriteText,
   writeImage as tauriWriteImage,
@@ -207,12 +207,15 @@ export function FigmaCaptureButton() {
     patchClipboardForTauri();
     const onHashChange = () => setActive(isCaptureActive());
     window.addEventListener("hashchange", onHashChange);
-    onCleanup(() => window.removeEventListener("hashchange", onHashChange));
+    return () => window.removeEventListener("hashchange", onHashChange);
   });
 
-  createTrackedEffect(() => {
-    if (open()) setDraftKey(key());
-  });
+  createEffect(
+    () => (open() ? key() : null),
+    (nextKey) => {
+      if (nextKey !== null) setDraftKey(nextKey);
+    },
+  );
 
   // Tracks whether the next onOpenChange(true) should be allowed
   // through. We only want the popover to appear when transitioning
