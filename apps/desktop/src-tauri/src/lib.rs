@@ -1304,6 +1304,10 @@ fn print_webview(webview: tauri::Webview) -> Result<(), String> {
     webview.print().map_err(|e| e.to_string())
 }
 
+pub(crate) fn tauri_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Before GTK starts and before any other thread exists. `wayland,x11`
@@ -1509,7 +1513,7 @@ pub fn run() {
             html_preview_set_overlay,
             html_preview_clear_overlay,
         ])
-        .build(tauri::generate_context!())
+        .build(tauri_context())
         .expect("error while building tauri application")
         .run(|_app, _event| {
             if matches!(_event, tauri::RunEvent::Exit) {

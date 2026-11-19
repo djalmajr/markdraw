@@ -1,0 +1,72 @@
+name: Native Checks
+
+# Build and test the desktop crate on Windows and macOS for pull requests that
+# touch it. PR Checks only runs on Linux, so platform-only code (the Windows
+# named pipe, macOS paths) otherwise first compiles at release time.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/desktop/src-tauri/**"
+      - ".github/workflows/native-checks.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: native-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Native Rust (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2.9.1
+        with:
+          workspaces: "apps/desktop/src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      # tauri::generate_context! embeds the built frontend, so it must exist.
+      - name: Build frontend
+        shell: bash
+        working-directory: apps/desktop
+        run: bun run build:frontend
+
+      - name: Check all targets
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --locked --all-targets
+
+      # On Windows the lib test binary needs the SxS manifest (see build.rs);
+      # the flag must stay off for builds that also link the app binary.
+      - name: MCP server unit tests
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        env:
+          ASCIIMARK_EMBED_TEST_MANIFEST: "1"
+        run: cargo test --locked --lib mcp_server
+
+      - name: MCP server stdio tests
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked --test mcp_stdio
