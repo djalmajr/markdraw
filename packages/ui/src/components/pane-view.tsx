@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { useDroppable } from "../lib/dnd/index.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
@@ -297,6 +297,9 @@ export function PaneView(props: PaneViewProps) {
           pendingFragment={s.pendingFragment()}
           pendingHeadingText={s.pendingHeadingText()}
           onHeadingHandled={() => s.setPendingHeadingText(null)}
+          onHeadingDiscarded={(heading) => {
+            if (untrack(s.pendingHeadingText) === heading) s.setPendingHeadingText(null);
+          }}
           previewOverlayHost={previewPanelRef}
           onScrollRatioChange={(ratio) => {
             if (!syncScrollActive()) return;
@@ -304,6 +307,9 @@ export function PaneView(props: PaneViewProps) {
             setEditorSyncTargetVersion((value) => value + 1);
           }}
           onFragmentHandled={() => s.setPendingFragment(null)}
+          onFragmentDiscarded={(fragment) => {
+            if (untrack(s.pendingFragment) === fragment) s.setPendingFragment(null);
+          }}
           onNavigate={props.onNavigate ?? (() => {})}
           onOpenExternal={props.onOpenExternal}
           onSearchOpenChange={s.setPreviewSearchOpen}

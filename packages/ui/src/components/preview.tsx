@@ -1,4 +1,4 @@
-import { Show, createSignal, onSettled, onCleanup, createTrackedEffect } from "solid-js";
+import { Show, createSignal, onSettled, onCleanup, createEffect, untrack } from "solid-js";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import mermaid from "mermaid";
@@ -733,12 +733,20 @@ interface PreviewProps {
   pendingFragment: string | null;
   /** Called after the pending fragment has been scrolled to (to clear the signal) */
   onFragmentHandled: () => void;
+  /** Called with the fragment that lost its document. Separate from
+   *  `onFragmentHandled` so the host can clear the signal without claiming
+   *  the jump happened in the newly opened file. */
+  onFragmentDiscarded?: (fragment: string) => void;
   /** Heading text to scroll to after content loads — used by the
    *  Workspace Symbol search and any cross-file jump that knows the
    *  heading by its rendered text rather than a fragment id. */
   pendingHeadingText?: string | null;
   /** Called after the pending heading has been resolved (to clear the signal) */
   onHeadingHandled?: () => void;
+  /** Called with the heading that lost its document. Separate from
+   *  `onHeadingHandled` so the host can clear the signal without claiming
+   *  the jump happened in the newly opened file. */
+  onHeadingDiscarded?: (heading: string) => void;
   /** Called when user clicks a document link (.adoc/.md); receives the resolved path and optional fragment */
   onNavigate: (path: string, fragment?: string | null) => void;
   /** Open an external URL (http/https) in the system browser. Desktop-only. */
@@ -767,6 +775,10 @@ export function Preview(props: PreviewProps) {
   const [overlayHost, setOverlayHost] = createSignal<HTMLElement | undefined>(undefined);
   const [viewerSvg, setViewerSvg] = createSignal<string | null>(null);
   const [viewerImage, setViewerImage] = createSignal<string | null>(null);
+  // Html whose post-swap work (TOC, highlight/mermaid/kroki) has finished.
+  // Navigation requests are applied against this rendered document, never
+  // against the raw `html` prop, so they never jump into stale content.
+  const [renderedHtml, setRenderedHtml] = createSignal<string | null>(null);
 
   // Per-image display menu for inline preview images. Opened by CLICKING the
   // image (hover put the menu too far to reach before it dismissed); it floats at
@@ -790,29 +802,32 @@ export function Preview(props: PreviewProps) {
 
   // Dismiss the image menu on outside-click / Escape / scroll. Deferred so the
   // click that opened it doesn't immediately close it.
-  createTrackedEffect(() => {
-    if (!sizeMenuImg()) return;
-    const close = () => setSizeMenuImg(null);
-    const onDown = (ev: MouseEvent) => {
-      if (!(ev.target as HTMLElement).closest(".img-size-menu")) close();
-    };
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") close();
-    };
-    const t = setTimeout(() => {
-      document.addEventListener("mousedown", onDown, true);
-      document.addEventListener("keydown", onKey);
-      window.addEventListener("scroll", close, { capture: true, passive: true });
-    }, 0);
-    onCleanup(() => {
-      clearTimeout(t);
-      document.removeEventListener("mousedown", onDown, true);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, { capture: true } as EventListenerOptions);
-    });
-  });
-  let lastFindTrigger = props.findTrigger;
-  let lastSyncScrollTargetVersion = props.syncScrollTargetVersion;
+  createEffect(
+    () => !!sizeMenuImg(),
+    (isOpen) => {
+      if (!isOpen) return;
+      const close = () => setSizeMenuImg(null);
+      const onDown = (ev: MouseEvent) => {
+        if (!(ev.target as HTMLElement).closest(".img-size-menu")) close();
+      };
+      const onKey = (ev: KeyboardEvent) => {
+        if (ev.key === "Escape") close();
+      };
+      const t = setTimeout(() => {
+        document.addEventListener("mousedown", onDown, true);
+        document.addEventListener("keydown", onKey);
+        window.addEventListener("scroll", close, { capture: true, passive: true });
+      }, 0);
+      return () => {
+        clearTimeout(t);
+        document.removeEventListener("mousedown", onDown, true);
+        document.removeEventListener("keydown", onKey);
+        window.removeEventListener("scroll", close, { capture: true } as EventListenerOptions);
+      };
+    },
+  );
+  let lastFindTrigger: number | undefined;
+  let lastSyncScrollTargetVersion: number | undefined;
   let articleRef: HTMLElement | undefined;
   let cleanupToc: (() => void) | undefined;
   let suppressScrollCallback = false;
@@ -834,6 +849,30 @@ export function Preview(props: PreviewProps) {
   // to decide whether to bail.
   let renderGen = 0;
   const isStale: IsStaleFn = (gen) => gen !== renderGen;
+
+  // Navigation readiness is tied to a generation, not just to the html
+  // string: a request that arrives while highlight/mermaid/kroki are
+  // still running must wait for the final layout. Post-processing is
+  // best-effort (a diagram error must not strand navigation), but a
+  // superseded generation must never publish readiness.
+  async function finishPostProcessing(
+    gen: number,
+    html: string,
+    steps: Array<() => Promise<void>>,
+  ) {
+    try {
+      for (const step of steps) {
+        if (isStale(gen)) return;
+        try {
+          await step();
+        } catch {
+          // Highlighting/diagram rendering is best-effort; keep going.
+        }
+      }
+    } finally {
+      if (!isStale(gen)) setRenderedHtml(html);
+    }
+  }
 
   function computeScrollRatio(scrollTop: number, scrollHeight: number, clientHeight: number): number {
     const maxScrollTop = scrollHeight - clientHeight;
@@ -905,57 +944,67 @@ export function Preview(props: PreviewProps) {
 
     document.addEventListener("mouseup", handleMouseUp);
     document.addEventListener("selectionchange", handleSelectionChange);
-    onCleanup(() => {
+    return () => {
       document.removeEventListener("mouseup", handleMouseUp);
       document.removeEventListener("selectionchange", handleSelectionChange);
       if (popoverShown) props.onSelectionPopover?.(null);
-    });
-  });
-
-  createTrackedEffect(() => {
-    const findTrigger = props.findTrigger;
-    if (findTrigger === lastFindTrigger) return;
-    lastFindTrigger = findTrigger;
-    props.onSearchOpenChange(true);
-  });
-
-  createTrackedEffect(() => {
-    if (!hasArticle()) return;
-    setOverlayHost(articleRef?.closest(".preview-panel") as HTMLElement | undefined);
-  });
-
-  createTrackedEffect(() => {
-    if (!articleRef) return;
-
-    const scrollContainer = articleRef.closest(".content") as HTMLElement | null;
-    if (!scrollContainer) return;
-
-    let scrollRaf = 0;
-    const onScroll = () => {
-      if (suppressScrollCallback || !props.syncScrollActive) return;
-      cancelAnimationFrame(scrollRaf);
-      scrollRaf = requestAnimationFrame(() => {
-        props.onScrollRatioChange(computeScrollRatio(
-          scrollContainer.scrollTop,
-          scrollContainer.scrollHeight,
-          scrollContainer.clientHeight,
-        ));
-      });
     };
-
-    scrollContainer.addEventListener("scroll", onScroll, { passive: true });
-    onCleanup(() => {
-      cancelAnimationFrame(scrollRaf);
-      scrollContainer.removeEventListener("scroll", onScroll);
-    });
   });
 
-  createTrackedEffect(() => {
-    const targetVersion = props.syncScrollTargetVersion;
-    if (targetVersion === lastSyncScrollTargetVersion) return;
-    lastSyncScrollTargetVersion = targetVersion;
+  createEffect(
+    () => props.findTrigger,
+    (findTrigger) => {
+      if (findTrigger === lastFindTrigger) return;
+      lastFindTrigger = findTrigger;
+      props.onSearchOpenChange(true);
+    },
+    { defer: true },
+  );
 
-    if (!props.syncScrollActive || !articleRef) return;
+  createEffect(
+    () => hasArticle(),
+    (has) => {
+      if (!has) return;
+      setOverlayHost(articleRef?.closest(".preview-panel") as HTMLElement | undefined);
+    },
+  );
+
+  createEffect(
+    () => hasArticle(),
+    (has) => {
+      if (!has || !articleRef) return;
+
+      const scrollContainer = articleRef.closest(".content") as HTMLElement | null;
+      if (!scrollContainer) return;
+
+      let scrollRaf = 0;
+      const onScroll = () => {
+        if (suppressScrollCallback || !props.syncScrollActive) return;
+        cancelAnimationFrame(scrollRaf);
+        scrollRaf = requestAnimationFrame(() => {
+          props.onScrollRatioChange(computeScrollRatio(
+            scrollContainer.scrollTop,
+            scrollContainer.scrollHeight,
+            scrollContainer.clientHeight,
+          ));
+        });
+      };
+
+      scrollContainer.addEventListener("scroll", onScroll, { passive: true });
+      return () => {
+        cancelAnimationFrame(scrollRaf);
+        scrollContainer.removeEventListener("scroll", onScroll);
+      };
+    },
+  );
+
+  createEffect(
+    () => props.syncScrollTargetVersion,
+    (targetVersion) => {
+      if (targetVersion === lastSyncScrollTargetVersion) return;
+      lastSyncScrollTargetVersion = targetVersion;
+
+      if (!props.syncScrollActive || !articleRef) return;
 
     const targetRatio = props.syncScrollTargetRatio;
     if (targetRatio === null) return;
@@ -971,7 +1020,9 @@ export function Preview(props: PreviewProps) {
     requestAnimationFrame(() => {
       suppressScrollCallback = false;
     });
-  });
+    },
+    { defer: true },
+  );
 
   // Listen for theme changes to re-init mermaid
   onSettled(() => {
@@ -982,7 +1033,7 @@ export function Preview(props: PreviewProps) {
       attributes: true,
       attributeFilter: ["class"],
     });
-    onCleanup(() => observer.disconnect());
+    return () => observer.disconnect();
   });
 
   onCleanup(() => cleanupToc?.());
@@ -995,6 +1046,24 @@ export function Preview(props: PreviewProps) {
   function scrollToFragment(fragmentId: string) {
     if (!articleRef) return;
     const target = articleRef.querySelector(`[id="${CSS.escape(fragmentId)}"]`) as HTMLElement | null;
+    if (!target) return;
+    const contentEl = articleRef.closest(".content");
+    if (contentEl) {
+      const targetRect = target.getBoundingClientRect();
+      const contentRect = contentEl.getBoundingClientRect();
+      const offset = targetRect.top - contentRect.top + contentEl.scrollTop - 16;
+      contentEl.scrollTo({ top: offset, behavior: "smooth" });
+    } else {
+      target.scrollIntoView({ behavior: "smooth" });
+    }
+  }
+
+  function scrollToHeading(headingText: string) {
+    if (!articleRef) return;
+    const hs = articleRef.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6");
+    const target = Array.from(hs).find(
+      (h) => h.textContent?.trim() === headingText,
+    );
     if (!target) return;
     const contentEl = articleRef.closest(".content");
     if (contentEl) {
@@ -1122,8 +1191,9 @@ export function Preview(props: PreviewProps) {
   // `textContent = ""` on that shared container — detaching our toc
   // from the DOM but leaving the node alive in `tocNode`. So we re-use
   // the cached node to put it back into the (now emptied) container.
-  createTrackedEffect(() => {
-    const container = props.tocContainer;
+  createEffect(
+    () => ({ container: props.tocContainer, tocVis: props.tocVisible }),
+    ({ container, tocVis }) => {
     // Always cleanup first — this also covers the deactivation path,
     // where `container` becomes undefined. Without this, the previous
     // session's scroll listener would keep firing against `articleRef`
@@ -1132,7 +1202,6 @@ export function Preview(props: PreviewProps) {
     cleanupToc?.();
     cleanupToc = undefined;
     if (!container) return;
-    const tocVis = props.tocVisible;
     const fresh = articleRef?.querySelector<HTMLElement>("#toc") ?? null;
     if (fresh) tocNode = fresh;
     const toc = tocNode;
@@ -1147,19 +1216,23 @@ export function Preview(props: PreviewProps) {
         cleanupScroll?.();
       };
     }
-  });
+    return () => {
+      cleanupToc?.();
+      cleanupToc = undefined;
+    };
+    },
+  );
 
-  createTrackedEffect(() => {
-    const _html = props.html;
-    // Also track tocVisible so this re-runs when it changes
-    const tocVis = props.tocVisible;
-
+  createEffect(
+    () => ({ html: props.html, tocVis: props.tocVisible }),
+    ({ html: _html, tocVis }) => {
     if (!articleRef) return;
 
     // Empty HTML (file switch): hide old content but keep it for layout stability.
     // Cancel any in-flight pipeline so stale renders don't swap in.
     if (!_html) {
       ++renderGen;
+      setRenderedHtml(null);
       articleRef.style.opacity = "0";
       // Drop the cached toc handle: the next render will produce a
       // fresh one. Holding on to the old one across a file switch
@@ -1181,6 +1254,10 @@ export function Preview(props: PreviewProps) {
     }
 
     const gen = ++renderGen;
+    // Invalidate the previous generation immediately: a request arriving
+    // during this render must not consume against an article that is about
+    // to be swapped, nor against the half-processed new one.
+    setRenderedHtml(null);
     const isNewDocument = pendingNewDocument;
     pendingNewDocument = false;
     const sanitizedHtml = sanitizeHtmlFragment(_html);
@@ -1236,39 +1313,6 @@ export function Preview(props: PreviewProps) {
       }
 
       articleRef!.style.opacity = "";
-
-      const frag = props.pendingFragment;
-      if (frag) {
-        scrollToFragment(frag);
-        props.onFragmentHandled();
-      }
-
-      // Heading-text jump (Workspace Symbol search / programmatic
-      // navigation that doesn't know the rendered fragment id). Walk
-      // the visible article for h1-h6 nodes, match by trimmed
-      // textContent, scroll into view. Falling back to text rather
-      // than computing a slug ahead of time keeps the matcher
-      // resilient to renderer differences (asciidoctor vs markdown-it
-      // produce different id schemes).
-      const headingText = props.pendingHeadingText;
-      if (headingText && articleRef) {
-        const hs = articleRef.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6");
-        const target = Array.from(hs).find(
-          (h) => h.textContent?.trim() === headingText,
-        );
-        if (target) {
-          const contentEl = articleRef.closest(".content");
-          if (contentEl) {
-            const targetRect = target.getBoundingClientRect();
-            const contentRect = contentEl.getBoundingClientRect();
-            const offset = targetRect.top - contentRect.top + contentEl.scrollTop - 16;
-            contentEl.scrollTo({ top: offset, behavior: "smooth" });
-          } else {
-            target.scrollIntoView({ behavior: "smooth" });
-          }
-        }
-        props.onHeadingHandled?.();
-      }
     }
 
     // New document (file switch): double-buffer to avoid FOUC — process in
@@ -1282,39 +1326,35 @@ export function Preview(props: PreviewProps) {
       wrapImagesForScroll(buffer);
       if (props.resolveImageSrc) rewriteImageSources(buffer, props.resolveImageSrc);
 
-      queueMicrotask(async () => {
-        // Syntax highlighting can run against the detached buffer —
-        // it's pure DOM mutation with no document-level
-        // dependencies, and finishing it before the swap eliminates
-        // the FOUC of unhighlighted code.
-        await highlightCodeBlocks(buffer, gen, isStale);
-        if (isStale(gen)) return;
-
-        // Swap to the live article BEFORE running mermaid / kroki —
-        // both libraries create temp elements in `document.body`
-        // and read layout / fonts off the surrounding document. On
-        // a detached buffer the very first call randomly throws
-        // `null is not an object (evaluating 'element.firstChild')`
-        // because mermaid couldn't measure the temp container's
-        // size. Swap first → live measurement → reliable renders.
-        const scrollContainer = articleRef!.closest(".content");
-        const prevScrollTop = scrollContainer?.scrollTop ?? 0;
-        articleRef!.replaceChildren(...Array.from(buffer.childNodes));
-        if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
-
-        afterSwap(articleRef!, true, tocVis);
-
-        // Wait one paint frame so the freshly-attached article has
-        // been laid out before mermaid measures. Without this, the
-        // first block races with layout and throws `firstChild`.
-        await nextPaintFrame();
-        if (isStale(gen)) return;
-
-        await renderMermaidBlocks(articleRef!, gen, isStale);
-        if (isStale(gen)) return;
-
-        await renderKrokiBlocks(articleRef!, gen, isStale);
-      });
+      queueMicrotask(() =>
+        finishPostProcessing(gen, _html, [
+          // Syntax highlighting can run against the detached buffer —
+          // it's pure DOM mutation with no document-level
+          // dependencies, and finishing it before the swap eliminates
+          // the FOUC of unhighlighted code.
+          () => highlightCodeBlocks(buffer, gen, isStale),
+          async () => {
+            // Swap to the live article BEFORE running mermaid / kroki —
+            // both libraries create temp elements in `document.body`
+            // and read layout / fonts off the surrounding document. On
+            // a detached buffer the very first call randomly throws
+            // `null is not an object (evaluating 'element.firstChild')`
+            // because mermaid couldn't measure the temp container's
+            // size. Swap first → live measurement → reliable renders.
+            const scrollContainer = articleRef!.closest(".content");
+            const prevScrollTop = scrollContainer?.scrollTop ?? 0;
+            articleRef!.replaceChildren(...Array.from(buffer.childNodes));
+            if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
+            afterSwap(articleRef!, true, tocVis);
+          },
+          // Wait one paint frame so the freshly-attached article has
+          // been laid out before mermaid measures. Without this, the
+          // first block races with layout and throws `firstChild`.
+          () => nextPaintFrame(),
+          () => renderMermaidBlocks(articleRef!, gen, isStale),
+          () => renderKrokiBlocks(articleRef!, gen, isStale),
+        ]),
+      );
     } else {
       const scrollContainer = articleRef!.closest(".content");
       const prevScrollTop = scrollContainer?.scrollTop ?? 0;
@@ -1326,17 +1366,110 @@ export function Preview(props: PreviewProps) {
 
       afterSwap(articleRef!, false, tocVis);
 
-      queueMicrotask(async () => {
-        await highlightCodeBlocks(articleRef!, gen, isStale);
-        if (isStale(gen)) return;
-
-        await renderMermaidBlocks(articleRef!, gen, isStale);
-        if (isStale(gen)) return;
-
-        await renderKrokiBlocks(articleRef!, gen, isStale);
-      });
+      queueMicrotask(() =>
+        finishPostProcessing(gen, _html, [
+          () => highlightCodeBlocks(articleRef!, gen, isStale),
+          () => renderMermaidBlocks(articleRef!, gen, isStale),
+          () => renderKrokiBlocks(articleRef!, gen, isStale),
+        ]),
+      );
     }
+    return () => {
+      ++renderGen;
+    };
+    },
+  );
+
+  // A jump request belongs to the document that was current when the
+  // request was made. The host keeps pendingFragment/pendingHeadingText in
+  // global signals, and the readiness wait can keep them alive while a
+  // diagram from the previous file is still rendering. Track the owner in
+  // the same computation as the path: when the path and a new request
+  // arrive together (either order), the new file owns the request; when
+  // only the path changes, the old request is discarded here. The host's
+  // completion callback is deliberately NOT called for the new document.
+  const [requestOwner, setRequestOwner] = createSignal<string | null>(null);
+  let lastRequestPath: string | null = null;
+  let lastFragment: string | null = null;
+  let lastHeading: string | null = null;
+  createEffect(
+    () => ({
+      path: props.currentFilePath ?? null,
+      fragment: props.pendingFragment,
+      heading: props.pendingHeadingText ?? null,
+    }),
+    ({ path, fragment, heading }) => {
+      const droppedFragment = lastFragment;
+      const droppedHeading = lastHeading;
+      const requestChanged = fragment !== droppedFragment || heading !== droppedHeading;
+      const pathChanged = path !== lastRequestPath;
+      lastFragment = fragment;
+      lastHeading = heading;
+      lastRequestPath = path;
+      if (requestChanged) {
+        setRequestOwner(fragment || heading ? path : null);
+      } else if (pathChanged) {
+        setRequestOwner(null);
+      }
+      if (pathChanged) {
+        // The old request belongs to the previous document. Report it as
+        // dropped — never as handled — so the host can clear its signal.
+        // A new request for the new document may already be in the host
+        // signal; the host decides by comparing the value before clearing.
+        if (droppedFragment) props.onFragmentDiscarded?.(droppedFragment);
+        if (droppedHeading) props.onHeadingDiscarded?.(droppedHeading);
+      }
+    },
+  );
+
+  // A host can destroy this Preview before the path-change effect above
+  // runs — switching from a Markdown file to an HTML file replaces the
+  // component with HtmlPreview. If a request still belongs to this
+  // instance, hand it back as discarded from teardown so it cannot jump
+  // when the Markdown file is reopened. The host clears only when the
+  // value still matches, so a newer request survives; a handled request
+  // already made `requestOwner` null and is never reported here.
+  onCleanup(() => {
+    if (untrack(requestOwner) === null) return;
+    if (lastFragment) props.onFragmentDiscarded?.(lastFragment);
+    if (lastHeading) props.onHeadingDiscarded?.(lastHeading);
   });
+
+  // Navigation requests can arrive while the document is already on
+  // screen — choosing a symbol in the current file writes
+  // `pendingHeadingText`, and a #fragment on the current file writes
+  // `pendingFragment` without changing `html`. Both must be tracked in
+  // the compute; reading them from the html effect's apply phase missed
+  // those requests entirely. This effect only performs the jump: html
+  // still renders in its own effect, so a request change never re-renders
+  // the document.
+  createEffect(
+    () => ({
+      fragment: props.pendingFragment,
+      heading: props.pendingHeadingText,
+      // `renderedHtml` is published only after the current generation's
+      // post-processing finishes. Waiting for it prevents a jump into a
+      // half-processed article and a double jump when the file and the
+      // request arrive in the same update.
+      ready: !!props.html && renderedHtml() === props.html,
+      owner: requestOwner(),
+    }),
+    ({ fragment, heading, ready, owner }) => {
+      if (!ready || !articleRef) return;
+      // A request left over from another file must never be consumed
+      // against this article, even when its fragment/heading also exists
+      // here (homonymous targets). Ownership is null once dropped.
+      if (owner === null || owner !== (props.currentFilePath ?? null)) return;
+      if (fragment) {
+        scrollToFragment(fragment);
+        props.onFragmentHandled();
+      }
+      if (heading) {
+        scrollToHeading(heading);
+        props.onHeadingHandled?.();
+      }
+    },
+  );
 
   return (
     <div class="preview-scope">
