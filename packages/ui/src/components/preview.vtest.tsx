@@ -745,13 +745,18 @@ describe("Preview — navigation readiness after post-processing", () => {
 
   it("does not jump in a file replaced while a diagram is still rendering", async () => {
     diagramCtl.mode.mermaid = "pending";
+    const [path, setPath] = createSignal("a.md");
     const [html, setHtml] = createSignal('<h1 id="old">Old</h1>');
     const [fragment, setFragment] = createSignal<string | null>(null);
-    const handled = vi.fn(() => setFragment(null));
+    const completions: string[] = [];
+    const handled = vi.fn(() => {
+      completions.push(path());
+      setFragment(null);
+    });
     const { container } = render(() => (
       <div class="content">
         <Preview
-          {...withDefaults({ html: html(), currentFilePath: "a.md" })}
+          {...withDefaults({ html: html(), currentFilePath: path() })}
           pendingFragment={fragment()}
           onFragmentHandled={handled}
         />
@@ -770,6 +775,9 @@ describe("Preview — navigation readiness after post-processing", () => {
     await tick();
     expect(handled).not.toHaveBeenCalled();
 
+    // Real file switch: the request belonged to a.md; opening b.md must
+    // discard it without completing it in the new document.
+    setPath("b.md");
     setHtml('<h1 id="other">Other</h1>');
     flush();
     resolveDiagram("mermaid");
@@ -777,14 +785,15 @@ describe("Preview — navigation readiness after post-processing", () => {
     await tick();
 
     expect(container.querySelector("#other")).not.toBeNull();
-    // The stale request is cleared against the new article, but it must not
-    // scroll: the old diagram's completion cannot unlock the old position.
+    // The old diagram's completion cannot unlock the old position, and the
+    // new article never reports the old request as handled.
     expect(scroll).not.toHaveBeenCalled();
-    expect(handled).toHaveBeenCalledTimes(1);
+    expect(completions).toEqual([]);
+    expect(handled).not.toHaveBeenCalled();
 
     setFragment("other");
     flush();
-    await waitFor(() => expect(handled).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(completions).toEqual(["b.md"]));
     expect(scroll).toHaveBeenCalledTimes(1);
   });
 
@@ -817,6 +826,195 @@ describe("Preview — navigation readiness after post-processing", () => {
       expect(scroll).toHaveBeenCalledTimes(1);
     });
   }
+});
+
+describe("Preview — a jump request belongs to its own document", () => {
+  type RequestKind = "heading" | "fragment";
+  type Order = "path-first" | "request-first";
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
+  const READY_SVG = '<svg viewBox="0 0 10 400"><text>Ready</text></svg>';
+  const A_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="target">Target</h1>';
+  const B_TARGET_HTML = '<h1 id="target">Target</h1><p>FILE B</p>';
+  const B_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="target">Target</h1><p>FILE B</p>';
+  const scrollers: HTMLElement[] = [];
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    diagramCtl.reset();
+    for (const el of scrollers.splice(0)) el.remove();
+  });
+
+  function mountPreview(opts: {
+    path: () => string;
+    html: () => string;
+    fragment: () => string | null;
+    heading: () => string | null;
+    completions: string[];
+    setFragment?: (value: string | null) => void;
+    setHeading?: (value: string | null) => void;
+  }) {
+    const scroller = document.createElement("div");
+    scroller.className = "content";
+    document.body.appendChild(scroller);
+    scrollers.push(scroller);
+    const scroll = vi.spyOn(scroller, "scrollTo").mockImplementation(() => {});
+    render(() => (
+      <Preview
+        {...withDefaults({ html: opts.html(), currentFilePath: opts.path() })}
+        pendingFragment={opts.fragment()}
+        pendingHeadingText={opts.heading()}
+        onFragmentHandled={() => {
+          opts.completions.push(opts.path());
+          opts.setFragment?.(null);
+        }}
+        onHeadingHandled={() => {
+          opts.completions.push(opts.path());
+          opts.setHeading?.(null);
+        }}
+      />
+    ), { container: scroller });
+    return { scroller, scroll };
+  }
+
+  for (const kind of ["heading", "fragment"] as const) {
+    it(`does not apply an A ${kind} request to a homonymous target in B`, async () => {
+      diagramCtl.mode.mermaid = "pending";
+      const [path, setPath] = createSignal("a.md");
+      const [html, setHtml] = createSignal(A_DIAGRAM_HTML);
+      const [fragment, setFragment] = createSignal<string | null>(kind === "fragment" ? "target" : null);
+      const [heading, setHeading] = createSignal<string | null>(kind === "heading" ? "Target" : null);
+      const completions: string[] = [];
+      const { scroller, scroll } = mountPreview({
+        path, html, fragment, heading, completions, setFragment, setHeading,
+      });
+      await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+      expect(completions).toEqual([]);
+      expect(scroll).not.toHaveBeenCalled();
+
+      // The real file switch passes through empty HTML, then B's article.
+      setPath("b.md");
+      setHtml("");
+      flush();
+      setHtml(B_TARGET_HTML);
+      flush();
+      await tick();
+      await tick();
+      // A's renderer finishes after B is already on screen.
+      diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+      await tick();
+      await tick();
+
+      expect(scroller.textContent).toContain("FILE B");
+      expect(scroll).not.toHaveBeenCalled();
+      expect(completions).toEqual([]);
+    });
+  }
+
+  it("shows a plain document before any paint-frame callback and completes its request once", async () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const [fragment, setFragment] = createSignal<string | null>("target");
+    const completions: string[] = [];
+    const { scroller, scroll } = mountPreview({
+      path: () => "a.md",
+      html: () => '<h1 id="target">Target</h1>',
+      fragment,
+      heading: () => null,
+      completions,
+      setFragment,
+    });
+    expect(scroller.querySelector("article")?.textContent).toBe("Target");
+    expect(scroller.querySelector("article")?.style.opacity).not.toBe("0");
+    await waitFor(() => expect(completions).toEqual(["a.md"]));
+    expect(scroll).toHaveBeenCalledTimes(1);
+    raf.mockRestore();
+  });
+
+  for (const kind of ["heading", "fragment"] as const) {
+    for (const order of ["path-first", "request-first"] as const) {
+      it(`opens B with a B ${kind} request (${order}): one jump after the SVG`, async () => {
+        diagramCtl.mode.mermaid = "pending";
+        const [path, setPath] = createSignal("a.md");
+        const [html, setHtml] = createSignal('<h1 id="old">Old</h1>');
+        const [fragment, setFragment] = createSignal<string | null>(null);
+        const [heading, setHeading] = createSignal<string | null>(null);
+        const completions: string[] = [];
+        const { scroller, scroll } = mountPreview({
+          path, html, fragment, heading, completions, setFragment, setHeading,
+        });
+        await tick();
+        const setRequest = () => {
+          if (kind === "heading") setHeading("Target");
+          else setFragment("target");
+        };
+        setHtml("");
+        if (order === "path-first") {
+          setPath("b.md");
+          setRequest();
+        } else {
+          setRequest();
+          setPath("b.md");
+        }
+        flush();
+        setHtml(B_DIAGRAM_HTML);
+        flush();
+        await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+        expect(completions).toEqual([]);
+        expect(scroll).not.toHaveBeenCalled();
+
+        const target = scroller.querySelector("#target") as HTMLElement;
+        vi.spyOn(target, "getBoundingClientRect").mockImplementation(
+          () => ({ top: 500 }) as DOMRect,
+        );
+        diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+        await waitFor(() =>
+          expect(scroller.querySelector('.mermaid[data-processed="true"] svg')).not.toBeNull(),
+        );
+        await tick();
+
+        expect(scroller.textContent).toContain("FILE B");
+        expect(completions).toEqual(["b.md"]);
+        expect(scroll).toHaveBeenCalledTimes(1);
+        expect(scroll).toHaveBeenLastCalledWith({ top: 484, behavior: "smooth" });
+      });
+    }
+  }
+
+  it("does not resurrect a discarded request when the old file is reopened", async () => {
+    diagramCtl.mode.mermaid = "pending";
+    const [path, setPath] = createSignal("a.md");
+    const [html, setHtml] = createSignal(A_DIAGRAM_HTML);
+    const [fragment, setFragment] = createSignal<string | null>("target");
+    const completions: string[] = [];
+    const { scroller, scroll } = mountPreview({
+      path, html, fragment, heading: () => null, completions, setFragment,
+    });
+    await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+    expect(completions).toEqual([]);
+
+    setPath("b.md");
+    setHtml(B_TARGET_HTML);
+    flush();
+    diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+    await tick();
+    expect(completions).toEqual([]);
+
+    setPath("a.md");
+    setHtml('<h1 id="target">Target AGAIN</h1>');
+    flush();
+    await tick();
+    await tick();
+    expect(scroll).not.toHaveBeenCalled();
+    expect(completions).toEqual([]);
+
+    // A brand-new request in the reopened document still works.
+    setFragment(null);
+    flush();
+    setFragment("target");
+    flush();
+    await waitFor(() => expect(completions).toEqual(["a.md"]));
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("FrontmatterPanel — collapse state follows the file", () => {

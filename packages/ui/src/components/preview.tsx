@@ -1372,6 +1372,38 @@ export function Preview(props: PreviewProps) {
     },
   );
 
+  // A jump request belongs to the document that was current when the
+  // request was made. The host keeps pendingFragment/pendingHeadingText in
+  // global signals, and the readiness wait can keep them alive while a
+  // diagram from the previous file is still rendering. Track the owner in
+  // the same computation as the path: when the path and a new request
+  // arrive together (either order), the new file owns the request; when
+  // only the path changes, the old request is discarded here. The host's
+  // completion callback is deliberately NOT called for the new document.
+  const [requestOwner, setRequestOwner] = createSignal<string | null>(null);
+  let lastRequestPath: string | null = null;
+  let lastFragment: string | null = null;
+  let lastHeading: string | null = null;
+  createEffect(
+    () => ({
+      path: props.currentFilePath ?? null,
+      fragment: props.pendingFragment,
+      heading: props.pendingHeadingText ?? null,
+    }),
+    ({ path, fragment, heading }) => {
+      const requestChanged = fragment !== lastFragment || heading !== lastHeading;
+      const pathChanged = path !== lastRequestPath;
+      lastFragment = fragment;
+      lastHeading = heading;
+      lastRequestPath = path;
+      if (requestChanged) {
+        setRequestOwner(fragment || heading ? path : null);
+      } else if (pathChanged) {
+        setRequestOwner(null);
+      }
+    },
+  );
+
   // Navigation requests can arrive while the document is already on
   // screen — choosing a symbol in the current file writes
   // `pendingHeadingText`, and a #fragment on the current file writes
@@ -1389,9 +1421,14 @@ export function Preview(props: PreviewProps) {
       // half-processed article and a double jump when the file and the
       // request arrive in the same update.
       ready: !!props.html && renderedHtml() === props.html,
+      owner: requestOwner(),
     }),
-    ({ fragment, heading, ready }) => {
+    ({ fragment, heading, ready, owner }) => {
       if (!ready || !articleRef) return;
+      // A request left over from another file must never be consumed
+      // against this article, even when its fragment/heading also exists
+      // here (homonymous targets). Ownership is null once dropped.
+      if (owner === null || owner !== (props.currentFilePath ?? null)) return;
       if (fragment) {
         scrollToFragment(fragment);
         props.onFragmentHandled();
