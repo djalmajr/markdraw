@@ -27,6 +27,10 @@ mod platform;
 #[path = "windows.rs"]
 mod platform;
 
+mod confined;
+mod disk;
+mod scrub;
+
 const MAX_FRAME: usize = 64 * 1024;
 const MAX_RESPONSE: usize = 4 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 16;
@@ -68,6 +72,7 @@ struct Root {
 #[derive(Default)]
 pub struct Registry {
     roots: RwLock<Vec<Root>>,
+    cursors: disk::Cursors,
 }
 impl Registry {
     pub fn replace(&self, inputs: Vec<RootInput>) -> io::Result<()> {
@@ -111,6 +116,8 @@ impl Registry {
         if serde_json::to_vec(&response).map_err(|_| invalid())?.len() > MAX_RESPONSE {
             return Err(invalid());
         }
+        self.cursors
+            .retain_roots(&next.iter().map(|r| r.id.clone()).collect::<Vec<_>>());
         *roots = next;
         Ok(())
     }
@@ -122,7 +129,7 @@ impl Registry {
         Ok(Self::list_roots(&roots))
     }
     fn list_roots(roots: &[Root]) -> Value {
-        json!({"roots": roots.iter().map(|root| json!({"id":root.id,"name":root.name})).collect::<Vec<_>>()})
+        json!({"roots": roots.iter().map(|root| json!({"id":root.id,"name":scrub::scrub(&root.name)})).collect::<Vec<_>>()})
     }
 }
 
@@ -221,6 +228,8 @@ struct Auth {
 struct Request {
     id: u64,
     method: String,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    arguments: Value,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -266,11 +275,23 @@ async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(
     loop {
         let request: Request = receive(&mut stream).await?;
         // Strictly increasing IDs bound replay memory for arbitrary sessions.
-        if request.id <= last_id || request.method != "list_workspaces" {
+        if request.id <= last_id {
             return Err(invalid());
         }
         last_id = request.id;
-        let result = registry.list()?;
+        let result = if request.method == "list_workspaces" {
+            if !request.arguments.is_null() && request.arguments != json!({}) {
+                json!({"mcp_error":"invalid arguments"})
+            } else {
+                registry.list()?
+            }
+        } else {
+            let registry = registry.clone();
+            tokio::task::spawn_blocking(move || registry.disk(&request.method, request.arguments))
+                .await
+                .map_err(|_| invalid())?
+                .unwrap_or_else(|message| json!({"mcp_error":message}))
+        };
         send_response(
             &mut stream,
             &Response {
@@ -335,6 +356,9 @@ impl Proxy {
         }
     }
     async fn call(&self) -> io::Result<Value> {
+        self.call_named("list_workspaces", Value::Null).await
+    }
+    async fn call_named(&self, method: &str, arguments: Value) -> io::Result<Value> {
         let _permit = self
             .limit
             .try_acquire()
@@ -351,7 +375,8 @@ impl Proxy {
                 &mut stream,
                 &Request {
                     id: 1,
-                    method: "list_workspaces".into(),
+                    method: method.into(),
+                    arguments,
                 },
             )
             .await?;
@@ -385,7 +410,31 @@ impl ServerHandler for Proxy {
         );
         tool.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(true));
         Ok(ListToolsResult {
-            tools: vec![tool],
+            tools: {
+                let mut tools = vec![tool];
+                for (name, properties, required) in [
+                    (
+                        "list_files",
+                        json!({"root_id":{"type":"string"},"path":{"type":"string","minLength":1},"cursor":{"type":"string"}}),
+                        json!(["root_id"]),
+                    ),
+                    (
+                        "read_file",
+                        json!({"root_id":{"type":"string"},"path":{"type":"string","minLength":1},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}}),
+                        json!(["root_id", "path"]),
+                    ),
+                    (
+                        "search_workspace",
+                        json!({"root_id":{"type":"string"},"query":{"type":"string","minLength":1},"cursor":{"type":"string"}}),
+                        json!(["root_id", "query"]),
+                    ),
+                ] {
+                    let mut tool = Tool::new(name, "Read disk contents of an open workspace; secrets are masked", json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}).as_object().unwrap().clone());
+                    tool.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(true));
+                    tools.push(tool);
+                }
+                tools
+            },
             ..Default::default()
         })
     }
@@ -394,11 +443,18 @@ impl ServerHandler for Proxy {
         request: CallToolRequestParams,
         _: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
-        if request.name != "list_workspaces"
-            || request
-                .arguments
-                .as_ref()
-                .is_some_and(|args| !args.is_empty())
+        if ![
+            "list_workspaces",
+            "list_files",
+            "read_file",
+            "search_workspace",
+        ]
+        .contains(&request.name.as_ref())
+            || (request.name == "list_workspaces"
+                && request
+                    .arguments
+                    .as_ref()
+                    .is_some_and(|args| !args.is_empty()))
             || request.task.is_some()
         {
             return Err(ErrorData::invalid_params(
@@ -406,17 +462,30 @@ impl ServerHandler for Proxy {
                 None,
             ));
         }
-        self.call()
-            .await
-            .map(CallToolResult::structured)
-            .map_err(|error| {
-                let message = match error.kind() {
-                    io::ErrorKind::TimedOut => "Markdraw request timed out; try again",
-                    io::ErrorKind::WouldBlock => "Too many Markdraw requests; try again",
-                    _ => NOT_RUNNING,
-                };
-                ErrorData::internal_error(message, None)
-            })
+        self.call_named(
+            &request.name,
+            request
+                .arguments
+                .map(Value::Object)
+                .unwrap_or_else(|| json!({})),
+        )
+        .await
+        .map(|result| {
+            if let Some(message) = result.get("mcp_error").and_then(Value::as_str) {
+                CallToolResult::error(vec![rmcp::model::Content::text(message)])
+            } else {
+                CallToolResult::structured(result)
+            }
+        })
+        .map_err(|error| {
+            let message = match error.kind() {
+                io::ErrorKind::TimedOut if request.name == "read_file" => "timed out",
+                io::ErrorKind::TimedOut => "Markdraw request timed out; try again",
+                io::ErrorKind::WouldBlock => "Too many Markdraw requests; try again",
+                _ => NOT_RUNNING,
+            };
+            ErrorData::internal_error(message, None)
+        })
     }
 }
 
