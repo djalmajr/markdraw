@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onSettled, Show, untrack } from "solid-js";
 import { createConverter } from "@markdraw/core/converter.ts";
 import ConvertWorker from "@markdraw/core/convert-worker.ts?worker";
 import type { IndexedFile } from "@markdraw/core/file-index.ts";
@@ -1672,7 +1672,7 @@ export function App() {
     },
   );
 
-  onSettled(() => () => {
+  onCleanup(() => {
     clearTimeout(autoSaveTimer);
     watcher.destroy();
   });
@@ -2358,6 +2358,7 @@ export function App() {
     () => {
       const tier = indexingTier();
       rootPaths(); // re-index when the open roots change
+      state.rootsList(); // ...and when their trees change (watcher adds a file)
       return tier;
     },
     (tier) => {
