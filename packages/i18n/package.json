@@ -19,6 +19,6 @@
   "devDependencies": {
     "@inlang/paraglide-js": "^3.2.2",
     "solid-js": "2.0.1",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   }
 }
