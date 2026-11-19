@@ -8,7 +8,7 @@
 // pane. Lesson 5 fixed `file-loader.ts`; this suite audits +
 // regression-locks the same fix on `folder.ts` handlers.
 
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { installLocalStorageMock } from "@markdraw/core/test-utils.ts";
 import { createPaneManager } from "@markdraw/ui/composables/create-pane-manager.ts";
 import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
@@ -19,6 +19,9 @@ installLocalStorageMock();
 // the Tauri clipboard plugin — neither is available in bun. We stub
 // them with controllable promises so the tests can park the await
 // and flip panes between request and response.
+let restoreMcpInvoke: (() => void) | undefined;
+let mcpRootsCalls: Array<Array<{ path: string; name: string }>> = [];
+
 let resolveWrite: (() => void) | undefined;
 let resolveRename: (() => void) | undefined;
 let resolveTrash: (() => void) | undefined;
@@ -104,6 +107,7 @@ mock.module("@tauri-apps/plugin-dialog", () => ({
 }));
 
 import { createFolder } from "./folder.ts";
+import * as tauriIpc from "./chaos-invoke.ts";
 
 function makeState(paneManager: ReturnType<typeof createPaneManager>): AppState {
   // The proxies read `paneManager.activePane()` on each access. Real
@@ -144,6 +148,7 @@ function setupTwoPanes() {
 }
 
 beforeEach(() => {
+  mcpRootsCalls = [];
   resolveWrite = undefined;
   resolveRename = undefined;
   resolveTrash = undefined;
@@ -157,6 +162,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  restoreMcpInvoke?.();
+  restoreMcpInvoke = undefined;
   localStorage.clear();
 });
 
@@ -470,5 +477,61 @@ describe("handleRevealInFileManager", () => {
     });
     await folder.handleRevealInFileManager({ name: "x.md", path: "x.md", kind: "file" }, "ghost");
     expect(revealCalls).toEqual([]);
+  });
+});
+
+describe("createFolder MCP workspace labels", () => {
+  function setup() {
+    const invokeSpy = spyOn(tauriIpc, "invoke").mockImplementation(async (command, args) => {
+      if (command === "mcp_set_roots") {
+        mcpRootsCalls.push((args as { roots: Array<{ path: string; name: string }> }).roots);
+      }
+      return undefined as never;
+    });
+    restoreMcpInvoke = () => invokeSpy.mockRestore();
+    let roots = new Map<string, string>();
+    const state = makeState(createPaneManager());
+    const folder = createFolder({
+      rootPaths: () => roots,
+      setRootPaths: ((value: Map<string, string> | ((previous: Map<string, string>) => Map<string, string>)) => {
+        roots = typeof value === "function" ? value(roots) : value;
+        return roots;
+      }),
+      state,
+      watcher,
+    });
+    return folder;
+  }
+
+  for (const path of ["/", "", "///", "\\\\", "/notes/\0"]) {
+    it(`sends Root instead of an empty or separator-only label for ${JSON.stringify(path)}`, async () => {
+      const folder = setup();
+      const opening = folder.openFolderPath(path);
+      resolveReadTree?.([]);
+      expect(await opening).toBe(true);
+      expect(mcpRootsCalls.at(-1)).toEqual([{ path: path.replace(/\\/g, "/"), name: "Root" }]);
+    });
+  }
+
+  it("keeps duplicate Root labels as separate paths when opening / and a real Root folder", async () => {
+    const folder = setup();
+    const first = folder.openFolderPath("/");
+    resolveReadTree?.([]);
+    expect(await first).toBe(true);
+    const second = folder.openFolderPath("/notes/Root");
+    resolveReadTree?.([]);
+    expect(await second).toBe(true);
+    expect(mcpRootsCalls.at(-1)).toEqual([
+      { path: "/", name: "Root" },
+      { path: "/notes/Root", name: "Root" },
+    ]);
+  });
+
+  it("preserves a normal folder label", async () => {
+    const folder = setup();
+    const opening = folder.openFolderPath("/notes/Plans");
+    resolveReadTree?.([]);
+    expect(await opening).toBe(true);
+    expect(mcpRootsCalls.at(-1)).toEqual([{ path: "/notes/Plans", name: "Plans" }]);
   });
 });

@@ -11,9 +11,9 @@ import {
   tryParse,
 } from "../src/schemas.ts";
 
-export function fuzz(data: Buffer): void {
+export function fuzz(data) {
   const input = data.toString("utf8");
-  let parsed: unknown;
+  let parsed;
   try {
     parsed = JSON.parse(input);
   } catch {

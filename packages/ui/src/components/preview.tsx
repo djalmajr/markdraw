@@ -115,6 +115,13 @@ function initMermaid(force = false) {
   mermaid.initialize({
     startOnLoad: false,
     theme: document.documentElement.classList.contains("dark") ? "dark" : "default",
+    // Pin the mermaid 11 appearance. Mermaid 12 defaults to the `neo` look and
+    // to ELK as the layout engine, which recolours and re-routes every existing
+    // diagram (the upstream 12.0.0 notes name exactly these two options: "add
+    // `layout: dagre`, `theme: default` and `look: classic` to your config to
+    // keep the old look"). The new look is a separate, later product decision.
+    look: "classic",
+    layout: "dagre",
     securityLevel: "strict",
     fontFamily: "inherit",
   });

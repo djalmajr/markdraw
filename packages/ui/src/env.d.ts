@@ -2,9 +2,20 @@
 /// <reference types="unplugin-icons/types/solid" />
 /// <reference types="chrome-types" />
 
+// markdown-it 15 ships its own types and dropped the global `MarkdownIt`
+// namespace that `@types/markdown-it` used to provide (`PluginSimple`,
+// `PluginWithOptions`). These aliases keep the plugin declarations below
+// readable without a top-level import, which would turn this file into a
+// module and break the ambient `declare module` blocks.
+type MarkdownItInstance = import("markdown-it").MarkdownIt;
+type MarkdownItPlugin = (md: MarkdownItInstance) => void;
+type MarkdownItPluginWithOptions<Options> = (
+  md: MarkdownItInstance,
+  options?: Options,
+) => void;
+
 declare module "markdown-it-task-lists" {
-  import type MarkdownIt from "markdown-it";
-  const plugin: MarkdownIt.PluginWithOptions<{
+  const plugin: MarkdownItPluginWithOptions<{
     enabled?: boolean;
     label?: boolean;
     labelAfter?: boolean;
@@ -13,57 +24,48 @@ declare module "markdown-it-task-lists" {
 }
 
 declare module "markdown-it-footnote" {
-  import type MarkdownIt from "markdown-it";
-  const plugin: MarkdownIt.PluginSimple;
+  const plugin: MarkdownItPlugin;
   export default plugin;
 }
 
 declare module "markdown-it-emoji" {
-  import type MarkdownIt from "markdown-it";
-  export const full: MarkdownIt.PluginSimple;
-  export const light: MarkdownIt.PluginSimple;
-  export const bare: MarkdownIt.PluginSimple;
+  export const full: MarkdownItPlugin;
+  export const light: MarkdownItPlugin;
+  export const bare: MarkdownItPlugin;
 }
 
 declare module "markdown-it-deflist" {
-  import type MarkdownIt from "markdown-it";
-  const plugin: MarkdownIt.PluginSimple;
+  const plugin: MarkdownItPlugin;
   export default plugin;
 }
 
 declare module "markdown-it-abbr" {
-  import type MarkdownIt from "markdown-it";
-  const plugin: MarkdownIt.PluginSimple;
+  const plugin: MarkdownItPlugin;
   export default plugin;
 }
 
 declare module "markdown-it-sub" {
-  import type MarkdownIt from "markdown-it";
-  const plugin: MarkdownIt.PluginSimple;
+  const plugin: MarkdownItPlugin;
   export default plugin;
 }
 
 declare module "markdown-it-sup" {
-  import type MarkdownIt from "markdown-it";
-  const plugin: MarkdownIt.PluginSimple;
+  const plugin: MarkdownItPlugin;
   export default plugin;
 }
 
 declare module "markdown-it-ins" {
-  import type MarkdownIt from "markdown-it";
-  const plugin: MarkdownIt.PluginSimple;
+  const plugin: MarkdownItPlugin;
   export default plugin;
 }
 
 declare module "markdown-it-mark" {
-  import type MarkdownIt from "markdown-it";
-  const plugin: MarkdownIt.PluginSimple;
+  const plugin: MarkdownItPlugin;
   export default plugin;
 }
 
 declare module "markdown-it-multimd-table" {
-  import type MarkdownIt from "markdown-it";
-  const plugin: MarkdownIt.PluginWithOptions<{
+  const plugin: MarkdownItPluginWithOptions<{
     multiline?: boolean;
     rowspan?: boolean;
     headerless?: boolean;
@@ -74,8 +76,7 @@ declare module "markdown-it-multimd-table" {
 }
 
 declare module "markdown-it-container" {
-  import type MarkdownIt from "markdown-it";
-  const plugin: MarkdownIt.PluginWithOptions<{
+  const plugin: MarkdownItPluginWithOptions<{
     validate?: (params: string) => boolean | RegExpMatchArray | null;
     render?: (tokens: any[], idx: number, options: any, env: any, self: any) => string;
     marker?: string;

@@ -1,0 +1,772 @@
+use super::*;
+use tokio::io::{AsyncWriteExt, BufReader};
+
+#[tokio::test]
+async fn framing_rejects_unterminated_and_oversized_lines() {
+    let mut valid = &b"{}\n"[..];
+    assert_eq!(read_frame(&mut valid).await.unwrap(), b"{}");
+    let mut partial = &b"{}"[..];
+    assert!(read_frame(&mut partial).await.is_err());
+    let bytes = [vec![b'x'; MAX_FRAME + 1], vec![b'\n']].concat();
+    assert!(read_frame(&mut bytes.as_slice()).await.is_err());
+    let boundary = [vec![b'x'; MAX_FRAME], vec![b'\n']].concat();
+    assert_eq!(
+        read_frame(&mut boundary.as_slice()).await.unwrap().len(),
+        MAX_FRAME
+    );
+}
+
+#[tokio::test]
+async fn timeout_covers_a_line_without_newline() {
+    let (mut sender, receiver) = tokio::io::duplex(128);
+    sender.write_all(b"{").await.unwrap();
+    let result = tokio::time::timeout(
+        Duration::from_millis(250),
+        timed_frame(&mut BufReader::new(receiver), Duration::from_millis(20)),
+    )
+    .await
+    .expect("frame deadline must fire before outer watchdog");
+    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
+}
+
+#[test]
+fn identity_never_crosses_builds() {
+    assert_ne!(build_identity(true), build_identity(false));
+    assert_eq!(build_identity(true), "app.markdraw-dev");
+    assert_eq!(build_identity(false), "app.markdraw");
+}
+
+#[test]
+fn registry_is_atomic_and_ids_are_session_local() {
+    let registry = Registry::default();
+    let root = RootInput {
+        name: "notes".into(),
+        path: std::env::current_dir().unwrap(),
+    };
+    registry.replace(vec![root.clone()]).unwrap();
+    let first = registry.list().unwrap();
+    registry.replace(vec![root.clone()]).unwrap();
+    assert_eq!(registry.list().unwrap(), first);
+    let other = Registry::default();
+    other.replace(vec![root]).unwrap();
+    assert_ne!(other.list().unwrap(), first);
+    registry.replace(vec![]).unwrap();
+    assert_eq!(registry.list().unwrap(), serde_json::json!({"roots":[]}));
+    assert!(!first.to_string().contains(
+        &std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    ));
+    // Reject the entire replacement rather than partially authorizing it.
+    assert!(registry
+        .replace(vec![RootInput {
+            name: "bad".into(),
+            path: "relative".into()
+        }])
+        .is_err());
+    assert_eq!(registry.list().unwrap(), serde_json::json!({"roots":[]}));
+}
+
+#[cfg(unix)]
+fn fixture() -> tempfile::TempDir {
+    // Honors TMPDIR when set, else the system temp dir (CI).
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = tempfile::tempdir_in(
+        std::env::temp_dir(),
+    )
+    .unwrap();
+    std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    fixture
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn permissions_symlinks_live_owner_and_orphan_cleanup() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let fixture = fixture();
+    let directory = fixture.path().join("endpoint");
+    let registry = Arc::new(Registry::default());
+    let endpoint = platform::Endpoint::start(&directory, registry.clone()).unwrap();
+    assert_eq!(
+        std::fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert_eq!(
+        std::fs::metadata(directory.join("token"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert_eq!(
+        std::fs::metadata(directory.join("ipc.sock"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    let original = std::fs::read(directory.join("token")).unwrap();
+    assert!(platform::Endpoint::start(&directory, registry.clone()).is_err());
+    assert_eq!(std::fs::read(directory.join("token")).unwrap(), original);
+    drop(endpoint);
+    assert!(!directory.join("token").exists());
+    assert!(!directory.join("ipc.sock").exists());
+    // A dead listener with secure artifacts is reclaimed; a live listener is not.
+    let old = std::os::unix::net::UnixListener::bind(directory.join("ipc.sock")).unwrap();
+    std::fs::set_permissions(
+        directory.join("ipc.sock"),
+        std::fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    std::fs::write(directory.join("token"), "a".repeat(64)).unwrap();
+    std::fs::set_permissions(
+        directory.join("token"),
+        std::fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    assert!(platform::Endpoint::start(&directory, registry.clone()).is_err());
+    drop(old);
+    let next = platform::Endpoint::start(&directory, registry.clone()).unwrap();
+    assert_ne!(std::fs::read(directory.join("token")).unwrap(), original);
+    std::fs::set_permissions(
+        directory.join("token"),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    assert!(platform::connect(&directory).await.is_err());
+    std::fs::set_permissions(
+        directory.join("token"),
+        std::fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    assert!(platform::connect(&directory).await.is_ok());
+    std::fs::set_permissions(
+        directory.join("ipc.sock"),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    assert!(platform::connect(&directory).await.is_err());
+    std::fs::set_permissions(
+        directory.join("ipc.sock"),
+        std::fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    assert!(platform::connect(&directory).await.is_ok());
+    drop(next);
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(platform::Endpoint::start(&directory, registry.clone()).is_err());
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let link = fixture.path().join("link");
+    symlink(&directory, &link).unwrap();
+    assert!(platform::Endpoint::start(&link, registry.clone()).is_err());
+    symlink(fixture.path().join("victim"), directory.join("ipc.sock")).unwrap();
+    assert!(platform::Endpoint::start(&directory, registry.clone()).is_err());
+    std::fs::remove_file(directory.join("ipc.sock")).unwrap();
+    symlink(fixture.path().join("victim"), directory.join("token")).unwrap();
+    assert!(platform::Endpoint::start(&directory, registry).is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn authentication_invalid_json_repeated_ids_and_limits() {
+    let fixture = fixture();
+    let directory = fixture.path().join("endpoint");
+    let _endpoint = platform::Endpoint::start(&directory, Arc::new(Registry::default())).unwrap();
+    for auth in [
+        serde_json::json!({"id":0}),
+        serde_json::json!({"id":0,"token":"wrong"}),
+        serde_json::json!({"id":0,"method":"list_workspaces"}),
+    ] {
+        let (stream, _) = platform::connect(&directory).await.unwrap();
+        let mut stream = BufReader::new(stream);
+        send(&mut stream, &auth).await.unwrap();
+        assert!(timed_frame(&mut stream, REQUEST_TIMEOUT).await.is_err());
+    }
+    let (stream, token) = platform::connect(&directory).await.unwrap();
+    let mut stream = BufReader::new(stream);
+    send(&mut stream, &serde_json::json!({"id":0,"token":token}))
+        .await
+        .unwrap();
+    let _: Response = receive(&mut stream).await.unwrap();
+    send(
+        &mut stream,
+        &serde_json::json!({"id":1,"method":"list_workspaces"}),
+    )
+    .await
+    .unwrap();
+    let response: Response = receive(&mut stream).await.unwrap();
+    assert_eq!(response.id, 1);
+    assert_eq!(response.result.unwrap(), serde_json::json!({"roots":[]}));
+    send(
+        &mut stream,
+        &serde_json::json!({"id":1,"method":"list_workspaces"}),
+    )
+    .await
+    .unwrap();
+    assert!(receive::<_, Response>(&mut stream).await.is_err());
+    for bytes in [b"invalid\n".to_vec(), vec![b'x'; MAX_FRAME + 2]] {
+        let (mut stream, _) = platform::connect(&directory).await.unwrap();
+        // The server may close as soon as the size bound is reached.
+        let _ = stream.write_all(&bytes).await;
+        assert!(timed_frame(&mut BufReader::new(stream), REQUEST_TIMEOUT)
+            .await
+            .is_err());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn real_rmcp_client_lists_calls_observes_close_and_eof() {
+    use rmcp::model::CallToolRequestParams;
+    let fixture = fixture();
+    let directory = fixture.path().join("endpoint");
+    let registry = Arc::new(Registry::default());
+    registry
+        .replace(vec![RootInput {
+            name: "notes".into(),
+            path: fixture.path().to_path_buf(),
+        }])
+        .unwrap();
+    let endpoint = platform::Endpoint::start(&directory, registry.clone()).unwrap();
+    let (client_transport, server_transport) = tokio::io::duplex(8192);
+    let proxy = Proxy::new(directory.clone());
+    let server = tokio::spawn(async move {
+        let service = proxy.serve(server_transport).await.unwrap();
+        service.waiting().await.unwrap()
+    });
+    let client = ().serve(client_transport).await.unwrap();
+    let tools = client.list_all_tools().await.unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "list_workspaces");
+    let result = client
+        .call_tool(CallToolRequestParams::new("list_workspaces"))
+        .await
+        .unwrap();
+    let value = result.structured_content.unwrap();
+    assert_eq!(value["roots"][0]["name"], "notes");
+    assert_eq!(value["roots"][0]["id"].as_str().unwrap().len(), 64);
+    assert!(!value
+        .to_string()
+        .contains(&fixture.path().to_string_lossy().to_string()));
+    registry.replace(vec![]).unwrap();
+    let result = client
+        .call_tool(CallToolRequestParams::new("list_workspaces"))
+        .await
+        .unwrap();
+    assert_eq!(
+        result.structured_content.unwrap(),
+        serde_json::json!({"roots":[]})
+    );
+    drop(endpoint);
+    let error = client
+        .call_tool(CallToolRequestParams::new("list_workspaces"))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains(NOT_RUNNING));
+    client.cancel().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn simultaneous_peers_are_bounded_without_blocking_authenticated_reads() {
+    let fixture = fixture();
+    let directory = fixture.path().join("endpoint");
+    let _endpoint = platform::Endpoint::start(&directory, Arc::new(Registry::default())).unwrap();
+    let mut peers = Vec::new();
+    for _ in 0..MAX_CONNECTIONS {
+        let (stream, token) = platform::connect(&directory).await.unwrap();
+        let mut stream = BufReader::new(stream);
+        send(&mut stream, &Auth { id: 0, token }).await.unwrap();
+        let _: Response = receive(&mut stream).await.unwrap();
+        peers.push(stream);
+    }
+    let (stream, _) = platform::connect(&directory).await.unwrap();
+    assert!(tokio::time::timeout(
+        Duration::from_millis(250),
+        receive::<_, Response>(&mut BufReader::new(stream)),
+    )
+    .await
+    .expect("excess peer must be rejected before its authentication deadline")
+    .is_err());
+    send(
+        &mut peers[0],
+        &Request {
+            id: 1,
+            method: "list_workspaces".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let response: Response = receive(&mut peers[0]).await.unwrap();
+    assert_eq!(response.result.unwrap(), serde_json::json!({"roots":[]}));
+}
+
+#[test]
+fn duplicate_root_labels_keep_distinct_opaque_ids() {
+    let registry = Registry::default();
+    // Absolute on both Unix and Windows, without accessing real workspaces.
+    let base = std::env::current_dir().unwrap();
+    let first = RootInput {
+        name: "Root".into(),
+        path: base.clone(),
+    };
+    let second = RootInput {
+        name: "Root".into(),
+        path: base.join("Root"),
+    };
+    registry.replace(vec![first, second.clone()]).unwrap();
+    let listed = registry.list().unwrap();
+    let roots = listed["roots"].as_array().unwrap();
+    assert_eq!(roots.len(), 2);
+    assert_eq!(roots[0]["name"], "Root");
+    assert_eq!(roots[1]["name"], "Root");
+    assert_ne!(roots[0]["id"], roots[1]["id"]);
+    assert_eq!(roots[0]["id"].as_str().unwrap().len(), 64);
+    assert_eq!(roots[1]["id"].as_str().unwrap().len(), 64);
+    let kept_id = roots[1]["id"].clone();
+    registry.replace(vec![second]).unwrap();
+    assert_eq!(registry.list().unwrap()["roots"][0]["id"], kept_id);
+    for name in ["", "/", "///", "\\", "bad\0name"] {
+        assert!(registry
+            .replace(vec![RootInput {
+                name: name.into(),
+                path: base.clone()
+            }])
+            .is_err());
+        assert_eq!(registry.list().unwrap()["roots"][0]["id"], kept_id);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sec_review_accepted_registry_must_fit_ipc_response() {
+    let fixture = fixture();
+    let registry = Arc::new(Registry::default());
+    let roots = (0..256)
+        .map(|n| RootInput {
+            name: "n".repeat(200),
+            path: fixture.path().join(n.to_string()),
+        })
+        .collect();
+    registry
+        .replace(roots)
+        .expect("valid root count and filesystem-valid label lengths");
+    let listed = registry.list().unwrap();
+    println!(
+        "accepted_roots={} serialized_result_bytes={} frame_limit={}",
+        listed["roots"].as_array().unwrap().len(),
+        serde_json::to_vec(&listed).unwrap().len(),
+        MAX_FRAME
+    );
+    let directory = fixture.path().join("endpoint");
+    let _endpoint = platform::Endpoint::start(&directory, registry).unwrap();
+    let result = Proxy::new(directory).call().await;
+    println!(
+        "proxy_error_kind={:?}",
+        result.as_ref().err().map(|error| error.kind())
+    );
+    assert!(result.is_ok(), "accepted registry must remain listable");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sec_review_stale_session_deep_json_and_recovery() {
+    let fixture = fixture();
+    let directory = fixture.path().join("endpoint");
+    let registry = Arc::new(Registry::default());
+    let old = platform::Endpoint::start(&directory, registry.clone()).unwrap();
+    let (_, stale) = platform::connect(&directory).await.unwrap();
+    drop(old);
+    let _endpoint = platform::Endpoint::start(&directory, registry).unwrap();
+    let (stream, _) = platform::connect(&directory).await.unwrap();
+    let mut stream = BufReader::new(stream);
+    send(
+        &mut stream,
+        &Auth {
+            id: 0,
+            token: stale,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(receive::<_, Response>(&mut stream).await.is_err());
+    let (mut stream, _) = platform::connect(&directory).await.unwrap();
+    let deep = format!("{}0{}\n", "[".repeat(300), "]".repeat(300));
+    stream.write_all(deep.as_bytes()).await.unwrap();
+    assert!(receive::<_, Response>(&mut BufReader::new(stream))
+        .await
+        .is_err());
+    assert_eq!(
+        Proxy::new(directory).call().await.unwrap(),
+        json!({"roots":[]})
+    );
+    println!("stale_session=rejected deep_json=rejected subsequent_read=ok");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sec_review_bounds_and_planted_files() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = fixture();
+    let registry = Arc::new(Registry::default());
+    for name in ["endpoint", "ipc.sock", "token"] {
+        let directory = fixture.path().join(format!("case-{name}"));
+        let planted = if name == "endpoint" {
+            directory.clone()
+        } else {
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+            directory.join(name)
+        };
+        std::fs::write(&planted, b"do not remove").unwrap();
+        assert!(platform::Endpoint::start(&directory, registry.clone()).is_err());
+        assert_eq!(std::fs::read(&planted).unwrap(), b"do not remove");
+    }
+    let base = fixture.path();
+    assert!(registry
+        .replace(
+            (0..257)
+                .map(|n| RootInput {
+                    name: "n".into(),
+                    path: base.join(n.to_string())
+                })
+                .collect()
+        )
+        .is_err());
+    assert!(registry
+        .replace(vec![RootInput {
+            name: "n".repeat(513),
+            path: base.into()
+        }])
+        .is_err());
+    println!(
+        "planted_directory_socket_token=preserved root_count_257=rejected name_bytes_513=rejected"
+    );
+}
+
+#[test]
+fn sec_review_tauri_command_respects_window_capability() {
+    let registry = Arc::new(Registry::default());
+    let app = tauri::test::mock_builder()
+        .manage(registry.clone())
+        .invoke_handler(tauri::generate_handler![crate::mcp_server::mcp_set_roots])
+        .build(tauri::generate_context!())
+        .unwrap();
+    let webview =
+        tauri::WebviewWindowBuilder::new(&app, "sec-review-no-capability", Default::default())
+            .build()
+            .unwrap();
+    let result = tauri::test::get_ipc_response(
+        &webview,
+        tauri::webview::InvokeRequest {
+            cmd: "mcp_set_roots".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(
+                json!({"roots":[{"name":"probe", "path":std::env::current_dir().unwrap()}]}),
+            ),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        },
+    );
+    println!(
+        "unprivileged_window_command_succeeded={} registry_root_count={}",
+        result.is_ok(),
+        registry.list().unwrap()["roots"].as_array().unwrap().len()
+    );
+    assert!(
+        result.is_err(),
+        "window without capability must not replace authorization roots"
+    );
+    assert_eq!(registry.list().unwrap(), json!({"roots":[]}));
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let result = tauri::test::get_ipc_response(
+        &main,
+        tauri::webview::InvokeRequest {
+            cmd: "mcp_set_roots".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(
+                json!({"roots":[{"name":"main", "path":std::env::current_dir().unwrap()}]}),
+            ),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        },
+    );
+    assert!(
+        result.is_ok(),
+        "main must retain access to its workspace registry: {result:?}"
+    );
+    assert_eq!(registry.list().unwrap()["roots"][0]["name"], "main");
+    let snapshot = registry.list().unwrap();
+    let result = tauri::test::get_ipc_response(
+        &webview,
+        tauri::webview::InvokeRequest {
+            cmd: "mcp_set_roots".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(json!({"roots": []})),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        },
+    );
+    assert_eq!(
+        result.unwrap_err(),
+        json!("Could not update MCP workspaces")
+    );
+    assert_eq!(registry.list().unwrap(), snapshot);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sec_review_unauthenticated_slow_peers_expire() {
+    let fixture = fixture();
+    let directory = fixture.path().join("endpoint");
+    let _endpoint = platform::Endpoint::start(&directory, Arc::new(Registry::default())).unwrap();
+    let mut peers = Vec::new();
+    for _ in 0..MAX_CONNECTIONS {
+        let (mut stream, _) = platform::connect(&directory).await.unwrap();
+        stream.write_all(b"{").await.unwrap();
+        peers.push(stream);
+    }
+    tokio::time::sleep(REQUEST_TIMEOUT + Duration::from_millis(200)).await;
+    for stream in peers {
+        assert!(receive::<_, Response>(&mut BufReader::new(stream))
+            .await
+            .is_err());
+    }
+    assert_eq!(
+        Proxy::new(directory).call().await.unwrap(),
+        json!({"roots":[]})
+    );
+    println!("unauthenticated_slow_peers=16 expired_after_deadline=true subsequent_read=ok");
+}
+
+#[test]
+fn token_format_and_constant_time_result_are_required() {
+    let expected = "a".repeat(64);
+    assert!(valid_token(&expected, &expected));
+    for candidate in [
+        "b".repeat(64),
+        "a".repeat(63),
+        "a".repeat(65),
+        "A".repeat(64),
+        "g".repeat(64),
+        "é".repeat(32),
+    ] {
+        assert!(!valid_token(&candidate, &expected));
+    }
+    for malformed in ["a".repeat(63), "g".repeat(64), "A".repeat(64)] {
+        assert!(!valid_token(&malformed, &malformed));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn maximum_escaped_roots_remain_listable_and_rejections_preserve_snapshot() {
+    let fixture = fixture();
+    let registry = Arc::new(Registry::default());
+    registry
+        .replace(
+            (0..256)
+                .map(|n| RootInput {
+                    name: "\u{1}".repeat(512),
+                    path: fixture.path().join(n.to_string()),
+                })
+                .collect(),
+        )
+        .unwrap();
+    let snapshot = registry.list().unwrap();
+    let _endpoint =
+        platform::Endpoint::start(&fixture.path().join("endpoint"), registry.clone()).unwrap();
+    assert_eq!(
+        Proxy::new(fixture.path().join("endpoint"))
+            .call()
+            .await
+            .unwrap(),
+        snapshot
+    );
+    for roots in [
+        (0..257)
+            .map(|n| RootInput {
+                name: "n".into(),
+                path: fixture.path().join(n.to_string()),
+            })
+            .collect(),
+        vec![RootInput {
+            name: "n".repeat(513),
+            path: fixture.path().into(),
+        }],
+        vec![
+            RootInput {
+                name: "n".into(),
+                path: fixture.path().into()
+            };
+            2
+        ],
+    ] {
+        assert!(registry.replace(roots).is_err());
+        assert_eq!(registry.list().unwrap(), snapshot);
+    }
+    let worst = Response {
+        id: u64::MAX,
+        result: Some(snapshot),
+    };
+    assert!(serde_json::to_vec(&worst).unwrap().len() < MAX_RESPONSE);
+}
+
+#[tokio::test]
+async fn response_boundary_is_four_mib_and_request_limit_stays_small() {
+    for (size, accepted) in [(MAX_RESPONSE, true), (MAX_RESPONSE + 1, false)] {
+        let envelope = serde_json::to_vec(&Response {
+            id: 1,
+            result: Some(json!("")),
+        })
+        .unwrap()
+        .len();
+        let response = Response {
+            id: 1,
+            result: Some(json!("x".repeat(size - envelope))),
+        };
+        let (mut writer, reader) = tokio::io::duplex(MAX_RESPONSE + 2);
+        let write = send_response(&mut writer, &response).await;
+        assert_eq!(write.is_ok(), accepted);
+        drop(writer);
+        assert_eq!(
+            receive_response(&mut BufReader::new(reader)).await.is_ok(),
+            accepted
+        );
+    }
+    let response = Response {
+        id: 1,
+        result: Some(json!("x".repeat(MAX_FRAME))),
+    };
+    assert!(send(&mut tokio::io::sink(), &response).await.is_err());
+    let bytes = [vec![b' '; MAX_RESPONSE + 1], vec![b'\n']].concat();
+    assert!(receive_response(&mut bytes.as_slice()).await.is_err());
+}
+
+#[test]
+fn round2_concurrent_replace_preserves_complete_snapshots() {
+    let registry = Arc::new(Registry::default());
+    let base = std::env::current_dir().unwrap();
+    let snapshot = |tag: &str| {
+        (0..16)
+            .map(|n| RootInput {
+                name: tag.to_string(),
+                path: base.join(n.to_string()),
+            })
+            .collect()
+    };
+    registry.replace(snapshot("A")).unwrap();
+    let first_ids: Vec<_> = registry.list().unwrap()["roots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].clone())
+        .collect();
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let mut readers = Vec::new();
+    for _ in 0..2 {
+        let registry = registry.clone();
+        let barrier = barrier.clone();
+        let ids = first_ids.clone();
+        readers.push(std::thread::spawn(move || {
+            barrier.wait();
+            for _ in 0..2000 {
+                let listed = registry.list().unwrap();
+                let roots = listed["roots"].as_array().unwrap();
+                assert_eq!(roots.len(), 16);
+                let tag = &roots[0]["name"];
+                assert!(*tag == json!("A") || *tag == json!("B"));
+                for (index, root) in roots.iter().enumerate() {
+                    assert_eq!(&root["name"], tag);
+                    assert_eq!(root["id"], ids[index]);
+                }
+            }
+        }));
+    }
+    barrier.wait();
+    for index in 0..1000 {
+        registry
+            .replace(snapshot(if index % 2 == 0 { "A" } else { "B" }))
+            .unwrap();
+        assert!(registry
+            .replace(vec![RootInput {
+                name: "bad".into(),
+                path: "relative".into()
+            }])
+            .is_err());
+    }
+    for reader in readers {
+        reader.join().unwrap();
+    }
+    println!("concurrent_snapshots=4000 valid_replacements=1000 invalid_replacements=1000 partial_snapshot=0 stable_ids=true");
+}
+
+#[test]
+fn round2_manifest_keeps_existing_read_dir_callable() {
+    let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
+    let app = tauri::test::mock_builder()
+        .invoke_handler(tauri::generate_handler![crate::read_dir])
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let result = tauri::test::get_ipc_response(
+        &main,
+        tauri::webview::InvokeRequest {
+            cmd: "read_dir".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(json!({"path":fixture.path()})),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        },
+    );
+    assert!(result.is_ok(), "existing command regressed: {result:?}");
+    assert_eq!(result.unwrap().deserialize::<Value>().unwrap(), json!([]));
+    println!("existing_read_dir_main=allowed empty_fixture_result=[]");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn round2_valid_unix_socket_path_survives_private_publication() {
+    let fixture = fixture();
+    let length = fixture.path().as_os_str().as_encoded_bytes().len();
+    assert!(length + 1 < 90);
+    let directory = fixture.path().join("d".repeat(90 - length - 1));
+    std::fs::create_dir(&directory).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let socket = directory.join("ipc.sock");
+    let direct =
+        std::os::unix::net::UnixListener::bind(&socket).expect("final endpoint fits Unix sun_path");
+    drop(direct);
+    std::fs::remove_file(&socket).unwrap();
+    let result = platform::Endpoint::start(&directory, Arc::new(Registry::default()));
+    println!(
+        "directory_path_bytes={} final_socket_path_bytes={} direct_bind=ok endpoint_start={:?}",
+        directory.as_os_str().as_encoded_bytes().len(),
+        socket.as_os_str().as_encoded_bytes().len(),
+        result.as_ref().map(|_| ()).map_err(|e| e.to_string())
+    );
+    assert!(
+        result.is_ok(),
+        "private staging must preserve a valid final socket path"
+    );
+}

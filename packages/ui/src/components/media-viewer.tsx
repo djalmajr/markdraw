@@ -1,5 +1,5 @@
 import { For, Show, createSignal, onCleanup, createEffect } from "solid-js";
-import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import { createPanZoom } from "../composables/create-pan-zoom.ts";
@@ -55,11 +55,20 @@ export function MediaViewer(props: MediaViewerProps) {
   const [pdfLoading, setPdfLoading] = createSignal(false);
 
   let pdfDoc: PDFDocumentProxy | null = null;
+  // pdf.js 6 removed `PDFDocumentProxy.destroy`; the loading task owns the
+  // worker, so releasing the document means destroying the task that loaded it.
+  let pdfLoadingTask: PDFDocumentLoadingTask | null = null;
   let basePageWidth = 0;
   let stageRef: HTMLDivElement | undefined;
   const canvasRefs: (HTMLCanvasElement | undefined)[] = [];
   let renderGen = 0;
   let renderTasks: RenderTask[] = [];
+
+  function releasePdf() {
+    void pdfLoadingTask?.destroy();
+    pdfLoadingTask = null;
+    pdfDoc = null;
+  }
 
   function cancelRenders() {
     for (const t of renderTasks) {
@@ -89,10 +98,7 @@ export function MediaViewer(props: MediaViewerProps) {
     ({ kind, src }) => {
     void (async () => {
         cancelRenders();
-        if (pdfDoc) {
-          void pdfDoc.destroy();
-          pdfDoc = null;
-        }
+        releasePdf();
         setScale(1);
         imageZoom.reset();
         setFit(kind === "image");
@@ -103,15 +109,18 @@ export function MediaViewer(props: MediaViewerProps) {
         if (kind !== "pdf" || !src) return;
 
         setPdfLoading(true);
+        let task: PDFDocumentLoadingTask | undefined;
         try {
           const pdfjs = await import("pdfjs-dist");
           pdfjs.GlobalWorkerOptions.workerSrc = PdfWorkerUrl;
-          const doc = await pdfjs.getDocument(src).promise;
+          task = pdfjs.getDocument({ url: src });
+          const doc = await task.promise;
           // A newer load may have superseded this one mid-await.
           if (src !== props.src) {
-            void doc.destroy();
+            void task.destroy();
             return;
           }
+          pdfLoadingTask = task;
           pdfDoc = doc;
           const first = await doc.getPage(1);
           basePageWidth = first.getViewport({ scale: 1 }).width;
@@ -119,6 +128,12 @@ export function MediaViewer(props: MediaViewerProps) {
           // Mounting the canvases (via pageCount) drives the render effect.
           setPageCount(doc.numPages);
         } catch (e) {
+          // The worker is already spawned once getDocument returned, so a
+          // corrupt/mislabeled file must release it too (pdf.js 6 has no
+          // document-level destroy). Once the task is stored, releasePdf()
+          // destroys it and clears the field, so cleanup won't destroy it twice.
+          if (task && pdfLoadingTask === task) releasePdf();
+          else void task?.destroy();
           // Surfaces genuinely broken/mislabeled files (e.g. a .pdf that is
           // actually text → pdf.js throws InvalidPDFException) without a
           // silent blank canvas.
@@ -168,7 +183,7 @@ export function MediaViewer(props: MediaViewerProps) {
 
   onCleanup(() => {
     cancelRenders();
-    if (pdfDoc) void pdfDoc.destroy();
+    releasePdf();
   });
 
   // Zoom dispatches to the right engine: images use the pan-zoom hook

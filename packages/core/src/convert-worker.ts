@@ -1,8 +1,13 @@
 // Web Worker for heavy AsciiDoc/Markdown conversion
 // Runs asciidoctor.js and markdown-it off the main thread
 
-import Asciidoctor from "@asciidoctor/core";
-import MarkdownIt from "markdown-it";
+// Asciidoctor.js 4 dropped the `Asciidoctor()` processor factory (and the Opal
+// runtime): the public API is module-level named exports and `convert` is
+// async, so the adoc path in this worker is async too.
+import { convert as convertAdocSource, Extensions } from "@asciidoctor/core";
+// markdown-it 15 bundles its own types: the default import is the constructor,
+// the instance type is a named export.
+import MarkdownIt, { type MarkdownIt as MarkdownItInstance } from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
 import mk from "@traptitech/markdown-it-katex";
@@ -20,8 +25,6 @@ import container from "markdown-it-container";
 import { escapeHtml } from "./utils";
 
 // ─── AsciiDoc ───────────────────────────────────────────────────────────────
-
-const asciidoctor = Asciidoctor();
 
 const ADOC_EXT_PATTERN = /\.(adoc|asciidoc|asc|ad)$/;
 
@@ -69,16 +72,16 @@ function preprocessXrefs(content: string): string {
   return content;
 }
 
-function convertAdocSync(
+async function convertAdocSync(
   fileContent: string,
   filePath: string,
   includeCache: Record<string, string>,
-): string {
+): Promise<string> {
   const baseDirPath = dirOf(filePath);
   const cache = new Map(Object.entries(includeCache));
   const dirStack: string[] = [baseDirPath];
 
-  const registry = asciidoctor.Extensions.create();
+  const registry = Extensions.create();
 
   registry.block(function (this: any) {
     const self = this;
@@ -139,7 +142,7 @@ function convertAdocSync(
 
   const processedContent = preprocessXrefs(fileContent);
 
-  return asciidoctor.convert(processedContent, {
+  return (await convertAdocSource(processedContent, {
     extension_registry: registry,
     standalone: false,
     safe: "unsafe",
@@ -153,7 +156,7 @@ function convertAdocSync(
       toc: "left",
       toclevels: 4,
     },
-  }) as string;
+  })) as string;
 }
 
 // ─── Markdown ───────────────────────────────────────────────────────────────
@@ -162,9 +165,9 @@ function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[\s]+/g, "-").replace(/[^\w-]/g, "");
 }
 
-let mdInstance: MarkdownIt | null = null;
+let mdInstance: MarkdownItInstance | null = null;
 
-function getMd(): MarkdownIt {
+function getMd(): MarkdownItInstance {
   if (mdInstance) return mdInstance;
 
   const md = new MarkdownIt({
@@ -176,10 +179,25 @@ function getMd(): MarkdownIt {
     breaks: true,
   });
 
-  md.use(anchor, { permalink: false, slugify });
+  // markdown-it 15 upgraded to linkify-it 6, which stopped recognising fuzzy
+  // links (`example.com`) and credentials in URLs by default; the preview has
+  // always linked both, so opt back in explicitly. See packages/core/src/markdown.ts.
+  md.linkify.set({ fuzzyLink: true, urlAuth: true });
+  md.use(anchor, { slugify });
   md.use(taskLists, { enabled: true, label: true });
   md.use(mk, { throwOnError: false, errorColor: "#cc0000" });
-  md.use(alert);
+  // --- GitHub-style alerts (NOTE, WARNING, TIP, CAUTION, IMPORTANT) ---
+  // @mdit/plugin-alert 2.x echoes the label as written (`[!NOTE]` becomes
+  // "NOTE" and goes through renderInline); 0.23.x capitalised it and lowercased
+  // the rest ("Note"). Pin the previous title text so the upgrade changes no
+  // user-visible output (the label is one of the fixed alert names).
+  md.use(alert, {
+    titleRenderer: (tokens, idx) => {
+      const label = tokens[idx]?.content ?? "";
+      const title = label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
+      return `<p class="markdown-alert-title">${title}</p>\n`;
+    },
+  });
   md.use(footnote);
   md.use(emoji);
   md.use(deflist);
@@ -188,7 +206,16 @@ function getMd(): MarkdownIt {
   md.use(sup);
   md.use(ins);
   md.use(mark);
-  md.use(multimdTable, { multiline: true, rowspan: true, headerless: true, multibody: true, autolabel: true });
+  // markdown-it 15 removed `md.utils.assign()`, one object shared by every
+  // instance; markdown-it-multimd-table 4.2.3 reads it once at registration.
+  // Lend it for that call only. See packages/core/src/markdown.ts.
+  const mdUtils = md.utils as unknown as { assign?: typeof Object.assign };
+  mdUtils.assign = Object.assign;
+  try {
+    md.use(multimdTable, { multiline: true, rowspan: true, headerless: true, multibody: true, autolabel: true });
+  } finally {
+    delete mdUtils.assign;
+  }
   for (const name of ["warning", "note", "tip", "caution", "important", "info"]) {
     md.use(container, name);
   }
@@ -278,12 +305,12 @@ interface ConvertMdMessage {
 
 type WorkerMessage = ConvertAdocMessage | ConvertMdMessage;
 
-self.onmessage = (e: MessageEvent<WorkerMessage>) => {
+self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
   const msg = e.data;
   try {
     let html: string;
     if (msg.type === "convert-adoc") {
-      html = convertAdocSync(msg.fileContent, msg.filePath, msg.includeCache);
+      html = await convertAdocSync(msg.fileContent, msg.filePath, msg.includeCache);
     } else {
       html = convertMarkdownSync(msg.processedContent);
     }
