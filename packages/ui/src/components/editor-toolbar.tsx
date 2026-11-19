@@ -57,6 +57,7 @@ export function EditorToolbar(props: EditorToolbarProps) {
           render={(triggerProps) => (
             <Toggle
               {...triggerProps}
+              aria-label="Find in editor"
               size="sm"
               pressed={props.searchOpen}
               onChange={() => props.onToggleFind()}
@@ -72,8 +73,8 @@ export function EditorToolbar(props: EditorToolbarProps) {
           as="button"
           class="content-toolbar-btn"
           aria-label="Undo"
-          disabled={!props.canUndo}
-          onClick={props.onUndo}
+          aria-disabled={props.canUndo ? "false" : "true"}
+          onClick={() => { if (props.canUndo) props.onUndo(); }}
         >
           <IconUndo2 width={14} height={14} />
         </TooltipTrigger>
@@ -84,8 +85,8 @@ export function EditorToolbar(props: EditorToolbarProps) {
           as="button"
           class="content-toolbar-btn"
           aria-label="Redo"
-          disabled={!props.canRedo}
-          onClick={props.onRedo}
+          aria-disabled={props.canRedo ? "false" : "true"}
+          onClick={() => { if (props.canRedo) props.onRedo(); }}
         >
           <IconRedo2 width={14} height={14} />
         </TooltipTrigger>
@@ -98,6 +99,7 @@ export function EditorToolbar(props: EditorToolbarProps) {
           render={(triggerProps) => (
             <Toggle
               {...triggerProps}
+              aria-label="Show line numbers"
               size="sm"
               pressed={props.showLineNumbers}
               onChange={props.onToggleShowLineNumbers}
@@ -114,6 +116,7 @@ export function EditorToolbar(props: EditorToolbarProps) {
           render={(triggerProps) => (
             <Toggle
               {...triggerProps}
+              aria-label="Show invisibles"
               size="sm"
               pressed={props.showInvisibles}
               onChange={props.onToggleShowInvisibles}
@@ -130,6 +133,7 @@ export function EditorToolbar(props: EditorToolbarProps) {
           render={(triggerProps) => (
             <Toggle
               {...triggerProps}
+              aria-label="Wrap text"
               size="sm"
               pressed={props.wrapText}
               onChange={props.onToggleWrapText}
@@ -147,6 +151,7 @@ export function EditorToolbar(props: EditorToolbarProps) {
             render={(triggerProps) => (
               <Toggle
                 {...triggerProps}
+              aria-label="Sync scroll"
                 size="sm"
                 pressed={props.syncScroll}
                 onChange={props.onToggleSyncScroll}

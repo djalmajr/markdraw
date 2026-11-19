@@ -1252,7 +1252,7 @@ export function Preview(props: PreviewProps) {
       // you switch to an empty (or heading-less, empty-rendered) Markdown file.
       // Only the active pane owns the shared container; guard on it so an
       // inactive pane doesn't wipe the active one's toc.
-      const emptyTocContainer = props.tocContainer;
+      const emptyTocContainer = untrack(() => props.tocContainer);
       if (emptyTocContainer) {
         emptyTocContainer.textContent = "";
         props.onTocChange(false);
@@ -1289,7 +1289,7 @@ export function Preview(props: PreviewProps) {
       // contents the moment focus leaves this pane. Detaching keeps
       // `tocNode` valid as a cache so the next focus flip can move
       // the same node into the now-bound shared container.
-      const tocContainer = props.tocContainer;
+      const tocContainer = untrack(() => props.tocContainer);
       const toc = container.querySelector<HTMLElement>("#toc");
       tocNode = toc ?? undefined;
       if (tocContainer) {

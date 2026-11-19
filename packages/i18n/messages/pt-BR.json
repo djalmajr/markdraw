@@ -136,6 +136,8 @@
   "tree_show_hidden": "Mostrar ocultos",
   "tree_show_all_dirs": "Mostrar todos os diretórios",
   "tree_show_all_files": "Mostrar todos os arquivos",
+  "tab_scroll_left": "Rolar abas para a esquerda",
+  "tab_scroll_right": "Rolar abas para a direita",
   "tab_new_tab": "Nova aba",
   "tab_close": "Fechar",
   "tab_close_others": "Fechar outras",

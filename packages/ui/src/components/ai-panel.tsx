@@ -300,7 +300,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   // edit must die on chat switch or its index would truncate the wrong chat.
   createEffect(
       () => props.store,
-      () => cancelEditing(),
+      () => untrack(() => cancelEditing()),
       { defer: true },
     );
 
@@ -888,7 +888,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       // visible panel never gets it (the chip stays, the token never appears).
       // Only the instance actually in the document should handle it.
       if (!textarea || !textarea.isConnected) return;
-      insertItemToken(request.itemId, request.token);
+      untrack(() => insertItemToken(request.itemId, request.token));
       props.onInlineReferenceHandled?.();
     },
   );

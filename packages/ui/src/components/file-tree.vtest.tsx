@@ -63,6 +63,26 @@ const SINGLE_ROOT: WorkspaceRoot[] = [
 ];
 
 describe("FileTree", () => {
+  it("reveals a selected descendant without untracked-read warnings and names row menus", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const [selected, setSelected] = createSignal<string | null>(null);
+      const { container, getByText } = render(() => (
+        <AppProvider state={makeAppStub()}>
+          <FileTree roots={SINGLE_ROOT} selectedPath={selected()} selectedRootId="r1" onSelect={() => {}} />
+        </AppProvider>
+      ));
+      setSelected("notes/a.md");
+      flush();
+      expect(getByText("a.md")).toBeTruthy();
+      const menus = [...container.querySelectorAll("button.tree-item-more")];
+      expect(menus.length).toBeGreaterThan(0);
+      expect(menus.every((button) => !!button.getAttribute("aria-label"))).toBe(true);
+      expect(warn.mock.calls.flat().join(" ")).not.toContain("[STRICT_READ_UNTRACKED] Reactive value read directly in an effect callback");
+    } finally {
+      warn.mockRestore();
+    }
+  });
   it("renders the workspace root header and visible entries", () => {
     const { getByText } = render(() => (
       <AppProvider state={makeAppStub()}>

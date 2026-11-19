@@ -151,6 +151,32 @@ describe("Editor", () => {
 
 /** Regression probes from the Solid 2 editor review, promoted to permanent tests. */
 describe("Solid 2 editor conversion", () => {
+  it("updates a real editor while searching without listener errors", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const [content, setContent] = createSignal("one one");
+    const [searchOpen, setSearchOpen] = createSignal(true);
+    let api: EditorApi | undefined;
+    const { container } = render(() => (
+      <Editor {...withDefaults({ content: content() })} searchOpen={searchOpen()} onReady={(value) => { api = value; }} />
+    ));
+    const input = container.querySelector<HTMLInputElement>(".search-input")!;
+    fireEvent.input(input, { target: { value: "one" } });
+    flush();
+    api!.replaceRange(0, 3, "two");
+    await Promise.resolve();
+    flush();
+    expect(container.querySelector(".search-count")?.textContent).toMatch(/1\/1/);
+    setContent("one one one");
+    flush();
+    await Promise.resolve();
+    flush();
+    expect(container.querySelector(".search-count")?.textContent).toMatch(/1\/3/);
+    setSearchOpen(false);
+    flush();
+    expect(error).not.toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join(" ")).not.toMatch(/STRICT_READ_UNTRACKED[^\n]*(currentMatchIndex|searchQuery|searchOptions)|PRIMITIVE_IN_EFFECT_CALLBACK/);
+  });
   it("one view survives reactive config changes then destroys exactly once", () => {
     const [dark, setDark] = createSignal(false);
     const [wrap, setWrap] = createSignal(true);

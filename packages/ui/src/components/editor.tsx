@@ -181,16 +181,17 @@ export function Editor(props: EditorProps) {
 
   let containerRef: HTMLDivElement | undefined;
   let view: EditorView | undefined;
-  let lastFindTrigger = props.findTrigger;
-  let lastRedoTrigger = props.redoTrigger;
-  let lastSearchOpen = props.searchOpen;
+  let lastFindTrigger = untrack(() => props.findTrigger);
+  let lastRedoTrigger = untrack(() => props.redoTrigger);
+  let lastSearchOpen = untrack(() => props.searchOpen);
   // Only a real `props.content` change may replace the document. Search
   // state is read as a snapshot in the apply phase, never as a trigger.
   let lastAppliedExternalContent: string | undefined;
-  let lastSyncScrollTargetVersion = props.syncScrollTargetVersion;
-  let lastScrollToLineVersion = props.scrollToLineVersion ?? 0;
-  let lastUndoTrigger = props.undoTrigger;
+  let lastSyncScrollTargetVersion = untrack(() => props.syncScrollTargetVersion);
+  let lastScrollToLineVersion = untrack(() => props.scrollToLineVersion ?? 0);
+  let lastUndoTrigger = untrack(() => props.undoTrigger);
   let matches: SearchMatch[] = [];
+  let searchRefreshQueued = false;
   let suppressScrollCallback = false;
 
   const themeCompartment = new Compartment();
@@ -312,7 +313,7 @@ export function Editor(props: EditorProps) {
     },
   });
 
-  function buildSearchHighlightExtension(activeIndex = currentMatchIndex()) {
+  function buildSearchHighlightExtension(activeIndex: number) {
     if (matches.length === 0) return [];
     const ranges = matches.map((match, index) =>
       Decoration.mark({ class: index === activeIndex ? "cm-search-match cm-search-match-active" : "cm-search-match" })
@@ -321,7 +322,7 @@ export function Editor(props: EditorProps) {
     return EditorView.decorations.of(Decoration.set(ranges, true));
   }
 
-  function updateSearchHighlights(activeIndex = currentMatchIndex()) {
+  function updateSearchHighlights(activeIndex: number) {
     if (!view) return;
     view.dispatch({
       effects: searchHighlightCompartment.reconfigure(buildSearchHighlightExtension(activeIndex)),
@@ -350,7 +351,7 @@ export function Editor(props: EditorProps) {
       matches = [];
       setMatchCount(0);
       setCurrentMatchIndex(0);
-      updateSearchHighlights();
+      updateSearchHighlights(0);
       return;
     }
 
@@ -376,7 +377,7 @@ export function Editor(props: EditorProps) {
     matches = [];
     setMatchCount(0);
     setCurrentMatchIndex(0);
-    updateSearchHighlights();
+    updateSearchHighlights(0);
     view?.focus();
   }
 
@@ -459,8 +460,16 @@ export function Editor(props: EditorProps) {
             if (!isExternalSwap) {
               props.onChange(update.state.doc.toString());
             }
-            if (props.searchOpen && searchQuery()) {
-              recomputeMatches(searchQuery(), searchOptions());
+            // CodeMirror forbids dispatching another update inside its listener.
+            // Defer the search refresh and read the latest query once it runs.
+            if (!searchRefreshQueued) {
+              searchRefreshQueued = true;
+              queueMicrotask(() => {
+                searchRefreshQueued = false;
+                if (!view) return;
+                const search = untrack(() => ({ open: props.searchOpen, query: searchQuery(), options: searchOptions() }));
+                if (search.open && search.query) recomputeMatches(search.query, search.options);
+              });
             }
           }
         }),
@@ -569,6 +578,7 @@ export function Editor(props: EditorProps) {
       scrollEl.removeEventListener("scroll", onScroll);
       window.removeEventListener("keydown", onWindowKeyDown);
       view?.destroy();
+      view = undefined;
     };
   });
 
@@ -603,7 +613,7 @@ export function Editor(props: EditorProps) {
         matches = [];
         setMatchCount(0);
         setCurrentMatchIndex(0);
-        updateSearchHighlights();
+        updateSearchHighlights(0);
       }
 
       if (lastSearchOpen && !open) {

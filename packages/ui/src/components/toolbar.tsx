@@ -403,10 +403,10 @@ export function Toolbar(props: ToolbarProps) {
           <Tooltip>
             <TooltipTrigger
               as="button"
-              class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-30"
+              class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground aria-disabled:opacity-30"
               aria-label={(useLocale(), m.toolbar_go_back())}
-              disabled={!props.canGoBack}
-              onClick={props.onGoBack}
+              aria-disabled={props.canGoBack ? "false" : "true"}
+              onClick={() => { if (props.canGoBack) props.onGoBack?.(); }}
             >
               <IconArrowLeft width={14} height={14} />
             </TooltipTrigger>
@@ -415,10 +415,10 @@ export function Toolbar(props: ToolbarProps) {
           <Tooltip>
             <TooltipTrigger
               as="button"
-              class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-30"
+              class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground aria-disabled:opacity-30"
               aria-label={(useLocale(), m.toolbar_go_forward())}
-              disabled={!props.canGoForward}
-              onClick={props.onGoForward}
+              aria-disabled={props.canGoForward ? "false" : "true"}
+              onClick={() => { if (props.canGoForward) props.onGoForward?.(); }}
             >
               <IconArrowRight width={14} height={14} />
             </TooltipTrigger>

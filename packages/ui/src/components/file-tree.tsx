@@ -1,4 +1,4 @@
-import { createSignal, createMemo, For, Show, createEffect } from "solid-js";
+import { createSignal, createMemo, For, Show, createEffect, untrack } from "solid-js";
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -221,7 +221,7 @@ export function FileTree(props: FileTreeProps) {
         for (let i = 1; i < parts.length; i++) {
           ancestors.push(parts.slice(0, i).join("/"));
         }
-        expandPaths(rootId, ancestors);
+        untrack(() => expandPaths(rootId, ancestors));
       }
 
       queueMicrotask(() => {

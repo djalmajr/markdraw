@@ -66,6 +66,7 @@ export function ContentToolbar(props: ContentToolbarProps) {
           render={(triggerProps) => (
             <Toggle
               {...triggerProps}
+              aria-label="Auto-refresh"
               size="sm"
               pressed={props.autoRefresh}
               onChange={props.onToggleAutoRefresh}
@@ -83,6 +84,7 @@ export function ContentToolbar(props: ContentToolbarProps) {
           render={(triggerProps) => (
             <Toggle
               {...triggerProps}
+              aria-label="Wrap wide tables"
               size="sm"
               pressed={props.tableWrap}
               onChange={props.onToggleTableWrap}
@@ -100,6 +102,7 @@ export function ContentToolbar(props: ContentToolbarProps) {
             render={(triggerProps) => (
               <Toggle
                 {...triggerProps}
+              aria-label="Find in preview"
                 size="sm"
                 pressed={!!props.searchOpen}
                 onChange={() => {

@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, flush, onSettled, runWithOwner, type Setter } from "solid-js";
 import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@markdraw/core/types.ts";
 import { createPaneManager, type PaneManager } from "./create-pane-manager.ts";
+import type { PaneStore } from "./create-pane-store.ts";
 import { createAiChatSessions } from "./create-ai-chat-sessions.ts";
 import type { ChatTurn } from "./create-ai-chat-store.ts";
 import { createAiInlineStore } from "./create-ai-inline-store.ts";
@@ -207,6 +208,14 @@ export interface RightPanelTabModel {
   orderKey: number;
 }
 
+export function effectivePaneEditorMode(pane: PaneStore): "edit" | "split" | "preview" {
+  const file = pane.selectedFile();
+  const kind = file ? fileKind(file.name) : null;
+  if (kind === "image" || kind === "pdf") return "preview";
+  if (kind === "other" && pane.html() !== UNSUPPORTED_CONTENT) return "edit";
+  return pane.editorMode();
+}
+
 export function createAppState(config: AppStateConfig) {
   // ── Pane manager (per-document signals proxy through here) ─────────────
   // Per the split-panes feature plan, every signal that describes
@@ -273,7 +282,7 @@ export function createAppState(config: AppStateConfig) {
 
   // ── Editor state ────────────────────────────────────────────────────────
 
-  const editorMode = (): "edit" | "split" | "preview" => paneManager.activePane().editorMode();
+  const editorMode = createMemo(() => effectivePaneEditorMode(paneManager.activePane()));
   const setEditorMode = ((value: unknown) =>
     (paneManager.activePane().setEditorMode as (v: unknown) => unknown)(value)) as Setter<"edit" | "split" | "preview">;
   const editorVisible = () => editorMode() !== "preview";
@@ -458,26 +467,6 @@ export function createAppState(config: AppStateConfig) {
     const k = viewerKind();
     return k === "document" || k === "html" || k === "image" || k === "pdf";
   };
-
-  // Force the mode that matches the file's capabilities. Media (image/pdf/
-  // svg) is preview-only — the viewer ignores editorMode, but forcing
-  // "preview" keeps the toggle's active state honest. Non-previewable text
-  // is edit-only. Documents (and unsupported binaries, which show their own
-  // notice) are left wherever the user put them.
-  createEffect(
-    () => ({
-      kind: viewerKind(),
-      unsupported: isUnsupported(),
-      mode: editorMode(),
-    }),
-    ({ kind, unsupported, mode }) => {
-      if ((kind === "image" || kind === "pdf") && mode !== "preview") {
-        setEditorMode("preview");
-      } else if (kind === "other" && !unsupported && mode !== "edit") {
-        setEditorMode("edit");
-      }
-    },
-  );
 
   // ── System theme listener ───────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onCleanup, createEffect } from "solid-js";
+import { For, Show, createSignal, onCleanup, createEffect, untrack } from "solid-js";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -116,7 +116,7 @@ export function MediaViewer(props: MediaViewerProps) {
           task = pdfjs.getDocument({ url: src });
           const doc = await task.promise;
           // A newer load may have superseded this one mid-await.
-          if (src !== props.src) {
+          if (src !== untrack(() => props.src)) {
             void task.destroy();
             return;
           }
@@ -153,7 +153,7 @@ export function MediaViewer(props: MediaViewerProps) {
     () => ({ count: pageCount(), scale: scale() }),
     ({ count }) => {
     void (async () => {
-        if (props.kind !== "pdf" || !pdfDoc || count === 0) return;
+        if (untrack(() => props.kind) !== "pdf" || !pdfDoc || count === 0) return;
         const gen = ++renderGen;
         cancelRenders();
         // Let the <For> mount its canvases before we reach for the refs.

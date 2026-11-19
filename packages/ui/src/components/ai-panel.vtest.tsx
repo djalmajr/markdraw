@@ -65,6 +65,24 @@ function installScrollMetrics(
 }
 
 describe("AiPanel", () => {
+  it("clears a draft on session change without reading inlineRefs in the effect callback", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const [store, setStore] = createSignal(readyStore());
+      const { container } = render(() => <AiPanel store={store()} providerLabel="Mock" />);
+      const textarea = container.querySelector("textarea")!;
+      fire.input(textarea, { target: { value: "draft" } });
+      setStore(readyStore());
+      flush();
+      expect(textarea.value).toBe("");
+      expect(warn.mock.calls.flat().join(" ")).not.toMatch(/STRICT_READ_UNTRACKED[^\n]*inlineRefs/);
+      expect(error.mock.calls.flat().join(" ")).not.toMatch(/PRIMITIVE_|REACTIVE_WRITE/);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
   it("shows the empty state with no messages and no provider", () => {
     const store = createAiChatStore({ getProvider: () => null });
     const { baseElement } = render(() => <AiPanel store={store} providerLabel={null} />);

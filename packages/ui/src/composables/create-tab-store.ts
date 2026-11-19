@@ -121,7 +121,10 @@ export function createTabStore(config: TabStoreConfig): TabStore {
   function restoreActiveTab(): void {
     const tab = getActiveTab();
     if (!tab) return;
+    restoreTab(tab);
+  }
 
+  function restoreTab(tab: TabState): void {
     pane.setEditorContent(tab.editorContent);
     pane.setSavedContent(tab.savedContent);
     pane.setHtml(tab.html);
@@ -289,8 +292,9 @@ export function createTabStore(config: TabStoreConfig): TabStore {
         pane.setEditorMode("preview");
       } else {
         const nextIdx = Math.min(idx, remaining.length - 1);
-        setActiveId(remaining[nextIdx]!.id);
-        restoreActiveTab();
+        const next = remaining[nextIdx]!;
+        setActiveId(next.id);
+        restoreTab(next);
       }
     }
 
@@ -346,16 +350,18 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     // Re-add the tab (at the end)
     setTabList((prev) => [...prev, tab]);
     setActiveId(tab.id);
-    restoreActiveTab();
+    restoreTab(tab);
     persistSession();
     return tab;
   }
 
   function activateTab(tabId: TabId): void {
     if (activeId() === tabId) return;
+    const tab = getTab(tabId);
+    if (!tab) return;
     snapshotActiveTab();
     setActiveId(tabId);
-    restoreActiveTab();
+    restoreTab(tab);
     persistSession();
   }
 

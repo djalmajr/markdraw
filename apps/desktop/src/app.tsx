@@ -1226,6 +1226,7 @@ export function App() {
     setImportOpenCode(on);
     setImportOpenCodeMcps(on);
   }
+  const [rootPaths, setRootPaths] = createSignal<Map<string, string>>(new Map());
   // Re-discover whenever the open roots, provider connectivity, or the OpenCode
   // toggle change. Fires once on mount too (empty connectivity → no-op until the
   // keychain probe lands), and is latest-wins via the guard inside.
@@ -1236,7 +1237,7 @@ export function App() {
       connectedProviders();
       return importOpenCode();
     },
-    () => { void refreshDiscoveredMcp(); },
+    () => { void untrack(() => refreshDiscoveredMcp()); },
   );
 
   /** Persist the MCP server list into ai.json, preserving sibling sections. */
@@ -1288,7 +1289,6 @@ export function App() {
   // failed, callback timeout…). Surfaced on the card only while it still needs
   // auth; cleared on a fresh attempt and auto-hidden once the server connects.
   const [mcpAuthErrors, setMcpAuthErrors] = createSignal<Map<string, string>>(new Map());
-  const [rootPaths, setRootPaths] = createSignal<Map<string, string>>(new Map());
 
   /** Kick off the interactive OAuth flow for an OAuth-gated server (Rust opens
    *  the browser), then refresh so the now-connected server shows its tools. A
@@ -1455,11 +1455,11 @@ export function App() {
   // the effect phase starts the reload.
   createEffect(
     () => rootPaths(),
-    () => reloadAiCommands(),
+    () => untrack(() => reloadAiCommands()),
   );
   createEffect(
     () => rootPaths(),
-    () => { void refreshDiscoveredSkills(); },
+    () => { void untrack(() => refreshDiscoveredSkills()); },
   );
 
   // Quick Open (Cmd/Ctrl+P) overlay visibility — owned here so the keyboard
@@ -2363,7 +2363,7 @@ export function App() {
     },
     (tier) => {
       if (tier === "off") return;
-      void workspaceIndexer.reindexAll();
+      void untrack(() => workspaceIndexer.reindexAll());
     },
   );
   /** Re-index the active document after it's saved (called from the autosave
@@ -2389,7 +2389,7 @@ export function App() {
   createEffect(
     // React to rootPaths changing (roots being opened)
     () => rootPaths(),
-    (paths) => {
+    (paths) => untrack(() => {
       if (paths.size === 0 || sessionRestored) return;
 
       const session = tabStore().getPersistedSession();
@@ -2444,7 +2444,7 @@ export function App() {
         // No active tab from session — activate the first
         void handleActivateTab(tabStore().tabs()[0]!.id);
       }
-    },
+    }),
   );
 
   // Snapshot active tab before app hides (close-to-tray)

@@ -136,6 +136,8 @@
   "tree_show_hidden": "Mostrar ocultos",
   "tree_show_all_dirs": "Mostrar todos los directorios",
   "tree_show_all_files": "Mostrar todos los archivos",
+  "tab_scroll_left": "Desplazar pestañas a la izquierda",
+  "tab_scroll_right": "Desplazar pestañas a la derecha",
   "tab_new_tab": "Pestaña nueva",
   "tab_close": "Cerrar",
   "tab_close_others": "Cerrar otras",

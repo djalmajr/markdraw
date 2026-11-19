@@ -27,6 +27,25 @@ const BASE_PROPS = {
 };
 
 describe("Toolbar — split editor toggle", () => {
+  it("keeps unavailable navigation focusable and ignores clicks until available", () => {
+    const back = vi.fn();
+    const forward = vi.fn();
+    const { getByRole } = render(() => <Toolbar {...BASE_PROPS} showNavButtons onGoBack={back} onGoForward={forward} />);
+    for (const name of ["Go back", "Go forward"]) {
+      const button = getByRole("button", { name });
+      expect(button.hasAttribute("disabled")).toBe(false);
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      fireEvent.click(button);
+    }
+    expect(back).not.toHaveBeenCalled();
+    expect(forward).not.toHaveBeenCalled();
+    cleanup();
+    const enabled = render(() => <Toolbar {...BASE_PROPS} showNavButtons canGoBack canGoForward onGoBack={back} onGoForward={forward} />);
+    fireEvent.click(enabled.getByRole("button", { name: "Go back" }));
+    fireEvent.click(enabled.getByRole("button", { name: "Go forward" }));
+    expect(back).toHaveBeenCalledOnce();
+    expect(forward).toHaveBeenCalledOnce();
+  });
   it("renders the split toggle when onToggleSplit is provided and a workspace is open", () => {
     const { baseElement } = render(() => (
       <Toolbar {...BASE_PROPS} onToggleSplit={() => {}} isSplit={false} />

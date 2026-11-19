@@ -126,6 +126,81 @@ describe("AppState — theme slice (DJA-42)", () => {
   });
 });
 
+describe("effective editor mode", () => {
+  it("restores Markdown split mode after opening a PDF in another tab", () => {
+    withState((s) => {
+      const md: FSEntry = { name: "doc.md", path: "doc.md", kind: "file" };
+      const pdf: FSEntry = { name: "doc.pdf", path: "doc.pdf", kind: "file" };
+      const pane = s.paneManager.activePane();
+      const mdId = pane.tabs.openTab(md, "root");
+      flush();
+      s.setSelectedFile(md);
+      s.setEditorMode("split");
+      const pdfId = pane.tabs.openTab(pdf, "root");
+      flush();
+      s.setSelectedFile(pdf);
+      expect(s.editorMode()).toBe("preview");
+      pane.tabs.activateTab(mdId);
+      s.setSelectedFile(md);
+      expect(s.editorMode()).toBe("split");
+      pane.tabs.activateTab(pdfId);
+      s.setSelectedFile(pdf);
+      expect(s.editorMode()).toBe("preview");
+    });
+  });
+  it("keeps each pane's chosen mode through media and unsupported files", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      withState((s) => {
+        const file = (name: string): FSEntry => ({ name, path: name, kind: "file" });
+        s.setEditorMode("split");
+        s.setSelectedFile(file("doc.md"));
+        expect(s.editorMode()).toBe("split");
+        s.setSelectedFile(file("doc.pdf"));
+        expect(s.editorMode()).toBe("preview");
+        expect(s.paneManager.activePane().editorMode()).toBe("split");
+        s.setSelectedFile(file("photo.png"));
+        expect(s.editorMode()).toBe("preview");
+        s.setSelectedFile(file("plain.txt"));
+        expect(s.editorMode()).toBe("edit");
+        s.setHtml(UNSUPPORTED_CONTENT);
+        expect(s.editorMode()).toBe("split");
+        s.setHtml("");
+        s.setSelectedFile(file("doc.md"));
+        expect(s.editorMode()).toBe("split");
+        const first = s.paneManager.activePane();
+        first.tabs.openTab(file("doc.md"), "root");
+        flush();
+        s.setSelectedFile(file("doc.pdf"));
+        expect(s.editorMode()).toBe("preview");
+        first.tabs.snapshotActiveTab();
+        flush();
+        expect(first.tabs.getActiveTab()?.editorMode).toBe("split");
+        s.setSelectedFile(file("doc.md"));
+        s.paneManager.splitFromActive();
+        flush();
+        s.setSelectedFile(file("other.md"));
+        s.setEditorMode("edit");
+        expect(s.editorMode()).toBe("edit");
+        s.paneManager.setActivePane(0);
+        flush();
+        expect(s.editorMode()).toBe("split");
+        first.setEditorMode("preview");
+        flush();
+        first.tabs.restoreActiveTab();
+        flush();
+        expect(s.editorMode()).toBe("split");
+      });
+      expect(warn.mock.calls.flat().join(" ")).not.toContain("EFFECT_WRITES_OWN_SOURCE");
+      expect(error.mock.calls.flat().join(" ")).not.toMatch(/PRIMITIVE_|REACTIVE_WRITE/);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
+});
+
 describe("AppState — sidebar / TOC slices (DJA-42)", () => {
   it("sidebar starts visible by default", () => {
     withState((state) => {

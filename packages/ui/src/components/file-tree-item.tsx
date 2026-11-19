@@ -745,6 +745,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
               <DropdownMenuTrigger
                 as="button"
                 class="tree-item-more"
+                aria-label={(useLocale(), m.ai_more_options())}
                 onClick={(e: MouseEvent) => e.stopPropagation()}
               >
                 <IconEllipsisVertical width={14} height={14} />

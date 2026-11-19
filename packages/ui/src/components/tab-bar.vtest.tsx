@@ -15,6 +15,41 @@ function setupPaneWithTabs(filenames: string[]) {
 }
 
 describe("TabBar — Move to Other Pane menu entry", () => {
+  it("retains a named tab element across updates and keeps its menu usable", () => {
+    const pane = setupPaneWithTabs(["a.md"]);
+    flush();
+    const activate = vi.fn();
+    const { container } = render(() => <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={activate} onCloseTab={() => {}} />);
+    const first = container.querySelector<HTMLElement>(".tab-bar-item")!;
+    expect(first.getAttribute("aria-label")).toBe("a.md");
+    expect(first.getAttribute("role")).toBe("button");
+    fireEvent.click(first);
+    expect(activate).toHaveBeenCalledOnce();
+    pane.tabs.updateActiveTabContent({ editorContent: "updated" });
+    flush();
+    expect(container.querySelector(".tab-bar-item")).toBe(first);
+    expect(pane.tabs.getActiveTab()?.editorContent).toBe("updated");
+    expect(first.getAttribute("aria-label")).toBe("a.md");
+    const tooltipTrigger = container.querySelector<HTMLElement>(".tab-bar-item-tooltip-trigger")!;
+    expect(tooltipTrigger.getAttribute("aria-label")).toBe("a.md");
+    expect(tooltipTrigger.tabIndex).toBe(-1);
+    fireEvent.contextMenu(first);
+    flush();
+    expect(screen.getByText("Close Others")).toBeTruthy();
+  });
+
+  it("names both scroll controls when the tab list overflows", async () => {
+    const pane = setupPaneWithTabs(["a.md", "b.md"]);
+    flush();
+    const { container, getByRole } = render(() => <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={() => {}} onCloseTab={() => {}} />);
+    const list = container.querySelector<HTMLElement>(".tab-bar-list")!;
+    Object.defineProperties(list, { scrollWidth: { configurable: true, value: 600 }, clientWidth: { configurable: true, value: 100 }, scrollLeft: { configurable: true, value: 50 } });
+    fireEvent.scroll(list);
+    flush();
+    await Promise.resolve();
+    expect(getByRole("button", { name: "Scroll tabs left" })).toBeTruthy();
+    expect(getByRole("button", { name: "Scroll tabs right" })).toBeTruthy();
+  });
   it("hides the menu entry entirely when onMoveToOtherPane prop is missing", () => {
     const pane = setupPaneWithTabs(["a.md"]);
     render(() => (
