@@ -1,4 +1,4 @@
-import { type Accessor } from "solid-js";
+import { untrack, type Accessor } from "solid-js";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { getIncludePaths } from "@markdraw/core/asciidoc.ts";
 import { getMarkdownIncludePaths } from "@markdraw/core/markdown.ts";
@@ -44,7 +44,9 @@ export function createFileLoader(deps: FileLoaderDeps) {
       const kind = fileKind(entry.path);
       if (kind !== "image" && kind !== "pdf" && kind !== "excalidraw") {
         watcher.setTarget({ filePath: `${rootPath}/${entry.path}`, includePaths, rootPath });
-        if (state.autoRefresh()) void watcher.start();
+        // The app-level effect owns the on/off decision; this is a current-value
+        // check for this sync, not a dependency of the effect that called it.
+        if (untrack(() => state.autoRefresh())) void watcher.start();
         return;
       }
     }

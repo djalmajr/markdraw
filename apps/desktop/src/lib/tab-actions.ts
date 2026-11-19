@@ -1,4 +1,4 @@
-import { createEffect } from "solid-js";
+import { createEffect, untrack } from "solid-js";
 import type { TabState } from "@markdraw/core/tabs.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
@@ -19,7 +19,11 @@ export function createTabActions({
 }: TabActionDeps) {
   const manager = state.paneManager;
 
-  createEffect(manager.activePane, (pane) => {
+  // Focus changes republish the target for the newly focused pane. Only the
+  // focused pane is a dependency: loaders and selection handlers already call
+  // syncWatcher when they open a valid file, so the values read here are
+  // current snapshots, not causes for a second publication.
+  createEffect(manager.activePane, (pane) => untrack(() => {
     const tab = pane.tabs.getActiveTab();
     if (pane.loading() || tab?.needsLoad) {
       syncWatcher(null);
@@ -31,7 +35,25 @@ export function createTabActions({
       ? tab.includePaths
       : [];
     syncWatcher(entry, rootId ? rootPaths().get(rootId) : undefined, includes);
-  });
+  }));
+
+  // A state change outside a loader/handler (a scratch tab, a removed root,
+  // a loading or unloaded tab) must stop a watcher still aimed at the old
+  // file. These reads belong in the compute so the effect reacts to them;
+  // returning to a valid target is published by the focus effect or loader.
+  createEffect(
+    () => {
+      const pane = manager.activePane();
+      const tab = pane.tabs.getActiveTab();
+      const entry = pane.selectedFile();
+      const rootId = pane.selectedRootId();
+      const rootPath = rootId ? rootPaths().get(rootId) : undefined;
+      return pane.loading() || !!tab?.needsLoad || !entry || !rootPath;
+    },
+    (invalid) => {
+      if (invalid) syncWatcher(null);
+    },
+  );
 
   function selectTab(pane: PaneStore, tab: TabState | null, focused = pane === manager.activePane(), pushHistory = false) {
     const entry = tab?.rootId === SCRATCH_ROOT_ID

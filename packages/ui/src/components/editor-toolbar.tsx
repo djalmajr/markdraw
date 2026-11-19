@@ -1,4 +1,4 @@
-import IconFileText from "~icons/lucide/file-text";
+import IconTextWrap from "~icons/lucide/text-wrap";
 import IconIndentIncrease from "~icons/lucide/indent-increase";
 import IconListOrdered from "~icons/lucide/list-ordered";
 import IconPilcrow from "~icons/lucide/pilcrow";
@@ -138,7 +138,7 @@ export function EditorToolbar(props: EditorToolbarProps) {
               pressed={props.wrapText}
               onChange={props.onToggleWrapText}
             >
-              <IconFileText width={14} height={14} />
+              <IconTextWrap width={14} height={14} />
             </Toggle>
           )}
         />

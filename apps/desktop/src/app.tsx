@@ -9,6 +9,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "./lib/chaos-invoke.ts";
 import { dragOnceMoved, installHyprlandMaximize } from "./lib/hyprland-maximize.ts";
+import { attachFromSelectionSources, selectionShortcutOrigin } from "./lib/selection-shortcut.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
@@ -2654,6 +2655,23 @@ export function App() {
     return true;
   }
 
+  /** Attach whatever is selected to the chat: the Excalidraw diagram
+   *  selection over an `.excalidraw`, else the editor text selection, else a
+   *  DOM selection in the rendered preview (`.doc-body`). Resolves true when
+   *  something was attached. Shared by ⌘I, ⌘L and the command palette.
+   *  `editor: false` skips the editor selection (CodeMirror keeps its last
+   *  range after it loses focus). */
+  async function attachSelectionToChat({ editor = true } = {}): Promise<boolean> {
+    return attachFromSelectionSources(
+      {
+        diagram: addExcalidrawSelectionToChat,
+        editor: addSelectionToChat,
+        preview: addPreviewSelectionToChat,
+      },
+      { editor },
+    );
+  }
+
   // Quick Open (Cmd/Ctrl+P) — recents set keyed by `${rootId}::${path}` so
   // the fuzzy ranker can boost recently-opened files. In desktop the rootId
   // equals the absolute root path (set by `folder.openFolderPath`), so the
@@ -2898,10 +2916,8 @@ export function App() {
         group: "AI",
         title: (useLocale(), m.command_add_selection_to_chat()),
         run: () => {
-          void addExcalidrawSelectionToChat().then((attached) => {
-            if (attached || addSelectionToChat() || addPreviewSelectionToChat()) {
-              state.focusAiComposer();
-            }
+          void attachSelectionToChat().then((attached) => {
+            if (attached) state.focusAiComposer();
           });
         },
       },
@@ -3284,19 +3300,29 @@ export function App() {
           state.setReaderMode((v) => !v);
         },
         "ai.openChat": (ev) => {
+          // ⌘L fronts the chat and, like ⌘I (and Ctrl+L in other editors),
+          // brings a live selection along: the editor's only when the keystroke
+          // comes from the editor, since CodeMirror keeps its last range after
+          // blur and ⌘L is also the everyday "open chat" key. Pressed from
+          // inside the chat it only refocuses the composer, so repeating it
+          // there doesn't attach a lingering selection again.
           ev.preventDefault();
-          state.focusAiComposer();
+          const origin = selectionShortcutOrigin(ev.target);
+          if (origin.chatOnly) {
+            state.focusAiComposer();
+            return;
+          }
+          void attachSelectionToChat({ editor: origin.editor }).then(() => state.focusAiComposer());
         },
         "ai.inlineAction": (ev) => {
-          // ⌘I attaches the current selection to the chat as a chip — the
-          // Excalidraw diagram selection over an `.excalidraw`, else the editor
-          // text selection, else a DOM selection in the rendered preview
-          // (`.doc-body`). No-op when there's nothing selected.
+          // ⌘I attaches the current selection to the chat as a chip, using the
+          // same origin rule as ⌘L: a stale CodeMirror range only counts when
+          // the keystroke came from the editor. No-op without a selection.
           ev.preventDefault();
-          void addExcalidrawSelectionToChat().then((attached) => {
-            if (attached || addSelectionToChat() || addPreviewSelectionToChat()) {
-              state.focusAiComposer();
-            }
+          const origin = selectionShortcutOrigin(ev.target);
+          if (origin.chatOnly) return;
+          void attachSelectionToChat({ editor: origin.editor }).then((attached) => {
+            if (attached) state.focusAiComposer();
           });
         },
         "app.settings": (ev) => {

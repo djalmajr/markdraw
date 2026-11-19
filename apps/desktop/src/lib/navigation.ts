@@ -30,19 +30,19 @@ export function createNavigation(deps: NavigationDeps) {
     return state.navIndex() < state.navStack().length - 1;
   }
 
-  async function handleNavigate(targetPath: string, fragment?: string | null) {
-    state.setPendingFragment(fragment ?? null);
-    const resolved = resolveNavigationTarget(targetPath, rootPaths());
-    targetPath = resolved.path;
+  /** Try a single candidate path in the tree, then on the filesystem.
+   *  Returns true when the navigation was handled (including a directory
+   *  opened as a new root). */
+  async function tryOpenTarget(targetPath: string, resolvedRootId?: string): Promise<boolean> {
     const currentRootId = state.selectedRootId();
-    const preferredRootId = resolved.rootId ?? currentRootId;
+    const preferredRootId = resolvedRootId ?? currentRootId;
 
     // Try finding in the current root first
     if (preferredRootId) {
       const entry = state.findEntryByPath(targetPath, preferredRootId);
       if (entry && entry.kind === "file") {
         loadFileContent(entry, true, false, preferredRootId);
-        return;
+        return true;
       }
     }
 
@@ -51,7 +51,7 @@ export function createNavigation(deps: NavigationDeps) {
       const entry = state.findEntryByPath(targetPath, root.id);
       if (entry && entry.kind === "file") {
         loadFileContent(entry, true, false, root.id);
-        return;
+        return true;
       }
     }
 
@@ -77,7 +77,7 @@ export function createNavigation(deps: NavigationDeps) {
           state.setSidebarVisible(true);
           state.setSelectedFile(null);
           state.setHtml("");
-          return;
+          return true;
         }
       } catch {
         // Not a directory
@@ -92,13 +92,27 @@ export function createNavigation(deps: NavigationDeps) {
           : targetPath;
         const syntheticEntry: FSEntry = { name, kind: "file", path: targetPath };
         loadFileContent(syntheticEntry, true, false, fallbackRootId!);
-        return;
+        return true;
       } catch {
         // File doesn't exist at that path
       }
     }
 
-    showToast({ title: "File not found", description: targetPath, duration: 4000 });
+    return false;
+  }
+
+  async function handleNavigate(targetPath: string, fragment?: string | null) {
+    state.setPendingFragment(fragment ?? null);
+    const resolved = resolveNavigationTarget(targetPath, rootPaths());
+    // Preview maps AsciiDoc's generated `.html` xref links back to `.adoc`.
+    // If that document is absent, try the literal `.html` file before failing.
+    const candidates = resolved.path.endsWith(".adoc")
+      ? [resolved.path, `${resolved.path.slice(0, -5)}.html`]
+      : [resolved.path];
+    for (const candidate of candidates) {
+      if (await tryOpenTarget(candidate, resolved.rootId)) return;
+    }
+    showToast({ title: "File not found", description: resolved.path, duration: 4000 });
   }
 
   function navigateToStackEntry(newIdx: number) {

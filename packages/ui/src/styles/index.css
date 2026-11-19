@@ -70,6 +70,28 @@
   }
 }
 
+/* ui-sdk popups (menus, selects, popovers, tooltips) render in place, in the
+   top layer, so they inherit text and pointer styles from wherever their
+   trigger sits. Under the workspace-root header that meant uppercase, bold,
+   letter-spaced items that stopped taking clicks as soon as the pointer left
+   the header (`.workspace-root-actions` is `pointer-events: none` until
+   hover). Reset the inherited properties to the document defaults the old
+   body portal gave them. In the base layer, so a utility on a popup still
+   wins. */
+@layer base {
+  [popover] {
+    pointer-events: auto;
+    cursor: default;
+    font-style: normal;
+    font-weight: 400;
+    letter-spacing: normal;
+    text-align: start;
+    text-indent: 0;
+    text-transform: none;
+    white-space: normal;
+  }
+}
+
 /* === solid-ui CSS Variables (Light) === */
 @layer base {
   :root {

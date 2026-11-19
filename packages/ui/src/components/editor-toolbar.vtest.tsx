@@ -51,3 +51,31 @@ it("keeps unavailable history buttons focusable and ignores activation", () => {
     expect(button.getAttribute("aria-label") || button.textContent?.trim()).toBeTruthy();
   }
 });
+
+it("keeps the Wrap text toggle working after switching to the text-wrap icon", () => {
+  const [wrapText, setWrapText] = createSignal(false);
+  const toggleWrapText = vi.fn(() => setWrapText((value) => !value));
+  const { getByRole } = render(() => <EditorToolbar
+    searchOpen={false} showInvisibles={false} showLineNumbers={false}
+    indentMode="spaces" indentSize={2} syncScroll={false} wrapText={wrapText()}
+    canUndo={false} canRedo={false} onUndo={() => {}} onRedo={() => {}}
+    onToggleFind={() => {}} onIndentChange={() => {}} onToggleShowInvisibles={() => {}}
+    onToggleShowLineNumbers={() => {}} onToggleWrapText={toggleWrapText} onToggleSyncScroll={() => {}}
+  />);
+
+  const button = getByRole("button", { name: "Wrap text" });
+  expect(button.getAttribute("aria-pressed")).toBe("false");
+  // The lucide text-wrap path is distinct from the old file-text document.
+  const icon = button.querySelector("svg")?.innerHTML ?? "";
+  expect(icon).toContain('d="m16 16l-3 3l3 3"');
+  expect(icon).not.toContain("M6 22a2 2 0 0 1-2-2V4");
+
+  fireEvent.click(button);
+  expect(toggleWrapText).toHaveBeenCalledTimes(1);
+  flush();
+  expect(button.getAttribute("aria-pressed")).toBe("true");
+
+  setWrapText(false);
+  flush();
+  expect(button.getAttribute("aria-pressed")).toBe("false");
+});
