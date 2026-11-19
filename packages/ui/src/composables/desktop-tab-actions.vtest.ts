@@ -97,6 +97,24 @@ function calls(command: string) {
   return invoke.mock.calls.filter(([called]) => called === command).map(([, args]) => args);
 }
 
+function mockWatcherHolder(holdFirst: "watch_paths" | "stop_watching") {
+  const defaultImplementation = invoke.getMockImplementation()!;
+  const response = Promise.withResolvers<void>();
+  const applied: (string[] | null)[] = [];
+  let blocked = false;
+  invoke.mockImplementation(async (command, args) => {
+    if (command !== "watch_paths" && command !== "stop_watching") {
+      return defaultImplementation(command, args);
+    }
+    if (command === holdFirst && !blocked) {
+      blocked = true;
+      await response.promise;
+    }
+    applied.push(command === "watch_paths" ? args.paths as string[] : null);
+  });
+  return { response, applied };
+}
+
 function holdMcpClose() {
   const response = Promise.withResolvers<void>();
   const received = Promise.withResolvers<void>();
@@ -306,6 +324,133 @@ describe("desktop document transitions in Solid 2", () => {
       oldRegistration.resolve(21);
       newRegistration.resolve(22);
       await Promise.all([oldStart, newStart]);
+    }
+  });
+
+  it.each(["watch_paths", "stop_watching"] as const)(
+    "keeps the focused document in the native holder when an older %s is delayed",
+    async (delayedCommand) => {
+      const { folder, paneManager } = fixture();
+      expect(await folder.openFolderPath(workspace)).toBe(true);
+      const { response, applied } = mockWatcherHolder(delayedCommand);
+      const alphaPath = `${workspace}/alpha.md`;
+      const betaPath = `${workspace}/beta.md`;
+      openDocument(paneManager.activePane(), alpha, "Loaded Alpha");
+      const right = paneManager.splitFromActive()!;
+      flush();
+      if (delayedCommand === "watch_paths") openDocument(right, beta, "Loaded Beta");
+      try {
+        paneManager.setActivePane(0);
+        flush();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(calls("watch_paths")).toEqual([{ paths: [alphaPath] }]);
+
+        paneManager.setActivePane(1);
+        flush();
+        await vi.advanceTimersByTimeAsync(0);
+        if (delayedCommand === "stop_watching") {
+          expect(calls("stop_watching")).toHaveLength(1);
+          paneManager.setActivePane(0);
+          flush();
+          await vi.advanceTimersByTimeAsync(0);
+        }
+        const pathsBeforeResponse = calls("watch_paths");
+
+        response.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        const expected = delayedCommand === "watch_paths" ? betaPath : alphaPath;
+        expect(paneManager.activePane().selectedFile()?.path).toBe(expected.split("/").at(-1));
+        expect(applied.at(-1)).toEqual([expected]);
+        expect(pathsBeforeResponse).toEqual([{ paths: [alphaPath] }]);
+        expect(applied).toEqual(delayedCommand === "watch_paths"
+          ? [[alphaPath], [betaPath]]
+          : [[alphaPath], null, [alphaPath]]);
+      } finally {
+        response.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+      }
+    },
+  );
+
+  it("discards superseded targets during rapid focus changes while a publication is in flight", async () => {
+    const { folder, paneManager } = fixture();
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const { response, applied } = mockWatcherHolder("watch_paths");
+    const alphaPath = `${workspace}/alpha.md`;
+    openDocument(paneManager.activePane(), alpha, "Loaded Alpha");
+    const right = paneManager.splitFromActive()!;
+    flush();
+    openDocument(right, beta, "Loaded Beta");
+    try {
+      paneManager.setActivePane(0);
+      flush();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls("watch_paths")).toEqual([{ paths: [alphaPath] }]);
+
+      for (const index of [1, 0, 1, 0]) {
+        paneManager.setActivePane(index);
+        flush();
+        await vi.advanceTimersByTimeAsync(0);
+      }
+
+      response.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(applied).toEqual([[alphaPath], [alphaPath]]);
+      expect(calls("watch_paths")).toEqual([{ paths: [alphaPath] }, { paths: [alphaPath] }]);
+    } finally {
+      response.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+  });
+
+  it("continues with the newly focused target after a watcher IPC rejects", async () => {
+    const { folder, paneManager } = fixture();
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const { response, applied } = mockWatcherHolder("watch_paths");
+    openDocument(paneManager.activePane(), alpha, "Loaded Alpha");
+    const right = paneManager.splitFromActive()!;
+    flush();
+    openDocument(right, beta, "Loaded Beta");
+    try {
+      paneManager.setActivePane(0);
+      flush();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls("watch_paths")).toEqual([{ paths: [`${workspace}/alpha.md`] }]);
+
+      paneManager.setActivePane(1);
+      flush();
+      await vi.advanceTimersByTimeAsync(0);
+      response.reject(new Error("Native watcher failed to apply Alpha"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(applied).toEqual([[`${workspace}/beta.md`]]);
+    } finally {
+      response.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+  });
+
+  it("drops waiting paths and finishes destroy with a stop after the in-flight publication", async () => {
+    const { watcher } = fixture();
+    flush();
+    const { response, applied } = mockWatcherHolder("watch_paths");
+    const alphaPath = `${workspace}/alpha.md`;
+    watcher.setTarget({ filePath: alphaPath, includePaths: [], rootPath: workspace });
+    try {
+      await watcher.start();
+      expect(calls("watch_paths")).toEqual([{ paths: [alphaPath] }]);
+      watcher.setTarget({ filePath: `${workspace}/beta.md`, includePaths: [], rootPath: workspace });
+      const destroying = watcher.destroy();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls("stop_watching")).toEqual([]);
+      expect(applied).toEqual([]);
+
+      response.resolve();
+      await destroying;
+      expect(applied).toEqual([[alphaPath], null]);
+      expect(calls("watch_paths")).toEqual([{ paths: [alphaPath] }]);
+    } finally {
+      response.resolve();
+      await vi.advanceTimersByTimeAsync(0);
     }
   });
 

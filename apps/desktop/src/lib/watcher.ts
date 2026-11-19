@@ -7,6 +7,8 @@ export class FileWatcher {
   private watchedPaths: string[] = [];
   private running = false;
   private generation = 0;
+  private ipcQueue = Promise.resolve();
+  private latestRequest = 0;
 
   constructor(onChange: () => void) {
     this.onChange = onChange;
@@ -55,8 +57,8 @@ export class FileWatcher {
     void this.sendWatchPaths();
   }
 
-  async stop() {
-    if (!this.running) return;
+  stop() {
+    if (!this.running) return this.ipcQueue;
     this.generation++;
     this.running = false;
 
@@ -65,17 +67,32 @@ export class FileWatcher {
       this.unlisten = null;
     }
 
-    await invoke("stop_watching");
+    return this.enqueue(null);
   }
 
-  private async sendWatchPaths() {
+  private sendWatchPaths() {
     if (this.watchedPaths.length > 0) {
-      await invoke("watch_paths", { paths: this.watchedPaths });
+      void this.enqueue(this.watchedPaths);
     }
   }
 
-  async destroy() {
+  private enqueue(paths: string[] | null) {
+    const request = ++this.latestRequest;
+    const operation = this.ipcQueue.then(async () => {
+      // Skip superseded requests that have not reached the backend yet.
+      if (request !== this.latestRequest) return;
+      if (paths) {
+        await invoke("watch_paths", { paths });
+      } else {
+        await invoke("stop_watching");
+      }
+    });
+    this.ipcQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
+  destroy() {
     this.watchedPaths = [];
-    await this.stop();
+    return this.running ? this.stop() : this.enqueue(null);
   }
 }
