@@ -1484,6 +1484,54 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     });
   });
 
+  it("submit commits the host's context reorder before the provider reads it", async () => {
+    // The host owns the context array and writes it from onReorderContext.
+    // Only the payload captured inside the submit handler proves the reorder
+    // landed before the store resolved getContext for THIS send.
+    const itemA: AiContextItem = { id: "selection:a", kind: "selection", label: "A", content: "A" };
+    const itemB: AiContextItem = { id: "selection:b", kind: "selection", label: "B", content: "B" };
+    const [items, setItems] = createSignal([itemB, itemA]);
+    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const outgoing: AIMessage[][] = [];
+    const provider: AIProvider = {
+      async *chat(messages) {
+        outgoing.push([...messages]);
+        yield { type: "text-delta", text: "reply" };
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const store = createAiChatStore({
+      getProvider: () => provider,
+      getContext: () => items().map((item) => item.label).join(","),
+    });
+    const { baseElement } = render(() => (
+      <AiPanel
+        store={store}
+        contextItems={items()}
+        inlineReference={ref()}
+        onInlineReferenceHandled={() => setRef(null)}
+        onReorderContext={(ids) => setItems((prev) => ids.map((id) => prev.find((item) => item.id === id)!))}
+      />
+    ));
+    setRef({ itemId: itemA.id, seq: 1, token: itemA.label });
+    flush();
+    const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
+    ta.blur();
+    setRef({ itemId: itemB.id, seq: 2, token: itemB.label });
+    flush();
+    expect(ta.value).toBe("@A @B ");
+    expect(items().map((item) => item.label)).toEqual(["B", "A"]);
+    fire.keyDown(ta, { key: "Enter" });
+    await waitFor(() => expect(outgoing).toHaveLength(1));
+    expect(outgoing[0]!.at(-1)?.content).toBe("A,B\n\n@A @B");
+  });
+
   it("a chat switch with a live selection token removes its item and empties the composer", async () => {
     const [store, setStore] = createSignal(readyStore());
     const onRemoveContext = vi.fn();

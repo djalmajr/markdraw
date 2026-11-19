@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onSettled, untrack } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, flush, onCleanup, onSettled, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -752,6 +752,10 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       if (item) ids.push(item.id);
     }
     props.onReorderContext?.(ids);
+    // Solid 2 commits signal writes on flush. The host reorders context by
+    // writing a signal; commit it before sendMessage/editAndResend resolves
+    // getContext so the provider sees the tokens' textual order in this send.
+    flush();
     setConsumedRefs((prev) => {
       const next = new Map(prev);
       for (const ref of tracked.values()) {
