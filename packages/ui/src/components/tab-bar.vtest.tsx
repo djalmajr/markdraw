@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { flush } from "solid-js";
 import { createPaneStore } from "../composables/create-pane-store.ts";
 import { TabBar } from "./tab-bar.tsx";
 
@@ -32,7 +33,7 @@ describe("TabBar — Move to Other Pane menu entry", () => {
   });
 
   it("shows the menu entry with the supplied label when onMoveToOtherPane is wired", () => {
-    // The item's click→onSelect behaviour is Kobalte's responsibility
+    // The item's click→onSelect behaviour is ui-sdk's responsibility
     // (well-tested upstream); this test guards the prop wiring — the
     // entry must be rendered with the supplied label so the user can
     // see + activate it.
@@ -49,6 +50,7 @@ describe("TabBar — Move to Other Pane menu entry", () => {
     ));
     const tab = screen.getByText("a.md");
     fireEvent.contextMenu(tab);
+    flush();
     expect(screen.getByText("Open in Split Pane")).not.toBeNull();
   });
 
@@ -64,6 +66,7 @@ describe("TabBar — Move to Other Pane menu entry", () => {
     ));
     const tab = screen.getByText("a.md");
     fireEvent.contextMenu(tab);
+    flush();
     expect(screen.getByText("Move to Other Pane")).not.toBeNull();
   });
 });
@@ -82,6 +85,7 @@ describe("TabBar — translated context menu (DJA-30)", () => {
       />
     ));
     fireEvent.contextMenu(screen.getByText("doc.md"));
+    flush();
     // EN is the base locale resolved by paraglide when no locale is set;
     // these labels must come through the i18n catalog, not be hardcoded.
     for (const label of ["Close", "Close Others", "Close to the Right", "Close All"]) {

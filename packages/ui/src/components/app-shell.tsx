@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, createTrackedEffect } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { DragDropProvider, DragOverlay } from "../lib/dnd/index.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
@@ -482,12 +482,14 @@ export function AppShell(props: AppShellProps) {
   // `hasToc`; for everything else we clear it and drop the orphan DOM nodes
   // from the shared container so the `<Show when={!s.hasToc()}>` placeholder
   // gets a clean canvas.
-  createTrackedEffect(() => {
-    const file = s.selectedFile();
-    if (file && fileKind(file.name) === "document") return;
-    s.setHasToc(false);
-    if (tocContainerRef) tocContainerRef.textContent = "";
-  });
+  createEffect(
+    () => s.selectedFile(),
+    (file) => {
+      if (file && fileKind(file.name) === "document") return;
+      s.setHasToc(false);
+      if (tocContainerRef) tocContainerRef.textContent = "";
+    },
+  );
 
   // Lazily flatten the workspace only while the Quick Open overlay is open.
   // `state.rootsList` is reactive, so the memo refreshes when files are

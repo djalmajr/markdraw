@@ -46,11 +46,23 @@ type ButtonProps = ComponentProps<"button"> &
 /** `class`, `variant`, `size`, `loading`, `children` and `disabled` are ours;
  *  everything else (native props, event handlers) spreads onto the part. */
 const Button = (props: ButtonProps) => {
-  const others = omit(props, "variant", "size", "class", "loading", "children", "disabled")
+  // The DOM prop type admits `false`/RemoveAttribute on `type`, `style`, etc.;
+  // the ui-sdk part only accepts real HTML values.
+  const others = omit(
+    props,
+    "variant",
+    "size",
+    "class",
+    "loading",
+    "children",
+    "disabled",
+    "style",
+  ) as Omit<ComponentProps<typeof ButtonPrimitive>, "class" | "disabled" | "children" | "style">
   return (
     <ButtonPrimitive
       class={cn(buttonVariants({ variant: props.variant, size: props.size }), props.class)}
-      disabled={props.loading || props.disabled}
+      disabled={!!(props.loading || props.disabled)}
+      style={props.style as string | JSX.CSSProperties | undefined}
       {...others}
     >
       <Show when={props.loading}>

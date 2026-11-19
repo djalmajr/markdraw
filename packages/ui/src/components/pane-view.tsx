@@ -1,4 +1,4 @@
-import { Show, createMemo, createSignal, createTrackedEffect } from "solid-js";
+import { Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { useDroppable } from "../lib/dnd/index.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
@@ -236,11 +236,14 @@ export function PaneView(props: PaneViewProps) {
   const syncScrollActive = () =>
     pane().editorMode() === "split" && s.syncScroll() && !!pane().selectedFile();
 
-  createTrackedEffect(() => {
-    if (syncScrollActive()) return;
-    setEditorSyncTargetRatio(null);
-    setPreviewSyncTargetRatio(null);
-  });
+  createEffect(
+    () => syncScrollActive(),
+    (active) => {
+      if (active) return;
+      setEditorSyncTargetRatio(null);
+      setPreviewSyncTargetRatio(null);
+    },
+  );
 
   // Expose the scroll-to-line setters via property assignment — used
   // when this pane is the target of a Symbol or Find-in-Files jump.

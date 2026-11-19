@@ -430,7 +430,7 @@ export function Toolbar(props: ToolbarProps) {
         <div class="toolbar-center" data-tauri-drag-region={props.inWindowFrame ? "" : undefined}>
           <Tabs
             value={props.editorMode}
-            onChange={(v) => props.onEditorModeChange(v as "edit" | "split" | "preview")}
+            onChange={(v: unknown) => props.onEditorModeChange(String(v) as "edit" | "split" | "preview")}
           >
             <TabsList>
               <TabsTrigger disabled={!props.hasFile || !props.supportsEdit} value="edit">{(useLocale(), m.toolbar_editor_mode_edit())}</TabsTrigger>

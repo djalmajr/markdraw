@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSignal } from "solid-js";
+import { createSignal, flush } from "solid-js";
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { SelectionPopover } from "./selection-popover.tsx";
 import { Preview, type PreviewSelectionInfo } from "./preview.tsx";
@@ -82,17 +82,20 @@ describe("SelectionPopover", () => {
     sel.removeAllRanges();
     sel.addRange(range);
     fireEvent.mouseUp(para);
+    flush();
 
     expect(info()).not.toBeNull();
     expect(info()!.text).toBe("hello preview selection");
     const btn = baseElement.querySelector(".selection-popover-btn") as HTMLElement;
     expect(btn).not.toBeNull();
     fireEvent.click(btn);
+    flush();
     expect(added).toEqual(["hello preview selection"]);
 
     // Collapsing the selection (click elsewhere / Escape) hides the popover.
     sel.removeAllRanges();
     document.dispatchEvent(new Event("selectionchange"));
+    flush();
     expect(info()).toBeNull();
   });
 });
