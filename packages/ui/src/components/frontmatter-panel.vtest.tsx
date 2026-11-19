@@ -49,3 +49,40 @@ it("retains each property row and renders the latest value for its field", ({ on
   expect(rowFor("status")).toBe(status);
   expect(diagnostics.events.map(({ code }) => code)).not.toContain("UNSTABLE_LIST_IDENTITY");
 });
+
+it("stops expanding nested properties at the render depth cap", () => {
+  // Defense in depth: the parser rejects cyclic frontmatter, but a graph that
+  // reaches the panel another way must not recurse without bound.
+  const cyclic: Record<string, unknown> = { label: "loop" };
+  cyclic.next = cyclic;
+  const { container } = render(() => (
+    <FrontmatterPanel
+      frontmatter={{ meta: cyclic } as Frontmatter}
+      currentFilePath={null}
+      onNavigate={() => {}}
+    />
+  ));
+  expect(container.querySelectorAll(".frontmatter-nested").length).toBe(32);
+  expect(container.textContent).toContain("loop");
+  expect(container.textContent).toContain("…");
+  expect(container.textContent).not.toContain("[object Object]");
+});
+
+it("marks the render depth cap without coercing the value to a string", () => {
+  // A valid YAML map may carry a data key named `toString`; `String(map)` on
+  // it throws TypeError, so the cap emits a fixed marker instead.
+  const leaf = { toString: "not a method" };
+  let nested: Record<string, unknown> = leaf;
+  for (let i = 0; i < 32; i++) nested = { child: nested };
+  const { container } = render(() => (
+    <FrontmatterPanel
+      frontmatter={{ meta: nested } as Frontmatter}
+      currentFilePath={null}
+      onNavigate={() => {}}
+    />
+  ));
+  expect(container.querySelectorAll(".frontmatter-nested").length).toBe(32);
+  expect(container.textContent).toContain("…");
+  expect(container.textContent).not.toContain("[object Object]");
+  expect(container.textContent).not.toContain("not a method");
+});

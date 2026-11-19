@@ -2,4 +2,6 @@
 <p>Mail addresses become mailto links: <a href="mailto:user@example.com">user@example.com</a></p>
 <p>Full URLs stay links: <a href="https://example.org/path?q=1#frag">https://example.org/path?q=1#frag</a></p>
 <p>Bare file extensions are not domains: doc.adoc and notes.txt stay plain text.</p>
+<p>Bare document names are files, not domains: README.md and docs/notes.markdown stay plain text.</p>
 <p>URLs with credentials stay whole: <a href="http://user:pass@example.com/path">http://user:pass@example.com/path</a></p>
+<p>A domain plus a document path is still a link: <a href="http://example.com/README.md">example.com/README.md</a> and <a href="https://example.com/README.md">https://example.com/README.md</a>.</p>

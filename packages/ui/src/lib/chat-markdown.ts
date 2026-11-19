@@ -94,7 +94,10 @@ function linkDocumentPaths(state: any): void {
 // Fuzzy linkify treats anything shaped like a domain as a URL — and `.md` is
 // Moldova's TLD, so plain file names like `README.md` became live links to
 // parked spam domains. Require an explicit scheme (https://…) instead.
-md.linkify.set({ fuzzyLink: false });
+// `urlAuth` keeps credentials inside the link: without it linkify stops at the
+// `@`, so `http://user:pass@example.com/path` became a link to `http://user`
+// followed by the rest as plain text.
+md.linkify.set({ fuzzyLink: false, urlAuth: true });
 md.core.ruler.after("inline", "markdraw_document_path_links", linkDocumentPaths);
 
 const originalCodeInline =

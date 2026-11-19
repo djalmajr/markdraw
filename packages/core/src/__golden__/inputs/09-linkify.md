@@ -6,4 +6,8 @@ Full URLs stay links: https://example.org/path?q=1#frag
 
 Bare file extensions are not domains: doc.adoc and notes.txt stay plain text.
 
+Bare document names are files, not domains: README.md and docs/notes.markdown stay plain text.
+
 URLs with credentials stay whole: http://user:pass@example.com/path
+
+A domain plus a document path is still a link: example.com/README.md and https://example.com/README.md.

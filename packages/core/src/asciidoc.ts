@@ -6,8 +6,8 @@
 // registry and its DSL (block/includeProcessor with `named`/`onContext`/
 // `process`) are unchanged.
 import { convert, Extensions } from "@asciidoctor/core";
-import { escapeHtml } from "./utils";
-import { extractFrontmatter, type Frontmatter } from "./frontmatter";
+import { escapeHtml } from "./utils.ts";
+import { extractFrontmatter, type Frontmatter } from "./frontmatter.ts";
 
 export interface ConvertResult {
   html: string;

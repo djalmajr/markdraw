@@ -40,6 +40,129 @@ describe("getMarkdownIncludePaths", () => {
   });
 });
 
+describe("convertMarkdown — linkify policy", () => {
+  const render = async (fileContent: string) =>
+    (await convertMarkdown({ filePath: "d.md", fileContent, readFile: noopRead })).html;
+
+  it("keeps bare domains linked", async () => {
+    const html = await render("Bare: example.com and www.example.org");
+    expect(html).toContain('<a href="http://example.com">example.com</a>');
+    expect(html).toContain('<a href="http://www.example.org">www.example.org</a>');
+  });
+
+  it("does not link a bare document name (`.md` is Moldova's TLD)", async () => {
+    const html = await render("Files: README.md, README.MD, notes.markdown, doc.adoc, spec.asciidoc");
+    expect(html).not.toMatch(/href=["'][^"']*readme\.md/i);
+    expect(html).not.toMatch(/href=["'][^"']*notes\.markdown/i);
+    expect(html).not.toMatch(/href=["'][^"']*doc\.adoc/i);
+    expect(html).not.toMatch(/href=["'][^"']*spec\.asciidoc/i);
+    expect(html).toContain("README.md");
+  });
+
+  it("keeps the surrounding text intact when it drops a file-name match", async () => {
+    const html = await render("Read README.md first, then example.com and doc.adoc last");
+    expect(html).toContain("Read README.md first, then <a href=\"http://example.com\">example.com</a> and doc.adoc last");
+  });
+
+  it("does not link a document path without a scheme", async () => {
+    const html = await render("See docs/a.md and docs/notes.adoc");
+    expect(html).not.toMatch(/href=["'][^"']*docs\//i);
+    expect(html).toContain("docs/a.md");
+  });
+
+  it("keeps a domain followed by a document path linked", async () => {
+    // The suppression is only for an isolated file name: `example.com/README.md`
+    // is a domain plus a document path, not a bare `README.md`.
+    const html = await render("See example.com/README.md and example.md/foo");
+    expect(html).toContain('<a href="http://example.com/README.md">example.com/README.md</a>');
+    expect(html).toContain('<a href="http://example.md/foo">example.md/foo</a>');
+  });
+
+  it("keeps a domain with a query or fragment that ends in a document name linked", async () => {
+    const html = await render("See example.com?file=README.md and example.com#README.md");
+    expect(html).toContain('<a href="http://example.com?file=README.md">example.com?file=README.md</a>');
+    expect(html).toContain('<a href="http://example.com#README.md">example.com#README.md</a>');
+  });
+
+  it("does not link a document path that never matched as a fuzzy domain", async () => {
+    const html = await render("A directory path docs/README.md stays text");
+    expect(html).not.toContain("href");
+    expect(html).toContain("docs/README.md");
+  });
+
+  it("keeps an explicit URL to a document linked", async () => {
+    const html = await render("See https://example.com/docs/README.md");
+    expect(html).toContain('<a href="https://example.com/docs/README.md">');
+  });
+
+  it("keeps mail addresses linked", async () => {
+    const html = await render("Mail user@example.com");
+    expect(html).toContain('<a href="mailto:user@example.com">user@example.com</a>');
+  });
+
+  it("keeps a URL with credentials whole (urlAuth)", async () => {
+    const html = await render("Auth http://user:pass@example.com/path");
+    expect(html).toContain(
+      '<a href="http://user:pass@example.com/path">http://user:pass@example.com/path</a>',
+    );
+    expect(html).not.toContain('<a href="http://user">');
+  });
+});
+
+describe("convert-worker — linkify policy", () => {
+  // The worker repeats the preview filter on its own instance, so it is driven
+  // through its real entry point: the `self.onmessage` handler it installs.
+  type WorkerReply = { id: number; html: string | null; error: string | null };
+  const scope = globalThis as { self?: unknown };
+  const hadSelf = "self" in scope;
+  const previousSelf = scope.self;
+  let reply: WorkerReply | null = null;
+  const fakeSelf = {
+    onmessage: null as ((event: { data: unknown }) => Promise<void>) | null,
+    postMessage: (message: WorkerReply) => {
+      reply = message;
+    },
+  };
+  let handler: ((event: { data: unknown }) => Promise<void>) | null = null;
+
+  const renderInWorker = async (source: string): Promise<string> => {
+    // The handler reads `self` when it replies, so the fake stays installed
+    // until the call settles; the module is imported only once.
+    scope.self = fakeSelf;
+    try {
+      if (!handler) {
+        await import("./convert-worker.ts");
+        handler = fakeSelf.onmessage;
+        if (!handler) throw new Error("convert-worker installed no onmessage handler");
+      }
+      reply = null;
+      await handler({ data: { type: "convert-md", id: 1, processedContent: source } });
+    } finally {
+      if (hadSelf) scope.self = previousSelf;
+      else delete scope.self;
+    }
+    if (!reply || reply.error !== null) throw new Error(`worker failed: ${reply?.error ?? "no reply"}`);
+    return reply.html ?? "";
+  };
+
+  it("does not link a bare document name", async () => {
+    const html = await renderInWorker("Files: README.md and doc.adoc");
+    expect(html).not.toContain("href");
+    expect(html).toContain("README.md");
+  });
+
+  it("keeps a domain followed by a document path linked", async () => {
+    const html = await renderInWorker("See example.com/README.md");
+    expect(html).toContain('<a href="http://example.com/README.md">example.com/README.md</a>');
+  });
+
+  it("keeps a domain with a query or fragment that ends in a document name linked", async () => {
+    const html = await renderInWorker("See example.com?file=README.md and example.com#README.md");
+    expect(html).toContain('<a href="http://example.com?file=README.md">example.com?file=README.md</a>');
+    expect(html).toContain('<a href="http://example.com#README.md">example.com#README.md</a>');
+  });
+});
+
 describe("convertMarkdown", () => {
   it("renders a basic document into HTML with a TOC block", async () => {
     const { html, frontmatter } = await convertMarkdown({

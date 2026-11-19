@@ -92,13 +92,89 @@ body`;
     expect(body).toBe(source);
   });
 
-  it("parses recursive anchors without throwing (same as v4 — aliases are by reference)", () => {
-    const { frontmatter, body } = extractFrontmatter("---\na: &x [*x]\n---\nbody");
+  it("rejects a recursive anchor instead of returning a cyclic map", () => {
+    // js-yaml resolves aliases by reference, so `*x` inside `&x` is a real
+    // cycle. Consumers walk the map recursively (the properties panel,
+    // JSON.stringify), so it is treated like invalid YAML.
+    const sources = [
+      "---\na: &x [*x]\n---\nbody",
+      "---\na: &x { b: *x }\n---\nbody",
+      "---\na: &a\n  b: &b\n    c: *a\n---\nbody",
+    ];
+    for (const source of sources) {
+      expect(extractFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+    }
+  });
+
+  it("rejects a frontmatter map nested deeper than 64 levels", () => {
+    const nested = (levels: number) =>
+      `---\na: ${"{b: ".repeat(levels - 1)}1${"}".repeat(levels - 1)}\n---\nbody`;
+
+    const atLimit = nested(64);
+    expect(extractFrontmatter(atLimit).frontmatter).not.toBeNull();
+
+    const tooDeep = nested(65);
+    expect(extractFrontmatter(tooDeep)).toEqual({ frontmatter: null, body: tooDeep });
+  });
+
+  it("rejects a long alias chain (deep through shared references, not a cycle)", () => {
+    // A chain of 100 aliases nests 100 levels even though no object repeats on
+    // its own path: the depth limit, not the cycle check, is what rejects it.
+    let chain = "---\nroot: &r0 {v: 1}\n";
+    for (let i = 1; i < 100; i++) chain += `k${i}: &r${i} {child: *r${i - 1}}\n`;
+    const source = `${chain}---\nbody`;
+    expect(extractFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+  });
+
+  it("keeps an anchor reused by sibling keys (shared, not cyclic)", () => {
+    const { frontmatter } = extractFrontmatter("---\nx: &s {k: 1}\ny: *s\n---\nbody");
     expect(frontmatter).not.toBeNull();
-    expect(body).toBe("body");
-    // The alias is a real self-reference, not a copy — JSON.stringify would throw.
-    const a = frontmatter!.a as unknown[];
-    expect(a[0]).toBe(a);
+    expect(frontmatter!.x).toEqual({ k: 1 });
+    // Aliases are still by reference: two fields, one map.
+    expect(frontmatter!.x).toBe(frontmatter!.y);
+  });
+
+  it("validates a shared subtree once instead of re-walking it per reference", () => {
+    // 22 doubling levels: re-walking both branches on every reference costs
+    // ~2^22 visits (~3.7 s here) while a memoized height costs 22.
+    const levels = 22;
+    let source = "---\nbase: &a0 {v: 1}\n";
+    for (let i = 1; i <= levels; i++) {
+      source += `k${i}: &a${i} {l: *a${i - 1}, r: *a${i - 1}}\n`;
+    }
+    source += "---\nbody";
+
+    const started = performance.now();
+    const { frontmatter } = extractFrontmatter(source);
+    const elapsed = performance.now() - started;
+
+    expect(frontmatter).not.toBeNull();
+    // Same anchor, one object: siblings share the reference, no cycle.
+    expect((frontmatter!.k22 as { l: unknown }).l).toBe(frontmatter!.k21);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it("applies the depth limit to the absolute path through a shared subtree", () => {
+    // A 40-level chain, valid at the top (depth 1 + height 39 = 40) and over
+    // the limit when the same subtree hangs 30 maps down (31 + 39 = 70).
+    let chain = "c0: &c0 {v: 1}\n";
+    for (let i = 1; i < 40; i++) chain += `c${i}: &c${i} {child: *c${i - 1}}\n`;
+
+    const shallow = `---\n${chain}top: *c39\n---\nbody`;
+    expect(extractFrontmatter(shallow).frontmatter).not.toBeNull();
+
+    const nested = `deep: ${"{n: ".repeat(30)}*c39${"}".repeat(30)}\n`;
+    const deep = `---\n${chain}${nested}---\nbody`;
+    expect(extractFrontmatter(deep)).toEqual({ frontmatter: null, body: deep });
+  });
+
+  it("keeps a map whose data key is named toString (valid YAML, no coercion)", () => {
+    // The panel must not `String()` such a value: `toString` is a string here,
+    // not a method. The parser only walks own values, so it stays valid.
+    const source = "---\nmeta: {toString: boom}\n---\nbody";
+    const { frontmatter } = extractFrontmatter(source);
+    expect(frontmatter).not.toBeNull();
+    expect(frontmatter!.meta).toEqual({ toString: "boom" });
   });
 
   it("treats an empty frontmatter block as no frontmatter (load('') throws in v5)", () => {
