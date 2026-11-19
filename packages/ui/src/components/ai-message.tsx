@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, Show, createTrackedEffect } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -283,7 +283,7 @@ function AiWaitingIndicator(): JSX.Element {
       m.ai_message_waiting_verifying(),
     ];
   };
-  const [statusIndex, setStatusIndex] = createSignal(randomWaitingStatusIndex(statuses().length));
+  const [statusIndex, setStatusIndex] = createSignal(randomWaitingStatusIndex(untrack(statuses).length));
   let statusTimer: ReturnType<typeof setTimeout> | undefined;
 
   function nextDelay(): number {
@@ -423,21 +423,22 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
     }, AI_TYPEWRITER_INTERVAL_MS);
   }
 
-  createTrackedEffect(() => {
-    const target = props.content;
-    if (!props.streaming) {
-      stopTypewriter();
-      setVisibleContent(target);
-      return;
-    }
-    const current = visibleContent();
-    if (!target.startsWith(current)) {
-      stopTypewriter();
-      setVisibleContent(target);
-      return;
-    }
-    if (target.length > current.length) startTypewriter();
-  });
+  createEffect(
+    () => ({ target: props.content, streaming: props.streaming, current: visibleContent() }),
+    ({ target, streaming, current }) => {
+      if (!streaming) {
+        stopTypewriter();
+        setVisibleContent(target);
+        return;
+      }
+      if (!target.startsWith(current)) {
+        stopTypewriter();
+        setVisibleContent(target);
+        return;
+      }
+      if (target.length > current.length) startTypewriter();
+    },
+  );
 
   onCleanup(() => {
     clearTimeout(copiedTimer);

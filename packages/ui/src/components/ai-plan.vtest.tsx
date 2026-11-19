@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { AiPlan } from "./ai-plan.tsx";
@@ -43,6 +44,7 @@ describe("AiPlan", () => {
     ));
     const boxes = baseElement.querySelectorAll<HTMLInputElement>(".ai-plan-checkbox");
     fireEvent.click(boxes[1]!);
+    flush();
     expect(onToggleItem).toHaveBeenCalledTimes(1);
     expect(onToggleItem).toHaveBeenCalledWith(1);
   });
@@ -53,6 +55,7 @@ describe("AiPlan", () => {
       <AiPlan items={ITEMS} onClear={onClear} onToggleItem={() => {}} />
     ));
     fireEvent.click(baseElement.querySelector(".ai-plan-clear")!);
+    flush();
     expect(onClear).toHaveBeenCalledTimes(1);
   });
 
@@ -62,9 +65,11 @@ describe("AiPlan", () => {
     ));
     const toggle = baseElement.querySelector(".ai-plan-toggle")!;
     fireEvent.click(toggle);
+    flush();
     expect(baseElement.querySelector(".ai-plan-items")).toBeNull();
     expect(baseElement.querySelector(".ai-plan-counter")!.textContent).toBe("1/3");
     fireEvent.click(toggle);
+    flush();
     expect(baseElement.querySelectorAll(".ai-plan-item")).toHaveLength(3);
   });
 });

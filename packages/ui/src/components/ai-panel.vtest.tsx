@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSignal } from "solid-js";
+import { createSignal, flush } from "solid-js";
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createMockProvider } from "@markdraw/ai/mock-provider.ts";
 import type { SlashCommandDef } from "@markdraw/ai/slash-commands.ts";
@@ -14,6 +14,21 @@ import { AiPanel, type AiMentionEntry, type AiSkillEntry } from "./ai-panel.tsx"
 import { AiMessage } from "./ai-message.tsx";
 
 afterEach(cleanup);
+
+// Solid 2 commits signal writes on the next flush. Firing an event is the test
+// equivalent of a user interaction: dispatch it, then drain the reactive writes
+// before asserting on the DOM (the same boundary the renderer uses).
+const fire = new Proxy(fireEvent, {
+  get(target, prop) {
+    const handler = Reflect.get(target, prop);
+    if (typeof handler !== "function") return handler;
+    return (...args: unknown[]) => {
+      const result = (handler as (...args: unknown[]) => unknown).apply(target, args);
+      flush();
+      return result;
+    };
+  },
+});
 
 function readyStore(reply = "hello there") {
   return createAiChatStore({
@@ -75,7 +90,7 @@ describe("AiPanel", () => {
     await waitFor(() => expect(scroll.scrollTop()).toBe(1000));
 
     scroll.setScrollTop(100);
-    fireEvent.scroll(viewport);
+    fire.scroll(viewport);
     const chip = screen.getByRole("button", { name: /scroll to bottom|ir para o fim|ir al final/i });
     expect(chip).not.toBeNull();
 
@@ -83,7 +98,7 @@ describe("AiPanel", () => {
     await waitFor(() => expect(store.messages()).toHaveLength(4));
     expect(scroll.scrollTop()).toBe(100);
 
-    fireEvent.click(chip);
+    fire.click(chip);
     await waitFor(() => expect(scroll.scrollTop()).toBe(1000));
     expect(screen.queryByRole("button", { name: /scroll to bottom|ir para o fim|ir al final/i })).toBeNull();
   });
@@ -133,9 +148,9 @@ describe("AiPanel", () => {
     expect(baseElement.querySelector(".ai-provider-chip")).toBeNull();
     expect(trigger.textContent).toContain("Model 1");
     // Open the popover and confirm the provider group + the other model show.
-    fireEvent.click(trigger);
+    fire.click(trigger);
     expect(screen.getByText("Provider P")).not.toBeNull();
-    fireEvent.click(screen.getByText("Model 2"));
+    fire.click(screen.getByText("Model 2"));
     expect(onSelectModel).toHaveBeenCalledWith("p/m2");
   });
 
@@ -155,11 +170,11 @@ describe("AiPanel", () => {
     const chips = baseElement.querySelectorAll(".ai-context-chip");
     expect(chips).toHaveLength(2);
     // Removing the active-file chip dismisses it (it re-appears on file switch).
-    fireEvent.click(baseElement.querySelector(".ai-context-chip-active .ai-context-chip-x") as HTMLElement);
+    fire.click(baseElement.querySelector(".ai-context-chip-active .ai-context-chip-x") as HTMLElement);
     expect(onDismissActiveFile).toHaveBeenCalledTimes(1);
     // Removing an item chip drops it by id.
     const itemChip = [...chips].find((c) => !c.classList.contains("ai-context-chip-active"))!;
-    fireEvent.click(itemChip.querySelector(".ai-context-chip-x") as HTMLElement);
+    fire.click(itemChip.querySelector(".ai-context-chip-x") as HTMLElement);
     expect(onRemoveContext).toHaveBeenCalledWith("f1");
   });
 
@@ -179,11 +194,11 @@ describe("AiPanel", () => {
     const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
     ta.value = "@al";
     ta.setSelectionRange(3, 3);
-    fireEvent.input(ta);
+    fire.input(ta);
     const items = baseElement.querySelectorAll(".ai-mention-item");
     expect(items).toHaveLength(1); // filtered to "alpha.md"
     expect(items[0]!.textContent).toContain("alpha.md");
-    fireEvent.mouseDown(items[0]!);
+    fire.mouseDown(items[0]!);
     expect(onMention).toHaveBeenCalledWith({ label: "alpha.md", path: "a/alpha.md", rootId: "r" });
     // The reference stays INLINE: the typed "@al" is replaced by the literal
     // "@alpha.md " token in the composer text, and the list closes.
@@ -209,7 +224,7 @@ describe("AiPanel", () => {
     const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
     ta.value = "@no";
     ta.setSelectionRange(3, 3);
-    fireEvent.input(ta);
+    fire.input(ta);
     const items = baseElement.querySelectorAll(".ai-mention-item");
     expect(items).toHaveLength(1); // filtered to the "notes/" dir
     expect(items[0]!.querySelector(".ai-mention-name")?.textContent).toBe("notes/");
@@ -217,16 +232,16 @@ describe("AiPanel", () => {
     // so the host knows to attach a listing instead of file content. The
     // typed "@no" becomes the inline "@notes/ " token (folder labels already
     // carry the trailing slash).
-    fireEvent.mouseDown(items[0]!);
+    fire.mouseDown(items[0]!);
     expect(onMention).toHaveBeenCalledWith({ kind: "dir", label: "notes/", path: "notes", rootId: "r" });
     expect(ta.value).toBe("@notes/ ");
     // The root entry is mentionable too.
     ta.value = "@wk";
     ta.setSelectionRange(3, 3);
-    fireEvent.input(ta);
+    fire.input(ta);
     const rootItems = baseElement.querySelectorAll(".ai-mention-item");
     expect(rootItems).toHaveLength(1);
-    fireEvent.mouseDown(rootItems[0]!);
+    fire.mouseDown(rootItems[0]!);
     expect(onMention).toHaveBeenCalledWith({ kind: "dir", label: "wksp/", path: "", rootId: "r" });
   });
 
@@ -273,7 +288,7 @@ describe("AiPanel", () => {
     const store = readyStore();
     render(() => <AiPanel store={store} providerLabel="Mock" />);
     const trigger = screen.getByLabelText("Context usage");
-    fireEvent.click(trigger);
+    fire.click(trigger);
     await waitFor(() => {
       expect(screen.getByText("Conversation")).not.toBeNull();
       expect(screen.getByText("Total (estimated)")).not.toBeNull();
@@ -284,8 +299,8 @@ describe("AiPanel", () => {
     const store = readyStore("hello there");
     const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
     const textarea = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
-    fireEvent.input(textarea, { target: { value: "hi" } });
-    fireEvent.keyDown(textarea, { key: "Enter" });
+    fire.input(textarea, { target: { value: "hi" } });
+    fire.keyDown(textarea, { key: "Enter" });
 
     await waitFor(() => {
       expect(baseElement.textContent).toContain("hello there");
@@ -376,11 +391,11 @@ describe("AiPanel", () => {
     ));
     expect(baseElement.querySelector(".ai-tool-output")).toBeNull();
     const chip = baseElement.querySelector(".ai-tool-chip") as HTMLButtonElement;
-    fireEvent.click(chip);
+    fire.click(chip);
     const out = baseElement.querySelector(".ai-tool-output");
     expect(out?.textContent).toContain("[DIR] diagramas");
     expect(chip.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(chip);
+    fire.click(chip);
     expect(baseElement.querySelector(".ai-tool-output")).toBeNull();
   });
 
@@ -400,7 +415,7 @@ describe("AiPanel", () => {
         ]}
       />
     ));
-    fireEvent.click(baseElement.querySelector(".ai-tool-chip") as HTMLElement);
+    fire.click(baseElement.querySelector(".ai-tool-chip") as HTMLElement);
     const out = baseElement.querySelector(".ai-tool-output");
     expect(out?.textContent).toContain("add");
     expect(out?.textContent).toContain('"a": 17');
@@ -421,7 +436,7 @@ describe("AiPanel", () => {
     const links = [...baseElement.querySelectorAll(".ai-markdown a")];
     expect(links).toHaveLength(1);
     // The click is cancelled (no webview navigation) and routed to the host.
-    const notCancelled = fireEvent.click(links[0]!);
+    const notCancelled = fire.click(links[0]!);
     expect(notCancelled).toBe(false);
     expect(onOpenExternal).toHaveBeenCalledWith("https://example.com");
   });
@@ -443,7 +458,7 @@ describe("AiPanel", () => {
     ));
 
     const link = baseElement.querySelector(".ai-markdown a")!;
-    const notCancelled = fireEvent.click(link);
+    const notCancelled = fire.click(link);
     expect(notCancelled).toBe(false);
     expect(onNavigateDocument).toHaveBeenCalledWith("docs/architecture.adoc", null);
   });
@@ -468,7 +483,7 @@ describe("AiPanel", () => {
     ));
 
     const link = baseElement.querySelector(".ai-markdown a")!;
-    fireEvent.click(link);
+    fire.click(link);
     expect(onNavigateDocument).toHaveBeenCalledWith(
       "/Users/djalmajr/Developer/djalmajr/markdraw/docs/README.md",
       null,
@@ -486,7 +501,7 @@ describe("AiPanel", () => {
     const { baseElement } = render(() => <AiMessage content="copy me" role="assistant" />);
     const btn = baseElement.querySelector(".ai-msg-action-btn") as HTMLButtonElement;
     expect(btn.getAttribute("aria-label")).toBe("Copy");
-    fireEvent.click(btn);
+    fire.click(btn);
     expect(writeText).toHaveBeenCalledWith("copy me");
     // After the write resolves the button shows the transient "copied" state.
     await waitFor(() => {
@@ -542,7 +557,7 @@ describe("AiPanel", () => {
     const bubbles = baseElement.querySelectorAll(".ai-message");
     expect(bubbles[bubbles.length - 1]!.contains(retries[0]!)).toBe(true);
     // Clicking retry drops "a2" and streams a fresh reply in its place.
-    fireEvent.click(retries[0]!);
+    fire.click(retries[0]!);
     await waitFor(() => {
       expect(store.messages().at(-1)).toEqual({ role: "assistant", content: "fresh reply" });
     });
@@ -564,7 +579,7 @@ describe("AiPanel", () => {
     // Every USER bubble (and only those) offers the edit action.
     const edits = baseElement.querySelectorAll('[aria-label="Edit and resend"]');
     expect(edits).toHaveLength(2);
-    fireEvent.click(edits[0]!);
+    fire.click(edits[0]!);
     const textarea = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
     expect(textarea.value).toBe("q1");
     expect(baseElement.querySelector(".ai-editing-bar")).not.toBeNull();
@@ -581,10 +596,10 @@ describe("AiPanel", () => {
       ],
     });
     const { baseElement } = render(() => <AiPanel store={store} providerLabel="Mock" />);
-    fireEvent.click(baseElement.querySelectorAll('[aria-label="Edit and resend"]')[0]!);
+    fire.click(baseElement.querySelectorAll('[aria-label="Edit and resend"]')[0]!);
     const textarea = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
-    fireEvent.input(textarea, { target: { value: "q1 edited" } });
-    fireEvent.keyDown(textarea, { key: "Enter" });
+    fire.input(textarea, { target: { value: "q1 edited" } });
+    fire.keyDown(textarea, { key: "Enter" });
     await waitFor(() => {
       expect(store.messages().at(-1)).toEqual({ role: "assistant", content: "edited reply" });
     });
@@ -610,15 +625,15 @@ describe("AiPanel", () => {
     const edit = baseElement.querySelector('[aria-label="Edit and resend"]') as HTMLElement;
     const textarea = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
     // X dismisses.
-    fireEvent.click(edit);
+    fire.click(edit);
     expect(textarea.value).toBe("q1");
-    fireEvent.click(baseElement.querySelector(".ai-editing-bar .ai-context-chip-x") as HTMLElement);
+    fire.click(baseElement.querySelector(".ai-editing-bar .ai-context-chip-x") as HTMLElement);
     expect(baseElement.querySelector(".ai-editing-bar")).toBeNull();
     expect(textarea.value).toBe("");
     // Escape dismisses too.
-    fireEvent.click(edit);
+    fire.click(edit);
     expect(baseElement.querySelector(".ai-editing-bar")).not.toBeNull();
-    fireEvent.keyDown(textarea, { key: "Escape" });
+    fire.keyDown(textarea, { key: "Escape" });
     expect(baseElement.querySelector(".ai-editing-bar")).toBeNull();
     expect(textarea.value).toBe("");
     // History untouched by cancelled edits.
@@ -668,12 +683,12 @@ describe("AiPanel", () => {
     const trigger = screen.getByLabelText("Chat mode");
     expect(trigger.textContent).toContain("Plan");
     // Open the popover and pick Build, with modes ordered alphabetically.
-    fireEvent.click(trigger);
+    fire.click(trigger);
     const rows = [...document.querySelectorAll(".ai-mp-popover-compact .ai-mp-row-label")].map(
       (el) => el.textContent,
     );
     expect(rows).toEqual(["Ask", "Build", "Plan"]);
-    fireEvent.click(screen.getByText("Build"));
+    fire.click(screen.getByText("Build"));
     expect(onModeChange).toHaveBeenCalledWith("build");
   });
 
@@ -683,8 +698,8 @@ describe("AiPanel", () => {
     render(() => <AiPanel store={store} providerLabel="Mock" mode="ask" onModeChange={onModeChange} />);
     const trigger = screen.getByLabelText("Chat mode");
     expect(trigger.textContent).toContain("Ask");
-    fireEvent.click(trigger);
-    fireEvent.click(screen.getByText("Plan"));
+    fire.click(trigger);
+    fire.click(screen.getByText("Plan"));
     expect(onModeChange).toHaveBeenCalledWith("plan");
   });
 
@@ -714,8 +729,8 @@ describe("AiPanel", () => {
     // A streamed turn is transformed for display too, and consolidates into
     // the store with the original text.
     const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
-    fireEvent.input(ta, { target: { value: "go" } });
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.input(ta, { target: { value: "go" } });
+    fire.keyDown(ta, { key: "Enter" });
     await waitFor(() => {
       expect(store.messages().at(-1)).toEqual({ role: "assistant", content: "token is [secret-1]" });
     });
@@ -753,7 +768,7 @@ describe("AiPanel", () => {
     const chip = baseElement.querySelector(".ai-tool-chip") as HTMLButtonElement;
     expect(chip.querySelector(".ai-tool-chip-name")?.textContent).toBe("File");
     expect(chip.getAttribute("title")).toBe("Read file");
-    fireEvent.click(chip);
+    fire.click(chip);
     const output = baseElement.querySelector(".ai-tool-output");
     expect(output?.textContent).toBe("key: sk-realvalue");
   });
@@ -778,7 +793,7 @@ describe("AiPanel — @-mention workspace roots", () => {
     const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
     ta.value = value;
     ta.setSelectionRange(value.length, value.length);
-    fireEvent.input(ta);
+    fire.input(ta);
     return ta;
   }
 
@@ -837,7 +852,7 @@ describe("AiPanel — @-mention workspace roots", () => {
       <AiPanel store={store} mentionFiles={mentionEntries(12)} onMention={onMention} />
     ));
     const ta = typeMention(baseElement, "@");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     expect(onMention).toHaveBeenCalledWith(ROOT);
     // The "@" becomes the inline root token, the list closes, nothing was sent.
     expect(ta.value).toBe("@wksp/ ");
@@ -897,12 +912,12 @@ describe("AiPanel — inline @-mention tokens (Cursor-style)", () => {
     ta.value = value;
     const at = caret ?? value.length;
     ta.setSelectionRange(at, at);
-    fireEvent.input(ta);
+    fire.input(ta);
     return ta;
   }
 
   function pickMention(baseElement: HTMLElement, index = 0): void {
-    fireEvent.mouseDown(baseElement.querySelectorAll(".ai-mention-item")[index]!);
+    fire.mouseDown(baseElement.querySelectorAll(".ai-mention-item")[index]!);
   }
 
   /** Minimal AiChatStore stub so a test can control the sendMessage promise. */
@@ -985,6 +1000,7 @@ describe("AiPanel — inline @-mention tokens (Cursor-style)", () => {
     expect(onRemoveContext).not.toHaveBeenCalled();
     // The item lands late → the pending-removal sweep drops it immediately.
     setItems([ALPHA_ITEM]);
+    flush();
     await waitFor(() => {
       expect(onRemoveContext).toHaveBeenCalledWith("mention:r:a/alpha.md");
     });
@@ -1026,7 +1042,7 @@ describe("AiPanel — inline @-mention tokens (Cursor-style)", () => {
     const ta = typeText(baseElement, "@be @alpha.md ", 3);
     pickMention(baseElement);
     expect(ta.value).toBe("@beta.md  @alpha.md ");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     // Sent text carries the tokens verbatim; the reorder (item IDS in
     // textual order) happened BEFORE the send so the preamble matches.
     expect(sendMessage).toHaveBeenCalledWith("@beta.md  @alpha.md ");
@@ -1059,6 +1075,7 @@ describe("AiPanel — inline @-mention tokens (Cursor-style)", () => {
     typeText(baseElement, "@al");
     pickMention(baseElement);
     setStore(readyStore());
+    flush();
     await waitFor(() => {
       expect(onRemoveContext).toHaveBeenCalledWith("mention:r:a/alpha.md");
     });
@@ -1117,12 +1134,12 @@ describe("AiPanel — inline @-mention tokens (Cursor-style)", () => {
     ));
     // Turn 1 streams (its gate stays closed)...
     const ta = typeText(baseElement, "hi");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     await waitFor(() => expect(gates).toHaveLength(1));
     // ...and a steering send with an @-mention queues while it does.
     typeText(baseElement, "@be");
     pickMention(baseElement);
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     expect(store.queued()).toBe("@beta.md");
     // The mention's item must STAY attached while the message sits queued.
     await Promise.resolve();
@@ -1187,7 +1204,7 @@ describe("AiPanel — inline @-mention tokens (Cursor-style)", () => {
     const chips = baseElement.querySelectorAll(".ai-context-chip");
     expect(chips).toHaveLength(1);
     // The visible chip is r1's — its × removes r1, proving it never stranded.
-    fireEvent.click(chips[0]!.querySelector(".ai-context-chip-x")!);
+    fire.click(chips[0]!.querySelector(".ai-context-chip-x")!);
     expect(onRemoveContext).toHaveBeenCalledWith("mention:r1:a/notes.md");
   });
 
@@ -1212,6 +1229,7 @@ describe("AiPanel — inline @-mention tokens (Cursor-style)", () => {
     expect(onRemoveContext).not.toHaveBeenCalled();
     // BOTH twins land in the same batch — the sweep may only take r2's.
     setItems([TWIN_R1_ITEM, TWIN_R2_ITEM]);
+    flush();
     await waitFor(() => {
       expect(onRemoveContext).toHaveBeenCalledWith("mention:r2:b/notes.md");
     });
@@ -1251,7 +1269,7 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     ta.value = value;
     const at = caret ?? value.length;
     ta.setSelectionRange(at, at);
-    fireEvent.input(ta);
+    fire.input(ta);
     return ta;
   }
 
@@ -1291,6 +1309,7 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     ));
     const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     expect(ta.value).toBe("@doc.md:3-7 ");
     expect(baseElement.querySelector(".ai-inline-mention")?.textContent).toBe("@doc.md:3-7");
     await waitFor(() => {
@@ -1319,6 +1338,7 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     container.remove(); // the zombie's DOM is detached; its effects stay alive
     expect(ta.isConnected).toBe(false);
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     // A detached instance neither inserts nor acks — it leaves the reference
     // pending for the connected panel.
     expect(ta.value).toBe("");
@@ -1339,12 +1359,14 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     // text) follows non-whitespace, so the token gets a separating space.
     const ta = typeText(baseElement, "explain this");
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     expect(ta.value).toBe("explain this @doc.md:3-7 ");
     // Unfocused: the stale caret is ignored — the next reference APPENDS
     // (already after whitespace here, so no doubled space).
     ta.blur();
     ta.setSelectionRange(0, 0);
     setRef({ itemId: OTHER_SEL_ITEM.id, seq: 2, token: OTHER_SEL_ITEM.label });
+    flush();
     expect(ta.value).toBe("explain this @doc.md:3-7 @other.md:1-2 ");
   });
 
@@ -1356,11 +1378,14 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     ));
     const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     // The same reference re-set with the SAME seq is a no-op...
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     expect(ta.value).toBe("@doc.md:3-7 ");
     // ...and a NEW seq for the same item+token refocuses without duplicating.
     setRef({ itemId: SEL_ITEM.id, seq: 2, token: SEL_ITEM.label });
+    flush();
     expect(ta.value).toBe("@doc.md:3-7 ");
     expect(baseElement.querySelectorAll(".ai-inline-mention")).toHaveLength(1);
   });
@@ -1397,6 +1422,7 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
       />
     ));
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     // Gluing a character onto the token breaks its boundary → untracked.
     typeText(baseElement, "@doc.md:3-7x");
     expect(onRemoveContext).toHaveBeenCalledWith("selection:doc.md:10-20");
@@ -1411,6 +1437,7 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     ));
     expect(baseElement.querySelectorAll(".ai-context-chip")).toHaveLength(2);
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     const chips = [...baseElement.querySelectorAll(".ai-context-chip")];
     expect(chips).toHaveLength(1);
     expect(chips[0]!.textContent).toContain("other.md:1-2");
@@ -1436,11 +1463,12 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     // A mention token first, then the selection token appended after it —
     // locks the cross-kind textual ordering.
     typeText(baseElement, "@al");
-    fireEvent.mouseDown(baseElement.querySelector(".ai-mention-item")!);
+    fire.mouseDown(baseElement.querySelector(".ai-mention-item")!);
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
     expect(ta.value).toBe("@alpha.md @doc.md:3-7 ");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     expect(sendMessage).toHaveBeenCalledWith("@alpha.md @doc.md:3-7 ");
     expect(onReorderContext).toHaveBeenCalledWith([
       "mention:r:a/alpha.md",
@@ -1469,7 +1497,9 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
       />
     ));
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     setStore(readyStore());
+    flush();
     await waitFor(() => {
       expect(onRemoveContext).toHaveBeenCalledWith("selection:doc.md:10-20");
     });
@@ -1497,8 +1527,9 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     // to the pre-insertion "@al" text and must close, or its Enter handler
     // would run selectMention (a hidden, token-less mention) instead of send.
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     expect(baseElement.querySelectorAll(".ai-mention-item")).toHaveLength(0);
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     expect(onMention).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith("@al @doc.md:3-7 ");
   });
@@ -1527,8 +1558,9 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     // Left open, the stale list's Enter would run selectSlashCommand and wipe
     // the just-inserted token text while its ref stayed tracked.
     setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    flush();
     expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     // "/su" matches no command, so the text passes through with the token intact.
     expect(sendMessage).toHaveBeenCalledWith("/su @doc.md:3-7 ");
   });
@@ -1558,7 +1590,9 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
       />
     ));
     setRef({ itemId: firstItem.id, seq: 1, token: "flow.excalidraw:sel" });
+    flush();
     setRef({ itemId: secondItem.id, seq: 2, token: "flow.excalidraw:sel" });
+    flush();
     const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
     expect(ta.value).toBe("@flow.excalidraw:sel @flow.excalidraw:sel-2 ");
     // Each token still maps to ITS item: deleting the deduped one removes
@@ -1602,7 +1636,7 @@ describe("AiPanel — skill references", () => {
     const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
     ta.value = value;
     ta.setSelectionRange(value.length, value.length);
-    fireEvent.input(ta);
+    fire.input(ta);
     return ta;
   }
 
@@ -1614,7 +1648,7 @@ describe("AiPanel — skill references", () => {
     expect(items).toHaveLength(1);
     expect(items[0]!.textContent).toContain("$agile-proto");
     expect(items[0]!.textContent).toContain("Create interactive UI prototypes");
-    fireEvent.mouseDown(items[0]!);
+    fire.mouseDown(items[0]!);
     const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
     expect(ta.value).toBe("use $agile-proto ");
     expect(baseElement.querySelectorAll(".ai-skill-item")).toHaveLength(0);
@@ -1625,7 +1659,7 @@ describe("AiPanel — skill references", () => {
     const { baseElement } = render(() => <AiPanel store={store} skills={SKILLS} />);
     const ta = typeIntoComposer(baseElement, "$shadcn");
     expect(baseElement.querySelectorAll(".ai-skill-item")).toHaveLength(1);
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     expect(ta.value).toBe("$build-web-apps:shadcn ");
     expect(store.messages()).toHaveLength(0);
   });
@@ -1634,7 +1668,7 @@ describe("AiPanel — skill references", () => {
     const store = readyStore();
     const { baseElement } = render(() => <AiPanel store={store} skills={SKILLS} />);
     const ta = typeIntoComposer(baseElement, "$openai-docs ");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     await waitFor(() => {
       expect(store.messages()[0]?.content).toBe("$openai-docs");
     });
@@ -1648,7 +1682,7 @@ describe("AiPanel — skill references", () => {
     expect(items).toHaveLength(1);
     expect(items[0]!.textContent).toContain("/work-refute");
     expect(items[0]!.textContent).toContain("skill");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     expect(ta.value).toBe("/work-refute ");
     expect(store.messages()).toHaveLength(0);
   });
@@ -1657,7 +1691,7 @@ describe("AiPanel — skill references", () => {
     const store = readyStore();
     const { baseElement } = render(() => <AiPanel store={store} skills={SKILLS} />);
     const ta = typeIntoComposer(baseElement, "/work-refute check this plan");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     await waitFor(() => {
       expect(store.messages()[0]?.content).toBe("/work-refute check this plan");
     });
@@ -1684,7 +1718,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
     const ta = baseElement.querySelector(".ai-composer-input") as HTMLTextAreaElement;
     ta.value = value;
     ta.setSelectionRange(value.length, value.length);
-    fireEvent.input(ta);
+    fire.input(ta);
     return ta;
   }
 
@@ -1698,7 +1732,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
     expect(items).toHaveLength(1);
     expect(items[0]!.textContent).toContain("/explain");
     expect(items[0]!.textContent).toContain("Explain a topic");
-    fireEvent.mouseDown(items[0]!);
+    fire.mouseDown(items[0]!);
     // The typed "/ex" prefix is replaced by the full command + a trailing
     // space, and the list closes (focus stays in the composer).
     expect(ta.value).toBe("/explain ");
@@ -1718,11 +1752,11 @@ describe("AiPanel — slash commands (omp#1)", () => {
     const store = readyStore();
     const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
     const ta = typeIntoComposer(baseElement, "/");
-    fireEvent.keyDown(ta, { key: "ArrowDown" });
+    fire.keyDown(ta, { key: "ArrowDown" });
     expect(baseElement.querySelector(".ai-mention-item-active")?.textContent).toContain(
       "/summarize",
     );
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     expect(ta.value).toBe("/summarize ");
     // Enter consumed by the list — nothing was sent.
     expect(store.messages()).toHaveLength(0);
@@ -1733,7 +1767,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
     const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
     const ta = typeIntoComposer(baseElement, "/su");
     expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(1);
-    fireEvent.keyDown(ta, { key: "Escape" });
+    fire.keyDown(ta, { key: "Escape" });
     expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
     expect(ta.value).toBe("/su");
   });
@@ -1742,7 +1776,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
     const store = readyStore();
     const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
     const ta = typeIntoComposer(baseElement, "/explain how panes work");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     await waitFor(() => {
       expect(store.messages()[0]?.content).toBe("Explain this:\n\nhow panes work");
     });
@@ -1753,7 +1787,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
     const store = readyStore();
     const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
     const ta = typeIntoComposer(baseElement, "/summarize focus on risks");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     await waitFor(() => {
       expect(store.messages()[0]?.content).toBe(
         "Summarize the conversation.\n\nfocus on risks",
@@ -1765,7 +1799,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
     const store = readyStore();
     const { baseElement } = render(() => <AiPanel store={store} slashCommands={SLASH_COMMANDS} />);
     const ta = typeIntoComposer(baseElement, "/nope do it");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     await waitFor(() => {
       expect(store.messages()[0]?.content).toBe("/nope do it");
     });
@@ -1780,6 +1814,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
     // chats must drop the previous draft's popover too, or it would keep
     // capturing Enter over the new chat's empty composer.
     setStore(readyStore());
+    flush();
     await waitFor(() => {
       expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
     });
@@ -1794,7 +1829,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
     expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(1);
     // The send button bypasses the textarea's input event — the popover must
     // not linger over the streaming reply.
-    fireEvent.click(baseElement.querySelector(".ai-send-btn:not(.ai-context-btn)") as HTMLElement);
+    fire.click(baseElement.querySelector(".ai-send-btn:not(.ai-context-btn)") as HTMLElement);
     expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
     // "/su" matches no command, so it went through as raw text.
     await waitFor(() => {
@@ -1817,7 +1852,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
         slashCommands={SLASH_COMMANDS}
       />
     ));
-    fireEvent.click(baseElement.querySelector('[aria-label="Edit and resend"]')!);
+    fire.click(baseElement.querySelector('[aria-label="Edit and resend"]')!);
     expect(baseElement.querySelector(".ai-editing-bar")).not.toBeNull();
     // The edit submit path never expands commands, so "/" must not offer them.
     typeIntoComposer(baseElement, "/");
@@ -1841,10 +1876,10 @@ describe("AiPanel — slash commands (omp#1)", () => {
     // startEditing bypasses the textarea's input event — the popover belongs
     // to the abandoned "/su" draft and must close, or its Enter handler would
     // replace the loaded "q1" draft with "/summarize " instead of submitting.
-    fireEvent.click(baseElement.querySelector('[aria-label="Edit and resend"]')!);
+    fire.click(baseElement.querySelector('[aria-label="Edit and resend"]')!);
     expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
     expect(ta.value).toBe("q1");
-    fireEvent.keyDown(ta, { key: "Enter" });
+    fire.keyDown(ta, { key: "Enter" });
     await waitFor(() => {
       expect(store.messages()).toEqual([
         { role: "user", content: "q1" },
@@ -1861,7 +1896,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
     expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(1);
     // Not cancelled: the popover branch lets Shift+Enter reach the browser's
     // default newline insertion instead of selecting the highlighted command.
-    const reachedDefault = fireEvent.keyDown(ta, { key: "Enter", shiftKey: true });
+    const reachedDefault = fire.keyDown(ta, { key: "Enter", shiftKey: true });
     expect(reachedDefault).toBe(true);
     // No "/summarize " insertion happened, and nothing was sent.
     expect(ta.value).toBe("/su");
@@ -1887,7 +1922,7 @@ describe("AiPanel — slash commands (omp#1)", () => {
     expect(baseElement.querySelectorAll(".ai-mention-item:not(.ai-slash-item)")).toHaveLength(0);
     // The mention path still resolves end-to-end.
     typeIntoComposer(baseElement, "@al");
-    fireEvent.mouseDown(baseElement.querySelector(".ai-mention-item")!);
+    fire.mouseDown(baseElement.querySelector(".ai-mention-item")!);
     expect(onMention).toHaveBeenCalledWith({ label: "alpha.md", path: "a/alpha.md", rootId: "r" });
   });
 });

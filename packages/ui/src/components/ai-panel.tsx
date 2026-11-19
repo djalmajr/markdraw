@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onSettled, createTrackedEffect } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onSettled, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -191,18 +191,17 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   let messagesScrollFrame: ReturnType<typeof requestAnimationFrame> | undefined;
   let messagesViewportCleanup: (() => void) | undefined;
 
-  createTrackedEffect(() => {
-    props.focusTrigger;
-    textarea?.focus();
-  });
+  createEffect(() => props.focusTrigger, () => textarea?.focus());
 
-  createTrackedEffect(() => {
-    props.store.messages();
-    props.store.streaming();
-    props.store.streamingText();
-    props.store.toolActivity();
-    scheduleMessagesScrollSync();
-  });
+  createEffect(
+    () => {
+      props.store.messages();
+      props.store.streaming();
+      props.store.streamingText();
+      props.store.toolActivity();
+    },
+    () => scheduleMessagesScrollSync(),
+  );
 
   function isMessagesAtBottom(el: HTMLElement): boolean {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_BOTTOM_THRESHOLD_PX;
@@ -632,22 +631,26 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   // the moment the host lands it. Matched by identity, so a twin (same label,
   // other root) landing in the same batch survives. Only the matched
   // identities clear; the rest of the set keeps waiting.
-  createTrackedEffect(() => {
-    const items = props.contextItems ?? [];
-    const pending = pendingRemovals();
-    if (pending.size === 0) return;
-    const matched = items.filter((i) => {
-      const identity = itemIdentity(i);
-      return identity !== null && pending.has(identity);
-    });
-    if (matched.length === 0) return;
-    for (const item of matched) props.onRemoveContext?.(item.id);
-    setPendingRemovals((prev) => {
-      const next = new Set(prev);
-      for (const item of matched) next.delete(itemIdentity(item)!);
-      return next;
-    });
-  });
+  createEffect(
+    () => {
+      const items = props.contextItems ?? [];
+      const pending = pendingRemovals();
+      if (pending.size === 0) return [];
+      return items.filter((i) => {
+        const identity = itemIdentity(i);
+        return identity !== null && pending.has(identity);
+      });
+    },
+    (matched) => {
+      if (matched.length === 0) return;
+      for (const item of matched) props.onRemoveContext?.(item.id);
+      setPendingRemovals((prev) => {
+        const next = new Set(prev);
+        for (const item of matched) next.delete(itemIdentity(item)!);
+        return next;
+      });
+    },
+  );
 
   /** Untrack every token whose literal string no longer occurs in `text` and
    *  remove its resolved item. Called ONLY from the textarea's input event —
@@ -829,7 +832,9 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     if (!ta) return;
     let token = `@${rawToken}`;
     for (let n = 2; ; n += 1) {
-      const tracked = inlineRefs().get(token);
+      // A one-time snapshot at insertion: re-running the token-request effect
+      // because the draft changed would insert the same token twice.
+      const tracked = untrack(() => inlineRefs().get(token));
       if (!tracked) break;
       if (tracked.kind === "item" && tracked.itemId === itemId) {
         ta.focus();
@@ -837,7 +842,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       }
       token = `@${rawToken}-${n}`;
     }
-    const text = input();
+    const text = untrack(input);
     const focused = document.activeElement === ta;
     const at = focused ? (ta.selectionStart ?? text.length) : text.length;
     // A separating space when the insertion point follows non-whitespace —
@@ -867,20 +872,22 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   // closed when the user hit ⌘I and focusAiComposer just created it) — is a
   // pending request, never a stale replay.
   createEffect(
-      () => props.inlineReference?.seq,
-      (seq) => {
-        const ref = props.inlineReference;
-        if (!ref || seq === undefined) return;
-        // A transient detached AiPanel instance (mounted, DOM removed, but its
-        // effects still alive) would otherwise consume this reference first —
-        // inserting the token into its orphaned textarea and acking it — so the
-        // visible panel never gets it (the chip stays, the token never appears).
-        // Only the instance actually in the document should handle it.
-        if (!textarea || !textarea.isConnected) return;
-        insertItemToken(ref.itemId, ref.token);
-        props.onInlineReferenceHandled?.();
-      },
-    );
+    () => {
+      const ref = props.inlineReference;
+      return ref ? { seq: ref.seq, itemId: ref.itemId, token: ref.token } : null;
+    },
+    (request) => {
+      if (!request || request.seq === undefined) return;
+      // A transient detached AiPanel instance (mounted, DOM removed, but its
+      // effects still alive) would otherwise consume this reference first —
+      // inserting the token into its orphaned textarea and acking it — so the
+      // visible panel never gets it (the chip stays, the token never appears).
+      // Only the instance actually in the document should handle it.
+      if (!textarea || !textarea.isConnected) return;
+      insertItemToken(request.itemId, request.token);
+      props.onInlineReferenceHandled?.();
+    },
+  );
 
   /** The input split on tracked tokens (longest-first on ties) for the
    *  highlight backdrop — plain text nodes + pill spans, never innerHTML. */
@@ -1125,7 +1132,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           contentClass="ai-messages-content"
           viewportRef={attachMessagesViewport}
         >
-          <Show when={hasConversation()} fallback={<AiEmptyState {...props} />}>
+          <Show when={hasConversation()} fallback={<AiEmptyState store={props.store} onOpenSettings={props.onOpenSettings} />}>
             <For each={props.store.messages()}>
               {(msg, i) => (
                 <AiMessage
@@ -1620,7 +1627,7 @@ function ContextUsage(props: { store: AiChatStore; contextLimit?: number }): JSX
   );
 }
 
-function AiEmptyState(props: AiPanelProps): JSX.Element {
+function AiEmptyState(props: Pick<AiPanelProps, "store" | "onOpenSettings">): JSX.Element {
   return (
     <div class="ai-empty">
       <IconSparkles width={28} height={28} class="ai-empty-icon" />

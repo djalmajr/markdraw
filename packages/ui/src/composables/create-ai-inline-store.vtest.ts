@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { flush } from "solid-js";
 import type { AIProvider, AIStreamPart } from "@markdraw/ai/types.ts";
 import { createAiInlineStore } from "./create-ai-inline-store.ts";
 
@@ -27,6 +28,7 @@ describe("createAiInlineStore", () => {
   it("opens in the menu state with the captured selection", () => {
     const store = createAiInlineStore({ getProvider: () => stubProvider([]) });
     store.openFor(SEL, { left: 10, top: 20, bottom: 30 }, () => {});
+    flush();
     expect(store.open()).toBe(true);
     expect(store.status()).toBe("menu");
     expect(store.selection()).toEqual(SEL);
@@ -43,7 +45,9 @@ describe("createAiInlineStore", () => {
         ]),
     });
     store.openFor(SEL, null, () => {});
+    flush();
     await store.run("rewrite");
+    flush();
     expect(store.result()).toBe("Hello World");
     expect(store.status()).toBe("done");
     expect(store.action()).toBe("rewrite");
@@ -55,8 +59,11 @@ describe("createAiInlineStore", () => {
       getProvider: () => stubProvider([{ type: "text-delta", text: "Olá mundo" }, { type: "done" }]),
     });
     store.openFor(SEL, null, replace);
+    flush();
     await store.run("translate", "pt-BR");
+    flush();
     store.accept();
+    flush();
     expect(replace).toHaveBeenCalledWith(5, 16, "Olá mundo");
     expect(store.open()).toBe(false);
   });
@@ -67,8 +74,11 @@ describe("createAiInlineStore", () => {
       getProvider: () => stubProvider([{ type: "text-delta", text: "A summary" }, { type: "done" }]),
     });
     store.openFor(SEL, null, replace);
+    flush();
     await store.run("summarize");
+    flush();
     store.accept();
+    flush();
     expect(replace).toHaveBeenCalledWith(16, 16, "\n\nA summary");
   });
 
@@ -77,7 +87,9 @@ describe("createAiInlineStore", () => {
       getProvider: () => stubProvider([{ type: "error", code: "auth", message: "bad key" }]),
     });
     store.openFor(SEL, null, () => {});
+    flush();
     await store.run("rewrite");
+    flush();
     expect(store.status()).toBe("error");
     expect(store.error()).toBe("bad key");
   });
@@ -85,7 +97,9 @@ describe("createAiInlineStore", () => {
   it("reports a friendly error when no provider is configured", async () => {
     const store = createAiInlineStore({ getProvider: () => null });
     store.openFor(SEL, null, () => {});
+    flush();
     await store.run("rewrite");
+    flush();
     expect(store.status()).toBe("error");
     expect(store.error()).toContain("No AI provider");
   });
@@ -95,8 +109,11 @@ describe("createAiInlineStore", () => {
       getProvider: () => stubProvider([{ type: "text-delta", text: "x" }, { type: "done" }]),
     });
     store.openFor(SEL, null, () => {});
+    flush();
     await store.run("rewrite");
+    flush();
     store.close();
+    flush();
     expect(store.open()).toBe(false);
     expect(store.result()).toBe("");
     expect(store.selection()).toBeNull();
@@ -121,10 +138,13 @@ describe("createAiInlineStore diagram validation", () => {
         ]),
     });
     store.openForDiagram(TARGET, null, replace);
+    flush();
     await store.runDiagram("two boxes");
+    flush();
     expect(store.status()).toBe("done");
     expect(mermaidParse).toHaveBeenCalledWith("flowchart TD\n  A-->B");
     store.accept();
+    flush();
     expect(replace).toHaveBeenCalledWith(4, 4, "flowchart TD\n  A-->B\n");
     expect(store.open()).toBe(false);
   });
@@ -137,7 +157,9 @@ describe("createAiInlineStore diagram validation", () => {
         stubProvider([{ type: "text-delta", text: "flowchart TD\n  A--" }, { type: "done" }]),
     });
     store.openForDiagram(TARGET, null, replace);
+    flush();
     await store.runDiagram("two boxes");
+    flush();
     expect(store.status()).toBe("error");
     expect(store.error()).toContain("Something went wrong");
     store.accept();
@@ -151,7 +173,9 @@ describe("createAiInlineStore diagram validation", () => {
         stubProvider([{ type: "text-delta", text: "Sorry, I cannot help." }, { type: "done" }]),
     });
     store.openForDiagram(TARGET, null, replace);
+    flush();
     await store.runDiagram("two boxes");
+    flush();
     expect(store.status()).toBe("error");
     expect(mermaidParse).not.toHaveBeenCalled();
     store.accept();
