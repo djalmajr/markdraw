@@ -118,6 +118,8 @@ export function createPaneManager(config: PaneManagerConfig = {}): PaneManager {
     if (list.length <= 1) return;
     const next = list.slice(0, -1);
     const index = Math.min(activeIndex(), next.length - 1);
+    // Its store must not write the key again (a debounced write may be waiting).
+    list[list.length - 1].tabs.discardSession();
     setPaneList(next);
     setActiveIndex(index);
     // Drop the now-orphaned pane's tab session so it doesn't haunt the

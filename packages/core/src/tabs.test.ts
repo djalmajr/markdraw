@@ -1,11 +1,19 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
   LEGACY_STORAGE_KEY,
+  OPEN_ROOTS_STORAGE_KEY,
+  PENDING_TAB_ROOTS_STORAGE_KEY,
   clearTabSession,
+  getOpenRoots,
+  getPendingTabRoots,
   getTabSession,
+  loadOpenRoots,
   makeTabId,
   migrateLegacyTabSession,
   parseTabId,
+  planTabRestore,
+  setOpenRoots,
+  setPendingTabRoots,
   setTabSession,
   type PersistedTabSession,
 } from "./tabs.ts";
@@ -185,5 +193,158 @@ describe("migrateLegacyTabSession", () => {
   it("refuses to migrate to the legacy key (no self-loop)", () => {
     setTabSession({ activeTabId: null, tabs: [{ editorMode: "edit", fileName: "x", filePath: "x", id: "r::x", isPinned: true, rootId: "r" }] });
     expect(migrateLegacyTabSession(LEGACY_STORAGE_KEY)).toBe(false);
+  });
+});
+
+describe("open roots persistence", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("round-trips the open roots as { id, path } under its own key", () => {
+    setOpenRoots([
+      { id: "/notes", path: "/notes" },
+      { id: "/plans", path: "/plans" },
+    ]);
+
+    expect(JSON.parse(localStorage.getItem(OPEN_ROOTS_STORAGE_KEY)!)).toEqual([
+      { id: "/notes", path: "/notes" },
+      { id: "/plans", path: "/plans" },
+    ]);
+    expect(getOpenRoots()).toEqual([
+      { id: "/notes", path: "/notes" },
+      { id: "/plans", path: "/plans" },
+    ]);
+    // The tab session key is untouched by the root list.
+    expect(localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
+  });
+
+  it("keeps the same folder opened twice once, in first-seen order", () => {
+    setOpenRoots([
+      { id: "/notes", path: "/notes" },
+      { id: "/plans", path: "/plans" },
+      { id: "/notes", path: "/notes" },
+    ]);
+    expect(getOpenRoots().map((root) => root.path)).toEqual(["/notes", "/plans"]);
+  });
+
+  it("records 'nothing is open' as an empty inventory, not as a missing key", () => {
+    setOpenRoots([{ id: "/notes", path: "/notes" }]);
+    setOpenRoots([]);
+    expect(localStorage.getItem(OPEN_ROOTS_STORAGE_KEY)).toBe("[]");
+    expect(getOpenRoots()).toEqual([]);
+    expect(loadOpenRoots()).toEqual([]);
+  });
+
+  it("tells a missing or unusable inventory (null) from an empty one", () => {
+    // A version that predates the key: no inventory, so nothing may be dropped.
+    expect(loadOpenRoots()).toBeNull();
+    expect(getOpenRoots()).toEqual([]);
+    for (const raw of ["{not json", JSON.stringify({ path: "/notes" }), JSON.stringify(["/notes"]), ""]) {
+      localStorage.setItem(OPEN_ROOTS_STORAGE_KEY, raw);
+      expect(loadOpenRoots()).toBeNull();
+    }
+    localStorage.setItem(OPEN_ROOTS_STORAGE_KEY, "[]");
+    expect(loadOpenRoots()).toEqual([]);
+  });
+
+  it("round-trips many roots", () => {
+    const roots = Array.from({ length: 40 }, (_, i) => ({ id: `/root-${i}`, path: `/root-${i}` }));
+    setOpenRoots(roots);
+    expect(getOpenRoots()).toEqual(roots);
+  });
+
+  it.each([
+    ["malformed JSON", "{not json"],
+    ["a non-array payload", JSON.stringify({ path: "/notes" })],
+    ["an older shape with bare strings", JSON.stringify(["/notes"])],
+    ["an entry missing its path", JSON.stringify([{ id: 1, path: null }])],
+    ["an empty string", ""],
+  ])("ignores %s instead of failing the reload", (_label, raw) => {
+    localStorage.setItem(OPEN_ROOTS_STORAGE_KEY, raw);
+    expect(getOpenRoots()).toEqual([]);
+  });
+
+  it("drops an entry with an empty path but keeps the valid ones", () => {
+    localStorage.setItem(
+      OPEN_ROOTS_STORAGE_KEY,
+      JSON.stringify([{ id: "/notes", path: "/notes" }, { id: "", path: "" }]),
+    );
+    expect(getOpenRoots()).toEqual([{ id: "/notes", path: "/notes" }]);
+  });
+});
+
+describe("pending tab roots", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("round-trips the ids, deduped and without empty ones", () => {
+    setPendingTabRoots(["/notes", "/plans", "/notes", ""]);
+    expect(getPendingTabRoots()).toEqual(["/notes", "/plans"]);
+  });
+
+  it("removes the key when nothing is pending", () => {
+    setPendingTabRoots(["/notes"]);
+    setPendingTabRoots([]);
+    expect(localStorage.getItem(PENDING_TAB_ROOTS_STORAGE_KEY)).toBeNull();
+    expect(getPendingTabRoots()).toEqual([]);
+  });
+
+  it("reads corrupt or foreign-shaped storage as none", () => {
+    for (const raw of ["{not json", JSON.stringify({ roots: ["/notes"] }), JSON.stringify([1, 2])]) {
+      localStorage.setItem(PENDING_TAB_ROOTS_STORAGE_KEY, raw);
+      expect(getPendingTabRoots()).toEqual([]);
+    }
+  });
+});
+
+describe("planTabRestore", () => {
+  const tab = (rootId: string, filePath: string, id = makeTabId(rootId, filePath)) => ({
+    id,
+    filePath,
+    rootId,
+    fileName: filePath,
+    isPinned: false,
+    editorMode: "edit" as const,
+  });
+
+  const session: PersistedTabSession = {
+    activeTabId: "root-b::b.md",
+    tabs: [tab("root-a", "a.md"), tab("root-b", "b.md")],
+  };
+
+  it("restores only the tabs of the roots that just opened", () => {
+    const plan = planTabRestore(session, ["root-a"], new Set());
+    expect(plan.rootIds).toEqual(["root-a"]);
+    expect(plan.tabs.map((t) => t.filePath)).toEqual(["a.md"]);
+    // The persisted active tab belongs to root-b, which is not open.
+    expect(plan.activeTabId).toBeNull();
+  });
+
+  it("skips roots already restored and restores the next root's own tabs", () => {
+    const restored = new Set<string>();
+    const first = planTabRestore(session, ["root-a"], restored);
+    for (const rootId of first.rootIds) restored.add(rootId);
+
+    const second = planTabRestore(session, ["root-a", "root-b"], restored);
+    for (const rootId of second.rootIds) restored.add(rootId);
+    expect(second.rootIds).toEqual(["root-b"]);
+    expect(second.tabs.map((t) => t.filePath)).toEqual(["b.md"]);
+    expect(second.activeTabId).toBe("root-b::b.md");
+
+    const third = planTabRestore(session, ["root-a", "root-b"], restored);
+    expect(third).toEqual({ rootIds: [], tabs: [], activeTabId: null });
+  });
+
+  it("returns nothing to restore when no session was persisted", () => {
+    const plan = planTabRestore(null, ["root-a"], new Set());
+    expect(plan.rootIds).toEqual(["root-a"]);
+    expect(plan.tabs).toEqual([]);
+    expect(plan.activeTabId).toBeNull();
+  });
+
+  it("ignores the persisted active tab when it points at a tab outside the batch", () => {
+    const plan = planTabRestore({ ...session, activeTabId: "root-c::c.md" }, ["root-a", "root-b"], new Set());
+    expect(plan.tabs).toHaveLength(2);
+    expect(plan.activeTabId).toBeNull();
   });
 });

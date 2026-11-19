@@ -3,6 +3,7 @@ import type { FSEntry } from "@markdraw/core/types.ts";
 import {
   type TabId,
   type TabState,
+  type PersistedTab,
   type PersistedTabSession,
   makeTabId,
   getTabSession,
@@ -69,6 +70,20 @@ export interface TabStore {
 
   persistSession(): void;
   getPersistedSession(): PersistedTabSession | null;
+  /** Saved tabs whose root has not reopened yet. Every write of the session
+   *  appends them after the live tabs, so a reload that lands before a slow
+   *  folder opens does not erase that folder's tabs from storage. `activeTabId`
+   *  is the saved active tab, kept while no live tab is active. Pass `null`
+   *  once nothing is pending. */
+  holdPendingSession(pending: PersistedTabSession | null): void;
+  /** The pane that owns this store is gone: drop the write that is waiting and
+   *  ignore every later one, so the store cannot bring its storage key back. */
+  discardSession(): void;
+  isSessionDiscarded(): boolean;
+  /** The id a tab has now: a tab renamed or moved while the saved session is
+   *  still being restored gets a new id, and the snapshot only knows the old
+   *  one. Ids that were never renamed come back unchanged. */
+  resolveTabId(tabId: TabId): TabId;
 }
 
 interface TabStoreConfig {
@@ -477,6 +492,14 @@ export function createTabStore(config: TabStoreConfig): TabStore {
       if (closedTabsStack.length > MAX_CLOSED_TABS) closedTabsStack.shift();
     }
     if (active) setActiveId(renamed.id);
+    if (renamed.id !== tabId) {
+      // Everything that already pointed at the old id (an earlier rename of
+      // the same tab) now points at the new one, so the chain stays flat.
+      // The id is the one the tab really got: a background move onto a
+      // taken name gets a suffixed id.
+      for (const [from, to] of renamedIds) if (to === tabId) renamedIds.set(from, renamed.id);
+      renamedIds.set(tabId, renamed.id);
+    }
     persistSession();
     return renamed;
   }
@@ -497,11 +520,31 @@ export function createTabStore(config: TabStoreConfig): TabStore {
   }
 
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingSession: PersistedTabSession | null = null;
+  let discarded = false;
+  // Old id -> current id of tabs renamed during this store's life: the saved
+  // active tab of the snapshot is looked up through it.
+  const renamedIds = new Map<TabId, TabId>();
+
+  function resolveTabId(tabId: TabId): TabId {
+    return renamedIds.get(tabId) ?? tabId;
+  }
 
   function persistSession(): void {
+    if (discarded) return;
     clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
-      const tabs = tabList();
+      const live: PersistedTab[] = tabList().map((t) => ({
+        id: t.id,
+        filePath: t.filePath,
+        rootId: t.rootId,
+        fileName: t.fileName,
+        isPinned: t.isPinned,
+        editorMode: t.editorMode,
+      }));
+      const liveIds = new Set(live.map((t) => t.id));
+      const held = pendingSession?.tabs.filter((t) => !liveIds.has(t.id)) ?? [];
+      const tabs = [...live, ...held];
       if (tabs.length === 0) {
         if (storageKey) {
           localStorage.removeItem(storageKey);
@@ -510,21 +553,27 @@ export function createTabStore(config: TabStoreConfig): TabStore {
         }
         return;
       }
-      setTabSession(
-        {
-          tabs: tabs.map((t) => ({
-            id: t.id,
-            filePath: t.filePath,
-            rootId: t.rootId,
-            fileName: t.fileName,
-            isPinned: t.isPinned,
-            editorMode: t.editorMode,
-          })),
-          activeTabId: activeId(),
-        },
-        storageKey,
-      );
+      // While nothing is active yet (the saved batch is still reopening) the
+      // saved active tab stays the saved one.
+      const savedActive = pendingSession?.activeTabId == null ? null : resolveTabId(pendingSession.activeTabId);
+      const activeTabId = activeId()
+        ?? (savedActive !== null && tabs.some((t) => t.id === savedActive) ? savedActive : null);
+      setTabSession({ tabs, activeTabId }, storageKey);
     }, 500);
+  }
+
+  function holdPendingSession(pending: PersistedTabSession | null): void {
+    pendingSession = pending;
+  }
+
+  function isSessionDiscarded(): boolean {
+    return discarded;
+  }
+
+  function discardSession(): void {
+    discarded = true;
+    clearTimeout(persistTimer);
+    pendingSession = null;
   }
 
   function getPersistedSession(): PersistedTabSession | null {
@@ -563,5 +612,9 @@ export function createTabStore(config: TabStoreConfig): TabStore {
 
     persistSession,
     getPersistedSession,
+    holdPendingSession,
+    discardSession,
+    isSessionDiscarded,
+    resolveTabId,
   };
 }

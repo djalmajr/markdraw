@@ -14,14 +14,17 @@ import { switchLocale } from "@markdraw/i18n/solid";
 import { FileWatcher } from "../../../../apps/desktop/src/lib/watcher.ts";
 import { createAppState, type AppState } from "./create-app-state.ts";
 import { createPaneManager } from "./create-pane-manager.ts";
-import { createPaneStore, type PaneStore } from "./create-pane-store.ts";
+import { createPaneStore, createSessionRestore, type PaneStore } from "./create-pane-store.ts";
+import { getOpenRoots, setOpenRoots, setPendingTabRoots, setTabSession } from "@markdraw/core/tabs.ts";
 import { PaneView } from "../components/pane-view.tsx";
 import { TabBar } from "../components/tab-bar.tsx";
 import { DragDropProvider } from "../lib/dnd/index.ts";
 import { tabDisplayName } from "./create-tab-store.ts";
 
+// Partial mock: the pane tests render without a drag provider, but the mounted
+// app needs the real `DragDropProvider` and the rest of the module.
 vi.mock("../lib/dnd/index.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../lib/dnd/index.ts")>()),
+  ...await importOriginal<typeof import("../lib/dnd/index.ts")>(),
   useDroppable: () => ({ ref: () => {}, isDropTarget: () => false }),
 }));
 
@@ -621,6 +624,47 @@ describe("watcher recovery and rename regressions", () => {
     } finally {
       refresh.resolve([{ ...dir, name: "manual", path: "manual", children: [renamed] }, beta]);
       await rename;
+    }
+  });
+
+  it("autosaves a cross-root move at the destination while the trees still refresh, even with the same relative path", async () => {
+    const { folder, paneManager, state } = fixture();
+    const other = "/workspace-two";
+    const refresh = Promise.withResolvers<FSEntry[]>();
+    const reached = Promise.withResolvers<void>();
+    let moved = false;
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") {
+        if (moved && args.path === workspace) {
+          reached.resolve();
+          return refresh.promise;
+        }
+        return args.path === other && moved ? [alpha] : [alpha, beta];
+      }
+      if (command === "move_path") { moved = true; return; }
+      if (command === "plugin:event|listen") return 1;
+    });
+    await folder.openFolderPath(other);
+    await folder.openFolderPath(workspace);
+    const pane = paneManager.activePane();
+    openDocument(pane, alpha, "original buffer");
+
+    const moving = folder.handleMove(alpha, "", workspace, other);
+    try {
+      await reached.promise;
+      flush();
+      // The tab changed identity as soon as the file moved on disk, before any read.
+      expect(pane.selectedRootId()).toBe(other);
+      expect(pane.tabs.getActiveTab()).toMatchObject({ rootId: other, filePath: alpha.path });
+      expect(state.selectedRootId()).toBe(other);
+      pane.setEditorContent("edit during refresh");
+      flush();
+      await vi.advanceTimersByTimeAsync(1001);
+      expect(calls("write_file")).toEqual([{ path: `${other}/alpha.md`, content: "edit during refresh" }]);
+      expect(calls("write_file").map(({ path }) => path)).not.toContain(`${workspace}/alpha.md`);
+    } finally {
+      refresh.resolve([beta]);
+      await moving;
     }
   });
 
@@ -1292,6 +1336,774 @@ describe("recovered draft selection from the store alone", () => {
   });
 });
 
+describe("restoring the last session after a webview reload", () => {
+  const otherRoot = "/workspace-two";
+  const thirdRoot = "/workspace-three";
+  const paneZeroKey = "markdraw-tab-session-pane-0";
+  const gone = "No such file or directory (os error 2)";
+
+  function persistedTab(rootId: string, filePath: string, isPinned = false) {
+    return {
+      id: `${rootId}::${filePath}`,
+      filePath,
+      rootId,
+      fileName: filePath,
+      isPinned,
+      editorMode: "edit" as const,
+    };
+  }
+
+  // What App does: the session is read once, when the restore is created.
+  function sessionRestore(pane: PaneStore, state: AppState) {
+    return createSessionRestore(pane, (filePath, rootId) => state.findEntryByPath(filePath, rootId));
+  }
+
+  // Park the directory read of one root (and fail the reads of `missing`).
+  function holdRoot(path: string, failing: Record<string, string> = {}) {
+    const held = Promise.withResolvers<FSEntry[]>();
+    const reached = Promise.withResolvers<void>();
+    const fallback = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir" && typeof args.path === "string" && args.path in failing) throw failing[args.path];
+      // Asked about the root itself, a folder that failed to read answers like the
+      // OS: not found only when it is really gone, "is a directory" when it exists.
+      if (command === "read_file" && typeof args.path === "string" && args.path in failing) {
+        throw failing[args.path] === gone ? gone : "Is a directory (os error 21)";
+      }
+      if (command === "read_dir" && args.path === path) {
+        reached.resolve();
+        return held.promise;
+      }
+      return fallback(command, args);
+    });
+    return { held, reached };
+  }
+
+  function savedSession() {
+    return JSON.parse(localStorage.getItem(paneZeroKey) ?? "null") as
+      { tabs: { id: string }[]; activeTabId: string | null } | null;
+  }
+
+  it("reopens the persisted roots and restores their tabs as needsLoad", async () => {
+    const { folder, paneManager, rootPaths, state } = fixture();
+    setOpenRoots([
+      { id: workspace, path: workspace },
+      { id: otherRoot, path: otherRoot },
+    ]);
+    setTabSession({
+      activeTabId: `${otherRoot}::beta.md`,
+      tabs: [persistedTab(workspace, "alpha.md"), persistedTab(otherRoot, "beta.md", true)],
+    }, paneZeroKey);
+    const pane = paneManager.activePane();
+    const restore = sessionRestore(pane, state);
+
+    expect(await folder.restoreOpenRoots()).toEqual([workspace, otherRoot]);
+    expect(Array.from(rootPaths().keys())).toEqual([workspace, otherRoot]);
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    flush();
+
+    const tabs = pane.tabs.tabs();
+    expect(tabs.map((tab) => tab.id)).toEqual([`${workspace}::alpha.md`, `${otherRoot}::beta.md`]);
+    // Every restored tab must read its content from disk before activation.
+    expect(tabs.map((tab) => tab.needsLoad)).toEqual([true, true]);
+    expect(pane.tabs.getTab(`${otherRoot}::beta.md`)?.isPinned).toBe(true);
+    // Nothing is active until the whole batch is known; then the saved active
+    // tab wins even though its root opened last.
+    expect(pane.tabs.activeTabId()).toBeNull();
+    expect(restore.settle([workspace, otherRoot])).toBe(`${otherRoot}::beta.md`);
+  });
+
+  it("restores per root: a root opened later restores only its own tabs, without a new activation", async () => {
+    const { folder, paneManager, rootPaths, state } = fixture();
+    setOpenRoots([{ id: workspace, path: workspace }]);
+    setTabSession({
+      activeTabId: `${workspace}::alpha.md`,
+      tabs: [persistedTab(workspace, "alpha.md"), persistedTab(thirdRoot, "beta.md")],
+    }, paneZeroKey);
+    const pane = paneManager.activePane();
+    const restore = sessionRestore(pane, state);
+    expect(await folder.restoreOpenRoots()).toEqual([workspace]);
+
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    expect(restore.settle([workspace])).toBe(`${workspace}::alpha.md`);
+    flush();
+    expect(pane.tabs.tabs()).toHaveLength(1);
+
+    // Same roots again: nothing is replayed, and no activation is requested.
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    expect(pane.tabs.tabs()).toHaveLength(1);
+
+    // The settled session no longer keeps the tab of a folder that was not
+    // reopened, so storage has lost it by now...
+    await vi.advanceTimersByTimeAsync(501);
+    expect(savedSession()?.tabs.map(({ id }) => id)).toEqual([`${workspace}::alpha.md`]);
+
+    // ...yet a folder opened later still brings its own saved tab, from the
+    // stable snapshot rather than from the storage rewritten since, and only it.
+    expect(await folder.openFolderPath(thirdRoot)).toBe(true);
+    flush();
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    flush();
+    expect(pane.tabs.tabs().map((tab) => tab.id)).toEqual([
+      `${workspace}::alpha.md`,
+      `${thirdRoot}::beta.md`,
+    ]);
+  });
+
+  it("keeps the tabs of a root whose read outlasts the tab-store debounce, and activates the saved one when it opens last", async () => {
+    const { folder, paneManager, rootPaths, state } = fixture();
+    const a = persistedTab(workspace, "alpha.md");
+    const b = persistedTab(otherRoot, "beta.md");
+    setOpenRoots([{ id: workspace, path: workspace }, { id: otherRoot, path: otherRoot }]);
+    setTabSession({ tabs: [a, b], activeTabId: b.id }, paneZeroKey);
+    const pane = paneManager.activePane();
+    const restore = sessionRestore(pane, state);
+    const pending = holdRoot(otherRoot);
+
+    const restoring = folder.restoreOpenRoots();
+    await pending.reached.promise;
+    flush();
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    flush();
+    expect(pane.tabs.tabs().map(({ id }) => id)).toEqual([a.id]);
+
+    // The tab store rewrites its key after 500ms: the pending root's tab and
+    // the saved active tab must survive that write.
+    await vi.advanceTimersByTimeAsync(501);
+    expect(savedSession()?.tabs.map(({ id }) => id)).toEqual([a.id, b.id]);
+    expect(savedSession()?.activeTabId).toBe(b.id);
+
+    pending.held.resolve([beta]);
+    await restoring;
+    flush();
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    flush();
+    expect(pane.tabs.tabs().map(({ id }) => id)).toEqual([a.id, b.id]);
+    expect(restore.settle([workspace, otherRoot])).toBe(b.id);
+  });
+
+  it("settling keeps the tabs of a root that failed to open and drops those of a confirmed-missing root", async () => {
+    const { folder, paneManager, rootPaths, state } = fixture();
+    const a = persistedTab(workspace, "alpha.md");
+    const locked = persistedTab(otherRoot, "beta.md");
+    const missing = persistedTab(thirdRoot, "beta.md");
+    setOpenRoots([workspace, otherRoot, thirdRoot].map((path) => ({ id: path, path })));
+    setTabSession({ tabs: [a, locked, missing], activeTabId: a.id }, paneZeroKey);
+    const pane = paneManager.activePane();
+    const restore = sessionRestore(pane, state);
+    holdRoot("/unused", { [otherRoot]: "Permission denied (os error 13)", [thirdRoot]: gone });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await folder.restoreOpenRoots()).toEqual([workspace]);
+    warnSpy.mockRestore();
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    expect(restore.settle(folder.savedRootIds())).toBe(a.id);
+    flush();
+    await vi.advanceTimersByTimeAsync(501);
+
+    expect(getOpenRoots().map(({ path }) => path)).toEqual([workspace, otherRoot]);
+    expect(savedSession()?.tabs.map(({ id }) => id)).toEqual([a.id, locked.id]);
+  });
+
+  it("an in-flight restore cannot reopen a root the user opened and closed meanwhile", async () => {
+    const { folder, rootPaths } = fixture();
+    setOpenRoots([{ id: workspace, path: workspace }]);
+    const initialRead = Promise.withResolvers<FSEntry[]>();
+    const started = Promise.withResolvers<void>();
+    const fallback = invoke.getMockImplementation()!;
+    let count = 0;
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir" && args.path === workspace && ++count === 1) {
+        started.resolve();
+        return initialRead.promise;
+      }
+      return fallback(command, args);
+    });
+    const restoring = folder.restoreOpenRoots();
+    await started.promise;
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    await folder.handleCloseRoot(workspace);
+    flush();
+    expect(rootPaths().size).toBe(0);
+
+    initialRead.resolve([alpha]);
+    await restoring;
+    flush();
+
+    expect({
+      roots: [...rootPaths().keys()],
+      saved: getOpenRoots().map(({ path }) => path),
+      registry: calls("mcp_set_roots").at(-1)?.roots,
+    }).toEqual({ roots: [], saved: [], registry: [] });
+  });
+
+  it("activates a tab that is still open when the saved active tab's root was closed during startup", async () => {
+    const { folder, paneManager, rootPaths, state } = fixture();
+    const a = persistedTab(workspace, "alpha.md");
+    const b = persistedTab(otherRoot, "beta.md");
+    setOpenRoots([workspace, otherRoot].map((path) => ({ id: path, path })));
+    setTabSession({ tabs: [a, b], activeTabId: a.id }, paneZeroKey);
+    const pane = paneManager.activePane();
+    const restore = sessionRestore(pane, state);
+    const pending = holdRoot(otherRoot);
+
+    const restoring = folder.restoreOpenRoots();
+    await pending.reached.promise;
+    flush();
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    flush();
+    expect(pane.tabs.tabs().map(({ id }) => id)).toEqual([a.id]);
+    // The user closes the root of the saved active tab while the other still reads.
+    await folder.handleCloseRoot(workspace);
+    flush();
+    expect(pane.tabs.tabs()).toEqual([]);
+
+    pending.held.resolve([beta]);
+    await restoring;
+    flush();
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    flush();
+    expect(pane.tabs.tabs().map(({ id }) => id)).toEqual([b.id]);
+    expect(restore.settle(folder.savedRootIds())).toBe(b.id);
+  });
+
+  it("keeps the activation pending until a restored tab is still open", async () => {
+    const { folder, paneManager, rootPaths, state } = fixture();
+    const a = persistedTab(workspace, "alpha.md");
+    const b = persistedTab(otherRoot, "beta.md");
+    setOpenRoots([workspace, otherRoot].map((path) => ({ id: path, path })));
+    setTabSession({ tabs: [a, b], activeTabId: a.id }, paneZeroKey);
+    const pane = paneManager.activePane();
+    const restore = sessionRestore(pane, state);
+    holdRoot("/unused", { [otherRoot]: "Permission denied (os error 13)" });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await folder.restoreOpenRoots()).toEqual([workspace]);
+    warnSpy.mockRestore();
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    flush();
+    await folder.handleCloseRoot(workspace);
+    flush();
+    // Nothing alive to activate: the activation is not consumed.
+    expect(restore.settle(folder.savedRootIds())).toBeNull();
+    expect(pane.tabs.activeTabId()).toBeNull();
+
+    // The root that failed opens later: its tab is the one to activate.
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return args.path === otherRoot ? [beta] : [alpha, beta];
+      if (command === "plugin:event|listen") return 1;
+    });
+    expect(await folder.openFolderPath(otherRoot)).toBe(true);
+    expect(restore.rootsChanged(rootPaths().keys())).toBe(b.id);
+    flush();
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+  });
+
+  it("settles without an inventory by keeping the saved tabs' roots pending, then restores them when their folder opens", async () => {
+    const { folder, paneManager, rootPaths, state } = fixture();
+    const a = persistedTab(workspace, "alpha.md");
+    const b = persistedTab(otherRoot, "beta.md");
+    setTabSession({ tabs: [a, b], activeTabId: b.id }, paneZeroKey);
+    const pane = paneManager.activePane();
+    const restore = sessionRestore(pane, state);
+    folder.adoptSessionRoots(restore.rootIds());
+
+    expect(await folder.restoreOpenRoots()).toEqual([]);
+    expect(folder.savedRootIds()).toEqual([workspace, otherRoot]);
+    expect(restore.settle(folder.savedRootIds())).toBeNull();
+    await vi.advanceTimersByTimeAsync(501);
+    expect(savedSession()?.tabs.map(({ id }) => id)).toEqual([a.id, b.id]);
+    expect(savedSession()?.activeTabId).toBe(b.id);
+
+    // Opening one folder later restores only its tabs and keeps the other's.
+    expect(await folder.openFolderPath(otherRoot)).toBe(true);
+    expect(restore.rootsChanged(rootPaths().keys())).toBe(b.id);
+    flush();
+    await vi.advanceTimersByTimeAsync(501);
+    expect(savedSession()?.tabs.map(({ id }) => id)).toEqual([b.id, a.id]);
+  });
+
+  it("keeps a legacy root's tabs through the partial list the first session wrote and a second restart", async () => {
+    const b = persistedTab(otherRoot, "beta.md");
+    setTabSession({ tabs: [b], activeTabId: b.id }, paneZeroKey);
+
+    // First start after the update: no list yet; the user opens an unrelated folder.
+    const first = fixture();
+    const firstRestore = sessionRestore(first.paneManager.activePane(), first.state);
+    first.folder.adoptSessionRoots(firstRestore.rootIds());
+    expect(await first.folder.restoreOpenRoots()).toEqual([]);
+    expect(firstRestore.settle(first.folder.savedRootIds())).toBeNull();
+    expect(await first.folder.openFolderPath(workspace)).toBe(true);
+    await vi.advanceTimersByTimeAsync(501);
+    expect(getOpenRoots()).toEqual([{ id: workspace, path: workspace }]);
+    expect(savedSession()?.tabs.map(({ id }) => id)).toEqual([b.id]);
+
+    // Second start: the list exists but only holds the folder opened since.
+    const second = fixture();
+    const secondRestore = sessionRestore(second.paneManager.activePane(), second.state);
+    second.folder.adoptSessionRoots(secondRestore.rootIds());
+    expect(await second.folder.restoreOpenRoots()).toEqual([workspace]);
+    secondRestore.rootsChanged(second.rootPaths().keys());
+    expect(secondRestore.settle(second.folder.savedRootIds())).toBeNull();
+    await vi.advanceTimersByTimeAsync(501);
+    expect(savedSession()?.tabs.map(({ id }) => id)).toEqual([b.id]);
+
+    // The control: the folder opens later and the saved tab comes back.
+    expect(await second.folder.openFolderPath(otherRoot)).toBe(true);
+    expect(secondRestore.rootsChanged(second.rootPaths().keys())).toBe(b.id);
+  });
+
+  it("drops a legacy root's tabs once its directory is confirmed gone, and only then", async () => {
+    const b = persistedTab(otherRoot, "beta.md");
+    const c = persistedTab(thirdRoot, "gamma.md");
+    setTabSession({ tabs: [b, c], activeTabId: b.id }, paneZeroKey);
+    // A previous start already parked both roots; the list is the partial one.
+    setOpenRoots([{ id: workspace, path: workspace }]);
+    setPendingTabRoots([otherRoot, thirdRoot]);
+    holdRoot("/unused", { [thirdRoot]: gone });
+    const { folder, paneManager, state } = fixture();
+    const restore = sessionRestore(paneManager.activePane(), state);
+    folder.adoptSessionRoots(restore.rootIds());
+
+    await folder.restoreOpenRoots();
+    restore.settle(folder.savedRootIds());
+    await vi.advanceTimersByTimeAsync(501);
+
+    expect(folder.savedRootIds()).toEqual([workspace, otherRoot]);
+    expect(savedSession()?.tabs.map(({ id }) => id)).toEqual([b.id]);
+  });
+
+  it("preserves a root when two recursive reads return an unqualified not-found but the root still answers", async () => {
+    const { folder } = fixture();
+    setOpenRoots([{ id: workspace, path: workspace }]);
+    const fallback = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir" && args.path === workspace) throw gone;
+      // The root path itself still exists: reading it fails as "is a directory".
+      if (command === "read_file" && args.path === workspace) throw "Is a directory (os error 21)";
+      return fallback(command, args);
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await folder.restoreOpenRoots()).toEqual([]);
+    warnSpy.mockRestore();
+
+    expect(calls("read_dir")).toHaveLength(2);
+    expect(getOpenRoots()).toEqual([{ id: workspace, path: workspace }]);
+    expect(folder.savedRootIds()).toEqual([workspace]);
+  });
+
+  it("starts clean when the root storage is missing", async () => {
+    const { folder, paneManager, rootPaths, state } = fixture();
+    const pane = paneManager.activePane();
+    const restore = sessionRestore(pane, state);
+    expect(await folder.restoreOpenRoots()).toEqual([]);
+    expect(rootPaths().size).toBe(0);
+
+    expect(restore.settle([])).toBeNull();
+    expect(pane.tabs.tabs()).toEqual([]);
+  });
+
+  it("starts clean when the root storage is corrupt or from another version", async () => {
+    const { folder, paneManager, rootPaths, state } = fixture();
+    localStorage.setItem("markdraw-open-roots-v1", "{not json");
+    expect(await folder.restoreOpenRoots()).toEqual([]);
+
+    localStorage.setItem("markdraw-open-roots-v1", JSON.stringify([{ path: workspace }]));
+    expect(getOpenRoots()).toEqual([]);
+    expect(await folder.restoreOpenRoots()).toEqual([]);
+
+    const pane = paneManager.activePane();
+    expect(sessionRestore(pane, state).rootsChanged([workspace])).toBeNull();
+    expect(rootPaths().size).toBe(0);
+    expect(pane.tabs.tabs()).toEqual([]);
+  });
+
+  it("reopens the roots but activates nothing when no tab session was persisted", async () => {
+    const { folder, paneManager, rootPaths, state } = fixture();
+    setOpenRoots([{ id: workspace, path: workspace }]);
+    const pane = paneManager.activePane();
+    const restore = sessionRestore(pane, state);
+
+    expect(await folder.restoreOpenRoots()).toEqual([workspace]);
+    expect(restore.rootsChanged(rootPaths().keys())).toBeNull();
+    expect(restore.settle([workspace])).toBeNull();
+    expect(pane.tabs.tabs()).toEqual([]);
+    // The root itself is open and selected, so the user lands on the folder.
+    expect(pane.selectedRootId()).toBe(workspace);
+  });
+
+  it("saves the open document to its own root after another folder is opened", async () => {
+    const { folder, paneManager } = fixture();
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const pane = paneManager.activePane();
+    openDocument(pane, alpha, "Alpha buffer");
+
+    // Opening a second folder moves the selected root, not the open tab.
+    expect(await folder.openFolderPath(otherRoot)).toBe(true);
+    flush();
+    expect(pane.selectedRootId()).toBe(otherRoot);
+    pane.setEditorContent("Edited alpha");
+    flush();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(calls("write_file")).toEqual([{ path: `${workspace}/alpha.md`, content: "Edited alpha" }]);
+    expect(pane.savedContent()).toBe("Edited alpha");
+  });
+
+  it("restoring a second folder in the background keeps the selection and the save target", async () => {
+    const { folder, paneManager } = fixture();
+    setOpenRoots([{ id: workspace, path: workspace }, { id: otherRoot, path: otherRoot }]);
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const pane = paneManager.activePane();
+    openDocument(pane, alpha, "Alpha buffer");
+
+    expect(await folder.restoreOpenRoots()).toEqual([workspace, otherRoot]);
+    flush();
+    expect(pane.selectedRootId()).toBe(workspace);
+    pane.setEditorContent("Edited alpha");
+    flush();
+    await folder.handleEditorSave();
+
+    expect(calls("write_file")).toEqual([{ path: `${workspace}/alpha.md`, content: "Edited alpha" }]);
+  });
+});
+
+// The real `App`, mounted: the reload bug lived in how App wires the startup
+// (`runColdStart`, the session restore and the root-publishing effect), which
+// calling the helpers directly cannot prove. Only the IPC is simulated.
+describe("the mounted app restores the saved session at startup", () => {
+  const otherRoot = "/workspace-two";
+  const sessionKey = "markdraw-tab-session-pane-0";
+  const missing = "No such file or directory (os error 2)";
+
+  function persistedTab(rootId: string, filePath: string) {
+    return {
+      id: `${rootId}::${filePath}`, filePath, rootId, fileName: filePath,
+      isPinned: true, editorMode: "edit" as const,
+    };
+  }
+
+  async function settleApp(rounds = 12) {
+    for (let i = 0; i < rounds; i++) {
+      await vi.advanceTimersByTimeAsync(0);
+      flush();
+    }
+  }
+
+  // The first import transforms the whole app: far past the 5s default on a
+  // busy machine.
+  const APP_TIMEOUT = 60_000;
+
+  async function mountApp(options: { held?: Record<string, Promise<FSEntry[]>>; args?: string[] } = {}) {
+    const tree: Record<string, FSEntry[]> = { [workspace]: [alpha, beta], [otherRoot]: [beta] };
+    invoke.mockImplementation(async (command, args) => {
+      switch (command) {
+        case "read_dir": {
+          const path = args.path as string;
+          if (options.held?.[path]) return options.held[path];
+          if (path in tree) return tree[path];
+          throw missing;
+        }
+        case "rename_file":
+          tree[workspace] = [alpha, { ...beta, name: "renamed.md", path: "renamed.md" }];
+          return;
+        case "get_startup_args": return options.args ?? [];
+        case "plugin:event|listen": return 1;
+        case "ai_mcp_list_servers":
+        case "mcp_discover":
+        case "skills_discover": return [];
+        case "read_file": {
+          // Asking a root path itself (to confirm it is gone) answers like the OS:
+          // not found for a folder that vanished, "is a directory" for one that exists.
+          const path = args.path as string;
+          if (path in tree) throw "Is a directory (os error 21)";
+          if (!path.includes("/", 1)) throw missing;
+          return "# content";
+        }
+      }
+    });
+    vi.stubGlobal("__TAURI_INTERNALS__", {
+      invoke, transformCallback: () => 1,
+      metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
+    });
+    // The converter worker is a Vite `?worker`; the app only needs it to exist.
+    vi.stubGlobal("Worker", class {
+      onmessage = null;
+      postMessage() {}
+      terminate() {}
+      addEventListener() {}
+      removeEventListener() {}
+    });
+    const { App } = await import("../../../../apps/desktop/src/app.tsx");
+    const view = render(() => createComponent(App, {}));
+    disposeFixtures.push(async () => {
+      view.unmount();
+      await settleApp(3);
+    });
+    flush();
+    await settleApp();
+  }
+
+  const tabIds = () => Array.from(document.querySelectorAll("[data-tab-id]"), (el) => el.getAttribute("data-tab-id"));
+  const activeTabId = () => document.querySelector(".tab-bar-item-active")?.closest("[data-tab-id]")?.getAttribute("data-tab-id") ?? null;
+  const commandOrder = () => invoke.mock.calls.map(([command, args]) => `${command}:${(args as { path?: string })?.path ?? ""}`);
+
+  it("reopens the folders and tabs after a reload, whatever order they finish in", async () => {
+    const a = persistedTab(workspace, "alpha.md");
+    const b = persistedTab(otherRoot, "beta.md");
+    setOpenRoots([workspace, otherRoot].map((path) => ({ id: path, path })));
+    setTabSession({ tabs: [a, b], activeTabId: b.id }, sessionKey);
+    const second = Promise.withResolvers<FSEntry[]>();
+
+    await mountApp({ held: { [otherRoot]: second.promise } });
+
+    // Folder one is open and its tab is restored in the background; folder two
+    // is still reading, so nothing is active and the command-line step waits.
+    expect(tabIds()).toEqual([a.id]);
+    expect(activeTabId()).toBeNull();
+    expect(commandOrder()).not.toContain("get_startup_args:");
+
+    // The tab store's debounced write must not erase the pending folder's tab.
+    await vi.advanceTimersByTimeAsync(501);
+    expect(JSON.parse(localStorage.getItem(sessionKey)!)).toMatchObject({
+      tabs: [{ id: a.id }, { id: b.id }], activeTabId: b.id,
+    });
+
+    second.resolve([beta]);
+    await settleApp();
+
+    expect(tabIds()).toEqual([a.id, b.id]);
+    expect(activeTabId()).toBe(b.id);
+    expect(calls("mcp_set_roots").at(-1)).toEqual({
+      roots: [{ path: workspace, name: "workspace" }, { path: otherRoot, name: "workspace-two" }],
+    });
+    const order = commandOrder();
+    expect(order.indexOf("get_startup_args:")).toBeGreaterThan(order.lastIndexOf(`read_dir:${otherRoot}`));
+  }, APP_TIMEOUT);
+
+  it("keeps the saved tabs when the update from a version without the folder list starts the app", async () => {
+    const a = persistedTab(workspace, "alpha.md");
+    const b = persistedTab(otherRoot, "beta.md");
+    setTabSession({ tabs: [a, b], activeTabId: b.id }, sessionKey);
+    expect(localStorage.getItem("markdraw-open-roots-v1")).toBeNull();
+
+    await mountApp();
+    expect(tabIds()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(501);
+
+    // Nothing is open, so nothing is restored, and nothing is erased either.
+    expect(JSON.parse(localStorage.getItem(sessionKey)!)).toMatchObject({
+      tabs: [{ id: a.id }, { id: b.id }], activeTabId: b.id,
+    });
+    expect(JSON.parse(localStorage.getItem("markdraw-pending-tab-roots-v1")!)).toEqual([workspace, otherRoot]);
+  }, APP_TIMEOUT);
+
+  it("keeps the legacy tabs of another folder when the list the first session wrote is partial", async () => {
+    const b = persistedTab(otherRoot, "beta.md");
+    setTabSession({ tabs: [b], activeTabId: b.id }, sessionKey);
+
+    // First start after the update, then the user opened an unrelated folder.
+    await mountApp();
+    cleanup();
+    setOpenRoots([{ id: workspace, path: workspace }]);
+    expect(JSON.parse(localStorage.getItem(sessionKey)!).tabs.map(({ id }: { id: string }) => id)).toEqual([b.id]);
+
+    // Second start: the folder opens, the other one is not in the list.
+    await mountApp();
+    expect(tabIds()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(501);
+
+    expect(JSON.parse(localStorage.getItem(sessionKey)!)).toMatchObject({ tabs: [{ id: b.id }], activeTabId: b.id });
+    expect(getOpenRoots()).toEqual([{ id: workspace, path: workspace }]);
+  }, APP_TIMEOUT);
+
+  it("restores the tabs of a pane that does not have the focus when its folder opens", async () => {
+    const left = persistedTab(workspace, "alpha.md");
+    const right = persistedTab(otherRoot, "beta.md");
+    localStorage.setItem(layoutKey, JSON.stringify({ paneCount: 2, activePaneIndex: 0 }));
+    setOpenRoots([workspace, otherRoot].map((path) => ({ id: path, path })));
+    setTabSession({ tabs: [left], activeTabId: left.id }, sessionKey);
+    setTabSession({ tabs: [right], activeTabId: right.id }, "markdraw-tab-session-pane-1");
+
+    await mountApp();
+
+    // Both panes reopen their own tab, the right one active, the focus untouched.
+    expect(tabIds()).toEqual([left.id, right.id]);
+    expect(Array.from(document.querySelectorAll(".tab-bar-item-active"), (el) =>
+      el.closest("[data-tab-id]")?.getAttribute("data-tab-id"))).toEqual([left.id, right.id]);
+    expect(JSON.parse(localStorage.getItem(layoutKey)!)).toEqual({ paneCount: 2, activePaneIndex: 0 });
+    await vi.advanceTimersByTimeAsync(501);
+    expect(JSON.parse(localStorage.getItem("markdraw-tab-session-pane-1")!)).toMatchObject({ tabs: [{ id: right.id }] });
+  }, APP_TIMEOUT);
+
+  it("keeps the legacy tabs of the right pane, and its folder's tabs once that folder opens", async () => {
+    const right = persistedTab(otherRoot, "beta.md");
+    localStorage.setItem(layoutKey, JSON.stringify({ paneCount: 2, activePaneIndex: 0 }));
+    setTabSession({ tabs: [right], activeTabId: right.id }, "markdraw-tab-session-pane-1");
+
+    await mountApp();
+    await vi.advanceTimersByTimeAsync(501);
+
+    expect(tabIds()).toEqual([]);
+    expect(JSON.parse(localStorage.getItem("markdraw-pending-tab-roots-v1")!)).toEqual([otherRoot]);
+    expect(JSON.parse(localStorage.getItem("markdraw-tab-session-pane-1")!)).toMatchObject({ tabs: [{ id: right.id }] });
+  }, APP_TIMEOUT);
+
+  it("keeps the saved active tab on disk while another folder is still reopening, across a second reload", async () => {
+    const first = persistedTab(workspace, "alpha.md");
+    const second = persistedTab(workspace, "beta.md");
+    setOpenRoots([workspace, otherRoot].map((path) => ({ id: path, path })));
+    setTabSession({ tabs: [first, second], activeTabId: second.id }, sessionKey);
+    const slow = Promise.withResolvers<FSEntry[]>();
+
+    // The first folder restores both tabs while the second (no tab) still reads.
+    await mountApp({ held: { [otherRoot]: slow.promise } });
+    expect(tabIds()).toEqual([first.id, second.id]);
+    await vi.advanceTimersByTimeAsync(501);
+
+    expect(JSON.parse(localStorage.getItem(sessionKey)!)).toMatchObject({
+      tabs: [{ id: first.id }, { id: second.id }], activeTabId: second.id,
+    });
+
+    // The reload lands before the slow folder finished: the saved tab is still the active one.
+    cleanup();
+    await mountApp();
+    expect(activeTabId()).toBe(second.id);
+  }, APP_TIMEOUT);
+
+  it("lets an explicit choice during the restore win over the saved active tab on disk", async () => {
+    const first = persistedTab(workspace, "alpha.md");
+    const second = persistedTab(workspace, "beta.md");
+    setOpenRoots([workspace, otherRoot].map((path) => ({ id: path, path })));
+    setTabSession({ tabs: [first, second], activeTabId: second.id }, sessionKey);
+    const slow = Promise.withResolvers<FSEntry[]>();
+
+    await mountApp({ held: { [otherRoot]: slow.promise } });
+    expect(activeTabId()).toBeNull();
+    (document.querySelector(`[data-tab-id="${first.id}"] .tab-bar-item`) as HTMLElement).click();
+    await settleApp();
+    expect(activeTabId()).toBe(first.id);
+    await vi.advanceTimersByTimeAsync(501);
+
+    expect(JSON.parse(localStorage.getItem(sessionKey)!)).toMatchObject({ activeTabId: first.id });
+  }, APP_TIMEOUT);
+
+  it("keeps the saved active tab through a rename while another folder is still reopening", async () => {
+    const first = persistedTab(workspace, "alpha.md");
+    const second = persistedTab(workspace, "beta.md");
+    const renamed = persistedTab(workspace, "renamed.md");
+    setOpenRoots([workspace, otherRoot].map((path) => ({ id: path, path })));
+    setTabSession({ tabs: [first, second], activeTabId: second.id }, sessionKey);
+    const slow = Promise.withResolvers<FSEntry[]>();
+    try {
+      await mountApp({ held: { [otherRoot]: slow.promise } });
+      expect(tabIds()).toEqual([first.id, second.id]);
+      const label = Array.from(document.querySelectorAll<HTMLElement>(".tree-name"))
+        .find((element) => element.textContent === "beta.md");
+      expect(label).toBeDefined();
+      label!.closest(".tree-item")!.dispatchEvent(new Event("tree-rename"));
+      await settleApp();
+      expect(label!.classList.contains("tree-name-editing")).toBe(true);
+      label!.textContent = "renamed.md";
+      label!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await settleApp();
+      expect(calls("rename_file")).toHaveLength(1);
+      expect(tabIds()).toEqual([first.id, renamed.id]);
+      await vi.advanceTimersByTimeAsync(501);
+      expect(JSON.parse(localStorage.getItem(sessionKey)!)).toMatchObject({
+        tabs: [{ id: first.id }, { id: renamed.id }], activeTabId: renamed.id,
+      });
+
+      // The slow folder lands: the renamed tab is the one that gets activated.
+      slow.resolve([]);
+      await settleApp();
+      expect(activeTabId()).toBe(renamed.id);
+    } finally {
+      slow.resolve([]);
+      await settleApp();
+    }
+  }, APP_TIMEOUT);
+
+  it("keeps an explicit choice over the renamed saved active tab", async () => {
+    const first = persistedTab(workspace, "alpha.md");
+    const second = persistedTab(workspace, "beta.md");
+    const renamed = persistedTab(workspace, "renamed.md");
+    setOpenRoots([workspace, otherRoot].map((path) => ({ id: path, path })));
+    setTabSession({ tabs: [first, second], activeTabId: second.id }, sessionKey);
+    const slow = Promise.withResolvers<FSEntry[]>();
+    try {
+      await mountApp({ held: { [otherRoot]: slow.promise } });
+      const label = Array.from(document.querySelectorAll<HTMLElement>(".tree-name"))
+        .find((element) => element.textContent === "beta.md");
+      label!.closest(".tree-item")!.dispatchEvent(new Event("tree-rename"));
+      await settleApp();
+      label!.textContent = "renamed.md";
+      label!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await settleApp();
+      expect(tabIds()).toEqual([first.id, renamed.id]);
+      (document.querySelector(`[data-tab-id="${first.id}"] .tab-bar-item`) as HTMLElement).click();
+      await settleApp();
+      slow.resolve([]);
+      await settleApp();
+      await vi.advanceTimersByTimeAsync(501);
+      expect(activeTabId()).toBe(first.id);
+      expect(JSON.parse(localStorage.getItem(sessionKey)!)).toMatchObject({ activeTabId: first.id });
+    } finally {
+      slow.resolve([]);
+      await settleApp();
+    }
+  }, APP_TIMEOUT);
+
+  it("does not restore or save a pane the user collapsed while its folder was still reopening", async () => {
+    const left = persistedTab(workspace, "alpha.md");
+    const right = persistedTab(otherRoot, "beta.md");
+    const rightKey = "markdraw-tab-session-pane-1";
+    localStorage.setItem(layoutKey, JSON.stringify({ paneCount: 2, activePaneIndex: 0 }));
+    setOpenRoots([workspace, otherRoot].map((path) => ({ id: path, path })));
+    setTabSession({ tabs: [left], activeTabId: left.id }, sessionKey);
+    setTabSession({ tabs: [right], activeTabId: right.id }, rightKey);
+    const slow = Promise.withResolvers<FSEntry[]>();
+
+    await mountApp({ held: { [otherRoot]: slow.promise } });
+    expect(tabIds()).toEqual([left.id]);
+    (document.querySelector('[aria-label="Split editor"]') as HTMLElement).click();
+    await settleApp();
+    expect(localStorage.getItem(rightKey)).toBeNull();
+
+    slow.resolve([beta]);
+    await settleApp();
+    await vi.advanceTimersByTimeAsync(501);
+
+    expect(tabIds()).toEqual([left.id]);
+    expect(localStorage.getItem(rightKey)).toBeNull();
+    expect(JSON.parse(localStorage.getItem(layoutKey)!)).toEqual({ paneCount: 1, activePaneIndex: 0 });
+  }, APP_TIMEOUT);
+
+  it("opens a command-line file after the restored folders and lets it win the focus", async () => {
+    const a = persistedTab(workspace, "alpha.md");
+    const other = persistedTab(workspace, "beta.md");
+    setOpenRoots([{ id: workspace, path: workspace }]);
+    setTabSession({ tabs: [a, other], activeTabId: other.id }, sessionKey);
+
+    await mountApp({ args: [`${workspace}/alpha.md`] });
+
+    expect(tabIds()).toEqual([a.id, other.id]);
+    expect(activeTabId()).toBe(a.id);
+    expect(calls("mcp_set_roots").at(-1)).toEqual({ roots: [{ path: workspace, name: "workspace" }] });
+  }, APP_TIMEOUT);
+
+  it("starts empty when nothing was saved, and survives a folder that vanished", async () => {
+    setOpenRoots([{ id: "/gone", path: "/gone" }]);
+    await mountApp();
+
+    expect(tabIds()).toEqual([]);
+    expect(activeTabId()).toBeNull();
+    // The vanished folder is dropped; the (now empty) inventory is still an inventory.
+    expect(localStorage.getItem("markdraw-open-roots-v1")).toBe("[]");
+  }, APP_TIMEOUT);
+});
+
 describe("desktop document transitions in Solid 2", () => {
   it("autosaves alpha.md through write_file after closing the active beta.md tab", async () => {
     const { actions, folder, paneManager, watcher } = fixture();
@@ -1384,6 +2196,137 @@ describe("desktop document transitions in Solid 2", () => {
     expect(JSON.parse(localStorage.getItem(layoutKey)!)).toEqual({ paneCount: 1, activePaneIndex: 0 });
     flush();
     expect(manager.activePane()).toBe(manager.panes()[0]);
+  });
+
+  it("keeps the collapsed pane's debounced write from bringing its session key back", async () => {
+    const manager = createPaneManager();
+    const right = manager.splitFromActive()!;
+    flush();
+    openDocument(right, alpha, "Right Alpha");
+    const rightKey = "markdraw-tab-session-pane-1";
+
+    manager.collapseRightPane();
+    flush();
+    right.tabs.persistSession();
+    await vi.advanceTimersByTimeAsync(501);
+    expect(localStorage.getItem(rightKey)).toBeNull();
+
+    // A pane split again afterwards owns the key and saves normally.
+    const again = manager.splitFromActive()!;
+    flush();
+    openDocument(again, beta, "Again Beta");
+    await vi.advanceTimersByTimeAsync(501);
+    expect(JSON.parse(localStorage.getItem(rightKey)!)).toMatchObject({ tabs: [{ filePath: "beta.md" }] });
+  });
+
+  it("opens nothing and writes nothing for a pane collapsed before its folder finished reopening", async () => {
+    const rightKey = "markdraw-tab-session-pane-1";
+    const saved = {
+      id: `${workspace}::beta.md`, filePath: "beta.md", rootId: workspace,
+      fileName: "beta.md", isPinned: true, editorMode: "edit" as const,
+    };
+    localStorage.setItem(layoutKey, JSON.stringify({ paneCount: 2, activePaneIndex: 0 }));
+    setTabSession({ tabs: [saved], activeTabId: saved.id }, rightKey);
+    const manager = createPaneManager();
+    const right = manager.panes()[1];
+    const restore = createSessionRestore(right, () => beta);
+
+    manager.collapseRightPane();
+    flush();
+
+    expect(restore.rootsChanged([workspace])).toBeNull();
+    expect(restore.settle([workspace])).toBeNull();
+    flush();
+    expect(right.tabs.tabs()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(501);
+    expect(localStorage.getItem(rightKey)).toBeNull();
+  });
+
+  it("does not settle an activation for a pane collapsed after its tabs were restored", async () => {
+    const rightKey = "markdraw-tab-session-pane-1";
+    const saved = {
+      id: `${workspace}::beta.md`, filePath: "beta.md", rootId: workspace,
+      fileName: "beta.md", isPinned: true, editorMode: "edit" as const,
+    };
+    localStorage.setItem(layoutKey, JSON.stringify({ paneCount: 2, activePaneIndex: 0 }));
+    setTabSession({ tabs: [saved], activeTabId: saved.id }, rightKey);
+    const manager = createPaneManager();
+    const right = manager.panes()[1];
+    const restore = createSessionRestore(right, () => beta);
+    expect(restore.rootsChanged([workspace])).toBeNull();
+    flush();
+    expect(right.tabs.tabs().map(({ id }) => id)).toEqual([saved.id]);
+
+    manager.collapseRightPane();
+    flush();
+
+    expect(restore.settle([workspace])).toBeNull();
+    await vi.advanceTimersByTimeAsync(501);
+    expect(localStorage.getItem(rightKey)).toBeNull();
+  });
+
+  describe("a saved tab renamed during the restore", () => {
+    const paneKey = "markdraw-tab-session-pane-0";
+    const savedTab = (name: string) => ({
+      id: `${workspace}::${name}`, filePath: name, rootId: workspace,
+      fileName: name, isPinned: true, editorMode: "edit" as const,
+    });
+    const entryFor = (name: string): FSEntry => ({ ...beta, name, path: name });
+
+    it("writes and activates the new id, however many times the tab was renamed", async () => {
+      const first = savedTab("alpha.md");
+      const second = savedTab("beta.md");
+      setTabSession({ tabs: [first, second], activeTabId: second.id }, paneKey);
+      const store = createPaneManager().panes()[0];
+      const restore = createSessionRestore(store, (path) => entryFor(path));
+      expect(restore.rootsChanged([workspace])).toBeNull();
+      flush();
+
+      const once = store.tabs.updateTabFile(second.id, "once.md", "once.md", workspace)!;
+      flush();
+      const twice = store.tabs.updateTabFile(once.id, "twice.md", "twice.md", workspace)!;
+      flush();
+      // Another folder opens afterwards: the snapshot is held again with the old id.
+      expect(restore.rootsChanged([workspace, "/other"])).toBeNull();
+      await vi.advanceTimersByTimeAsync(501);
+      expect(JSON.parse(localStorage.getItem(paneKey)!)).toMatchObject({ activeTabId: twice.id });
+      expect(store.tabs.resolveTabId(second.id)).toBe(twice.id);
+      expect(store.tabs.resolveTabId(once.id)).toBe(twice.id);
+
+      expect(restore.settle([workspace, "/other"])).toBe(twice.id);
+    });
+
+    it("leaves an id that was never renamed alone, and the saved active tab with it", async () => {
+      const first = savedTab("alpha.md");
+      const second = savedTab("beta.md");
+      setTabSession({ tabs: [first, second], activeTabId: second.id }, paneKey);
+      const store = createPaneManager().panes()[0];
+      const restore = createSessionRestore(store, (path) => entryFor(path));
+      restore.rootsChanged([workspace]);
+      flush();
+
+      store.tabs.updateTabFile(first.id, "other.md", "other.md", workspace);
+      flush();
+      expect(store.tabs.resolveTabId(second.id)).toBe(second.id);
+      await vi.advanceTimersByTimeAsync(501);
+      expect(JSON.parse(localStorage.getItem(paneKey)!)).toMatchObject({ activeTabId: second.id });
+      expect(restore.settle([workspace])).toBe(second.id);
+    });
+
+    it("does not follow a rename that the store refused", async () => {
+      const first = savedTab("alpha.md");
+      const second = savedTab("beta.md");
+      setTabSession({ tabs: [first, second], activeTabId: second.id }, paneKey);
+      const store = createPaneManager().panes()[0];
+      const restore = createSessionRestore(store, (path) => entryFor(path));
+      restore.rootsChanged([workspace]);
+      flush();
+
+      // alpha.md is taken: the store keeps beta.md as it is.
+      expect(store.tabs.updateTabFile(second.id, "alpha.md", "alpha.md", workspace)).toBeUndefined();
+      expect(store.tabs.resolveTabId(second.id)).toBe(second.id);
+      expect(restore.settle([workspace])).toBe(second.id);
+    });
   });
 
   it("publishes the empty MCP snapshot before stopping the last root's watcher", async () => {

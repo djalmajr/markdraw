@@ -18,6 +18,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
 import { createPaneManager } from "@markdraw/ui/composables/create-pane-manager.ts";
+import { createSessionRestore, type PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
 import { exportChatArtifact, savePlanArtifact } from "./lib/ai-artifacts.ts";
 import { createMockProvider } from "@markdraw/ai/mock-provider.ts";
 import type { AIConfig, MCPServerConfig } from "@markdraw/ai/config-schema.ts";
@@ -152,7 +153,7 @@ import { getStoredTheme, applyTheme } from "./main.tsx";
 import { FileWatcher } from "./lib/watcher.ts";
 import { createFileLoader } from "./lib/file-loader.ts";
 import { createNavigation } from "./lib/navigation.ts";
-import { createFolder } from "./lib/folder.ts";
+import { createFolder, runColdStart } from "./lib/folder.ts";
 import { createFileAutosave } from "./lib/file-autosave.ts";
 import { createTabActions } from "./lib/tab-actions.ts";
 import {
@@ -1906,13 +1907,21 @@ export function App() {
     }
   }
 
-  // Cold start: check if the app was launched with a file argument
+  // Cold start (also a webview reload, e.g. Vite HMR in dev): reopen the saved
+  // roots, settle the tab session, then honor a file argument. The sequence is
+  // `runColdStart`; the tab restores it settles are `sessionRestores` below.
   onSettled(() => {
-    void invoke<string[]>("get_startup_args").then((args) => {
-      const filePath = args.find((a) => !a.startsWith("-") && isSupportedFile(a));
-      if (filePath) void openFileByAbsolutePath(filePath);
-    }).catch(() => {
-      // No args or command not available
+    void runColdStart({
+      restoreOpenRoots: folder.restoreOpenRoots,
+      settleSession: () => {
+        const keep = folder.savedRootIds();
+        for (const { pane, restore } of sessionRestores) activateRestoredTab(pane, restore.settle(keep));
+      },
+      getStartupFile: async () => {
+        const args = await invoke<string[]>("get_startup_args");
+        return args.find((a) => !a.startsWith("-") && isSupportedFile(a)) ?? null;
+      },
+      openStartupFile: openFileByAbsolutePath,
     });
   });
 
@@ -2466,48 +2475,40 @@ export function App() {
   }
 
   // ── Tab session restore ──────────────────────────────────────────────────
-  // Restore tabs when roots become available after startup.
-  let sessionRestored = false;
+  // The saved session is read once, here, before any root reopens (the tab
+  // store rewrites that key while folders are still opening). Each root's tabs
+  // open in the background the first time the root is open in this session; the
+  // activation is decided after the whole initial batch is known, so a later
+  // root never steals focus from the user's current tab.
+  // Every pane restores its own saved session: each reads it here, before any
+  // write, and opens its tabs as their roots become available, focused or not.
+  const sessionRestores = untrack(() => state.paneManager.panes()).map((pane) => ({
+    pane,
+    restore: createSessionRestore(
+      pane,
+      (filePath, rootId) => state.findEntryByPath(filePath, rootId),
+    ),
+  }));
+  // The roots those sessions use are parked before the folders write a list.
+  folder.adoptSessionRoots(sessionRestores.flatMap(({ restore }) => restore.rootIds()));
+
+  /** Activate in the pane that owns the tab; the focus stays where it is. */
+  function activateRestoredTab(pane: PaneStore, id: string | null) {
+    if (!id) return;
+    // Let the session batch publish before the regular activation handler
+    // resolves the tab and loads the selected file.
+    queueMicrotask(() => {
+      if (state.paneManager.panes().includes(pane)) void tabActions.activateTab(pane, id);
+    });
+  }
 
   createEffect(
     // React to rootPaths changing (roots being opened)
     () => rootPaths(),
     (paths) => untrack(() => {
-      if (paths.size === 0 || sessionRestored) return;
-
-      const session = tabStore().getPersistedSession();
-      if (!session || session.tabs.length === 0) {
-        sessionRestored = true;
-        return;
-      }
-
-      // Try to restore tabs whose roots are now available
-      const restorable = session.tabs.filter((t) => paths.has(t.rootId));
-      if (restorable.length === 0) return;
-
-      sessionRestored = true;
-
-      // The IDs returned by openTab also cover tabs still pending publication.
-      const store = tabStore();
-      let firstTabId: string | undefined;
-      let activeTabId: string | undefined;
-      for (const persisted of restorable) {
-        const entry = state.findEntryByPath(persisted.filePath, persisted.rootId);
-        if (!entry || entry.kind !== "file") continue;
-
-        const id = store.openTab(entry, persisted.rootId, { background: true });
-        store.markTabNeedsLoad(id);
-        firstTabId ??= id;
-        if (persisted.id === session.activeTabId) activeTabId = id;
-      }
-
-      const id = activeTabId ?? firstTabId;
-      if (id) {
-        // Let the session batch publish before the regular activation handler
-        // resolves the tab and loads the selected file.
-        queueMicrotask(() => {
-          if (tabStore() === store) void handleActivateTab(id);
-        });
+      if (paths.size === 0) return;
+      for (const { pane, restore } of sessionRestores) {
+        activateRestoredTab(pane, restore.rootsChanged(paths.keys()));
       }
     }),
   );
