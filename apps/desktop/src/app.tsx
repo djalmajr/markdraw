@@ -65,7 +65,7 @@ import {
   type EmbeddingMeta,
 } from "./lib/ai-index.ts";
 import { fetchModels } from "@markdraw/ai/model-catalog.ts";
-import { loadAIConfig, loadUserAIConfig, saveAIConfig } from "./lib/ai-config.ts";
+import { loadAIConfig, loadUserAIConfig, saveAIConfig, saveFetchedModels } from "./lib/ai-config.ts";
 import { buildMcpTools } from "@markdraw/ai/mcp-tools.ts";
 import {
   createMcpBridge,
@@ -600,7 +600,8 @@ export function App() {
   }
 
   async function reloadAiConfigAndProviders(): Promise<void> {
-    const config = await loadAIConfig();
+    const selected = getStoredAiModel();
+    const config = await loadAIConfig(aiConfig(), selected ? [selected] : []);
     setAiConfig(config);
     await refreshConnectedProviders(config);
   }
@@ -915,19 +916,7 @@ export function App() {
       } catch {
         ids = [];
       }
-      if (ids.length) {
-        const user = await loadUserAIConfig();
-        const existing = (user.provider ?? {})[providerId] ?? {};
-        await saveAIConfig(
-          JSON.stringify({
-            ...user,
-            provider: {
-              ...(user.provider ?? {}),
-              [providerId]: { ...existing, models: Object.fromEntries(ids.map((id) => [id, { name: id }])) },
-            },
-          }),
-        );
-      }
+      if (ids.length) saveFetchedModels(providerId, ids, "/models");
     }
     await reloadAiConfigAndProviders();
   }
@@ -951,18 +940,11 @@ export function App() {
       ids = [];
     }
     if (!ids.length) return;
-    const user = await loadUserAIConfig();
-    const existing = (user.provider ?? {})[providerId] ?? {};
-    await saveAIConfig(
-      JSON.stringify({
-        ...user,
-        provider: {
-          ...(user.provider ?? {}),
-          [providerId]: { ...existing, models: Object.fromEntries(ids.map((id) => [id, { name: id }])) },
-        },
-      }),
-    );
-    setAiConfig(await loadAIConfig());
+    // Fetched ids go to the versioned localStorage cache; ai.json keeps ONLY
+    // hand-written models, so a refresh can never erase the user's list.
+    saveFetchedModels(providerId, ids, "/models");
+    const selected = getStoredAiModel();
+    setAiConfig(await loadAIConfig(aiConfig(), selected ? [selected] : []));
   }
 
   async function removeProvider(ids: string[]): Promise<void> {

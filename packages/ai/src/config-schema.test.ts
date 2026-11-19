@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import * as v from "valibot";
-import type { ProviderConfig } from "./config-schema.ts";
+import type { ModelCache, ProviderConfig } from "./config-schema.ts";
 import { MCPServerConfigSchema, mergeConfigs, parseUserConfig } from "./config-schema.ts";
 
 const BUILTINS: Record<string, ProviderConfig> = {
@@ -181,5 +181,83 @@ describe("mergeConfigs", () => {
       provider: { broken: { options: { baseURL: "http://x" } } },
     });
     expect(merged.provider.broken).toBeUndefined();
+  });
+});
+
+describe("mergeConfigs — cache de modelos buscados", () => {
+  function cacheFor(models: ModelCache[string]["models"]): ModelCache {
+    return { ollama: { source: "/models", fetchedAt: "2026-11-19T12:00:00.000Z", models } };
+  }
+
+  it("o cache vence o embutido na colisão de id", () => {
+    const merged = mergeConfigs(BUILTINS, {}, {
+      anthropic: {
+        source: "/v1/models",
+        fetchedAt: "2026-11-19T12:00:00.000Z",
+        models: {
+          "claude-sonnet-4-6": { name: "Sonnet do cache", limit: { context: 123 } },
+          "claude-new": {},
+        },
+      },
+    });
+    expect(merged.provider.anthropic.models["claude-sonnet-4-6"].name).toBe("Sonnet do cache");
+    expect(merged.provider.anthropic.models["claude-sonnet-4-6"].limit?.context).toBe(123);
+    // Um id de cache que não colide entra sem apagar os embutidos.
+    expect(merged.provider.anthropic.models["claude-new"]?.name).toBe("claude-new");
+    expect(merged.provider.anthropic.models["claude-sonnet-4-6"].limit?.output).toBeUndefined();
+  });
+
+  it("o manual vence o cache na colisão de id", () => {
+    const merged = mergeConfigs(
+      BUILTINS,
+      { provider: { ollama: { models: { local: { name: "Manual" } } } } },
+      cacheFor({ local: { name: "Do cache" } }),
+    );
+    expect(merged.provider.ollama.models.local?.name).toBe("Manual");
+  });
+
+  it("manual sobrevive a uma atualização do cache", () => {
+    const user = {
+      provider: {
+        ollama: {
+          models: {
+            manual: { name: "Manual do usuário", limit: { context: 4096, output: 512 } },
+          },
+        },
+      },
+    };
+    const first = mergeConfigs(BUILTINS, user, cacheFor({ manual: { name: "Buscado v1" }, newer: { name: "Novo v1" } }));
+    const afterUpdate = mergeConfigs(BUILTINS, user, cacheFor({ newer: { name: "Novo v2" } }), {
+      previous: first,
+      selected: [],
+    });
+    expect(afterUpdate.provider.ollama.models.manual).toEqual({
+      name: "Manual do usuário",
+      limit: { context: 4096, output: 512 },
+    });
+    expect(afterUpdate.provider.ollama.models.newer?.name).toBe("Novo v2");
+  });
+
+  it("modelo selecionado ausente do cache continua como estava", () => {
+    const previous = mergeConfigs(BUILTINS, {}, cacheFor({ antigo: { name: "Antigo", limit: { context: 999 } } }));
+    const withoutKeep = mergeConfigs(BUILTINS, {}, cacheFor({ novo: { name: "Novo" } }));
+    expect(withoutKeep.provider.ollama.models.antigo).toBeUndefined();
+    const afterUpdate = mergeConfigs(BUILTINS, {}, cacheFor({ novo: { name: "Novo" } }), {
+      previous,
+      selected: ["ollama/antigo"],
+    });
+    expect(afterUpdate.provider.ollama.models.antigo).toEqual({
+      name: "Antigo",
+      limit: { context: 999 },
+    });
+    expect(afterUpdate.provider.ollama.models.novo?.name).toBe("Novo");
+  });
+
+  it("providers sem cache seguem como hoje", () => {
+    const user = { provider: { ollama: { models: { local: { name: "Local" } } } } };
+    expect(mergeConfigs(BUILTINS, user)).toEqual(mergeConfigs(BUILTINS, user, {}));
+    expect(mergeConfigs(BUILTINS, user).provider.anthropic.models["claude-sonnet-4-6"].name).toBe(
+      "Claude Sonnet 4.6",
+    );
   });
 });
