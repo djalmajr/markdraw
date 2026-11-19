@@ -835,6 +835,46 @@ describe("activation of an unloaded tab", () => {
     expect(calls("write_file")).toEqual([]);
   });
 
+  it("stops the watcher when a scratch tab replaces the loaded file without a loader call", async () => {
+    const { folder, paneManager, state } = fixture();
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const pane = paneManager.activePane();
+    openDocument(pane, alpha, "Alpha buffer");
+    paneManager.splitFromActive();
+    flush();
+    paneManager.setActivePane(0);
+    flush();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [`${workspace}/alpha.md`] });
+
+    const scratch: FSEntry = { kind: "file", path: "scratch.md", name: "scratch.md" };
+    pane.tabs.openTab(scratch, "scratch");
+    state.setSelectedFile(scratch);
+    state.setSelectedRootId("scratch");
+    flush();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(calls("stop_watching").at(-1)).toEqual({});
+  });
+
+  it("does not emit STRICT_READ_UNTRACKED when the watcher follows the active tab", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { folder, paneManager } = fixture();
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    openDocument(paneManager.activePane(), alpha, "Alpha buffer");
+    const right = paneManager.splitFromActive()!;
+    openDocument(right, beta, "Beta buffer");
+    paneManager.setActivePane(0);
+    flush();
+    paneManager.setActivePane(1);
+    flush();
+    await vi.advanceTimersByTimeAsync(0);
+    const strict = warn.mock.calls
+      .map(([message]) => String(message))
+      .filter((message) => message.includes("STRICT_READ_UNTRACKED"));
+    expect(strict).toEqual([]);
+  });
+
   it("ignores an unloaded tab's late result after switching to another tab", async () => {
     const { paneManager, actions, folder } = fixture();
     const read = Promise.withResolvers<string>();
