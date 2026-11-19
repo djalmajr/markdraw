@@ -49,6 +49,11 @@ use cli_agent::{
     cli_chat_cancel, cli_chat_stream, cli_detect_binary, cli_probe_subscription, CliStreamManager,
 };
 
+// Model-list sources the webview can't reach: bounded GET JSON, `grok|agy
+// models`, and the Codex models cache (model_list.rs).
+mod model_list;
+use model_list::{ai_http_get_json, cli_list_models, codex_models_cache};
+
 // Per-root workspace index (DJA-15): SQLite FTS5 keyword search + provider-
 // supplied embedding vectors fused with RRF. Commands imported by simple name
 // so the IPC-contract check (scripts/check-ipc-contract.sh) sees them.
@@ -1504,6 +1509,9 @@ pub fn run() {
             cli_probe_subscription,
             cli_chat_stream,
             cli_chat_cancel,
+            ai_http_get_json,
+            cli_list_models,
+            codex_models_cache,
             ai_index_status,
             ai_index_staleness,
             ai_index_sync,

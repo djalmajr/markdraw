@@ -294,7 +294,7 @@ fn cli_search_dirs() -> &'static [PathBuf] {
 /// for an explicit user override. Without it, a GUI-launched or overridden CLI
 /// would resolve but its child would inherit a PATH lacking the interpreter and
 /// fail to launch. Falls back to the inherited PATH if the dirs can't be joined.
-fn cli_path_env_for(binary: &str) -> OsString {
+pub(crate) fn cli_path_env_for(binary: &str) -> OsString {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(parent) = Path::new(binary).parent() {
         if !parent.as_os_str().is_empty() {
@@ -356,7 +356,7 @@ fn antigravity_probe_ok(stdout: &str) -> bool {
         && !s.contains("Please visit the URL")
 }
 
-fn binary_for_provider(provider: &str) -> Result<&'static str, String> {
+pub(crate) fn binary_for_provider(provider: &str) -> Result<&'static str, String> {
     match provider {
         "claude-cli" => Ok("claude"),
         "codex-cli" => Ok("codex"),
@@ -366,7 +366,10 @@ fn binary_for_provider(provider: &str) -> Result<&'static str, String> {
     }
 }
 
-fn resolve_cli_path(provider: &str, path_override: Option<String>) -> Result<String, String> {
+pub(crate) fn resolve_cli_path(
+    provider: &str,
+    path_override: Option<String>,
+) -> Result<String, String> {
     if let Some(path) = path_override {
         let trimmed = path.trim();
         if trimmed.is_empty() {
