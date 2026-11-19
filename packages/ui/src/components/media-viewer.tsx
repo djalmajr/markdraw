@@ -20,6 +20,11 @@ export interface MediaViewerProps {
   /** Asset URL the webview can load, already resolved by the host
    *  (desktop via `convertFileSrc`). Null when the host can't resolve it. */
   src: string | null;
+  /** Fallback when `src` is null: reads the file as a Blob (desktop: confined
+   *  byte read for paths the asset protocol refuses, e.g. dot folders). The
+   *  viewer shows it from a `blob:` URL and revokes that URL when the file
+   *  changes or the viewer unmounts. */
+  loadBlob?: (() => Promise<Blob>) | null;
   fileName: string;
 }
 
@@ -49,6 +54,46 @@ export function MediaViewer(props: MediaViewerProps) {
   // silently fell back to a paint-only, un-scrollable transform → "zoom stops at
   // 100%") with one mechanism that always works.
   const imageZoom = createPanZoom({ minScale: MIN_SCALE, maxScale: MAX_SCALE });
+
+  // `blob:` URL of the loaded fallback (see `loadBlob`). Exactly one is alive
+  // at a time: it is revoked on file switch and on unmount.
+  const [blobUrl, setBlobUrl] = createSignal<string | null>(null);
+  const [blobLoading, setBlobLoading] = createSignal(false);
+  let currentBlobUrl: string | null = null;
+  let blobGen = 0;
+  function revokeBlob() {
+    if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+    currentBlobUrl = null;
+  }
+  // What the viewer actually loads: the host's asset URL, else the blob URL.
+  const effectiveSrc = () => props.src ?? blobUrl();
+
+  createEffect(
+    () => (props.src ? null : (props.loadBlob ?? null)),
+    (loader) => {
+      blobGen++;
+      revokeBlob();
+      setBlobUrl(null);
+      setBlobLoading(false);
+      if (!loader) return;
+      const gen = blobGen;
+      setBlobLoading(true);
+      void loader()
+        .then((blob) => {
+          if (gen !== blobGen) return;
+          currentBlobUrl = URL.createObjectURL(blob);
+          setBlobUrl(currentBlobUrl);
+        })
+        .catch((e) => {
+          if (gen === blobGen) {
+            console.error("[MediaViewer] failed to read file:", (e as { code?: string })?.code ?? "error");
+          }
+        })
+        .finally(() => {
+          if (gen === blobGen) setBlobLoading(false);
+        });
+    },
+  );
 
   const [pageCount, setPageCount] = createSignal(0);
   const [pdfError, setPdfError] = createSignal<string | null>(null);
@@ -94,7 +139,7 @@ export function MediaViewer(props: MediaViewerProps) {
   // Load (or tear down) the PDF whenever the source or kind changes —
   // covers reusing the same pane for a different file.
   createEffect(
-    () => ({ kind: props.kind, src: props.src }),
+    () => ({ kind: props.kind, src: effectiveSrc() }),
     ({ kind, src }) => {
     void (async () => {
         cancelRenders();
@@ -116,7 +161,7 @@ export function MediaViewer(props: MediaViewerProps) {
           task = pdfjs.getDocument({ url: src });
           const doc = await task.promise;
           // A newer load may have superseded this one mid-await.
-          if (src !== untrack(() => props.src)) {
+          if (src !== untrack(effectiveSrc)) {
             void task.destroy();
             return;
           }
@@ -182,6 +227,8 @@ export function MediaViewer(props: MediaViewerProps) {
   );
 
   onCleanup(() => {
+    blobGen++;
+    revokeBlob();
     cancelRenders();
     releasePdf();
   });
@@ -263,8 +310,8 @@ export function MediaViewer(props: MediaViewerProps) {
         fallback={
           <div class="media-stage" ref={stageRef}>
             <Show
-              when={props.src}
-              fallback={<div class="media-message">{(useLocale(), m.media_unable_to_load({ name: props.fileName }))}</div>}
+              when={effectiveSrc()}
+              fallback={<div class="media-message">{(useLocale(), blobLoading() ? m.media_loading() : m.media_unable_to_load({ name: props.fileName }))}</div>}
             >
               <Show
                 when={!pdfError()}
@@ -301,8 +348,8 @@ export function MediaViewer(props: MediaViewerProps) {
           onPointerCancel={imageZoom.handlers.onPointerCancel}
         >
           <Show
-            when={props.src}
-            fallback={<div class="media-message">{(useLocale(), m.media_unable_to_load({ name: props.fileName }))}</div>}
+            when={effectiveSrc()}
+            fallback={<div class="media-message">{(useLocale(), blobLoading() ? m.media_loading() : m.media_unable_to_load({ name: props.fileName }))}</div>}
           >
             <Show
               when={!imageError()}
@@ -311,7 +358,7 @@ export function MediaViewer(props: MediaViewerProps) {
               <img
                 class={["media-image", { "media-image-fit": fit() }]}
                 
-                src={props.src!}
+                src={effectiveSrc()!}
                 alt={props.fileName}
                 style={imageStyle()}
                 onError={() => setImageError(true)}

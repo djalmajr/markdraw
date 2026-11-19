@@ -231,6 +231,11 @@ interface AppShellProps {
    *  builtin image/PDF viewer. Desktop maps it through Tauri's asset
    *  protocol. */
   resolveFileSrc?: (rootId: string, relativePath: string) => string | null;
+  /** Blob route for the media viewer when the host can read the file through
+   *  its own confined route but the asset protocol cannot serve it (desktop:
+   *  dot-folder files). Returns a loader, or null for "use `resolveFileSrc`".
+   *  Passed straight through to each PaneView. */
+  resolveFileBlob?: (rootId: string, relativePath: string) => (() => Promise<Blob>) | null;
   /** Desktop-only: render the embedded Excalidraw editor for a `.excalidraw`
    *  file. Passed straight through to each PaneView. */
   renderExcalidraw?: (file: FSEntry, rootId: string) => JSX.Element;
@@ -1007,6 +1012,7 @@ export function AppShell(props: AppShellProps) {
                         contentWrapper={props.contentWrapper}
                         resolveImageSrc={props.resolveImageSrc}
                         resolveFileSrc={props.resolveFileSrc}
+                        resolveFileBlob={props.resolveFileBlob}
                         renderExcalidraw={props.renderExcalidraw}
                         htmlPreviewHost={props.htmlPreviewHost}
                         onLoadFile={props.onLoadFile}

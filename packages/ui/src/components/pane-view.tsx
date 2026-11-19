@@ -67,6 +67,10 @@ export interface PaneViewProps {
    *  can load (desktop via `convertFileSrc`). Used by the media viewer to
    *  display images/PDFs. Returns null when the host can't resolve it. */
   resolveFileSrc?: (rootId: string, relativePath: string) => string | null;
+  /** Blob fallback for the media viewer when `resolveFileSrc` yields null for a
+   *  file the host can still read (desktop: dot-folder files via a confined
+   *  byte read). Returns null when the host has no such route. */
+  resolveFileBlob?: (rootId: string, relativePath: string) => (() => Promise<Blob>) | null;
   /** Desktop-only: render the embedded Excalidraw editor for a `.excalidraw`
    *  file. The extension leaves this undefined, so it never shows the editor. */
   renderExcalidraw?: (file: FSEntry, rootId: string) => JSX.Element;
@@ -172,10 +176,19 @@ export function PaneView(props: PaneViewProps) {
     return k === "image" || k === "pdf" ? k : null;
   };
   const isMedia = () => mediaKind() !== null;
+  // Blob route first: when the host can read the file through its own
+  // confined route (desktop: dot-folder files the asset protocol refuses),
+  // `resolveFileSrc` would hand the viewer a URL that cannot load.
+  const mediaBlob = () => {
+    const f = pane().selectedFile();
+    const rootId = pane().selectedRootId();
+    if (!f || !rootId || !props.resolveFileBlob) return null;
+    return props.resolveFileBlob(rootId, f.path);
+  };
   const mediaSrc = () => {
     const f = pane().selectedFile();
     const rootId = pane().selectedRootId();
-    if (!f || !rootId || !props.resolveFileSrc) return null;
+    if (!f || !rootId || !props.resolveFileSrc || mediaBlob()) return null;
     return props.resolveFileSrc(rootId, f.path);
   };
 
@@ -417,6 +430,7 @@ export function PaneView(props: PaneViewProps) {
             <MediaViewer
               kind={mediaKind()!}
               src={mediaSrc()}
+              loadBlob={mediaBlob()}
               fileName={pane().selectedFile()!.name}
             />
           </div>

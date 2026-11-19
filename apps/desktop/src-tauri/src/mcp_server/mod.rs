@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, RwLock},
     time::Duration,
 };
@@ -120,6 +120,19 @@ impl Registry {
             .retain_roots(&next.iter().map(|r| r.id.clone()).collect::<Vec<_>>());
         *roots = next;
         Ok(())
+    }
+    /// Read-only: is `canonical` (already canonicalized by the caller) one of
+    /// the currently open roots? Each registered root is canonicalized here,
+    /// so a root that was opened through a symlink still matches, and one that
+    /// has since vanished from disk cannot match. Compared as whole path
+    /// components, so `/a` and `/a/bc` never match an open `/a/b`.
+    pub fn contains_root(&self, canonical: &Path) -> bool {
+        let Ok(roots) = self.roots.read() else {
+            return false;
+        };
+        roots
+            .iter()
+            .any(|root| std::fs::canonicalize(&root.path).is_ok_and(|open| open == canonical))
     }
     fn list(&self) -> io::Result<Value> {
         let roots = self

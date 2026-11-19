@@ -167,6 +167,7 @@ import { buildBacklinkIndex } from "@markdraw/core/backlinks.ts";
 import { flattenWorkspace } from "@markdraw/core/file-index.ts";
 import { createDir, createFile, readFileByPath, readFileContent, writeFile } from "./lib/fs.ts";
 import { extractPdfText } from "./lib/pdf-text.ts";
+import { fetchMediaBytes, routeMediaAsset } from "./lib/media-asset.ts";
 import {
   buildWorkspaceSymbols,
   type WorkspaceSymbol,
@@ -2024,6 +2025,20 @@ export function App() {
     return convertFileSrc(`${rootPath}/${relativePath}`);
   }
 
+  /**
+   * Blob route for the media viewer: a file whose path has a dot component
+   * (`.docs/img.png`, or a root such as `~/.notes`) is refused by the asset
+   * protocol scope, so it is read through the confined `read_file_bytes_confined`
+   * command (which only serves OPEN roots) and shown from a `blob:` URL.
+   * Null for every other path: `resolveFileSrc` keeps serving those.
+   */
+  function resolveFileBlob(rootId: string, relativePath: string): (() => Promise<Blob>) | null {
+    const rootPath = rootPaths().get(rootId);
+    if (!rootPath) return null;
+    const route = routeMediaAsset(rootPath, relativePath);
+    return route.kind === "blob" ? route.load : null;
+  }
+
   // Folder-rooted HTML preview host: registers the previewed file's directory
   // with the Rust `markdraw-preview://` scheme (isolated origin → real SPA
   // rendering) and pushes the live editor buffer as an overlay. See
@@ -2645,9 +2660,9 @@ export function App() {
    *  — yield an explanatory note so the chip is never silently empty. */
   async function buildPdfMentionContent(absolutePath: string, label: string): Promise<string> {
     try {
-      const response = await fetch(convertFileSrc(absolutePath));
-      if (!response.ok) throw new Error(`asset fetch failed (${response.status})`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      // Dot-folder PDFs inside an opened root are outside the asset scope:
+      // `fetchMediaBytes` reads those through the confined command.
+      const bytes = await fetchMediaBytes(absolutePath, Array.from(rootPaths().values()));
       const text = await extractPdfText(bytes);
       // Ignore the structural `[page N]` / `[truncated: …]` markers; if no
       // real text remains, the PDF is scanned images or empty — say so
@@ -3648,6 +3663,7 @@ export function App() {
       }}
       resolveImageSrc={resolveImageSrc}
       resolveFileSrc={resolveFileSrc}
+      resolveFileBlob={resolveFileBlob}
       htmlPreviewHost={htmlPreviewHost}
       renderExcalidraw={(file, rootId) => {
         // Scratch (in-memory): no disk file. The frame runs in ephemeral mode —
