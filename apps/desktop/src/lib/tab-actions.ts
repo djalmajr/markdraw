@@ -1,5 +1,8 @@
 import { createEffect, untrack } from "solid-js";
 import type { TabState } from "@markdraw/core/tabs.ts";
+import { getIncludePaths } from "@markdraw/core/asciidoc.ts";
+import { getMarkdownIncludePaths } from "@markdraw/core/markdown.ts";
+import { isMdFile } from "@markdraw/core/utils.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
@@ -127,15 +130,75 @@ export function createTabActions({
     manager.activePane().tabs.closeTabsByRoot(rootId);
   }
 
-  function renameOpenTab(pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry) {
+  /**
+   * Point a tab at the file's new path after a rename or move. The active tab
+   * of the focused pane also re-aims the shared OS watcher (same file, new
+   * absolute path) and restarts its first read when one is still pending; a
+   * move across workspaces reopens the tab under the target root, since a tab
+   * id embeds its root.
+   */
+  function renameOpenTab(pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry, newRootId: string = rootId) {
     const activeTab = pane.tabs.getActiveTab();
     const active = activeTab?.rootId === rootId && activeTab.filePath === oldPath;
     const tab = active ? activeTab : pane.tabs.findTabByFile(oldPath, rootId);
     if (!tab) return;
-    const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name);
-    if (active && renamedTab?.needsLoad) {
-      void loadTabContent(pane, entry, renamedTab);
+    const watch = (includePaths: string[]) => {
+      if (pane === manager.activePane()) syncWatcher(entry, rootPaths().get(newRootId), includePaths);
+    };
+    const content = active && !tab.needsLoad ? pane.editorContent() : tab.editorContent;
+    const base = entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "";
+    const includePaths = isMdFile(entry.path)
+      ? getMarkdownIncludePaths(content, base)
+      : getIncludePaths(content, base);
+    if (newRootId === rootId) {
+      const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, rootId, { includePaths });
+      // The new path is already open in this pane: updateTabFile keeps the
+      // tabs unique, so there is no tab to repoint.
+      if (!renamedTab) return;
+      if (active) {
+        pane.setSelectedFile(entry);
+        pane.setSelectedRootId(rootId);
+      }
+      if (active && renamedTab.needsLoad) {
+        void loadTabContent(pane, entry, renamedTab);
+        return;
+      }
+      if (active) watch(renamedTab.includePaths);
+      return;
     }
+    // Replace the root-bearing identity in place; closing it would select a
+    // neighbour and could start that tab's pending load during this move.
+    const carried = active && !tab.needsLoad
+      ? {
+          editorContent: pane.editorContent(),
+          savedContent: pane.savedContent(),
+          html: pane.html(),
+          frontmatter: pane.frontmatter(),
+          editorMode: pane.editorMode(),
+        }
+      : {
+          editorContent: tab.editorContent,
+          savedContent: tab.savedContent,
+          html: tab.html,
+          frontmatter: tab.frontmatter,
+          editorMode: tab.editorMode,
+        };
+    const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, newRootId, { ...carried, includePaths });
+    if (!renamedTab || !active) return;
+    const id = renamedTab.id;
+    pane.setSelectedFile(entry);
+    pane.setSelectedRootId(newRootId);
+    if (tab.needsLoad) {
+      void loadTabContent(pane, entry, { id, rootId: newRootId });
+      return;
+    }
+    // The pane keeps the working buffer across the identity replacement.
+    pane.setEditorContent(carried.editorContent);
+    pane.setSavedContent(carried.savedContent);
+    pane.setHtml(carried.html);
+    pane.setFrontmatter(carried.frontmatter);
+    pane.setEditorMode(carried.editorMode);
+    watch(includePaths);
   }
 
   function moveTab(tabId: string, fromPaneIndex: number) {

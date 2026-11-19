@@ -5,6 +5,7 @@ import { setChatSessionsIndex } from "@markdraw/core/ai-chat-sessions.ts";
 import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AITool, ToolApprovalRequest } from "@markdraw/ai/types.ts";
 import { createAppState, type ThemeMode } from "./create-app-state.ts";
+import { createPaneManager } from "./create-pane-manager.ts";
 import { createPaneStore } from "./create-pane-store.ts";
 import type { AiInlineReference } from "./ai-context.ts";
 
@@ -1408,6 +1409,122 @@ describe("AppState — custom instructions in the system prompt (omp#1)", () => 
         createAIProvider: () => provider,
         getCustomInstructions: () => ({ mode: "replace", text: "You are a pirate." }),
       },
+    );
+  });
+});
+
+describe("AppState — rewriteTabPaths after a rename or move", () => {
+  const file = (path: string): FSEntry => ({
+    kind: "file",
+    path,
+    name: path.slice(path.lastIndexOf("/") + 1),
+  });
+
+  it("rewrites descendant tabs in every pane, background tabs included, and leaves unrelated paths alone", () => {
+    const paneManager = createPaneManager();
+    const left = paneManager.activePane();
+    const right = paneManager.splitFromActive()!;
+    withState(
+      (state) => {
+        const leftGuide = left.tabs.openTab(file("docs/guide.md"), "root", { background: true });
+        left.tabs.updateTabContent(leftGuide, { editorContent: "kept buffer" });
+        const leftNested = left.tabs.openTab(file("docs/sub dir/v1.adoc"), "root", { background: true });
+        const leftSibling = left.tabs.openTab(file("docset/guide.md"), "root", { background: true });
+        const leftOtherRoot = left.tabs.openTab(file("docs/guide.md"), "other-root", { background: true });
+        const rightGuide = right.tabs.openTab(file("docs/guide.md"), "root", { background: true });
+        right.tabs.markTabNeedsLoad(rightGuide);
+
+        // Solid 2 keeps a store write pending until the flush: read the tabs
+        // only after it, or the setup's own tabs look missing.
+        flush();
+
+        state.rewriteTabPaths("root", "docs", "manual");
+
+        expect(left.tabs.getTab(leftGuide)).toBeUndefined();
+        expect(left.tabs.findTabByFile("manual/guide.md", "root")).toMatchObject({
+          fileName: "guide.md",
+          editorContent: "kept buffer",
+          needsLoad: false,
+        });
+        expect(left.tabs.getTab(leftNested)).toBeUndefined();
+        expect(left.tabs.findTabByFile("manual/sub dir/v1.adoc", "root")).toMatchObject({
+          fileName: "v1.adoc",
+        });
+        // `docset` shares the prefix string but is not under `docs`.
+        expect(left.tabs.getTab(leftSibling)).toBeDefined();
+        // Another root keeps its own tab untouched.
+        expect(left.tabs.getTab(leftOtherRoot)).toBeDefined();
+        // The same file open in the second pane follows too, keeping its
+        // pending first read for the new path.
+        expect(right.tabs.getTab(rightGuide)).toBeUndefined();
+        expect(right.tabs.findTabByFile("manual/guide.md", "root")).toMatchObject({
+          fileName: "guide.md",
+          needsLoad: true,
+        });
+      },
+      { paneManager },
+    );
+  });
+
+  it("updates an active selection and resolves includes from the live buffer", () => {
+    const paneManager = createPaneManager();
+    const pane = paneManager.activePane();
+    withState((state) => {
+      const entry = file("docs/guide.md");
+      const id = pane.tabs.openTab(entry, "root");
+      pane.setSelectedFile(entry);
+      pane.setSelectedRootId("root");
+      pane.setEditorContent("<!-- include: chapter.md -->");
+      pane.setSavedContent("old buffer");
+      pane.tabs.updateTabContent(id, { includePaths: ["docs/old.md"] });
+      flush();
+      state.rewriteTabPaths("root", "docs", "manual");
+      flush();
+      expect(pane.selectedFile()?.path).toBe("manual/guide.md");
+      expect(pane.editorContent()).toBe("<!-- include: chapter.md -->");
+      expect(pane.savedContent()).toBe("old buffer");
+      expect(pane.tabs.getActiveTab()?.includePaths).toEqual(["manual/chapter.md"]);
+    }, { paneManager });
+  });
+
+  it("keeps the tabs unique when the new path is already open in the same pane", () => {
+    const paneManager = createPaneManager();
+    const right = paneManager.splitFromActive()!;
+    withState(
+      (state) => {
+        const stale = right.tabs.openTab(file("docs/guide.md"), "root", { background: true });
+        const taken = right.tabs.openTab(file("manual/guide.md"), "root", { background: true });
+        flush();
+
+        state.rewriteTabPaths("root", "docs", "manual");
+
+        // The rename cannot produce two tabs with one id: the stale tab keeps
+        // its old path and the open one is preserved.
+        expect(right.tabs.getTab(stale)).toBeDefined();
+        expect(right.tabs.getTab(taken)).toBeDefined();
+        const ids = right.tabs.tabs().map((tab) => tab.id);
+        expect(new Set(ids).size).toBe(ids.length);
+      },
+      { paneManager },
+    );
+  });
+
+  it("rewrites a single file's tab, spaces and accents included", () => {
+    const paneManager = createPaneManager();
+    const pane = paneManager.activePane();
+    withState(
+      (state) => {
+        const tab = pane.tabs.openTab(file("docs/relatório final.md"), "root", { background: true });
+        flush();
+
+        state.rewriteTabPaths("root", "docs/relatório final.md", "docs/relatório 2026.md");
+
+        expect(pane.tabs.getTab(tab)).toBeUndefined();
+        expect(pane.tabs.findTabByFile("docs/relatório 2026.md", "root")).toMatchObject({
+          fileName: "relatório 2026.md",
+        });
+      },
+      { paneManager },
     );
   });
 });

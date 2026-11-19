@@ -311,6 +311,68 @@ describe("createFileLoader / loadFileContent — pane race regression", () => {
   });
 });
 
+describe("createFileLoader / loadFileContent — watcher survives a conversion error", () => {
+  beforeEach(() => {
+    resolveRead = undefined;
+    rejectRead = undefined;
+    readFileByPathMock = async () => null;
+    readFilesRelativeMock = async () => new Map<string, string>();
+    localStorage.clear();
+  });
+
+  it("aims the watcher at the document that failed so its next save on disk reaches the preview", async () => {
+    // Mutation captured: leaving the conversion-error catch without calling
+    // `watch(...)` keeps the watcher on the file opened before it (or on
+    // nothing), so the next save of the failing document never triggers
+    // `refreshFromDisk` — the preview stays on the error until a reopen.
+    const paneManager = createPaneManager();
+    const targets: Array<{ filePath: string; includePaths: string[]; rootPath: string }> = [];
+    const started: number[] = [];
+    const state = {
+      paneManager,
+      pushNavHistory: () => {},
+      autoRefresh: () => true,
+      convert: async () => {
+        throw new Error("boom");
+      },
+      set _readFile(_v: unknown) {},
+    } as unknown as AppState;
+    const watcher = {
+      setTarget: (params: { filePath: string; includePaths: string[]; rootPath: string }) => {
+        targets.push(params);
+      },
+      start: () => {
+        started.push(1);
+      },
+      stop: async () => {},
+      destroy: async () => {},
+    } as unknown as Parameters<
+      typeof import("./file-loader.ts").createFileLoader
+    >[0]["watcher"];
+    readFilesRelativeMock = async (_root, paths) => new Map(paths.map((path) => [path, "Included text"]));
+
+    const rootPaths = () => new Map<string, string>([["root-0", "/ws"]]);
+    const { createFileLoader } = await import("./file-loader.ts");
+    const loader = createFileLoader({ rootPaths, state, watcher });
+
+    const loadPromise = loader.loadFileContent(
+      { kind: "file", name: "intro.adoc", path: "intro.adoc" },
+      false,
+      false,
+      "root-0",
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    resolveRead!("= intro.adoc\n\ninclude::chapter.adoc[]\n");
+    await loadPromise;
+
+    expect(paneManager.activePane().html()).toContain("Error converting file");
+    expect(targets).toEqual([
+      { filePath: "/ws/intro.adoc", includePaths: ["chapter.adoc"], rootPath: "/ws" },
+    ]);
+    expect(started).toHaveLength(1);
+  });
+});
+
 describe("createFileLoader / loadFileContent — image & PDF skip the text pipeline", () => {
   beforeEach(() => {
     resolveRead = undefined;

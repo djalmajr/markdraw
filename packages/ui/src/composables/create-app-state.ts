@@ -1,5 +1,7 @@
 import { createEffect, createMemo, createSignal, flush, onSettled, runWithOwner, type Setter } from "solid-js";
 import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@markdraw/core/types.ts";
+import { getIncludePaths } from "@markdraw/core/asciidoc.ts";
+import { getMarkdownIncludePaths } from "@markdraw/core/markdown.ts";
 import { createPaneManager, type PaneManager } from "./create-pane-manager.ts";
 import type { PaneStore } from "./create-pane-store.ts";
 import { createAiChatSessions } from "./create-ai-chat-sessions.ts";
@@ -1301,6 +1303,43 @@ export function createAppState(config: AppStateConfig) {
     return null;
   }
 
+  // ── Tab path rewrites ───────────────────────────────────────────────────
+
+  /**
+   * Point every tab whose file lives at (or under) `oldPath` at `newPath`
+   * after a rename or move. Every pane is rewritten, background tabs
+   * included: the tab content is the same file, only its location changed,
+   * so nothing needs a reload — a tab whose first read is still pending picks
+   * the new path when it runs. A tab whose rewritten path is already open in
+   * the same pane keeps its old path, because `updateTabFile` refuses to
+   * create a second tab with the same id (the tabs-are-unique invariant).
+   */
+  function rewriteTabPaths(rootId: string, oldPath: string, newPath: string): void {
+    if (!oldPath || oldPath === newPath) return;
+    const prefix = `${oldPath}/`;
+    for (const pane of paneManager.panes()) {
+      // Snapshot the list: updateTabFile rebuilds it on every rewrite.
+      for (const tab of pane.tabs.tabs()) {
+        if (tab.rootId !== rootId || !tab.filePath) continue;
+        if (tab.filePath !== oldPath && !tab.filePath.startsWith(prefix)) continue;
+        const rewritten = tab.filePath === oldPath
+          ? newPath
+          : `${newPath}${tab.filePath.slice(oldPath.length)}`;
+        const active = pane.tabs.activeTabId() === tab.id;
+        const source = active && !tab.needsLoad ? pane.editorContent() : tab.editorContent;
+        const base = rewritten.includes("/") ? rewritten.slice(0, rewritten.lastIndexOf("/")) : "";
+        const includePaths = isMdFile(rewritten)
+          ? getMarkdownIncludePaths(source, base)
+          : getIncludePaths(source, base);
+        const updated = pane.tabs.updateTabFile(tab.id, rewritten, rewritten.slice(rewritten.lastIndexOf("/") + 1), rootId, { includePaths });
+        const selected = pane.selectedFile();
+        if (updated && active && selected?.path === tab.filePath && pane.selectedRootId() === rootId) {
+          pane.setSelectedFile({ ...selected, path: rewritten, name: updated.fileName });
+        }
+      }
+    }
+  }
+
   // ── Navigation history ──────────────────────────────────────────────────
 
   interface PushNavHistoryParams {
@@ -1857,6 +1896,7 @@ export function createAppState(config: AppStateConfig) {
     onTocResizeReset,
     onTocResizeStart,
     pushNavHistory,
+    rewriteTabPaths,
     pushRecentFile,
     pushRecentFolder,
     removeRoot,

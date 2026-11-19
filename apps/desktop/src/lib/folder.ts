@@ -15,7 +15,7 @@ interface FolderDeps {
   state: AppState;
   watcher: FileWatcher;
   onRootClosed?: (rootId: string) => void;
-  onFileRenamed?: (pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry) => void;
+  onFileRenamed?: (pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry, newRootId?: string) => void;
 }
 
 export function createFolder(deps: FolderDeps) {
@@ -235,6 +235,26 @@ export function createFolder(deps: FolderDeps) {
     }
   }
 
+  // Capture other panes before refreshing the tree: an active first read
+  // must restart with the new identity, not finish against the old path.
+  function repointOtherActivePanes(targetPane: PaneStore, rootId: string, oldPath: string, newPath: string) {
+    const targets: { pane: PaneStore; oldPath: string; entry: FSEntry }[] = [];
+    for (const pane of state.paneManager.panes()) {
+      if (pane === targetPane || pane.selectedRootId() !== rootId) continue;
+      const selected = pane.selectedFile();
+      const tab = pane.tabs.getActiveTab();
+      if (!selected || !tab || tab.rootId !== rootId || tab.filePath !== selected.path) continue;
+      if (selected.path !== oldPath && !selected.path.startsWith(oldPath + "/")) continue;
+      const path = newPath + selected.path.slice(oldPath.length);
+      const collision = pane.tabs.findTabByFile(path, rootId);
+      if (collision && collision.id !== tab.id) continue;
+      const replacement = { ...selected, path, name: path.slice(path.lastIndexOf("/") + 1) };
+      pane.setSelectedFile(replacement);
+      targets.push({ pane, oldPath: selected.path, entry: replacement });
+    }
+    return targets;
+  }
+
   async function handleRename(entry: FSEntry, rootId: string, newName: string): Promise<void> {
     const rootPath = rootPaths().get(rootId);
     if (!rootPath) throw new Error("Root not found");
@@ -251,30 +271,33 @@ export function createFolder(deps: FolderDeps) {
     const targetPane = state.paneManager.activePane();
     await renameFile(rootPath, entry.path, newRelative);
 
-    // If the renamed entry is (or contains) the open file, rewrite its path
+    // If the renamed entry is (or contains) the open file, rewrite its path.
+    // `renamedSel` keeps the new entry so the tab and the OS watcher can
+    // follow it once the root refresh settles.
     const sel = targetPane.selectedFile();
+    let renamedSel: FSEntry | null = null;
     if (sel && targetPane.selectedRootId() === rootId) {
       if (sel.path === entry.path) {
-        targetPane.setSelectedFile({ ...sel, path: newRelative, name: newName });
+        renamedSel = { ...sel, path: newRelative, name: newName };
       } else if (sel.path.startsWith(entry.path + "/")) {
-        const newSelPath = newRelative + sel.path.slice(entry.path.length);
-        targetPane.setSelectedFile({ ...sel, path: newSelPath });
+        renamedSel = { ...sel, path: newRelative + sel.path.slice(entry.path.length) };
       }
+      if (renamedSel) targetPane.setSelectedFile(renamedSel);
     }
 
+    const otherPanes = entry.kind === "directory"
+      ? repointOtherActivePanes(targetPane, rootId, entry.path, newRelative) : [];
     await refreshRoot(rootId);
+    for (const other of otherPanes) onFileRenamed?.(other.pane, rootId, other.oldPath, other.entry);
     if (entry.kind === "file") {
       onFileRenamed?.(targetPane, rootId, entry.path, { ...entry, path: newRelative, name: newName });
-    } else {
-      const pending = targetPane.tabs.getActiveTab();
-      if (pending?.needsLoad && pending.rootId === rootId && pending.filePath.startsWith(entry.path + "/")) {
-        onFileRenamed?.(targetPane, rootId, pending.filePath, {
-          path: newRelative + pending.filePath.slice(entry.path.length),
-          name: pending.fileName,
-          kind: "file",
-        });
-      }
+      return;
     }
+    // The open file restarts a pending first read under the new name and
+    // re-aims the watcher; every other tab under the folder — background tabs
+    // and tabs of the other panes — only needs the rewritten path.
+    if (renamedSel && sel) onFileRenamed?.(targetPane, rootId, sel.path, renamedSel);
+    state.rewriteTabPaths(rootId, entry.path, newRelative);
   }
 
   async function handleDelete(entry: FSEntry, rootId: string): Promise<void> {
@@ -366,20 +389,32 @@ export function createFolder(deps: FolderDeps) {
     // Keep the open file pointing at its new location (path, and root when it
     // crossed workspaces).
     const sel = targetPane.selectedFile();
+    let movedSel: FSEntry | null = null;
     if (sel && targetPane.selectedRootId() === rootId) {
       const rewrite = (path: string) => {
         if (!sameRoot) targetPane.setSelectedRootId(targetRootId);
         targetPane.setSelectedFile({ ...sel, path });
       };
       if (sel.path === entry.path) {
+        movedSel = { ...sel, path: newRelative };
         rewrite(newRelative);
       } else if (sel.path.startsWith(entry.path + "/")) {
-        rewrite(newRelative + sel.path.slice(entry.path.length));
+        movedSel = { ...sel, path: newRelative + sel.path.slice(entry.path.length) };
+        rewrite(movedSel.path);
       }
     }
 
+    const otherPanes = entry.kind === "directory" && sameRoot
+      ? repointOtherActivePanes(targetPane, rootId, entry.path, newRelative) : [];
     await refreshRoot(rootId);
     if (!sameRoot) await refreshRoot(targetRootId);
+    for (const other of otherPanes) onFileRenamed?.(other.pane, rootId, other.oldPath, other.entry);
+
+    // A move renames the file on disk as well: repoint its tab (and the OS
+    // watcher) at the new location, then the remaining tabs under a folder
+    // moved inside the same workspace.
+    if (movedSel && sel) onFileRenamed?.(targetPane, rootId, sel.path, movedSel, targetRootId);
+    if (entry.kind === "directory" && sameRoot) state.rewriteTabPaths(rootId, entry.path, newRelative);
   }
 
   /** Copy `entry` into the directory at `targetDirRel` ("" = workspace root) of

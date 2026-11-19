@@ -164,6 +164,11 @@ export function createFileLoader(deps: FileLoaderDeps) {
     // Yield to let the UI render loading state before heavy conversion
     await new Promise((r) => setTimeout(r, 0));
 
+    // Paths this load wants to watch. Filled as soon as they are known so the
+    // error path below can keep the watcher on the file that failed.
+    let watchedIncludes: string[] = [];
+    let readContent: string | undefined;
+
     try {
       if (superseded()) return;
       const absolutePath = `${root}/${entry.path}`;
@@ -187,6 +192,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
       }
 
       if (superseded()) return;
+      readContent = content;
       // A watcher refresh decides between the disk and the live buffer.
       // `source` is the text to render; `adoptDisk` whether the buffer takes
       // the disk text. A normal load always adopts the disk.
@@ -232,10 +238,12 @@ export function createFileLoader(deps: FileLoaderDeps) {
       const scanPaths = isMdFile(entry.path)
         ? getMarkdownIncludePaths(source, baseDirForIncludes)
         : getIncludePaths(source, baseDirForIncludes);
+      watchedIncludes = scanPaths;
 
       let includeFileCache: Map<string, string> | null = null;
       if (scanPaths.length > 0) {
         includeFileCache = await readFilesRelative(root, scanPaths);
+        watchedIncludes = Array.from(new Set([...scanPaths, ...includeFileCache.keys()]));
       }
 
       const readFile = async (relPath: string) => {
@@ -254,6 +262,10 @@ export function createFileLoader(deps: FileLoaderDeps) {
       state._readFile = readFile;
 
       const result = await state.convert(entry.path, source, readFile);
+      // Conversion may have read includes missing from the batch above.
+      watchedIncludes = includeFileCache
+        ? Array.from(new Set([...scanPaths, ...includeFileCache.keys()]))
+        : scanPaths;
 
       // Yield again before DOM update to prevent long frame
       await new Promise((r) => setTimeout(r, 0));
@@ -266,17 +278,27 @@ export function createFileLoader(deps: FileLoaderDeps) {
         targetPane.setSavedContent(content);
       }
 
-      const includePaths = includeFileCache
-        ? Array.from(new Set([...scanPaths, ...includeFileCache.keys()]))
-        : scanPaths;
-
-      markTabLoaded(content, result.html, result.frontmatter, includePaths);
-      watch(includePaths);
+      markTabLoaded(content, result.html, result.frontmatter, watchedIncludes);
+      watch(watchedIncludes);
       return external && adoptDisk;
     } catch (e) {
       if (superseded()) return;
       console.error("Failed to convert file:", e);
-      targetPane.setHtml(`<div class="error">Error converting file: ${e}</div>`);
+      const errorHtml = `<div class="error">Error converting file: ${e}</div>`;
+      targetPane.setHtml(errorHtml);
+      // A completed first read remains editable and recoverable even when
+      // conversion fails. Read failures must remain pending instead.
+      if (tab && readContent !== undefined) {
+        targetPane.setEditorContent(readContent);
+        targetPane.setSavedContent(readContent);
+        targetPane.setFrontmatter(null);
+        markTabLoaded(readContent, errorHtml, null, watchedIncludes);
+      }
+      // Keep the watcher on the file (and its includes) that failed: the next
+      // save on disk must reach refreshFromDisk, or the preview stays on the
+      // error until the user reopens the tab. A previous file's target must
+      // not linger here, which is exactly what used to happen.
+      watch(watchedIncludes);
     } finally {
       if (!external && latestLoad.get(targetPane) === request) targetPane.setLoading(false);
     }

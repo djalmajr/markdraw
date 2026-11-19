@@ -129,6 +129,241 @@ function holdMcpClose() {
   return { response, received };
 }
 
+describe("watcher recovery and rename regressions", () => {
+  it("recovers an initially failed conversion on the next watcher event", async () => {
+    const { state, folder, paneManager } = fixture();
+    const doc: FSEntry = { kind: "file", name: "broken.adoc", path: "broken.adoc" };
+    let disk = "broken";
+    const convert = vi.spyOn(state, "convert").mockImplementation(async (_path, source) => {
+      if (source === "broken") throw new Error("conversion failed");
+      return { html: "<p>corrected</p>", frontmatter: null, toc: null, meta: {} };
+    });
+    const callbacks: (() => void)[] = [];
+    let live: (() => void) | undefined;
+    vi.stubGlobal("__TAURI_INTERNALS__", { invoke, transformCallback: (callback: () => void) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    } });
+    let observed: Promise<boolean> | undefined;
+    let loader: ReturnType<typeof createFileLoader>;
+    const refresh = new FileWatcher(() => {
+      const pane = paneManager.activePane();
+      const file = pane.selectedFile();
+      if (!file || pane.tabs.getActiveTab()?.needsLoad) return;
+      observed = loader.refreshFromDisk(file);
+    });
+    disposeFixtures.push(() => refresh.destroy());
+    const setup = createRoot((dispose) => {
+      const [rootPaths] = createSignal(new Map([[workspace, workspace]]));
+      loader = createFileLoader({ state, rootPaths, watcher: refresh });
+      const actions = createTabActions({ state, rootPaths, syncWatcher: loader.syncWatcher,
+        loadTabContent: loader.loadTabContent, loadFileContent: loader.loadFileContent });
+      return { actions, dispose };
+    });
+    disposeFixtures.push(async () => setup.dispose());
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return [doc];
+      if (command === "read_file") return disk;
+      if (command === "plugin:event|listen") {
+        if (args.event === "fs-change") live = callbacks[Number(args.handler) - 1];
+        return 1;
+      }
+      if (command === "stop_watching") live = undefined;
+    });
+    await folder.openFolderPath(workspace);
+    const pane = paneManager.activePane();
+    const opened = setup.actions.openFile(doc, workspace, true);
+    await vi.advanceTimersByTimeAsync(10);
+    await opened;
+    expect(pane.html()).toContain("conversion failed");
+    const tabId = pane.tabs.activeTabId();
+    expect(pane.editorContent()).toBe("broken");
+    expect(pane.tabs.getActiveTab()?.needsLoad).toBe(false);
+    expect(live).toBeDefined();
+    disk = "corrected";
+    live?.();
+    await vi.advanceTimersByTimeAsync(10);
+    await observed;
+    expect(pane.html()).toBe("<p>corrected</p>");
+    expect(pane.editorContent()).toBe("corrected");
+    expect(pane.tabs.activeTabId()).toBe(tabId);
+    expect(convert).toHaveBeenCalledTimes(2);
+    expect(calls("plugin:event|listen").filter((args) => args.event === "fs-change")).toHaveLength(1);
+  });
+
+  it("moves a dirty active tab across roots without selecting a pending sibling", async () => {
+    const { folder, paneManager, watcher } = fixture();
+    const other = "/other";
+    const moved = { ...alpha, path: "sub/alpha.md" };
+    const sub: FSEntry = { kind: "directory", path: "sub", name: "sub", children: [moved] };
+    let didMove = false;
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return args.path === other ? [sub] : didMove ? [beta] : [alpha, beta];
+      if (command === "move_path") { didMove = true; return; }
+      if (command === "read_file") return "Beta disk";
+      if (command === "plugin:event|listen") return 1;
+    });
+    await folder.openFolderPath(other);
+    await folder.openFolderPath(workspace);
+    const pane = paneManager.activePane();
+    openDocument(pane, alpha, "Alpha saved");
+    const sibling = pane.tabs.openTab(beta, workspace, { background: true });
+    pane.tabs.markTabNeedsLoad(sibling);
+    pane.setEditorContent("Alpha unsaved");
+    watcher.setTarget({ filePath: workspace + "/alpha.md", includePaths: [], rootPath: workspace });
+    await watcher.start();
+    flush();
+    await vi.advanceTimersByTimeAsync(0);
+    await folder.handleMove(alpha, "sub", workspace, other);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(pane.tabs.getActiveTab()).toMatchObject({ rootId: other, filePath: moved.path,
+      editorContent: "Alpha unsaved", savedContent: "Alpha saved" });
+    expect(pane.editorContent()).toBe("Alpha unsaved");
+    expect(pane.tabs.getTab(sibling)?.needsLoad).toBe(true);
+    expect(calls("read_file")).toEqual([]);
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [other + "/sub/alpha.md"] });
+    expect(calls("stop_watching")).toHaveLength(0);
+  });
+
+  it("renames an active descendant in another pane and autosaves only at the new path", async () => {
+    const { folder, paneManager } = fixture();
+    const guide: FSEntry = { ...alpha, path: "docs/alpha.md" };
+    const next: FSEntry = { ...alpha, path: "manual/alpha.md" };
+    const dir: FSEntry = { kind: "directory", name: "docs", path: "docs", children: [guide] };
+    let entries = [dir, beta];
+    invoke.mockImplementation(async (command) => {
+      if (command === "read_dir") return entries;
+      if (command === "rename_file") entries = [{ ...dir, name: "manual", path: "manual", children: [next] }, beta];
+      if (command === "plugin:event|listen") return 1;
+    });
+    await folder.openFolderPath(workspace);
+    const left = paneManager.activePane();
+    openDocument(left, beta, "Beta saved");
+    const right = paneManager.splitFromActive()!;
+    flush();
+    openDocument(right, guide, "Alpha saved");
+    right.setEditorContent("Alpha unsaved");
+    paneManager.setActivePane(0);
+    flush();
+    await folder.handleRename(dir, workspace, "manual");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(right.tabs.getActiveTab()?.filePath).toBe(next.path);
+    expect(right.selectedFile()?.path).toBe(next.path);
+    expect(right.editorContent()).toBe("Alpha unsaved");
+    paneManager.setActivePane(1);
+    flush();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [workspace + "/manual/alpha.md"] });
+    expect(calls("write_file")).toEqual([{ path: workspace + "/manual/alpha.md", content: "Alpha unsaved" }]);
+  });
+
+  it("updates another pane before a delayed tree refresh can autosave", async () => {
+    const { folder, paneManager } = fixture();
+    const guide = { ...alpha, path: "docs/alpha.md" };
+    const renamed = { ...alpha, path: "manual/alpha.md" };
+    const dir: FSEntry = { kind: "directory", name: "docs", path: "docs", children: [guide] };
+    const refresh = Promise.withResolvers<FSEntry[]>();
+    let moved = false;
+    invoke.mockImplementation(async (command) => {
+      if (command === "read_dir") return moved ? refresh.promise : [dir, beta];
+      if (command === "rename_file") { moved = true; return; }
+      if (command === "plugin:event|listen") return 1;
+    });
+    await folder.openFolderPath(workspace);
+    openDocument(paneManager.activePane(), beta, "Beta");
+    const right = paneManager.splitFromActive()!;
+    flush();
+    openDocument(right, guide, "Saved");
+    right.setEditorContent("Unsaved");
+    paneManager.setActivePane(0);
+    flush();
+    const rename = folder.handleRename(dir, workspace, "manual");
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      expect(right.selectedFile()?.path).toBe(renamed.path);
+      paneManager.setActivePane(1);
+      flush();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(calls("write_file")).toEqual([{ path: `${workspace}/${renamed.path}`, content: "Unsaved" }]);
+    } finally {
+      refresh.resolve([{ ...dir, name: "manual", path: "manual", children: [renamed] }, beta]);
+      await rename;
+    }
+  });
+
+  it.each(["rename", "move"])("restarts another pane's pending read after an ancestor %s", async (operation) => {
+    const { folder, paneManager, actions } = fixture();
+    const oldRead = Promise.withResolvers<string>();
+    const newRead = Promise.withResolvers<string>();
+    const guide = { ...alpha, path: "docs/alpha.md" };
+    const renamed = { ...alpha, path: operation === "rename" ? "manual/alpha.md" : "manual/docs/alpha.md" };
+    const dir: FSEntry = { kind: "directory", name: "docs", path: "docs", children: [guide] };
+    let entries = [dir, beta];
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return entries;
+      if (command === "read_file") return args.path === `${workspace}/${guide.path}` ? oldRead.promise : newRead.promise;
+      if (command === "rename_file") entries = [{ ...dir, name: "manual", path: "manual", children: [renamed] }, beta];
+      if (command === "plugin:event|listen") return 1;
+    });
+    await folder.openFolderPath(workspace);
+    const left = paneManager.activePane();
+    openDocument(left, beta, "Beta");
+    const right = paneManager.splitFromActive()!;
+    flush();
+    paneManager.setActivePane(1);
+    flush();
+    const opening = actions.openFile(guide, workspace, true);
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      paneManager.setActivePane(0);
+      flush();
+      if (operation === "rename") await folder.handleRename(dir, workspace, "manual");
+      else await folder.handleMove(dir, "manual", workspace);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls("read_file")).toEqual([{ path: `${workspace}/${guide.path}` }, { path: `${workspace}/${renamed.path}` }]);
+      oldRead.resolve("stale");
+      await vi.advanceTimersByTimeAsync(1);
+      await opening;
+      expect(right.tabs.getActiveTab()?.needsLoad).toBe(true);
+      newRead.resolve("new content");
+      await vi.advanceTimersByTimeAsync(10);
+      expect(right.selectedFile()?.path).toBe(renamed.path);
+      expect(right.editorContent()).toBe("new content");
+      expect(right.tabs.getActiveTab()?.needsLoad).toBe(false);
+    } finally {
+      oldRead.resolve("");
+      newRead.resolve("");
+      await vi.advanceTimersByTimeAsync(10);
+      await opening;
+    }
+  });
+
+  it("rescans includes when the containing folder is renamed", async () => {
+    const { folder, paneManager, watcher } = fixture();
+    const guide: FSEntry = { ...alpha, path: "docs/alpha.md" };
+    const next: FSEntry = { ...alpha, path: "manual/alpha.md" };
+    const dir: FSEntry = { kind: "directory", name: "docs", path: "docs", children: [guide] };
+    let entries = [dir];
+    invoke.mockImplementation(async (command) => {
+      if (command === "read_dir") return entries;
+      if (command === "rename_file") entries = [{ ...dir, name: "manual", path: "manual", children: [next] }];
+      if (command === "plugin:event|listen") return 1;
+    });
+    await folder.openFolderPath(workspace);
+    const pane = paneManager.activePane();
+    const id = openDocument(pane, guide, "<!-- include: chapter.md -->");
+    pane.tabs.updateTabContent(id, { includePaths: ["docs/chapter.md"] });
+    watcher.setTarget({ filePath: workspace + "/docs/alpha.md", includePaths: ["docs/chapter.md"], rootPath: workspace });
+    await watcher.start();
+    flush();
+    await vi.advanceTimersByTimeAsync(0);
+    await folder.handleRename(dir, workspace, "manual");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pane.tabs.getActiveTab()?.filePath).toBe(next.path);
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [workspace + "/manual/alpha.md", workspace + "/manual/chapter.md"] });
+  });
+});
+
 describe("desktop document transitions in Solid 2", () => {
   it("autosaves alpha.md through write_file after closing the active beta.md tab", async () => {
     const { actions, folder, paneManager, watcher } = fixture();
@@ -675,7 +910,7 @@ describe("activation of an unloaded tab", () => {
     }
   });
 
-  it("restarts the active first read after an ancestor folder rename and leaves background tabs alone", async () => {
+  it("restarts the active first read after an ancestor folder rename and repoints background tabs without reloading", async () => {
     const { paneManager, actions, folder } = fixture();
     const oldRead = Promise.withResolvers<string>();
     const newRead = Promise.withResolvers<string>();
@@ -734,7 +969,15 @@ describe("activation of an unloaded tab", () => {
       expect(pane.loading()).toBe(false);
       expect(pane.editorContent()).toBe("Content under the new folder name");
       expect(pane.tabs.getActiveTab()).toMatchObject({ filePath: renamed.path, needsLoad: false });
-      expect(pane.tabs.getTab(backgroundId)).toMatchObject({ filePath: background.path, needsLoad: true });
+      // The background tab follows the folder to its new path without a read:
+      // its pending first read loads the new path only when it is activated.
+      expect(pane.tabs.getTab(backgroundId)).toBeUndefined();
+      expect(pane.tabs.findTabByFile("renamed/nested/beta.md", workspace)).toMatchObject({
+        filePath: "renamed/nested/beta.md", needsLoad: true,
+      });
+      expect(calls("read_file")).toEqual([
+        { path: `${workspace}/${original.path}` }, { path: `${workspace}/${renamed.path}` },
+      ]);
     } finally {
       oldRead.resolve("");
       newRead.resolve("");
@@ -901,5 +1144,153 @@ describe("activation of an unloaded tab", () => {
     expect(pane.editorContent()).toBe("Beta buffer");
     expect(pane.tabs.getTab(alphaId)?.needsLoad).toBe(true);
     expect(pane.loading()).toBe(false);
+  });
+});
+
+describe("rename and move re-aim the shared watcher", () => {
+  it("points the watcher at a renamed file's new path", async () => {
+    const { folder, paneManager, watcher } = fixture();
+    const renamed = { ...alpha, path: "renamed.md", name: "renamed.md" };
+    let entries = [alpha, beta];
+    invoke.mockImplementation(async (command) => {
+      if (command === "read_dir") return entries;
+      if (command === "rename_file") entries = [renamed, beta];
+      if (command === "plugin:event|listen") return 1;
+    });
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const pane = paneManager.activePane();
+    openDocument(pane, alpha, "Alpha buffer");
+    watcher.setTarget({ filePath: `${workspace}/alpha.md`, includePaths: [], rootPath: workspace });
+    await watcher.start();
+    flush();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [`${workspace}/alpha.md`] });
+
+    await folder.handleRename(alpha, workspace, renamed.name);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(pane.tabs.activeTabId()).toBe(`${workspace}::renamed.md`);
+    expect(pane.selectedFile()).toEqual(renamed);
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [`${workspace}/renamed.md`] });
+  });
+
+  it("points the watcher at a moved file's new path", async () => {
+    const { folder, paneManager, watcher } = fixture();
+    const moved = { ...alpha, path: "sub/alpha.md" };
+    const sub: FSEntry = { kind: "directory", path: "sub", name: "sub", children: [moved] };
+    let entries = [alpha, beta];
+    invoke.mockImplementation(async (command) => {
+      if (command === "read_dir") return entries;
+      if (command === "rename_file") entries = [sub, beta];
+      if (command === "plugin:event|listen") return 1;
+    });
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const pane = paneManager.activePane();
+    openDocument(pane, alpha, "Alpha buffer");
+    watcher.setTarget({ filePath: `${workspace}/alpha.md`, includePaths: [], rootPath: workspace });
+    await watcher.start();
+    flush();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [`${workspace}/alpha.md`] });
+
+    await folder.handleMove(alpha, "sub", workspace);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(calls("rename_file")).toEqual([
+      { root: workspace, oldRelative: "alpha.md", newRelative: "sub/alpha.md" },
+    ]);
+    expect(pane.selectedFile()).toEqual(moved);
+    expect(pane.tabs.getActiveTab()).toMatchObject({ filePath: "sub/alpha.md" });
+    // The live buffer follows the tab; no reload happens on a rename.
+    expect(pane.editorContent()).toBe("Alpha buffer");
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [`${workspace}/sub/alpha.md`] });
+  });
+
+  it("reopens the tab and re-aims the watcher when the file moves to another workspace", async () => {
+    const { folder, paneManager, watcher } = fixture();
+    const other = "/other";
+    const moved = { ...alpha, path: "sub/alpha.md" };
+    const sub: FSEntry = { kind: "directory", path: "sub", name: "sub", children: [moved] };
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return args.path === other ? [sub] : [alpha, beta];
+      if (command === "move_path") return undefined;
+      if (command === "plugin:event|listen") return 1;
+    });
+    expect(await folder.openFolderPath(other)).toBe(true);
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const pane = paneManager.activePane();
+    openDocument(pane, alpha, "Alpha buffer");
+    watcher.setTarget({ filePath: `${workspace}/alpha.md`, includePaths: [], rootPath: workspace });
+    await watcher.start();
+    flush();
+    await vi.advanceTimersByTimeAsync(0);
+
+    await folder.handleMove(alpha, "sub", workspace, other);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(calls("move_path")).toEqual([{
+      srcRoot: workspace, srcRelative: "alpha.md", dstRoot: other, dstRelative: "sub/alpha.md",
+    }]);
+    expect(pane.selectedRootId()).toBe(other);
+    expect(pane.tabs.getActiveTab()).toMatchObject({
+      filePath: "sub/alpha.md", rootId: other, needsLoad: false,
+    });
+    expect(pane.editorContent()).toBe("Alpha buffer");
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [`${other}/sub/alpha.md`] });
+  });
+
+  it("repoints every descendant tab of a renamed folder in every pane and keeps the open file watched", async () => {
+    const { folder, paneManager, watcher } = fixture();
+    const guide: FSEntry = { kind: "file", name: "guide.md", path: "docs/guide.md" };
+    const other: FSEntry = { kind: "file", name: "other.md", path: "docs/other.md" };
+    const dir: FSEntry = { kind: "directory", path: "docs", name: "docs", children: [guide, other] };
+    const newDir: FSEntry = {
+      kind: "directory", path: "manual", name: "manual",
+      children: [
+        { ...guide, path: "manual/guide.md" },
+        { ...other, path: "manual/other.md" },
+      ],
+    };
+    let entries = [dir];
+    invoke.mockImplementation(async (command) => {
+      if (command === "read_dir") return entries;
+      if (command === "rename_file") entries = [newDir];
+      if (command === "plugin:event|listen") return 1;
+    });
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const left = paneManager.activePane();
+    openDocument(left, guide, "Guide buffer");
+    const backgroundId = left.tabs.openTab(other, workspace, { background: true });
+    flush();
+    const right = paneManager.splitFromActive()!;
+    flush();
+    const rightGuideId = right.tabs.openTab(guide, workspace, { background: true });
+    right.tabs.markTabNeedsLoad(rightGuideId);
+    flush();
+    paneManager.setActivePane(0);
+    watcher.setTarget({ filePath: `${workspace}/docs/guide.md`, includePaths: [], rootPath: workspace });
+    await watcher.start();
+    flush();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [`${workspace}/docs/guide.md`] });
+
+    await folder.handleRename(dir, workspace, "manual");
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The open file keeps its content; only its path (and the watcher) moves.
+    expect(calls("read_file")).toEqual([]);
+    expect(left.tabs.getActiveTab()).toMatchObject({ filePath: "manual/guide.md", needsLoad: false });
+    expect(left.editorContent()).toBe("Guide buffer");
+    expect(left.selectedFile()).toMatchObject({ path: "manual/guide.md" });
+    expect(calls("watch_paths").at(-1)).toEqual({ paths: [`${workspace}/manual/guide.md`] });
+    // Background tabs in both panes follow the folder, without a reload.
+    expect(left.tabs.getTab(backgroundId)).toBeUndefined();
+    expect(left.tabs.findTabByFile("manual/other.md", workspace)).toMatchObject({
+      filePath: "manual/other.md", needsLoad: false,
+    });
+    expect(right.tabs.getTab(rightGuideId)).toBeUndefined();
+    expect(right.tabs.findTabByFile("manual/guide.md", workspace)).toMatchObject({
+      filePath: "manual/guide.md", needsLoad: true,
+    });
   });
 });
