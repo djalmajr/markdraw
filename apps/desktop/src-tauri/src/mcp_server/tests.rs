@@ -71,8 +71,13 @@ fn registry_is_atomic_and_ids_are_session_local() {
 #[cfg(unix)]
 fn fixture() -> tempfile::TempDir {
     // Explicit destination: no test endpoint ever lands under /tmp.
-    tempfile::tempdir_in(std::env::var_os("TMPDIR").expect("run with TMPDIR=$HOME/.cache/md-tmp"))
-        .unwrap()
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = tempfile::tempdir_in(
+        std::env::var_os("TMPDIR").expect("run with TMPDIR=$HOME/.cache/md-tmp"),
+    )
+    .unwrap();
+    std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    fixture
 }
 
 #[cfg(unix)]
@@ -501,9 +506,27 @@ fn sec_review_tauri_command_respects_window_capability() {
     );
     assert!(
         result.is_ok(),
-        "main must retain its generated permission: {result:?}"
+        "main must retain access to its workspace registry: {result:?}"
     );
     assert_eq!(registry.list().unwrap()["roots"][0]["name"], "main");
+    let snapshot = registry.list().unwrap();
+    let result = tauri::test::get_ipc_response(
+        &webview,
+        tauri::webview::InvokeRequest {
+            cmd: "mcp_set_roots".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(json!({"roots": []})),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        },
+    );
+    assert_eq!(
+        result.unwrap_err(),
+        json!("Could not update MCP workspaces")
+    );
+    assert_eq!(registry.list().unwrap(), snapshot);
 }
 
 #[cfg(unix)]
@@ -633,4 +656,117 @@ async fn response_boundary_is_four_mib_and_request_limit_stays_small() {
     assert!(send(&mut tokio::io::sink(), &response).await.is_err());
     let bytes = [vec![b' '; MAX_RESPONSE + 1], vec![b'\n']].concat();
     assert!(receive_response(&mut bytes.as_slice()).await.is_err());
+}
+
+#[test]
+fn round2_concurrent_replace_preserves_complete_snapshots() {
+    let registry = Arc::new(Registry::default());
+    let base = std::env::current_dir().unwrap();
+    let snapshot = |tag: &str| {
+        (0..16)
+            .map(|n| RootInput {
+                name: tag.to_string(),
+                path: base.join(n.to_string()),
+            })
+            .collect()
+    };
+    registry.replace(snapshot("A")).unwrap();
+    let first_ids: Vec<_> = registry.list().unwrap()["roots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].clone())
+        .collect();
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let mut readers = Vec::new();
+    for _ in 0..2 {
+        let registry = registry.clone();
+        let barrier = barrier.clone();
+        let ids = first_ids.clone();
+        readers.push(std::thread::spawn(move || {
+            barrier.wait();
+            for _ in 0..2000 {
+                let listed = registry.list().unwrap();
+                let roots = listed["roots"].as_array().unwrap();
+                assert_eq!(roots.len(), 16);
+                let tag = &roots[0]["name"];
+                assert!(*tag == json!("A") || *tag == json!("B"));
+                for (index, root) in roots.iter().enumerate() {
+                    assert_eq!(&root["name"], tag);
+                    assert_eq!(root["id"], ids[index]);
+                }
+            }
+        }));
+    }
+    barrier.wait();
+    for index in 0..1000 {
+        registry
+            .replace(snapshot(if index % 2 == 0 { "A" } else { "B" }))
+            .unwrap();
+        assert!(registry
+            .replace(vec![RootInput {
+                name: "bad".into(),
+                path: "relative".into()
+            }])
+            .is_err());
+    }
+    for reader in readers {
+        reader.join().unwrap();
+    }
+    println!("concurrent_snapshots=4000 valid_replacements=1000 invalid_replacements=1000 partial_snapshot=0 stable_ids=true");
+}
+
+#[test]
+fn round2_manifest_keeps_existing_read_dir_callable() {
+    let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+    let app = tauri::test::mock_builder()
+        .invoke_handler(tauri::generate_handler![crate::read_dir])
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let result = tauri::test::get_ipc_response(
+        &main,
+        tauri::webview::InvokeRequest {
+            cmd: "read_dir".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(json!({"path":fixture.path()})),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        },
+    );
+    assert!(result.is_ok(), "existing command regressed: {result:?}");
+    assert_eq!(result.unwrap().deserialize::<Value>().unwrap(), json!([]));
+    println!("existing_read_dir_main=allowed empty_fixture_result=[]");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn round2_valid_unix_socket_path_survives_private_publication() {
+    let fixture = fixture();
+    let length = fixture.path().as_os_str().as_encoded_bytes().len();
+    assert!(length + 1 < 90);
+    let directory = fixture.path().join("d".repeat(90 - length - 1));
+    std::fs::create_dir(&directory).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let socket = directory.join("ipc.sock");
+    let direct =
+        std::os::unix::net::UnixListener::bind(&socket).expect("final endpoint fits Unix sun_path");
+    drop(direct);
+    std::fs::remove_file(&socket).unwrap();
+    let result = platform::Endpoint::start(&directory, Arc::new(Registry::default()));
+    println!(
+        "directory_path_bytes={} final_socket_path_bytes={} direct_bind=ok endpoint_start={:?}",
+        directory.as_os_str().as_encoded_bytes().len(),
+        socket.as_os_str().as_encoded_bytes().len(),
+        result.as_ref().map(|_| ()).map_err(|e| e.to_string())
+    );
+    assert!(
+        result.is_ok(),
+        "private staging must preserve a valid final socket path"
+    );
 }

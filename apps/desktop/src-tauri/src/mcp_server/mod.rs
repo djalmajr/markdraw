@@ -127,10 +127,14 @@ impl Registry {
 }
 
 #[tauri::command]
-pub fn mcp_set_roots(
+pub fn mcp_set_roots<R: tauri::Runtime>(
+    webview: tauri::Webview<R>,
     roots: Vec<RootInput>,
     registry: tauri::State<'_, Arc<Registry>>,
 ) -> Result<(), String> {
+    if webview.label() != "main" {
+        return Err("Could not update MCP workspaces".into());
+    }
     registry
         .replace(roots)
         .map_err(|_| "Could not update MCP workspaces".into())

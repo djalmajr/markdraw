@@ -125,10 +125,30 @@ impl Drop for Staging {
     }
 }
 fn bind_private(socket: &Path) -> io::Result<std::os::unix::net::UnixListener> {
-    let directory = socket
-        .parent()
+    // A shorter staging name must not admit a final address clients cannot connect to.
+    std::os::unix::net::SocketAddr::from_pathname(socket)?;
+    let build = socket.parent().ok_or_else(denied)?;
+    let parent = build.parent().ok_or_else(denied)?;
+    let _parent = open_directory(parent)?;
+    let budget = build
+        .file_name()
         .ok_or_else(denied)?
-        .join(format!(".mcp-{}", &random_id()?[..8]));
+        .as_encoded_bytes()
+        .len();
+    let random = random_id()?;
+    let name = if budget >= 3 {
+        format!(".s{}", &random[..(budget - 2).min(random.len())])
+    } else {
+        random[..budget.min(random.len())].to_string()
+    };
+    bind_private_in(socket, parent.join(name))
+}
+
+fn bind_private_in(
+    socket: &Path,
+    directory: PathBuf,
+) -> io::Result<std::os::unix::net::UnixListener> {
+    // Exclusive creation: a collision is never adopted, followed or removed.
     fs::DirBuilder::new().mode(0o700).create(&directory)?;
     let staging = Staging {
         socket: directory.join("ipc.sock"),
@@ -241,13 +261,78 @@ pub async fn connect(path: &Path) -> io::Result<(Stream, String)> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn maximum_direct_bind_path_still_starts_and_overflow_cleans_staging() {
+        // Discover the actual platform bind boundary, without assuming Linux's SUN_LEN.
+        // Keep staging bindable even when the final build name is much longer.
+        let fixture = tempfile::Builder::new()
+            .prefix("")
+            .rand_bytes(2)
+            .tempdir_in(std::env::var_os("TMPDIR").unwrap())
+            .unwrap();
+        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let prefix = fixture.path().as_os_str().as_encoded_bytes().len() + 1;
+        let mut maximum = None;
+        for length in prefix + 1..=256 {
+            let directory = fixture.path().join("b".repeat(length - prefix));
+            fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&directory)
+                .unwrap();
+            let socket = directory.join("ipc.sock");
+            match std::os::unix::net::UnixListener::bind(&socket) {
+                Ok(listener) => {
+                    drop(listener);
+                    fs::remove_file(&socket).unwrap();
+                    maximum = Some(directory.clone());
+                    fs::remove_dir(&directory).unwrap();
+                }
+                Err(error) => {
+                    let maximum = maximum.expect("fixture must fit a Unix socket");
+                    let final_len = maximum
+                        .join("ipc.sock")
+                        .as_os_str()
+                        .as_encoded_bytes()
+                        .len();
+                    assert_eq!(socket.as_os_str().as_encoded_bytes().len(), final_len + 1);
+                    println!(
+                        "direct_bind_max_bytes={final_len} overflow_class={:?}",
+                        error.kind()
+                    );
+                    let endpoint = Endpoint::start(&maximum, Arc::new(Registry::default()))
+                        .expect("private publication must preserve the direct bind boundary");
+                    assert_eq!(fs::read_dir(fixture.path()).unwrap().count(), 2);
+                    drop(endpoint);
+                    assert_eq!(fs::read_dir(&maximum).unwrap().count(), 0);
+                    assert!(Endpoint::start(&directory, Arc::new(Registry::default())).is_err());
+                    assert_eq!(fs::read_dir(fixture.path()).unwrap().count(), 2);
+                    assert_eq!(fs::read_dir(directory).unwrap().count(), 0);
+                    let much_longer = fixture.path().join("x".repeat(100));
+                    let error = Endpoint::start(&much_longer, Arc::new(Registry::default()))
+                        .err()
+                        .expect("short staging cannot make an oversized final address valid");
+                    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+                    assert_eq!(fs::read_dir(&much_longer).unwrap().count(), 0);
+                    assert_eq!(fs::read_dir(fixture.path()).unwrap().count(), 3);
+
+                    return;
+                }
+            }
+        }
+        panic!("Unix bind boundary not found");
+    }
+
     #[test]
     fn staging_cleans_failed_publication() {
         let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
-        let destination = fixture.path().join("ipc.sock");
+        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let build = fixture.path().join("build");
+        fs::create_dir(&build).unwrap();
+        let destination = build.join("ipc.sock");
         fs::create_dir(&destination).unwrap(); // rename of a socket over a directory must fail
         assert!(bind_private(&destination).is_err());
-        let entries: Vec<_> = fs::read_dir(fixture.path())
+        assert_eq!(fs::read_dir(fixture.path()).unwrap().count(), 1);
+        let entries: Vec<_> = fs::read_dir(&build)
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
             .collect();
@@ -257,15 +342,54 @@ mod tests {
         assert_eq!(fs::read_dir(fixture.path()).unwrap().count(), 1);
     }
 
+    #[test]
+    fn planted_staging_entries_are_never_followed_or_removed() {
+        use std::os::unix::fs::symlink;
+        let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let build = fixture.path().join("build");
+        fs::create_dir(&build).unwrap();
+        let socket = build.join("ipc.sock");
+        let file = fixture.path().join(".s-file");
+        fs::write(&file, b"untouched").unwrap();
+        let link = fixture.path().join(".s-link");
+        symlink(&build, &link).unwrap();
+        let private = fixture.path().join(".s-private");
+        fs::DirBuilder::new().mode(0o700).create(&private).unwrap();
+        let public = fixture.path().join(".s-public");
+        fs::DirBuilder::new().mode(0o755).create(&public).unwrap();
+        // Even an existing safe directory is rejected; uid/mode never authorize adoption.
+        for path in [&file, &link, &private, &public] {
+            let before = fs::symlink_metadata(path).unwrap();
+            assert_eq!(
+                bind_private_in(&socket, path.clone()).unwrap_err().kind(),
+                io::ErrorKind::AlreadyExists
+            );
+            let after = fs::symlink_metadata(path).unwrap();
+            assert_eq!(
+                (after.ino(), after.mode(), after.uid()),
+                (before.ino(), before.mode(), before.uid())
+            );
+            assert!(!socket.exists());
+        }
+        assert_eq!(fs::read(file).unwrap(), b"untouched");
+        assert_eq!(fs::read_link(link).unwrap(), build);
+        assert_eq!(fs::read_dir(&build).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(fixture.path()).unwrap().count(), 5);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn final_socket_first_publication_is_private_rename() {
         use std::ffi::CString;
         let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let build = fixture.path().join("build");
+        fs::create_dir(&build).unwrap();
         let raw = unsafe { libc::inotify_init1(libc::IN_CLOEXEC | libc::IN_NONBLOCK) };
         assert!(raw >= 0);
         let mut events = unsafe { File::from_raw_fd(raw) };
-        let path = CString::new(fixture.path().as_os_str().as_encoded_bytes()).unwrap();
+        let path = CString::new(build.as_os_str().as_encoded_bytes()).unwrap();
         assert!(
             unsafe {
                 libc::inotify_add_watch(
@@ -275,7 +399,7 @@ mod tests {
                 )
             } >= 0
         );
-        let socket = fixture.path().join("ipc.sock");
+        let socket = build.join("ipc.sock");
         let _listener = bind_private(&socket).unwrap();
         let mut buffer = [0u8; 4096];
         let count = events.read(&mut buffer).unwrap();
