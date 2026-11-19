@@ -1,4 +1,4 @@
-import { Loading, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
+import { For, Loading, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
 
 /** Desktop folder-rooted preview host. When provided, a directory is served as
@@ -37,6 +37,10 @@ export interface HtmlPreviewProps {
   /** srcdoc fallback only: asset:// URL of the file's directory (trailing
    *  slash) so relative resources resolve. Ignored in folderRoot mode. */
   baseHref?: string;
+  /** Pending #anchor from a preview link, added to the desktop iframe src. */
+  fragment?: string | null;
+  /** Fired when the iframe finishes loading, so the host can drop the anchor. */
+  onFragmentHandled?: () => void;
 }
 
 const OVERLAY_DEBOUNCE_MS = 350;
@@ -148,19 +152,20 @@ export function HtmlPreview(props: HtmlPreviewProps): JSX.Element {
     if (!t || !fr || v < 0) return undefined;
     const origin = fr.docOrigin(t.token);
     const token = encodeURIComponent(t.token);
+    const hash = props.fragment ? `#${encodeURIComponent(props.fragment)}` : "";
     if (t.ownRoot) {
       // Self-rooted SPA: load at path `/` (entry resolved server-side from
       // `am-entry`) so path routers match their root route. `am-token`
       // identifies the preview on Windows, where the fixed
       // `markdraw-preview.localhost` host can't carry it.
       const q = `am-token=${token}&am-entry=${encodeURIComponent(t.entryRel)}`;
-      return `${origin}/?${q}&v=${v}`;
+      return `${origin}/?${q}&v=${v}${hash}`;
     }
     // Relative document: load at the entry's TRUE path so the browser resolves
     // relative URLs (`./`, `../`) against the file's real location within the
     // workspace origin — exactly like opening the file via `file://`.
     const path = t.entryRel.split("/").map(encodeURIComponent).join("/");
-    return `${origin}/${path}?am-token=${token}&v=${v}`;
+    return `${origin}/${path}?am-token=${token}&v=${v}${hash}`;
   };
 
   return (
@@ -181,9 +186,19 @@ export function HtmlPreview(props: HtmlPreviewProps): JSX.Element {
           Mounted only while there's a loadable src — clearing the src
           ATTRIBUTE alone would leave the previous document rendered. */}
       <Loading on={props.folderRoot} fallback={<div class="html-preview-frame" />}>
-        <Show when={src()}>
-          <iframe class="html-preview-frame" title="HTML preview" sandbox={SANDBOX_FOLDER} src={src()} />
-        </Show>
+        <For each={src() ? [src()!] : []}>
+          {(url) => (
+            <iframe
+              class="html-preview-frame"
+              title="HTML preview"
+              sandbox={SANDBOX_FOLDER}
+              src={url}
+              onLoad={(event) => {
+                if (event.currentTarget.isConnected && untrack(src) === url) props.onFragmentHandled?.();
+              }}
+            />
+          )}
+        </For>
       </Loading>
     </Show>
   );

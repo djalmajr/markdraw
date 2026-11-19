@@ -103,6 +103,87 @@ describe("HtmlPreview", () => {
       expect(iframe.getAttribute("srcdoc")).toBeNull();
     });
 
+    it("adds the pending fragment as an encoded hash to the desktop src", async () => {
+      const host = makeHost();
+      const { container } = render(() => (
+        <HtmlPreview content="<p>spa</p>" folderRoot={host} fragment="a b#c" />
+      ));
+      await tick();
+      expect(frame(container).getAttribute("src")).toBe(
+        "markdraw-preview://r0/?am-token=r0&am-entry=index.html&v=0#a%20b%23c",
+      );
+    });
+
+    it("adds the fragment to the relative-document src too", async () => {
+      const host = makeHost({
+        register: vi.fn(async () => ({
+          token: "r3", entryRel: "course/lessons/0001.html", ownRoot: false,
+        })),
+      });
+      const { container } = render(() => (
+        <HtmlPreview content="<p>doc</p>" folderRoot={host} fragment="secao" />
+      ));
+      await tick();
+      expect(frame(container).getAttribute("src")).toBe(
+        "markdraw-preview://r3/course/lessons/0001.html?am-token=r3&v=0#secao",
+      );
+    });
+
+    it("follows a changed fragment without re-registering", async () => {
+      const [fragment, setFragment] = createSignal<string | null>("um");
+      const host = makeHost();
+      const { container } = render(() => (
+        <HtmlPreview content="<p>spa</p>" folderRoot={host} fragment={fragment()} />
+      ));
+      await tick();
+      expect(frame(container).getAttribute("src")).toContain("#um");
+      setFragment("dois");
+      await tick(0);
+      expect(frame(container).getAttribute("src")).toContain("#dois");
+      expect(host.register).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports the completed load so the host can clear the fragment", async () => {
+      const onFragmentHandled = vi.fn();
+      const host = makeHost();
+      const { container } = render(() => (
+        <HtmlPreview
+          content="<p>spa</p>"
+          folderRoot={host}
+          fragment="secao"
+          onFragmentHandled={onFragmentHandled}
+        />
+      ));
+      await tick();
+      expect(onFragmentHandled).not.toHaveBeenCalled();
+      frame(container).dispatchEvent(new Event("load"));
+      expect(onFragmentHandled).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores a late load from a superseded iframe", async () => {
+      const [fragment, setFragment] = createSignal("first");
+      const handled = vi.fn();
+      const host = makeHost();
+      const { container } = render(() => (
+        <HtmlPreview content="<p>spa</p>" folderRoot={host} fragment={fragment()} onFragmentHandled={handled} />
+      ));
+      await tick();
+      const stale = frame(container);
+      setFragment("second");
+      await tick(0);
+      expect(frame(container)).not.toBe(stale);
+      stale.dispatchEvent(new Event("load"));
+      expect(handled).not.toHaveBeenCalled();
+      setFragment("first");
+      await tick(0);
+      const current = frame(container);
+      expect(current).not.toBe(stale);
+      stale.dispatchEvent(new Event("load"));
+      expect(handled).not.toHaveBeenCalled();
+      current.dispatchEvent(new Event("load"));
+      expect(handled).toHaveBeenCalledTimes(1);
+    });
+
     it("pushes the live buffer as an overlay before first load", async () => {
       const host = makeHost();
       render(() => <HtmlPreview content="<p>live</p>" folderRoot={host} />);

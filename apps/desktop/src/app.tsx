@@ -1579,6 +1579,7 @@ export function App() {
     tabStore,
     onActivateTab: (tabId) => handleActivateTab(tabId),
     onOpenHistoryTab: (entry, rootId) => { void tabActions.openFile(entry, rootId, true, false); },
+    onOpenFile: (entry, rootId, pinned, pushHistory) => tabActions.openFile(entry, rootId, pinned, pushHistory),
   });
 
   const tabActions = createTabActions({
