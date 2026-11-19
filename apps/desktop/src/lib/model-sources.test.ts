@@ -63,6 +63,17 @@ describe("model-sources", () => {
     expect(e.message).toBe("The response is too large.");
   });
 
+  it("passes the busy and invalid_request errors through with their fixed messages", async () => {
+    next = { err: { code: "busy", message: "Too many model list requests are running." } };
+    const busy = await listCliModels("grok-sub").catch((x) => x);
+    expect(busy).toBeInstanceOf(ModelSourceError);
+    expect(busy.code).toBe("busy");
+    next = { err: { code: "invalid_request", message: "The request is not valid." } };
+    const bad = await httpGetJson("https://x.test/m").catch((x) => x);
+    expect(bad.code).toBe("invalid_request");
+    expect(bad.message).toBe("The request is not valid.");
+  });
+
   it("replaces an untyped rejection with a fixed message instead of echoing it", async () => {
     next = { err: "boom Bearer SECRET-MARKER" };
     const e = await listCliModels("antigravity-sub").catch((x) => x);

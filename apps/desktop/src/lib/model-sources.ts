@@ -5,12 +5,18 @@
 
 import { invoke } from "./chaos-invoke.ts";
 
-/** Stable error codes the Rust side emits (fixed strings, never secrets). */
+/**
+ * Stable error codes the Rust side emits (fixed strings, never secrets).
+ * `busy` = the command's global concurrency budget is full (retry later);
+ * `invalid_request` = the payload was not the expected shape.
+ */
 export type ModelSourceErrorCode =
   | "invalid_url"
   | "unsupported_scheme"
   | "blocked_host"
   | "invalid_header"
+  | "invalid_request"
+  | "busy"
   | "connect_failed"
   | "redirect_blocked"
   | "request_failed"
