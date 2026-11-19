@@ -21,8 +21,9 @@ export function createFolder(deps: FolderDeps) {
   // Serialize authorization changes together with their UI publication. In
   // particular a close is acknowledged by Rust before it disappears locally;
   // a later open cannot replay an older snapshot over the closed roots.
+  const rootUpdateRejected = Symbol("MCP workspace update rejected");
   let rootUpdates = invoke<void>("mcp_set_roots", { roots: [] }).catch(() => {
-    console.error("Could not initialize MCP workspaces");
+    console.warn("Could not initialize MCP workspaces");
   });
   function updateRoots(change: (next: Map<string, string>) => void, publish: () => void) {
     const update = rootUpdates.then(async () => {
@@ -30,6 +31,9 @@ export function createFolder(deps: FolderDeps) {
       change(next);
       await invoke("mcp_set_roots", {
         roots: Array.from(next.values(), (path) => ({ path, name: getPathName(path) })),
+      }).catch(() => {
+        console.warn("Could not update MCP workspaces");
+        throw rootUpdateRejected;
       });
       setRootPaths(next);
       publish();
@@ -80,7 +84,7 @@ export function createFolder(deps: FolderDeps) {
       state.pushRecentFolder(path);
       return true;
     } catch (e) {
-      console.error("Failed to open directory:", e);
+      if (e !== rootUpdateRejected) console.error("Failed to open directory:", e);
       return false;
     } finally {
       state.setLoading(false);
@@ -164,8 +168,8 @@ export function createFolder(deps: FolderDeps) {
         state.removeRoot(rootId);
         if (rootPaths().size === 0) watcher.destroy();
       });
-    } catch {
-      console.error("Could not close workspace: MCP authorization update failed");
+    } catch (e) {
+      if (e !== rootUpdateRejected) console.error("Could not close workspace: MCP authorization update failed");
     }
   }
 

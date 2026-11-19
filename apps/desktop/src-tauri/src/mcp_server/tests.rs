@@ -338,3 +338,299 @@ fn duplicate_root_labels_keep_distinct_opaque_ids() {
         assert_eq!(registry.list().unwrap()["roots"][0]["id"], kept_id);
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sec_review_accepted_registry_must_fit_ipc_response() {
+    let fixture = fixture();
+    let registry = Arc::new(Registry::default());
+    let roots = (0..256)
+        .map(|n| RootInput {
+            name: "n".repeat(200),
+            path: fixture.path().join(n.to_string()),
+        })
+        .collect();
+    registry
+        .replace(roots)
+        .expect("valid root count and filesystem-valid label lengths");
+    let listed = registry.list().unwrap();
+    println!(
+        "accepted_roots={} serialized_result_bytes={} frame_limit={}",
+        listed["roots"].as_array().unwrap().len(),
+        serde_json::to_vec(&listed).unwrap().len(),
+        MAX_FRAME
+    );
+    let directory = fixture.path().join("endpoint");
+    let _endpoint = platform::Endpoint::start(&directory, registry).unwrap();
+    let result = Proxy::new(directory).call().await;
+    println!(
+        "proxy_error_kind={:?}",
+        result.as_ref().err().map(|error| error.kind())
+    );
+    assert!(result.is_ok(), "accepted registry must remain listable");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sec_review_stale_session_deep_json_and_recovery() {
+    let fixture = fixture();
+    let directory = fixture.path().join("endpoint");
+    let registry = Arc::new(Registry::default());
+    let old = platform::Endpoint::start(&directory, registry.clone()).unwrap();
+    let (_, stale) = platform::connect(&directory).await.unwrap();
+    drop(old);
+    let _endpoint = platform::Endpoint::start(&directory, registry).unwrap();
+    let (stream, _) = platform::connect(&directory).await.unwrap();
+    let mut stream = BufReader::new(stream);
+    send(
+        &mut stream,
+        &Auth {
+            id: 0,
+            token: stale,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(receive::<_, Response>(&mut stream).await.is_err());
+    let (mut stream, _) = platform::connect(&directory).await.unwrap();
+    let deep = format!("{}0{}\n", "[".repeat(300), "]".repeat(300));
+    stream.write_all(deep.as_bytes()).await.unwrap();
+    assert!(receive::<_, Response>(&mut BufReader::new(stream))
+        .await
+        .is_err());
+    assert_eq!(
+        Proxy::new(directory).call().await.unwrap(),
+        json!({"roots":[]})
+    );
+    println!("stale_session=rejected deep_json=rejected subsequent_read=ok");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sec_review_bounds_and_planted_files() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = fixture();
+    let registry = Arc::new(Registry::default());
+    for name in ["endpoint", "ipc.sock", "token"] {
+        let directory = fixture.path().join(format!("case-{name}"));
+        let planted = if name == "endpoint" {
+            directory.clone()
+        } else {
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+            directory.join(name)
+        };
+        std::fs::write(&planted, b"do not remove").unwrap();
+        assert!(platform::Endpoint::start(&directory, registry.clone()).is_err());
+        assert_eq!(std::fs::read(&planted).unwrap(), b"do not remove");
+    }
+    let base = fixture.path();
+    assert!(registry
+        .replace(
+            (0..257)
+                .map(|n| RootInput {
+                    name: "n".into(),
+                    path: base.join(n.to_string())
+                })
+                .collect()
+        )
+        .is_err());
+    assert!(registry
+        .replace(vec![RootInput {
+            name: "n".repeat(513),
+            path: base.into()
+        }])
+        .is_err());
+    println!(
+        "planted_directory_socket_token=preserved root_count_257=rejected name_bytes_513=rejected"
+    );
+}
+
+#[test]
+fn sec_review_tauri_command_respects_window_capability() {
+    let registry = Arc::new(Registry::default());
+    let app = tauri::test::mock_builder()
+        .manage(registry.clone())
+        .invoke_handler(tauri::generate_handler![crate::mcp_server::mcp_set_roots])
+        .build(tauri::generate_context!())
+        .unwrap();
+    let webview =
+        tauri::WebviewWindowBuilder::new(&app, "sec-review-no-capability", Default::default())
+            .build()
+            .unwrap();
+    let result = tauri::test::get_ipc_response(
+        &webview,
+        tauri::webview::InvokeRequest {
+            cmd: "mcp_set_roots".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(
+                json!({"roots":[{"name":"probe", "path":std::env::current_dir().unwrap()}]}),
+            ),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        },
+    );
+    println!(
+        "unprivileged_window_command_succeeded={} registry_root_count={}",
+        result.is_ok(),
+        registry.list().unwrap()["roots"].as_array().unwrap().len()
+    );
+    assert!(
+        result.is_err(),
+        "window without capability must not replace authorization roots"
+    );
+    assert_eq!(registry.list().unwrap(), json!({"roots":[]}));
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let result = tauri::test::get_ipc_response(
+        &main,
+        tauri::webview::InvokeRequest {
+            cmd: "mcp_set_roots".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(
+                json!({"roots":[{"name":"main", "path":std::env::current_dir().unwrap()}]}),
+            ),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        },
+    );
+    assert!(
+        result.is_ok(),
+        "main must retain its generated permission: {result:?}"
+    );
+    assert_eq!(registry.list().unwrap()["roots"][0]["name"], "main");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sec_review_unauthenticated_slow_peers_expire() {
+    let fixture = fixture();
+    let directory = fixture.path().join("endpoint");
+    let _endpoint = platform::Endpoint::start(&directory, Arc::new(Registry::default())).unwrap();
+    let mut peers = Vec::new();
+    for _ in 0..MAX_CONNECTIONS {
+        let (mut stream, _) = platform::connect(&directory).await.unwrap();
+        stream.write_all(b"{").await.unwrap();
+        peers.push(stream);
+    }
+    tokio::time::sleep(REQUEST_TIMEOUT + Duration::from_millis(200)).await;
+    for stream in peers {
+        assert!(receive::<_, Response>(&mut BufReader::new(stream))
+            .await
+            .is_err());
+    }
+    assert_eq!(
+        Proxy::new(directory).call().await.unwrap(),
+        json!({"roots":[]})
+    );
+    println!("unauthenticated_slow_peers=16 expired_after_deadline=true subsequent_read=ok");
+}
+
+#[test]
+fn token_format_and_constant_time_result_are_required() {
+    let expected = "a".repeat(64);
+    assert!(valid_token(&expected, &expected));
+    for candidate in [
+        "b".repeat(64),
+        "a".repeat(63),
+        "a".repeat(65),
+        "A".repeat(64),
+        "g".repeat(64),
+        "é".repeat(32),
+    ] {
+        assert!(!valid_token(&candidate, &expected));
+    }
+    for malformed in ["a".repeat(63), "g".repeat(64), "A".repeat(64)] {
+        assert!(!valid_token(&malformed, &malformed));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn maximum_escaped_roots_remain_listable_and_rejections_preserve_snapshot() {
+    let fixture = fixture();
+    let registry = Arc::new(Registry::default());
+    registry
+        .replace(
+            (0..256)
+                .map(|n| RootInput {
+                    name: "\u{1}".repeat(512),
+                    path: fixture.path().join(n.to_string()),
+                })
+                .collect(),
+        )
+        .unwrap();
+    let snapshot = registry.list().unwrap();
+    let _endpoint =
+        platform::Endpoint::start(&fixture.path().join("endpoint"), registry.clone()).unwrap();
+    assert_eq!(
+        Proxy::new(fixture.path().join("endpoint"))
+            .call()
+            .await
+            .unwrap(),
+        snapshot
+    );
+    for roots in [
+        (0..257)
+            .map(|n| RootInput {
+                name: "n".into(),
+                path: fixture.path().join(n.to_string()),
+            })
+            .collect(),
+        vec![RootInput {
+            name: "n".repeat(513),
+            path: fixture.path().into(),
+        }],
+        vec![
+            RootInput {
+                name: "n".into(),
+                path: fixture.path().into()
+            };
+            2
+        ],
+    ] {
+        assert!(registry.replace(roots).is_err());
+        assert_eq!(registry.list().unwrap(), snapshot);
+    }
+    let worst = Response {
+        id: u64::MAX,
+        result: Some(snapshot),
+    };
+    assert!(serde_json::to_vec(&worst).unwrap().len() < MAX_RESPONSE);
+}
+
+#[tokio::test]
+async fn response_boundary_is_four_mib_and_request_limit_stays_small() {
+    for (size, accepted) in [(MAX_RESPONSE, true), (MAX_RESPONSE + 1, false)] {
+        let envelope = serde_json::to_vec(&Response {
+            id: 1,
+            result: Some(json!("")),
+        })
+        .unwrap()
+        .len();
+        let response = Response {
+            id: 1,
+            result: Some(json!("x".repeat(size - envelope))),
+        };
+        let (mut writer, reader) = tokio::io::duplex(MAX_RESPONSE + 2);
+        let write = send_response(&mut writer, &response).await;
+        assert_eq!(write.is_ok(), accepted);
+        drop(writer);
+        assert_eq!(
+            receive_response(&mut BufReader::new(reader)).await.is_ok(),
+            accepted
+        );
+    }
+    let response = Response {
+        id: 1,
+        result: Some(json!("x".repeat(MAX_FRAME))),
+    };
+    assert!(send(&mut tokio::io::sink(), &response).await.is_err());
+    let bytes = [vec![b' '; MAX_RESPONSE + 1], vec![b'\n']].concat();
+    assert!(receive_response(&mut bytes.as_slice()).await.is_err());
+}

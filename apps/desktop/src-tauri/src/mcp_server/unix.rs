@@ -112,6 +112,35 @@ fn unlink(dir: &File, name: &std::ffi::CStr) {
     unsafe { libc::unlinkat(dir.as_raw_fd(), name.as_ptr(), 0) };
 }
 
+// A fresh private namespace hides the socket until its final mode is set.
+// Drop also cleans failed bind/chmod/rename attempts, without recursive removal.
+struct Staging {
+    directory: PathBuf,
+    socket: PathBuf,
+}
+impl Drop for Staging {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.socket);
+        let _ = fs::remove_dir(&self.directory);
+    }
+}
+fn bind_private(socket: &Path) -> io::Result<std::os::unix::net::UnixListener> {
+    let directory = socket
+        .parent()
+        .ok_or_else(denied)?
+        .join(format!(".mcp-{}", &random_id()?[..8]));
+    fs::DirBuilder::new().mode(0o700).create(&directory)?;
+    let staging = Staging {
+        socket: directory.join("ipc.sock"),
+        directory,
+    };
+    let _private = open_directory(&staging.directory)?;
+    let listener = std::os::unix::net::UnixListener::bind(&staging.socket)?;
+    fs::set_permissions(&staging.socket, fs::Permissions::from_mode(0o600))?;
+    fs::rename(&staging.socket, socket)?;
+    Ok(listener)
+}
+
 pub struct Endpoint {
     directory: File,
     socket_created: bool,
@@ -180,9 +209,8 @@ impl Endpoint {
             token_created: false,
             task: None,
         };
-        let listener = std::os::unix::net::UnixListener::bind(&socket)?;
+        let listener = bind_private(&socket)?;
         endpoint.socket_created = true;
-        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
         let token = random_id()?;
         let mut file = child_file(
@@ -207,4 +235,71 @@ pub async fn connect(path: &Path) -> io::Result<(Stream, String)> {
     check_socket(&path.join("ipc.sock"))?;
     let stream = UnixStream::connect(path.join("ipc.sock")).await?;
     Ok((stream, token))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staging_cleans_failed_publication() {
+        let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+        let destination = fixture.path().join("ipc.sock");
+        fs::create_dir(&destination).unwrap(); // rename of a socket over a directory must fail
+        assert!(bind_private(&destination).is_err());
+        let entries: Vec<_> = fs::read_dir(fixture.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(entries, vec![std::ffi::OsString::from("ipc.sock")]);
+        fs::remove_dir(&destination).unwrap();
+        let _listener = bind_private(&destination).unwrap();
+        assert_eq!(fs::read_dir(fixture.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn final_socket_first_publication_is_private_rename() {
+        use std::ffi::CString;
+        let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+        let raw = unsafe { libc::inotify_init1(libc::IN_CLOEXEC | libc::IN_NONBLOCK) };
+        assert!(raw >= 0);
+        let mut events = unsafe { File::from_raw_fd(raw) };
+        let path = CString::new(fixture.path().as_os_str().as_encoded_bytes()).unwrap();
+        assert!(
+            unsafe {
+                libc::inotify_add_watch(
+                    events.as_raw_fd(),
+                    path.as_ptr(),
+                    libc::IN_CREATE | libc::IN_MOVED_TO,
+                )
+            } >= 0
+        );
+        let socket = fixture.path().join("ipc.sock");
+        let _listener = bind_private(&socket).unwrap();
+        let mut buffer = [0u8; 4096];
+        let count = events.read(&mut buffer).unwrap();
+        let mut offset = 0;
+        let mut found = false;
+        while offset < count {
+            let event = unsafe {
+                std::ptr::read_unaligned(buffer.as_ptr().add(offset).cast::<libc::inotify_event>())
+            };
+            let start = offset + std::mem::size_of::<libc::inotify_event>();
+            let name = &buffer[start..start + event.len as usize];
+            if name.starts_with(b"ipc.sock\0") {
+                assert_eq!(
+                    event.mask & libc::IN_CREATE,
+                    0,
+                    "final socket must never be created before chmod"
+                );
+                assert_ne!(event.mask & libc::IN_MOVED_TO, 0);
+                check_socket(&socket).unwrap();
+                found = true;
+            }
+            offset = start + event.len as usize;
+        }
+        assert!(found, "must observe the final publication");
+        assert_eq!(fs::read_dir(fixture.path()).unwrap().count(), 1);
+    }
 }

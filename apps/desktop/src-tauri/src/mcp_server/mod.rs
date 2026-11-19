@@ -17,6 +17,7 @@ use std::{
     sync::{Arc, RwLock},
     time::Duration,
 };
+use subtle::ConstantTimeEq;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
 #[cfg(unix)]
@@ -27,6 +28,7 @@ mod platform;
 mod platform;
 
 const MAX_FRAME: usize = 64 * 1024;
+const MAX_RESPONSE: usize = 4 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 16;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 pub const NOT_RUNNING: &str = "Markdraw is not running; open it and try again";
@@ -100,6 +102,15 @@ impl Registry {
         }
         // Hold the write lock over both ID reconciliation and replacement;
         // a read after the command returns cannot see a closed root.
+        // Use the largest request ID and the actual escaped JSON envelope.
+        // IDs are fixed-length session identifiers; names may expand sixfold.
+        let response = Response {
+            id: u64::MAX,
+            result: Some(Self::list_roots(&next)),
+        };
+        if serde_json::to_vec(&response).map_err(|_| invalid())?.len() > MAX_RESPONSE {
+            return Err(invalid());
+        }
         *roots = next;
         Ok(())
     }
@@ -108,9 +119,10 @@ impl Registry {
             .roots
             .read()
             .map_err(|_| io::Error::other("MCP registry unavailable"))?;
-        Ok(
-            json!({"roots": roots.iter().map(|root| json!({"id":root.id,"name":root.name})).collect::<Vec<_>>()}),
-        )
+        Ok(Self::list_roots(&roots))
+    }
+    fn list_roots(roots: &[Root]) -> Value {
+        json!({"roots": roots.iter().map(|root| json!({"id":root.id,"name":root.name})).collect::<Vec<_>>()})
     }
 }
 
@@ -125,6 +137,12 @@ pub fn mcp_set_roots(
 }
 
 async fn read_frame<R: AsyncBufRead + Unpin>(reader: &mut R) -> io::Result<Vec<u8>> {
+    read_frame_limit(reader, MAX_FRAME).await
+}
+async fn read_frame_limit<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    limit: usize,
+) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     loop {
         let available = reader.fill_buf().await?;
@@ -136,7 +154,7 @@ async fn read_frame<R: AsyncBufRead + Unpin>(reader: &mut R) -> io::Result<Vec<u
         }
         let newline = available.iter().position(|byte| *byte == b'\n');
         let count = newline.unwrap_or(available.len());
-        if bytes.len() + count > MAX_FRAME {
+        if bytes.len() + count > limit {
             return Err(invalid());
         }
         bytes.extend_from_slice(&available[..count]);
@@ -159,9 +177,25 @@ async fn receive<R: AsyncBufRead + Unpin, T: serde::de::DeserializeOwned>(
 ) -> io::Result<T> {
     serde_json::from_slice(&timed_frame(reader, REQUEST_TIMEOUT).await?).map_err(|_| invalid())
 }
+async fn receive_response<R: AsyncBufRead + Unpin>(reader: &mut R) -> io::Result<Response> {
+    let bytes = tokio::time::timeout(REQUEST_TIMEOUT, read_frame_limit(reader, MAX_RESPONSE))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "MCP IPC request timed out"))??;
+    serde_json::from_slice(&bytes).map_err(|_| invalid())
+}
 async fn send<W: AsyncWrite + Unpin, T: Serialize>(writer: &mut W, value: &T) -> io::Result<()> {
+    send_limit(writer, value, MAX_FRAME).await
+}
+async fn send_response<W: AsyncWrite + Unpin>(writer: &mut W, value: &Response) -> io::Result<()> {
+    send_limit(writer, value, MAX_RESPONSE).await
+}
+async fn send_limit<W: AsyncWrite + Unpin, T: Serialize>(
+    writer: &mut W,
+    value: &T,
+    limit: usize,
+) -> io::Result<()> {
     let mut bytes = serde_json::to_vec(value).map_err(|_| invalid())?;
-    if bytes.len() > MAX_FRAME {
+    if bytes.len() > limit {
         return Err(invalid());
     }
     bytes.push(b'\n');
@@ -191,6 +225,18 @@ struct Response {
     result: Option<Value>,
 }
 
+fn valid_token(candidate: &str, expected: &str) -> bool {
+    fn valid(value: &str) -> bool {
+        value.len() == 64
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    }
+    valid(candidate)
+        && valid(expected)
+        && bool::from(candidate.as_bytes().ct_eq(expected.as_bytes()))
+}
+
 async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
     registry: Arc<Registry>,
@@ -198,13 +244,13 @@ async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(
 ) -> io::Result<()> {
     let mut stream = BufReader::new(stream);
     let auth: Auth = receive(&mut stream).await?;
-    if auth.id != 0 || auth.token != token {
+    if auth.id != 0 || !valid_token(&auth.token, token) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "MCP authentication failed",
         ));
     }
-    send(
+    send_response(
         &mut stream,
         &Response {
             id: 0,
@@ -221,7 +267,7 @@ async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(
         }
         last_id = request.id;
         let result = registry.list()?;
-        send(
+        send_response(
             &mut stream,
             &Response {
                 id: request.id,
@@ -293,7 +339,7 @@ impl Proxy {
             let (stream, token) = platform::connect(&self.directory).await?;
             let mut stream = BufReader::new(stream);
             send(&mut stream, &Auth { id: 0, token }).await?;
-            let authenticated: Response = receive(&mut stream).await?;
+            let authenticated = receive_response(&mut stream).await?;
             if authenticated.id != 0 {
                 return Err(invalid());
             }
@@ -305,7 +351,7 @@ impl Proxy {
                 },
             )
             .await?;
-            let response: Response = receive(&mut stream).await?;
+            let response = receive_response(&mut stream).await?;
             if response.id != 1 {
                 return Err(invalid());
             }
@@ -370,6 +416,43 @@ impl ServerHandler for Proxy {
     }
 }
 
+// Idle stdin has no deadline. Once any byte arrives, bound the complete
+// frame before exposing it to rmcp's JSON decoder.
+async fn forward_stdio<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(
+    mut reader: R,
+    mut writer: W,
+) -> Result<(), &'static str> {
+    loop {
+        if reader
+            .fill_buf()
+            .await
+            .map_err(|_| "Markdraw MCP input failed")?
+            .is_empty()
+        {
+            return Ok(());
+        }
+        let bytes = match timed_frame(&mut reader, REQUEST_TIMEOUT).await {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return match error.kind() {
+                    io::ErrorKind::InvalidData => Err("markdraw mcp: message too large"),
+                    io::ErrorKind::TimedOut => Err("markdraw mcp: message timed out"),
+                    io::ErrorKind::UnexpectedEof => Ok(()),
+                    _ => Err("Markdraw MCP input failed"),
+                }
+            }
+        };
+        writer
+            .write_all(&bytes)
+            .await
+            .map_err(|_| "Markdraw MCP input failed")?;
+        writer
+            .write_all(b"\n")
+            .await
+            .map_err(|_| "Markdraw MCP input failed")?;
+    }
+}
+
 /// Called exclusively by the CLI branch before Tauri/GTK initialization.
 pub fn run_stdio() -> Result<(), &'static str> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -392,8 +475,16 @@ pub fn run_stdio() -> Result<(), &'static str> {
             }
         };
         tokio::pin!(closed);
+        let (validated, writer) = tokio::io::duplex(MAX_FRAME);
+        let input = async {
+            forward_stdio(BufReader::new(tokio::io::stdin()), writer).await?;
+            // EOF closes the writer; let rmcp drain already validated frames.
+            std::future::pending::<Result<(), &'static str>>().await
+        };
+        tokio::pin!(input);
         let service = tokio::select! {
-            result = proxy.serve(rmcp::transport::stdio()) => match result {
+            result = &mut input => return result,
+            result = proxy.serve((validated, tokio::io::stdout())) => match result {
                 Ok(service) => service,
                 Err(rmcp::service::ServerInitializeError::ConnectionClosed(_)) => return Ok(()),
                 Err(_) => return Err("Markdraw MCP initialization failed"),
@@ -402,6 +493,7 @@ pub fn run_stdio() -> Result<(), &'static str> {
         };
         let cancellation = service.cancellation_token();
         tokio::select! {
+            result = &mut input => return result,
             result = service.waiting() => { result.map_err(|_| "Markdraw MCP stopped unexpectedly")?; },
             _ = &mut closed => { cancellation.cancel(); },
         }

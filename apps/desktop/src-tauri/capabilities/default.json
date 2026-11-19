@@ -4,6 +4,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "allow-mcp-set-roots",
     "core:window:allow-set-title",
     "core:window:allow-start-dragging",
     "core:window:allow-toggle-maximize",

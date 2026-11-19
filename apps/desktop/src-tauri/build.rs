@@ -1,5 +1,9 @@
 fn main() {
-    tauri_build::build();
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(&["mcp_set_roots"])),
+    )
+    .expect("could not build Tauri application manifest");
 
     // Windows: `cargo test --lib` produces a test binary that does NOT inherit
     // the SxS manifest `tauri_build` embeds into the app binary (via resource.lib).
