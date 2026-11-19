@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSignal } from "solid-js";
-import { flush } from "solid-js";
+import { createSignal, flush, untrack } from "solid-js";
 import { cleanup, render, waitFor } from "@solidjs/testing-library";
 
 // Controlled diagram renderers: the readiness tests hold a diagram in a
@@ -88,6 +87,8 @@ interface BaseProps {
   onTocChange?: (b: boolean) => void;
   onFragmentHandled?: () => void;
   onHeadingHandled?: () => void;
+  onFragmentDiscarded?: (fragment: string) => void;
+  onHeadingDiscarded?: (heading: string) => void;
 }
 
 function withDefaults(p: BaseProps = {}) {
@@ -853,13 +854,15 @@ describe("Preview — a jump request belongs to its own document", () => {
     completions: string[];
     setFragment?: (value: string | null) => void;
     setHeading?: (value: string | null) => void;
+    onFragmentDiscarded?: (fragment: string) => void;
+    onHeadingDiscarded?: (heading: string) => void;
   }) {
     const scroller = document.createElement("div");
     scroller.className = "content";
     document.body.appendChild(scroller);
     scrollers.push(scroller);
     const scroll = vi.spyOn(scroller, "scrollTo").mockImplementation(() => {});
-    render(() => (
+    const mounted = render(() => (
       <Preview
         {...withDefaults({ html: opts.html(), currentFilePath: opts.path() })}
         pendingFragment={opts.fragment()}
@@ -872,9 +875,11 @@ describe("Preview — a jump request belongs to its own document", () => {
           opts.completions.push(opts.path());
           opts.setHeading?.(null);
         }}
+        onFragmentDiscarded={opts.onFragmentDiscarded}
+        onHeadingDiscarded={opts.onHeadingDiscarded}
       />
     ), { container: scroller });
-    return { scroller, scroll };
+    return { scroller, scroll, unmount: mounted.unmount };
   }
 
   for (const kind of ["heading", "fragment"] as const) {
@@ -1015,6 +1020,123 @@ describe("Preview — a jump request belongs to its own document", () => {
     await waitFor(() => expect(completions).toEqual(["a.md"]));
     expect(scroll).toHaveBeenCalledTimes(1);
   });
+
+  for (const kind of ["heading", "fragment"] as const) {
+    it(`does not resurrect a discarded host ${kind} on a fresh Preview when A is reopened`, async () => {
+      // Conversion of the reviewer's probe: the request signals live
+      // outside Preview, like create-app-state, and a discard clears the
+      // host signal without reporting a completed jump.
+      diagramCtl.mode.mermaid = "pending";
+      const [path, setPath] = createSignal("a.md");
+      const [html, setHtml] = createSignal(A_DIAGRAM_HTML);
+      const [fragment, setFragment] = createSignal<string | null>(kind === "fragment" ? "target" : null);
+      const [heading, setHeading] = createSignal<string | null>(kind === "heading" ? "Target" : null);
+      const completions: string[] = [];
+      const discards: string[] = [];
+      const mount = () => mountPreview({
+        path, html, fragment, heading, completions, setFragment, setHeading,
+        onFragmentDiscarded: (value) => {
+          discards.push(`fragment:${value}`);
+          if (untrack(fragment) === value) setFragment(null);
+        },
+        onHeadingDiscarded: (value) => {
+          discards.push(`heading:${value}`);
+          if (untrack(heading) === value) setHeading(null);
+        },
+      });
+
+      const first = mount();
+      await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+      expect(completions).toEqual([]);
+      expect(first.scroll).not.toHaveBeenCalled();
+
+      // A's renderer is still pending when B opens with a homonymous target.
+      setPath("b.md");
+      setHtml(B_TARGET_HTML);
+      flush();
+      diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+      await tick();
+      await tick();
+
+      const discarded = kind === "fragment" ? "fragment:target" : "heading:Target";
+      expect(discards).toEqual([discarded]);
+      expect(untrack(fragment)).toBeNull();
+      expect(untrack(heading)).toBeNull();
+      expect(completions).toEqual([]);
+      expect(first.scroll).not.toHaveBeenCalled();
+      expect(first.scroller.textContent).toContain("FILE B");
+
+      // PaneView can dispose Preview; a fresh instance must not inherit A.
+      first.unmount();
+      setPath("a.md");
+      setHtml('<h1 id="target">Target AGAIN</h1>');
+      flush();
+      const second = mount();
+      await tick();
+      await tick();
+
+      expect(second.scroll).not.toHaveBeenCalled();
+      expect(completions).toEqual([]);
+      expect(discards).toEqual([discarded]);
+      expect(untrack(fragment)).toBeNull();
+      expect(untrack(heading)).toBeNull();
+    });
+  }
+
+  for (const kind of ["heading", "fragment"] as const) {
+    for (const order of ["path-first", "request-first"] as const) {
+      it(`keeps a B ${kind} request when A is discarded in the same batch (${order})`, async () => {
+        diagramCtl.mode.mermaid = "pending";
+        const oldValue = kind === "fragment" ? "target-a" : "Target A";
+        const newValue = kind === "fragment" ? "target-b" : "Target B";
+        const [path, setPath] = createSignal("a.md");
+        const [html, setHtml] = createSignal(A_DIAGRAM_HTML);
+        const [fragment, setFragment] = createSignal<string | null>(kind === "fragment" ? oldValue : null);
+        const [heading, setHeading] = createSignal<string | null>(kind === "heading" ? oldValue : null);
+        const completions: string[] = [];
+        const discards: string[] = [];
+        const request = () => (kind === "fragment" ? fragment() : heading());
+        const setRequest = (value: string | null) => {
+          if (kind === "fragment") setFragment(value);
+          else setHeading(value);
+        };
+        const { scroll } = mountPreview({
+          path, html, fragment, heading, completions, setFragment, setHeading,
+          onFragmentDiscarded: (value) => {
+            discards.push(`fragment:${value}`);
+            if (untrack(fragment) === value) setFragment(null);
+          },
+          onHeadingDiscarded: (value) => {
+            discards.push(`heading:${value}`);
+            if (untrack(heading) === value) setHeading(null);
+          },
+        });
+        await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+        expect(completions).toEqual([]);
+        expect(scroll).not.toHaveBeenCalled();
+
+        setHtml('<h1 id="target-b">Target B</h1>');
+        if (order === "path-first") {
+          setPath("b.md");
+          setRequest(newValue);
+        } else {
+          setRequest(newValue);
+          setPath("b.md");
+        }
+        flush();
+
+        expect(discards).toEqual([`${kind}:${oldValue}`]);
+        expect(untrack(request)).toBe(newValue);
+        expect(completions).toEqual([]);
+        expect(scroll).not.toHaveBeenCalled();
+
+        diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+        await waitFor(() => expect(completions).toEqual(["b.md"]));
+        expect(scroll).toHaveBeenCalledTimes(1);
+        expect(untrack(request)).toBeNull();
+      });
+    }
+  }
 });
 
 describe("FrontmatterPanel — collapse state follows the file", () => {

@@ -733,12 +733,20 @@ interface PreviewProps {
   pendingFragment: string | null;
   /** Called after the pending fragment has been scrolled to (to clear the signal) */
   onFragmentHandled: () => void;
+  /** Called with the fragment that lost its document. Separate from
+   *  `onFragmentHandled` so the host can clear the signal without claiming
+   *  the jump happened in the newly opened file. */
+  onFragmentDiscarded?: (fragment: string) => void;
   /** Heading text to scroll to after content loads — used by the
    *  Workspace Symbol search and any cross-file jump that knows the
    *  heading by its rendered text rather than a fragment id. */
   pendingHeadingText?: string | null;
   /** Called after the pending heading has been resolved (to clear the signal) */
   onHeadingHandled?: () => void;
+  /** Called with the heading that lost its document. Separate from
+   *  `onHeadingHandled` so the host can clear the signal without claiming
+   *  the jump happened in the newly opened file. */
+  onHeadingDiscarded?: (heading: string) => void;
   /** Called when user clicks a document link (.adoc/.md); receives the resolved path and optional fragment */
   onNavigate: (path: string, fragment?: string | null) => void;
   /** Open an external URL (http/https) in the system browser. Desktop-only. */
@@ -1391,7 +1399,9 @@ export function Preview(props: PreviewProps) {
       heading: props.pendingHeadingText ?? null,
     }),
     ({ path, fragment, heading }) => {
-      const requestChanged = fragment !== lastFragment || heading !== lastHeading;
+      const droppedFragment = lastFragment;
+      const droppedHeading = lastHeading;
+      const requestChanged = fragment !== droppedFragment || heading !== droppedHeading;
       const pathChanged = path !== lastRequestPath;
       lastFragment = fragment;
       lastHeading = heading;
@@ -1400,6 +1410,14 @@ export function Preview(props: PreviewProps) {
         setRequestOwner(fragment || heading ? path : null);
       } else if (pathChanged) {
         setRequestOwner(null);
+      }
+      if (pathChanged) {
+        // The old request belongs to the previous document. Report it as
+        // dropped — never as handled — so the host can clear its signal.
+        // A new request for the new document may already be in the host
+        // signal; the host decides by comparing the value before clearing.
+        if (droppedFragment) props.onFragmentDiscarded?.(droppedFragment);
+        if (droppedHeading) props.onHeadingDiscarded?.(droppedHeading);
       }
     },
   );
