@@ -16,10 +16,11 @@ interface NavigationDeps {
    *  pane is in focus when the user fires a back/forward / link click. */
   tabStore?: () => TabStore;
   onActivateTab?: (tabId: string) => void;
+  onOpenHistoryTab?: (entry: FSEntry, rootId: string) => void;
 }
 
 export function createNavigation(deps: NavigationDeps) {
-  const { loadFileContent, rootPaths, state, tabStore: getTabStore, onActivateTab } = deps;
+  const { loadFileContent, rootPaths, state, tabStore: getTabStore, onActivateTab, onOpenHistoryTab } = deps;
 
   function canGoBack() {
     return state.navIndex() > 0;
@@ -40,7 +41,6 @@ export function createNavigation(deps: NavigationDeps) {
     if (preferredRootId) {
       const entry = state.findEntryByPath(targetPath, preferredRootId);
       if (entry && entry.kind === "file") {
-        if (state.isRootReadOnly?.(preferredRootId)) return;
         loadFileContent(entry, true, false, preferredRootId);
         return;
       }
@@ -50,7 +50,6 @@ export function createNavigation(deps: NavigationDeps) {
     for (const root of state.rootsList()) {
       const entry = state.findEntryByPath(targetPath, root.id);
       if (entry && entry.kind === "file") {
-        if (state.isRootReadOnly?.(root.id)) return;
         loadFileContent(entry, true, false, root.id);
         return;
       }
@@ -58,14 +57,12 @@ export function createNavigation(deps: NavigationDeps) {
 
     // Not in any tree -- try filesystem fallback using the current root
     const fallbackRootId = preferredRootId ?? currentRootId;
-    if (state.isRootReadOnly?.(fallbackRootId)) return;
     const currentRootPath = fallbackRootId ? rootPaths().get(fallbackRootId) : null;
     if (currentRootPath) {
       // Try as directory first
       try {
         const absolutePath = `${currentRootPath}/${targetPath}`;
         const entries = await readTree(absolutePath, state.showHiddenEntries());
-        if (state.isRootReadOnly?.(fallbackRootId)) return;
         if (entries.length > 0) {
           // Navigate into a subdirectory — add it as a new root
           state.addRoot({
@@ -90,7 +87,6 @@ export function createNavigation(deps: NavigationDeps) {
       try {
         const absolutePath = `${currentRootPath}/${targetPath}`;
         await readFileContent(absolutePath);
-        if (state.isRootReadOnly?.(fallbackRootId)) return;
         const name = targetPath.includes("/")
           ? targetPath.substring(targetPath.lastIndexOf("/") + 1)
           : targetPath;
@@ -108,7 +104,6 @@ export function createNavigation(deps: NavigationDeps) {
   function navigateToStackEntry(newIdx: number) {
     const stack = state.navStack();
     const qp: QualifiedPath = stack[newIdx]!;
-    if (state.isRootReadOnly?.(qp.rootId)) return;
     const entry = state.findEntryByPath(qp.path, qp.rootId);
     if (!entry || entry.kind !== "file") return;
 
@@ -121,6 +116,10 @@ export function createNavigation(deps: NavigationDeps) {
       const tab = tabStore.getTab(tabId);
       if (tab) {
         onActivateTab(tabId);
+        return;
+      }
+      if (onOpenHistoryTab) {
+        onOpenHistoryTab(entry, qp.rootId);
         return;
       }
       // Target not in a tab — open it as a pinned tab

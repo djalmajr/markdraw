@@ -4,11 +4,12 @@ import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
 import { writeFile } from "./fs.ts";
 import type { createFileLoader } from "./file-loader.ts";
+import type { FinishRootClose } from "./folder.ts";
 import { SCRATCH_ROOT_ID } from "./scratch.ts";
 import type { FileWatcher } from "./watcher.ts";
 
 interface TabActionDeps {
-  state: Pick<AppState, "paneManager" | "findEntryByPath" | "autoRefresh" | "isRootReadOnly">;
+  state: Pick<AppState, "paneManager" | "findEntryByPath" | "autoRefresh">;
   rootPaths: () => ReadonlyMap<string, string>;
   watcher: Pick<FileWatcher, "setTarget" | "start" | "stop">;
   loadTabContent: ReturnType<typeof createFileLoader>["loadTabContent"];
@@ -23,7 +24,6 @@ export function createTabActions({
   const manager = state.paneManager;
 
   function selectTab(pane: PaneStore, tab: TabState | null, focused = pane === manager.activePane(), pushHistory = false) {
-    if (tab && state.isRootReadOnly(tab.rootId)) return;
     const entry = tab?.rootId === SCRATCH_ROOT_ID
       ? { path: tab.filePath, name: tab.fileName, kind: "file" as const }
       : tab?.filePath ? state.findEntryByPath(tab.filePath, tab.rootId) : null;
@@ -54,7 +54,7 @@ export function createTabActions({
 
   function activateTab(pane: PaneStore, tabId: string, pushHistory = false) {
     const tab = pane.tabs.getTab(tabId);
-    if (!tab || state.isRootReadOnly(tab.rootId)) return;
+    if (!tab) return;
     pane.tabs.activateTab(tabId);
     return selectTab(pane, tab, pane === manager.activePane(), pushHistory);
   }
@@ -69,27 +69,31 @@ export function createTabActions({
     });
   }
 
-  async function openFile(entry: FSEntry, rootId: string, pinned = false) {
-    if (state.isRootReadOnly(rootId)) return;
+  async function openFile(entry: FSEntry, rootId: string, pinned = false, pushHistory = true) {
     const pane = manager.activePane();
     const store = pane.tabs;
     const existing = store.findTabByFile(entry.path, rootId);
     if (pinned && existing) {
       store.pinTab(existing.id);
       if (existing.needsLoad) {
-        await activateTab(pane, existing.id, true);
+        await activateTab(pane, existing.id, pushHistory);
       } else {
         store.activateTab(existing.id);
-        await loadFileContent(entry, true, false, rootId);
+        await loadFileContent(entry, pushHistory, false, rootId);
       }
       return;
     }
     const id = pinned ? store.openTab(entry, rootId) : store.loadInActiveTab(entry, rootId);
-    if (existing?.needsLoad) {
-      await selectTab(pane, existing, true, true);
+    if (!existing) {
+      store.markTabNeedsLoad(id);
+      await loadTabContent(pane, entry, { id, rootId }, pushHistory);
       return;
     }
-    await loadFileContent(entry, true, false, rootId);
+    if (existing.needsLoad) {
+      await selectTab(pane, existing, true, pushHistory);
+      return;
+    }
+    await loadFileContent(entry, pushHistory, false, rootId);
     updateLoadedTabCache(pane, id);
   }
 
@@ -133,13 +137,24 @@ export function createTabActions({
     return groups;
   }
 
-  async function approveClose(targets: () => TabTarget[], protect?: () => void) {
+  async function saveBuffer(path: string, item: DirtyTab): Promise<boolean> {
+    if (!rootPaths().has(item.tab.rootId) || !item.tab.filePath) return false;
+    try {
+      await writeFile(path, item.content);
+      return true;
+    } catch (error) {
+      console.error("Failed to save file:", error);
+      return false;
+    }
+  }
+
+  async function prepareClose(targets: () => TabTarget[], allowChanges: boolean) {
     const initial = dirtyTabs(targets());
-    if (!groupByDestination(initial)) return false;
+    if (!groupByDestination(initial)) return null;
     const approved: Array<DirtyTab & { save: boolean }> = [];
     for (const pending of initial) {
       const decision = await confirmDirtyTab(pending.tab);
-      if (decision === "cancel") return false;
+      if (decision === "cancel") return null;
       approved.push({ ...pending, save: decision === "confirm" });
     }
 
@@ -148,41 +163,58 @@ export function createTabActions({
       approved.find(({ pane, tab, content }) =>
         pane === pending.pane && tab.id === pending.tab.id && content === pending.content,
       );
-    protect?.();
     const pending = dirtyTabs(targets());
     const groups = groupByDestination(pending);
-    if (!groups || !pending.every(isApproved)) return false;
+    if (!groups || (!allowChanges && !pending.every(isApproved))) return null;
+    const saved = new Map<string, string>();
     for (const [path, group] of groups) {
       const item = group.find((candidate) => isApproved(candidate)?.save);
       if (!item) continue;
-      if (!rootPaths().has(item.tab.rootId) || !item.tab.filePath) return false;
-      try {
-        await writeFile(path, item.content);
-      } catch (error) {
-        console.error("Failed to save file:", error);
-        return false;
-      }
+      if (!await saveBuffer(path, item)) return null;
+      saved.set(path, item.content);
     }
-    return dirtyTabs(targets()).every(isApproved);
+    return { isApproved, saved };
   }
 
-  function approveTabClose(pane: PaneStore, id: string) {
-    const tab = pane.tabs.getTab(id);
-    if (tab && state.isRootReadOnly(tab.rootId)) return false;
-    return approveClose(() => [{ pane, id }]);
+  async function approveTabClose(pane: PaneStore, id: string) {
+    const targets = () => [{ pane, id }];
+    const decision = await prepareClose(targets, false);
+    return decision !== null && dirtyTabs(targets()).every(decision.isApproved);
   }
 
-  function approveRootClose(rootId: string, protect: () => void) {
-    return approveClose(() => manager.panes().flatMap((pane) =>
+  async function prepareRootClose(rootId: string): Promise<FinishRootClose | null> {
+    const targets = () => manager.panes().flatMap((pane) =>
       pane.tabs.tabs().filter((tab) => tab.rootId === rootId).map((tab) => ({ pane, id: tab.id })),
-    ), protect);
+    );
+    const decision = await prepareClose(targets, true);
+    if (!decision) return null;
+
+    return async (commit) => {
+      while (true) {
+        const groups = groupByDestination(dirtyTabs(targets()));
+        if (!groups) return;
+        const next = [...groups].find(([path, group]) =>
+          decision.saved.get(path) !== group[0]!.content
+          && group.some((item) => decision.isApproved(item)?.save !== false),
+        );
+        if (!next) {
+          // No await between the last scan and removing the tabs.
+          commit();
+          return;
+        }
+        const [path, group] = next;
+        const item = group[0]!;
+        if (!await saveBuffer(path, item)) return;
+        decision.saved.set(path, item.content);
+      }
+    };
   }
 
   function moveTab(tabId: string, fromPaneIndex: number) {
     const panes = manager.panes();
     const source = panes[fromPaneIndex];
     const tab = source?.tabs.getTab(tabId);
-    if (!source || !tab || state.isRootReadOnly(tab.rootId)) return;
+    if (!source || !tab) return;
     const entry = state.findEntryByPath(tab.filePath, tab.rootId);
     if (!entry || entry.kind !== "file") return;
     const targetIndex = fromPaneIndex === 0 ? 1 : 0;
@@ -224,6 +256,6 @@ export function createTabActions({
 
   return {
     selectTab, activateTab, openFile, updateLoadedTabCache,
-    closeTabs, closeRootTabs, approveTabClose, approveRootClose, moveTab,
+    closeTabs, closeRootTabs, approveTabClose, prepareRootClose, moveTab,
   };
 }

@@ -11,7 +11,7 @@ import { invoke } from "./lib/chaos-invoke.ts";
 import { dragOnceMoved, installHyprlandMaximize } from "./lib/hyprland-maximize.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { createAppState, type AppState } from "@markdraw/ui/composables/create-app-state.ts";
+import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
 import { createPaneManager } from "@markdraw/ui/composables/create-pane-manager.ts";
 import { exportChatArtifact, savePlanArtifact } from "./lib/ai-artifacts.ts";
 import { createMockProvider } from "@markdraw/ai/mock-provider.ts";
@@ -425,8 +425,7 @@ export function App() {
     return import.meta.env.DEV ? "Mock (dev)" : null;
   };
 
-  const state: AppState = createAppState({
-    isRootReadOnly: (rootId) => folder.isRootReadOnly(rootId),
+  const state = createAppState({
     paneManager: createPaneManager({
       onTabSelected: (pane, tab) => { void tabActions.selectTab(pane, tab); },
     }),
@@ -1520,6 +1519,7 @@ export function App() {
     state,
     tabStore,
     onActivateTab: (tabId) => handleActivateTab(tabId),
+    onOpenHistoryTab: (entry, rootId) => { void tabActions.openFile(entry, rootId, true, false); },
   });
 
   const tabActions = createTabActions({
@@ -1543,7 +1543,7 @@ export function App() {
     setRootPaths,
     state,
     watcher,
-    beforeRootClose: tabActions.approveRootClose,
+    beforeRootClose: tabActions.prepareRootClose,
     onRootClosed: tabActions.closeRootTabs,
   });
 
@@ -1881,7 +1881,6 @@ export function App() {
   }
 
   async function handleOpenRecentFolder(path: string) {
-    if (state.isRootReadOnly(path)) return;
     const opened = await folder.openFolderPath(path);
     if (!opened) {
       state.handleRemoveRecentFolder(path);
@@ -2258,7 +2257,6 @@ export function App() {
   }
 
   async function handleOpenRecentFile(recentFile: RecentFile) {
-    if (state.isRootReadOnly(recentFile.rootPath)) return;
     const opened = await folder.openFolderPath(recentFile.rootPath);
     if (!opened) {
       state.handleRemoveRecentFile(recentFile.path, recentFile.rootPath);
@@ -2397,7 +2395,7 @@ export function App() {
       }
 
       // Try to restore tabs whose roots are now available
-      const restorable = session.tabs.filter((t) => paths.has(t.rootId) && !state.isRootReadOnly(t.rootId));
+      const restorable = session.tabs.filter((t) => paths.has(t.rootId));
       if (restorable.length === 0) return;
 
       sessionRestored = true;
@@ -3080,7 +3078,6 @@ export function App() {
   /** "+" button: create an empty tab (shows empty state). */
   function handleNewTab() {
     const rootId = state.selectedRootId() ?? "";
-    if (state.isRootReadOnly(rootId)) return;
     // Snapshot current tab, then clear state for the empty tab
     tabStore().snapshotActiveTab();
 
@@ -3242,7 +3239,7 @@ export function App() {
         },
         "tab.reopen": (ev) => {
           ev.preventDefault();
-          tabStore().reopenClosedTab((tab) => !state.isRootReadOnly(tab.rootId));
+          tabStore().reopenClosedTab();
         },
         "tab.next": (ev) => {
           ev.preventDefault();

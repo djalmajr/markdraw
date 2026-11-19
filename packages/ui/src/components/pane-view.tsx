@@ -428,7 +428,6 @@ export function PaneView(props: PaneViewProps) {
               findTrigger={s.editorFindTrigger()}
               indentMode={s.indentMode()}
               indentSize={s.indentSize()}
-              readOnly={s.isRootReadOnly?.(pane().selectedRootId()) ?? false}
               showInvisibles={s.showInvisibles()}
               showLineNumbers={s.showLineNumbers()}
               wrapText={s.wrapText()}

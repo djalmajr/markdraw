@@ -48,11 +48,22 @@ export async function readFilesRelative(
   return new Map(Object.entries(result));
 }
 
+const pendingWrites = new Map<string, Promise<void>>();
+
 export async function writeFile(
   filePath: string,
   content: string,
 ): Promise<void> {
-  await invoke("write_file", { path: filePath, content });
+  // Manual/automatic saves and the close sweep can overlap on this path.
+  const write = () => invoke<void>("write_file", { path: filePath, content });
+  const previous = pendingWrites.get(filePath);
+  const pending = previous ? previous.catch(() => undefined).then(write) : write();
+  pendingWrites.set(filePath, pending);
+  try {
+    await pending;
+  } finally {
+    if (pendingWrites.get(filePath) === pending) pendingWrites.delete(filePath);
+  }
 }
 
 export async function renameFile(
