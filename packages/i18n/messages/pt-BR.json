@@ -317,6 +317,7 @@
   "settings_ai_custom_remove_model": "Remover modelo",
   "settings_ai_custom_submit": "Adicionar provedor",
   "settings_ai_custom_required": "ID do provedor e Base URL são obrigatórios.",
+  "settings_ai_config_invalid": "O arquivo de configuração de IA tem um erro. Corrija ou apague o ai.json antes de salvar.",
   "settings_ai_back": "Voltar",
   "settings_ai_edit_provider": "Editar provedor",
   "settings_ai_custom_provider": "Provedor custom",

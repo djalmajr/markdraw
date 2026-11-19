@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as v from "valibot";
 import type { ModelCache, ProviderConfig } from "./config-schema.ts";
-import { MCPServerConfigSchema, mergeConfigs, parseUserConfig } from "./config-schema.ts";
+import { MCPServerConfigSchema, mergeConfigs, parseUserConfig, parseUserConfigForWrite } from "./config-schema.ts";
 
 const BUILTINS: Record<string, ProviderConfig> = {
   anthropic: {
@@ -127,6 +127,48 @@ describe("parseUserConfig — per-entry mcp filtering", () => {
 
   it("still returns null when mcp itself is not an array", () => {
     expect(parseUserConfig(JSON.stringify({ mcp: { id: "x" } }))).toBeNull();
+  });
+});
+
+describe("parseUserConfigForWrite — nenhuma entrada MCP é descartada em silêncio", () => {
+  const VALID_STDIO = { id: "memory", transport: "stdio" as const, command: "bunx" };
+  const VALID_HTTP = { id: "remote", transport: "http" as const, url: "https://example.com/mcp" };
+
+  it("aceita o mesmo config válido da leitura tolerante, com todas as entradas", () => {
+    expect(
+      parseUserConfigForWrite(
+        JSON.stringify({ model: "a/b", provider: { ollama: { name: "O" } }, mcp: [VALID_STDIO, VALID_HTTP] }),
+      ),
+    ).toEqual({
+      model: "a/b",
+      provider: { ollama: { name: "O" } },
+      mcp: [VALID_STDIO, VALID_HTTP],
+    });
+  });
+
+  it("recusa o config inteiro quando UMA entrada MCP falha (F1)", () => {
+    const raw = JSON.stringify({ mcp: [VALID_STDIO, { id: "bad", transport: "http" }, VALID_HTTP] });
+    // Controle: a leitura tolerante devolve o config sem a entrada ruim...
+    expect(parseUserConfig(raw)?.mcp?.map((s) => s.id)).toEqual(["memory", "remote"]);
+    // ...e a leitura para gravação recusa em vez de gravar o subconjunto.
+    expect(parseUserConfigForWrite(raw)).toBeNull();
+  });
+
+  it("recusa entradas MCP que não são objetos e o mesmo `mcp` não-array", () => {
+    expect(parseUserConfigForWrite(JSON.stringify({ mcp: ["nope"] }))).toBeNull();
+    expect(parseUserConfigForWrite(JSON.stringify({ mcp: [42] }))).toBeNull();
+    expect(parseUserConfigForWrite(JSON.stringify({ mcp: { id: "x" } }))).toBeNull();
+  });
+
+  it("recusa JSON inválido, campo de tipo errado e ausência", () => {
+    expect(parseUserConfigForWrite("{not json")).toBeNull();
+    expect(parseUserConfigForWrite(JSON.stringify({ model: 123 }))).toBeNull();
+    expect(
+      parseUserConfigForWrite(
+        JSON.stringify({ provider: { custom: { kind: "openai", name: "C", models: "nope" } } }),
+      ),
+    ).toBeNull();
+    expect(parseUserConfigForWrite(null)).toBeNull();
   });
 });
 

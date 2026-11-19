@@ -17,7 +17,7 @@ import {
   parseOpenRouterModels,
   type CatalogModel,
 } from "@markdraw/ai/model-catalog.ts";
-import { parseModelsDevCatalog } from "@markdraw/ai/models-dev.ts";
+import { parseModelsDevCatalog, type ModelsDevCatalogModel } from "@markdraw/ai/models-dev.ts";
 import { REASONING_LABELS } from "@markdraw/ai/reasoning.ts";
 import {
   MODEL_CACHE_TTL_MS,
@@ -229,8 +229,16 @@ async function getJson(
 /**
  * The newest Claude model per family in a models.dev catalog. Dated snapshot
  * ids and deprecated entries are excluded, mirroring the curated built-in
- * list (Fable / Opus / Sonnet / Haiku). Version tuples are compared numerically
- * after the family token; ties keep the catalog's own order.
+ * list (Fable / Opus / Sonnet / Haiku).
+ *
+ * Recency follows ONE rule per family, decided before any candidate is
+ * compared: when EVERY candidate of the family carries a valid
+ * `release_date`, the dates decide (a date tie falls back to the version tuple
+ * after the family token); when any candidate has no valid date, the version
+ * tuple decides for the WHOLE family and the family's dates are ignored. A
+ * pairwise "date if both have one" rule is not transitive and made the winner
+ * depend on the catalog's order. Both rules are total orders, so the result
+ * does not depend on the order of the catalog. Version ties keep that order.
  */
 function compareVersions(a: number[], b: number[]): number {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
@@ -240,9 +248,39 @@ function compareVersions(a: number[], b: number[]): number {
   return 0;
 }
 
-export function selectClaudeSubscriptionModels(models: CatalogModel[]): CatalogModel[] {
+/** Epoch milliseconds for a catalog `release_date`, or undefined when absent.
+ *  `parseModelsDevCatalog` only keeps a valid `YYYY-MM-DD` calendar day, and
+ *  `T00:00:00Z` keeps the conversion timezone-free. */
+function releaseTimestamp(model: ModelsDevCatalogModel): number | undefined {
+  if (!model.releaseDate) return undefined;
+  const parsed = Date.parse(`${model.releaseDate}T00:00:00Z`);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+interface ClaudeCandidate {
+  model: CatalogModel;
+  version: number[];
+  releasedAt?: number;
+}
+
+/** > 0 when `candidate` is newer than `prior` under the family's single rule:
+ *  with `allDated`, (date, version) lexicographically; otherwise the version
+ *  tuple alone, every date in the family ignored. */
+function compareRecency(
+  candidate: ClaudeCandidate,
+  prior: ClaudeCandidate,
+  allDated: boolean,
+): number {
+  if (allDated) {
+    const byDate = (candidate.releasedAt ?? 0) - (prior.releasedAt ?? 0);
+    if (byDate !== 0) return byDate;
+  }
+  return compareVersions(candidate.version, prior.version);
+}
+
+export function selectClaudeSubscriptionModels(models: ModelsDevCatalogModel[]): CatalogModel[] {
   const families = ["fable", "opus", "sonnet", "haiku"] as const;
-  const best = new Map<string, { model: CatalogModel; version: number[] }>();
+  const candidates = new Map<string, ClaudeCandidate[]>();
   for (const model of models) {
     if (model.deprecated || !model.id || /\d{8}/.test(model.id) || /\d{4}-\d{2}-\d{2}/.test(model.id))
       continue;
@@ -252,12 +290,21 @@ export function selectClaudeSubscriptionModels(models: CatalogModel[]): CatalogM
     const after = lower.slice(lower.indexOf(family) + family.length);
     const version = (after.match(/\d+/g) ?? []).map(Number);
     if (version.length === 0) continue;
-    const prior = best.get(family);
-    if (!prior || compareVersions(version, prior.version) > 0) {
-      best.set(family, { model, version });
-    }
+    const list = candidates.get(family) ?? [];
+    list.push({ model, version, releasedAt: releaseTimestamp(model) });
+    candidates.set(family, list);
   }
-  return families.flatMap((f) => (best.get(f) ? [best.get(f)!.model] : []));
+  const best = new Map<string, CatalogModel>();
+  for (const [family, list] of candidates) {
+    // ONE rule for the whole family, chosen before reducing it.
+    const allDated = list.every((c) => c.releasedAt !== undefined);
+    let winner = list[0];
+    for (const candidate of list.slice(1)) {
+      if (compareRecency(candidate, winner, allDated) > 0) winner = candidate;
+    }
+    best.set(family, winner.model);
+  }
+  return families.flatMap((f) => (best.has(f) ? [best.get(f)!] : []));
 }
 
 async function openAiCompatibleWrite(
