@@ -59,6 +59,14 @@ static HTTP_SLOTS: Semaphore = Semaphore::const_new(HTTP_MAX_CONCURRENT);
 static CLI_SLOTS: Semaphore = Semaphore::const_new(CLI_MAX_CONCURRENT);
 static CACHE_SLOTS: Semaphore = Semaphore::const_new(CACHE_MAX_CONCURRENT);
 
+/// Budget of the blocking system DNS lookups. A lookup runs on a blocking
+/// thread that nobody can cancel, so it outlives the request that started it
+/// (the request timeout, a dropped future); its permit therefore travels INTO
+/// that thread and only comes back when `getaddrinfo` returns. Separate from
+/// [`HTTP_SLOTS`] because the HTTP permit goes back with the request.
+const DNS_MAX_CONCURRENT: usize = HTTP_MAX_CONCURRENT;
+static DNS_SLOTS: Semaphore = Semaphore::const_new(DNS_MAX_CONCURRENT);
+
 const CODEX_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const CODEX_MAX_MODELS: usize = 2_000;
 const CODEX_MAX_FIELD_CHARS: usize = 256;
@@ -152,15 +160,51 @@ impl std::error::Error for BlockedAddress {}
 
 type LookupFuture = Pin<Box<dyn Future<Output = std::io::Result<Vec<SocketAddr>>> + Send>>;
 type Lookup = Arc<dyn Fn(String) -> LookupFuture + Send + Sync>;
+/// The blocking name → addresses call (`getaddrinfo`); a plain `fn` so a test
+/// can stand in a slow one.
+type BlockingResolve = fn(&str) -> std::io::Result<Vec<SocketAddr>>;
 
-fn system_lookup() -> Lookup {
-    Arc::new(|host| {
+/// Marker the lookup returns (inside an `io::Error`) when [`DNS_SLOTS`] is full;
+/// the resolver turns it into the fixed `busy` error, never into a queued
+/// lookup.
+#[derive(Debug)]
+struct LookupBusy;
+
+impl std::fmt::Display for LookupBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("lookup budget is full")
+    }
+}
+
+impl std::error::Error for LookupBusy {}
+
+fn system_resolve(host: &str) -> std::io::Result<Vec<SocketAddr>> {
+    use std::net::ToSocketAddrs;
+    Ok((host, 0u16).to_socket_addrs()?.collect())
+}
+
+/// Runs `resolve` on a blocking thread that carries a permit of `slots` until
+/// `resolve` returns — also when the awaiting future is dropped meanwhile. The
+/// permit is taken with `try_acquire` before any thread is spawned: a full
+/// budget answers [`LookupBusy`] at once and queues nothing.
+fn budgeted_lookup(slots: &'static Semaphore, resolve: BlockingResolve) -> Lookup {
+    Arc::new(move |host| {
         Box::pin(async move {
-            Ok(tokio::net::lookup_host((host.as_str(), 0))
-                .await?
-                .collect::<Vec<_>>())
+            let permit = slots
+                .try_acquire()
+                .map_err(|_| std::io::Error::other(LookupBusy))?;
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                resolve(&host)
+            })
+            .await
+            .map_err(|_| std::io::Error::other("the lookup task failed"))?
         })
     })
+}
+
+fn system_lookup() -> Lookup {
+    budgeted_lookup(&DNS_SLOTS, system_resolve)
 }
 
 /// DNS resolver of the GET client: the addresses the connector may dial are the
@@ -185,9 +229,15 @@ impl reqwest::dns::Resolve for FilteringResolver {
         let lookup = self.lookup.clone();
         let host = name.as_str().to_owned();
         Box::pin(async move {
-            let resolved = lookup(host)
-                .await
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+            let resolved = lookup(host).await.map_err(|e| {
+                // Hand the marker over bare: an `io::Error` hides what it wraps
+                // from `source()`, so the mapping would never find it.
+                if e.get_ref().is_some_and(|inner| inner.is::<LookupBusy>()) {
+                    Box::new(LookupBusy) as Box<dyn std::error::Error + Send + Sync>
+                } else {
+                    Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+                }
+            })?;
             let allowed: Vec<SocketAddr> = resolved
                 .into_iter()
                 .filter(|a| !ip_is_link_local(a.ip()))
@@ -273,11 +323,11 @@ fn same_origin(a: &reqwest::Url, b: &reqwest::Url) -> bool {
         && a.port_or_known_default() == b.port_or_known_default()
 }
 
-fn caused_by_blocked_address(e: &reqwest::Error) -> bool {
+fn caused_by<T: std::error::Error + 'static>(e: &reqwest::Error) -> bool {
     use std::error::Error as _;
     let mut cur = e.source();
     while let Some(inner) = cur {
-        if inner.is::<BlockedAddress>() {
+        if inner.is::<T>() {
             return true;
         }
         cur = inner.source();
@@ -287,8 +337,10 @@ fn caused_by_blocked_address(e: &reqwest::Error) -> bool {
 
 fn map_reqwest_error(e: &reqwest::Error) -> ModelListError {
     // Never `e.to_string()`: reqwest embeds the URL (and so any `?key=`).
-    if caused_by_blocked_address(e) {
+    if caused_by::<BlockedAddress>(e) {
         err("blocked_host", "This host is not allowed.")
+    } else if caused_by::<LookupBusy>(e) {
+        busy()
     } else if e.is_timeout() {
         err("timeout", "The request timed out.")
     } else if e.is_connect() {
@@ -398,6 +450,12 @@ async fn get_json_unlimited(
 /// `request` arrives as a generic value and is decoded here: a typed argument
 /// would be decoded by Tauri first, and its rejection carries serde's message
 /// (which can quote the payload) instead of a fixed error.
+///
+/// Known, accepted gap: a *binary* IPC body is rejected by Tauri before this
+/// handler runs, with the framework's own text. That text names the command and
+/// the argument, never a byte of the payload, and the TypeScript wrapper turns
+/// any rejection that is not a typed `{code, message}` into its fixed message,
+/// so nothing from the payload reaches the UI.
 #[tauri::command]
 pub async fn ai_http_get_json(
     request: Option<serde_json::Value>,
@@ -439,16 +497,39 @@ fn cli_kind_for_provider_id(provider: &str) -> Result<&'static str, ModelListErr
 ///   and closing the handle (drop) does too.
 ///
 /// Dropping the guard kills the tree, so a cancelled future cleans up as well.
-/// `kill` is idempotent. On Unix the group id is read from the child before it
-/// is reaped and the kill normally happens before the reap; on the success path
-/// the direct child is already reaped when the (usually empty) group is killed,
-/// and a group id cannot be recycled while any member is alive.
+/// `kill` is idempotent.
+///
+/// Reach of the guarantee: the *process group* (Unix) or the *job* (Windows). A
+/// CLI that deliberately detaches a helper into another session (`setsid`) or
+/// another group is outside it; the CLIs this module runs are the two known
+/// subscription CLIs and are assumed not to do that.
+///
+/// Group-id identity (Unix): a process-group id is only guaranteed not to be
+/// reused while some member of the group — the leader, alive or zombie, included
+/// — still exists. So `killpg` is sent only while the leader has NOT been
+/// collected (timeout, oversized stdout, cancellation). Once `wait` collected
+/// the leader, [`ProcessTree::leader_collected`] drops the id and nothing is
+/// signalled any more: the group may be empty and its number recycled by an
+/// unrelated process, so a normal exit never signals the group (a member that
+/// outlives a CLI which exited by itself is likewise outside the guarantee).
 struct ProcessTree {
     #[cfg(unix)]
     pgid: Option<libc::pid_t>,
+    /// The group-kill syscall; a field only so tests can record the calls.
+    #[cfg(unix)]
+    killpg: fn(libc::pid_t),
     #[cfg(windows)]
     job: job::Job,
     killed: bool,
+}
+
+#[cfg(unix)]
+fn real_killpg(pgid: libc::pid_t) {
+    // SAFETY: plain syscall; callers pass the group this tree created and only
+    // while its leader is still uncollected (see [`ProcessTree`]).
+    unsafe {
+        libc::killpg(pgid, libc::SIGKILL);
+    }
 }
 
 impl ProcessTree {
@@ -456,10 +537,20 @@ impl ProcessTree {
         Ok(Self {
             #[cfg(unix)]
             pgid: None,
+            #[cfg(unix)]
+            killpg: real_killpg,
             #[cfg(windows)]
             job: job::Job::new()?,
             killed: false,
         })
+    }
+
+    /// A tree whose group kills go through `killpg` (tests only).
+    #[cfg(all(unix, test))]
+    fn with_killpg(killpg: fn(libc::pid_t)) -> Self {
+        let mut tree = Self::new().expect("a Unix tree has nothing to create");
+        tree.killpg = killpg;
+        tree
     }
 
     /// Configure `cmd` so the spawned process leads (Unix) or is held for (Windows)
@@ -495,16 +586,23 @@ impl ProcessTree {
         }
     }
 
+    /// The direct child (the group leader) has been collected: its group id no
+    /// longer proves anything, so the group is never signalled again. A Windows
+    /// job is a handle, not a number, and stays killable.
+    fn leader_collected(&mut self) {
+        #[cfg(unix)]
+        {
+            self.pgid = None;
+        }
+    }
+
     fn kill(&mut self) {
         if std::mem::replace(&mut self.killed, true) {
             return;
         }
         #[cfg(unix)]
         if let Some(pgid) = self.pgid {
-            // SAFETY: plain syscall; `pgid` is the group this tree created.
-            unsafe {
-                libc::killpg(pgid, libc::SIGKILL);
-            }
+            (self.killpg)(pgid);
         }
         #[cfg(windows)]
         self.job.terminate();
@@ -645,9 +743,10 @@ mod job {
 }
 
 /// Run `<binary> models` (fixed argv, stdin closed, stderr discarded) and
-/// return its stdout, bounded in time and size. On every exit — success,
-/// timeout, oversized stdout or cancellation — the CLI's whole process tree is
-/// killed and the direct child is awaited.
+/// return its stdout, bounded in time and size. On timeout, oversized stdout
+/// and cancellation the CLI's process tree is killed while the direct child is
+/// still uncollected, and the direct child is then awaited. After the CLI
+/// exited by itself (success or not) nothing is signalled, see [`ProcessTree`].
 ///
 /// Shell exception (documented, not a gap): `binary` comes from
 /// `cli_agent::resolve_cli_path`, the same discovery the CLI chat uses. On Unix
@@ -660,8 +759,18 @@ async fn run_models_command(
     max_stdout: usize,
     timeout: Duration,
 ) -> Result<String, ModelListError> {
+    let tree =
+        ProcessTree::new().map_err(|_| err("cli_spawn_failed", "Could not start the CLI."))?;
+    run_models_command_in(binary, max_stdout, timeout, tree).await
+}
+
+async fn run_models_command_in(
+    binary: &str,
+    max_stdout: usize,
+    timeout: Duration,
+    mut tree: ProcessTree,
+) -> Result<String, ModelListError> {
     let spawn_failed = || err("cli_spawn_failed", "Could not start the CLI.");
-    let mut tree = ProcessTree::new().map_err(|_| spawn_failed())?;
     let mut cmd = Command::new(binary);
     cmd.arg("models")
         .stdin(Stdio::null())
@@ -677,40 +786,54 @@ async fn run_models_command(
         let _ = child.start_kill();
         return Err(spawn_failed());
     }
+    // Moved AFTER `child` on purpose: locals drop in reverse order (and the
+    // parameter `tree` would drop after every local), so when this future is
+    // cancelled `group` kills the process group first, while the leader is still
+    // uncollected, and only then does `child`'s drop (which reaps a leader that
+    // already exited) run.
+    let mut group = tree;
     let Some(stdout) = child.stdout.take() else {
-        tree.kill();
+        group.kill();
         let _ = child.wait().await;
         return Err(spawn_failed());
     };
 
+    // `(outcome, leader_collected)`. `child.wait()` collects the leader in the
+    // same poll that returns, so the flag is exact: true only after `wait`
+    // returned (whatever it returned: after an error the leader's state is
+    // unknown and signalling its group is the unsafe guess).
     let work = async {
         let mut buf: Vec<u8> = Vec::new();
         // +1 so "exactly at the limit" and "over it" are distinguishable.
         let mut limited = stdout.take(max_stdout as u64 + 1);
-        limited
-            .read_to_end(&mut buf)
-            .await
-            .map_err(|_| err("cli_failed", "The CLI failed."))?;
+        if limited.read_to_end(&mut buf).await.is_err() {
+            return (Err(err("cli_failed", "The CLI failed.")), false);
+        }
         if buf.len() > max_stdout {
-            return Err(err("too_large", "The CLI output is too large."));
+            return (Err(err("too_large", "The CLI output is too large.")), false);
         }
-        let status = child
-            .wait()
-            .await
-            .map_err(|_| err("cli_failed", "The CLI failed."))?;
-        if !status.success() {
-            return Err(err("cli_failed", "The CLI exited with an error."));
-        }
-        Ok(String::from_utf8_lossy(&buf).into_owned())
+        let outcome = match child.wait().await {
+            Ok(status) if status.success() => Ok(String::from_utf8_lossy(&buf).into_owned()),
+            Ok(_) => Err(err("cli_failed", "The CLI exited with an error.")),
+            Err(_) => Err(err("cli_failed", "The CLI failed.")),
+        };
+        (outcome, true)
     };
-    let outcome = match tokio::time::timeout(timeout, work).await {
-        Ok(result) => result,
-        Err(_) => Err(err("timeout", "The CLI timed out.")),
+    let (outcome, collected) = match tokio::time::timeout(timeout, work).await {
+        Ok(done) => done,
+        Err(_) => (Err(err("timeout", "The CLI timed out.")), false),
     };
-    // Whatever the outcome: stop the CLI and everything it started, then await
-    // the direct child (instant after the kill; bounded in case it is not).
-    tree.kill();
-    let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+    if collected {
+        group.leader_collected();
+    }
+    // Uncollected leader (timeout, oversized stdout, read error): the group id is
+    // still reserved by the leader, alive or zombie, so killing the group is
+    // safe. Then await the leader (instant after the kill; bounded in case it
+    // is not).
+    group.kill();
+    if !collected {
+        let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+    }
     outcome
 }
 
@@ -1946,8 +2069,12 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
         assert_eq!(hits.load(Ordering::SeqCst), 1);
     }
 
+    /// Tests that touch the real [`DNS_SLOTS`] take turns.
+    static REAL_DNS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[tokio::test]
     async fn the_real_resolver_still_reaches_localhost() {
+        let _turn = REAL_DNS.lock().await;
         let (port, _) = serve(|_| ok_json("{}")).await;
         let resp = get(req(&format!("http://localhost:{port}/m")))
             .await
@@ -1970,55 +2097,180 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
         assert!(!serde_json::to_string(&e).unwrap().contains(MARKER));
     }
 
-    /// Restores the proxy variables a test sets, also when an assertion fails.
-    struct ProxyEnv(Vec<(&'static str, Option<std::ffi::OsString>)>);
-    impl ProxyEnv {
-        fn set(url: &str) -> Self {
-            let names = [
-                "HTTP_PROXY",
-                "http_proxy",
-                "ALL_PROXY",
-                "all_proxy",
-                "NO_PROXY",
-                "no_proxy",
-            ];
-            let saved = names.iter().map(|n| (*n, std::env::var_os(n))).collect();
-            for n in ["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] {
-                std::env::set_var(n, url);
-            }
-            for n in ["NO_PROXY", "no_proxy"] {
-                std::env::remove_var(n);
-            }
-            ProxyEnv(saved)
-        }
-    }
-    impl Drop for ProxyEnv {
-        fn drop(&mut self) {
-            for (n, v) in &self.0 {
-                match v {
-                    Some(v) => std::env::set_var(n, v),
-                    None => std::env::remove_var(n),
-                }
-            }
-        }
-    }
+    /// The proxy test runs its request in a child process that gets the proxy
+    /// variables at launch: `std::env::set_var` in this test process would race
+    /// with the system resolver other tests run on their own threads.
+    const PROXY_CHILD: &str = "model_list::tests::the_environment_proxy_child";
 
     #[tokio::test]
     async fn the_environment_proxy_is_never_used() {
         // A proxy would dial the destination itself, outside the resolver policy.
         let (proxy_port, proxy_hits) = serve(|_| ok_json(r#"{"via":"proxy"}"#)).await;
         let (port, hits) = serve(|_| ok_json(r#"{"via":"direct"}"#)).await;
-        let _env = ProxyEnv::set(&format!("http://127.0.0.1:{proxy_port}"));
-        let resp = get(req(&format!("http://127.0.0.1:{port}/m")))
-            .await
-            .unwrap();
-        assert_eq!(resp.body, r#"{"via":"direct"}"#);
+        let proxy = format!("http://127.0.0.1:{proxy_port}");
+        let mut child = tokio::process::Command::new(std::env::current_exe().unwrap());
+        child
+            .args(["--exact", PROXY_CHILD, "--ignored", "--test-threads=1"])
+            .env("MD_PROXY_TEST_TARGET_PORT", port.to_string())
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy")
+            .kill_on_drop(true);
+        for name in ["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] {
+            child.env(name, &proxy);
+        }
+        let out = child.output().await.unwrap();
+        let log = String::from_utf8_lossy(&out.stdout).into_owned();
+        let err = String::from_utf8_lossy(&out.stderr).into_owned();
+        // `--exact` naming nothing would run 0 tests and still exit 0.
+        assert!(
+            log.contains("running 1 test"),
+            "the child test did not run: {log}\n{err}"
+        );
+        assert!(
+            out.status.success() && log.contains("1 passed"),
+            "the child test failed: {log}\n{err}"
+        );
         assert_eq!(
             proxy_hits.load(Ordering::SeqCst),
             0,
             "request went to the proxy"
         );
         assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// Body of the proxy test, run by [`the_environment_proxy_is_never_used`] in
+    /// a child that has the proxy variables set; a bare `--ignored` run has no
+    /// target and passes without doing anything.
+    #[tokio::test]
+    #[ignore = "runs as a child of the_environment_proxy_is_never_used"]
+    async fn the_environment_proxy_child() {
+        let Ok(port) = std::env::var("MD_PROXY_TEST_TARGET_PORT") else {
+            return;
+        };
+        assert!(
+            std::env::var_os("HTTP_PROXY").is_some(),
+            "the child must start with the proxy set"
+        );
+        let resp = get(req(&format!("http://127.0.0.1:{port}/m")))
+            .await
+            .unwrap();
+        assert_eq!(resp.body, r#"{"via":"direct"}"#);
+    }
+
+    // ── F2 (round 3): the blocking lookup outlives the request, so does its permit ──
+
+    #[tokio::test]
+    async fn a_slow_lookup_keeps_its_permit_after_the_timeout_and_a_full_budget_is_busy() {
+        use std::sync::{Condvar, Mutex};
+
+        static SLOTS: Semaphore = Semaphore::const_new(2);
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        static GATE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
+
+        /// A "getaddrinfo" stuck until the gate opens (bounded, never forever).
+        fn slow(_host: &str) -> std::io::Result<Vec<SocketAddr>> {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            let (open, cv) = &GATE;
+            let guard = open.lock().unwrap();
+            let (_guard, wait) = cv
+                .wait_timeout_while(guard, Duration::from_secs(20), |open| !*open)
+                .unwrap();
+            assert!(!wait.timed_out(), "the test never opened the gate");
+            Ok(vec!["127.0.0.1:0".parse().unwrap()])
+        }
+
+        /// Opens the gate also when an assertion fails, so no thread stays stuck.
+        struct OpenGate;
+        impl Drop for OpenGate {
+            fn drop(&mut self) {
+                *GATE.0.lock().unwrap() = true;
+                GATE.1.notify_all();
+            }
+        }
+
+        async fn call(
+            resolver: &Arc<FilteringResolver>,
+            http: &Semaphore,
+            port: u16,
+            timeout_ms: u64,
+        ) -> Result<GetJsonResponse, ModelListError> {
+            let mut r = req(&format!("http://slow.test:{port}/m"));
+            r.timeout_ms = Some(timeout_ms);
+            get_json(r, HTTP_MAX_BODY_BYTES, 5_000, resolver.clone(), http).await
+        }
+
+        let _gate = OpenGate;
+        let (port, hits) = serve(|_| ok_json(r#"{"ok":1}"#)).await;
+        let resolver = Arc::new(FilteringResolver {
+            lookup: budgeted_lookup(&SLOTS, slow),
+        });
+        let http = Semaphore::new(HTTP_MAX_CONCURRENT);
+
+        // Two short-deadline calls: each times out, each leaves its lookup running.
+        for n in 1..=2usize {
+            let started = std::time::Instant::now();
+            let e = call(&resolver, &http, port, 150).await.unwrap_err();
+            assert_eq!(e.code, "timeout", "{e:?}");
+            assert!(started.elapsed() < Duration::from_secs(2));
+            assert_eq!(CALLS.load(Ordering::SeqCst), n);
+            assert_eq!(
+                SLOTS.available_permits(),
+                2 - n,
+                "the lookup permit came back before the lookup finished"
+            );
+            assert_eq!(
+                http.available_permits(),
+                HTTP_MAX_CONCURRENT,
+                "the request permit is the request's own"
+            );
+        }
+
+        // Full lookup budget: many calls with a name all get the fixed `busy`,
+        // at once, and none of them starts another lookup.
+        let started = std::time::Instant::now();
+        let refused =
+            futures_util::future::join_all((0..12).map(|_| call(&resolver, &http, port, 5_000)))
+                .await;
+        assert!(started.elapsed() < Duration::from_millis(500));
+        for r in refused {
+            assert_eq!(r.unwrap_err(), busy());
+        }
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2, "a lookup was queued");
+        assert_eq!(hits.load(Ordering::SeqCst), 0, "a refused call connected");
+
+        // The stuck lookups finish: permits return and a name resolves again.
+        drop(_gate);
+        for _ in 0..250 {
+            if SLOTS.available_permits() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(SLOTS.available_permits(), 2, "permits never came back");
+        let ok = call(&resolver, &http, port, 5_000).await.unwrap();
+        assert_eq!(ok.body, r#"{"ok":1}"#);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn the_system_resolver_runs_on_the_dns_budget() {
+        let _turn = REAL_DNS.lock().await;
+        assert_eq!(DNS_MAX_CONCURRENT, 4);
+        let (port, hits) = serve(|_| ok_json("{}")).await;
+        let held: Vec<_> = (0..DNS_MAX_CONCURRENT)
+            .map(|_| DNS_SLOTS.try_acquire().unwrap())
+            .collect();
+        let e = get(req(&format!("http://localhost:{port}/m")))
+            .await
+            .unwrap_err();
+        drop(held);
+        assert_eq!(e, busy());
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+        // Control: with the budget free the same name resolves and connects.
+        let ok = get(req(&format!("http://localhost:{port}/m")))
+            .await
+            .unwrap();
+        assert_eq!(ok.status, 200);
     }
 
     // ── F6: IPC payload decoding ──
@@ -2130,6 +2382,7 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
         assert_eq!(HTTP_SLOTS.available_permits(), 4);
         assert_eq!(CLI_SLOTS.available_permits(), 2);
         assert_eq!(CACHE_SLOTS.available_permits(), 1);
+        assert_eq!(DNS_MAX_CONCURRENT, 4);
     }
 
     #[tokio::test]
@@ -2407,6 +2660,46 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
             run_models_command(bin, max, timeout).await
         }
 
+        /// [`run`] with the group kill replaced by `killpg`.
+        async fn run_with(
+            bin: &str,
+            max: usize,
+            timeout: Duration,
+            killpg: fn(libc::pid_t),
+        ) -> Result<String, ModelListError> {
+            for _ in 0..20 {
+                match run_models_command_in(bin, max, timeout, ProcessTree::with_killpg(killpg))
+                    .await
+                {
+                    Err(e) if e.code == "cli_spawn_failed" => {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                    other => return other,
+                }
+            }
+            run_models_command_in(bin, max, timeout, ProcessTree::with_killpg(killpg)).await
+        }
+
+        /// What a recorded group kill saw: the group id and whether its leader
+        /// was still uncollected at that moment (`kill(pgid, 0)`: a zombie still
+        /// answers, a collected child is ESRCH).
+        type Signals = std::sync::Mutex<Vec<(libc::pid_t, bool)>>;
+
+        fn record(log: &'static Signals, pgid: libc::pid_t, forward: bool) {
+            let uncollected = (unsafe { libc::kill(pgid, 0) }) == 0;
+            log.lock().unwrap().push((pgid, uncollected));
+            if forward {
+                real_killpg(pgid);
+            }
+        }
+
+        /// Exactly one group kill, sent while the leader was still uncollected.
+        fn assert_one_early_signal(log: &'static Signals, what: &str) {
+            let seen = log.lock().unwrap().clone();
+            assert_eq!(seen.len(), 1, "{what}: group signals: {seen:?}");
+            assert!(seen[0].1, "{what}: the leader was already collected");
+        }
+
         async fn read_pid(file: &Path) -> i32 {
             for _ in 0..200 {
                 if let Ok(text) = std::fs::read_to_string(file) {
@@ -2439,8 +2732,8 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            // Do not leave the probe process running after a failing run.
-            unsafe { libc::kill(pid, libc::SIGKILL) };
+            // No signal by number here: the process may be gone and its pid
+            // reused. The fixture grandchildren are bounded `sleep`s instead.
             panic!("{what}: grandchild {pid} survived");
         }
 
@@ -2518,40 +2811,190 @@ printf 'Default model: m1\n  * m1 (default)\n  - m2\n'"#,
             assert_dies(grandchild, "drop").await;
         }
 
+        // ── F1 (round 3): the group is only signalled while its leader is uncollected ──
+
         #[tokio::test]
-        async fn a_successful_cli_that_leaves_a_detached_grandchild_does_not_leak_it() {
+        async fn timeout_signals_the_group_once_while_the_leader_is_uncollected() {
+            static LOG: Signals = std::sync::Mutex::new(Vec::new());
+            fn rec(pgid: libc::pid_t) {
+                record(&LOG, pgid, true)
+            }
             let dir = tempfile::tempdir().unwrap();
             let pidfile = dir.path().join("grandchild.pid");
-            // The grandchild closes stdout/stderr, so EOF comes and the CLI
-            // "succeeds" while it keeps running.
+            let bin = fake_cli(
+                dir.path(),
+                "tree",
+                &script_with_grandchild(&pidfile, "sleep 30"),
+            );
+            let e = run_with(&bin, 1024, Duration::from_millis(500), rec)
+                .await
+                .unwrap_err();
+            assert_eq!(e.code, "timeout");
+            assert_dies(read_pid(&pidfile).await, "timeout").await;
+            assert_one_early_signal(&LOG, "timeout");
+        }
+
+        #[tokio::test]
+        async fn oversized_stdout_signals_the_group_once_while_the_leader_is_uncollected() {
+            static LOG: Signals = std::sync::Mutex::new(Vec::new());
+            fn rec(pgid: libc::pid_t) {
+                record(&LOG, pgid, true)
+            }
+            let dir = tempfile::tempdir().unwrap();
+            let pidfile = dir.path().join("grandchild.pid");
+            let bin = fake_cli(
+                dir.path(),
+                "big",
+                &script_with_grandchild(&pidfile, "yes x"),
+            );
+            let e = run_with(&bin, 2_000, Duration::from_secs(10), rec)
+                .await
+                .unwrap_err();
+            assert_eq!(e.code, "too_large");
+            assert_dies(read_pid(&pidfile).await, "oversized stdout").await;
+            assert_one_early_signal(&LOG, "oversized stdout");
+        }
+
+        #[tokio::test]
+        async fn cancelling_signals_the_group_once_while_the_leader_is_uncollected() {
+            static LOG: Signals = std::sync::Mutex::new(Vec::new());
+            fn rec(pgid: libc::pid_t) {
+                record(&LOG, pgid, true)
+            }
+            let dir = tempfile::tempdir().unwrap();
+            let pidfile = dir.path().join("grandchild.pid");
+            let bin = fake_cli(
+                dir.path(),
+                "tree",
+                &script_with_grandchild(&pidfile, "sleep 30"),
+            );
+            let task =
+                tokio::spawn(
+                    async move { run_with(&bin, 1024, Duration::from_secs(60), rec).await },
+                );
+            let grandchild = read_pid(&pidfile).await;
+            task.abort();
+            let _ = task.await;
+            assert_dies(grandchild, "cancel").await;
+            assert_one_early_signal(&LOG, "cancel");
+        }
+
+        /// The leader has exited and is a zombie (nobody has waited for it: the
+        /// grandchild keeps stdout open, so the call is still reading) when the
+        /// call is cancelled. Dropping the `Child` first would reap that zombie
+        /// and the group kill would then use a collected leader's id.
+        #[tokio::test]
+        async fn cancelling_right_after_the_leader_exited_still_signals_before_the_leader_is_collected(
+        ) {
+            static LOG: Signals = std::sync::Mutex::new(Vec::new());
+            fn rec(pgid: libc::pid_t) {
+                record(&LOG, pgid, true)
+            }
+            let dir = tempfile::tempdir().unwrap();
+            let pidfile = dir.path().join("grandchild.pid");
+            let bin = fake_cli(
+                dir.path(),
+                "exits",
+                &script_with_grandchild(&pidfile, "exit 0"),
+            );
+            let task =
+                tokio::spawn(
+                    async move { run_with(&bin, 1024, Duration::from_secs(60), rec).await },
+                );
+            let grandchild = read_pid(&pidfile).await;
+            // Let the leader finish and become a zombie.
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            assert!(alive(grandchild));
+            task.abort();
+            let _ = task.await;
+            assert_dies(grandchild, "cancel after leader exit").await;
+            assert_one_early_signal(&LOG, "cancel after leader exit");
+        }
+
+        /// A CLI that exits by itself (success) while a same-group member lives
+        /// on: its leader is collected by `wait`, so its group id no longer
+        /// proves anything and nothing is signalled. The member is outside the
+        /// guarantee; the fixture's is a bounded `sleep`, never signalled by
+        /// number.
+        #[tokio::test]
+        async fn a_normal_exit_sends_no_group_signal() {
+            static LOG: Signals = std::sync::Mutex::new(Vec::new());
+            fn rec(pgid: libc::pid_t) {
+                record(&LOG, pgid, false)
+            }
+            let dir = tempfile::tempdir().unwrap();
+            let pidfile = dir.path().join("grandchild.pid");
             let bin = fake_cli(
                 dir.path(),
                 "daemonizing",
                 &format!(
-                    "sleep 30 >/dev/null 2>&1 &\necho $! > '{}'\necho models-ok",
+                    "sleep 3 >/dev/null 2>&1 &\necho $! > '{}'\necho models-ok",
                     pidfile.display()
                 ),
             );
-            let out = run(&bin, 1024, Duration::from_secs(10)).await.unwrap();
+            let out = run_with(&bin, 1024, Duration::from_secs(10), rec)
+                .await
+                .unwrap();
             assert_eq!(out, "models-ok\n");
-            assert_dies(read_pid(&pidfile).await, "success path").await;
+            let seen = LOG.lock().unwrap().clone();
+            assert!(
+                seen.is_empty(),
+                "group signalled after a normal exit: {seen:?}"
+            );
+            // Behavioural proof, not only the recorder: the member is untouched.
+            assert!(alive(read_pid(&pidfile).await), "the group was signalled");
         }
 
         #[tokio::test]
-        async fn a_failing_cli_with_a_grandchild_is_still_cleaned_up() {
+        async fn a_cli_that_exits_with_an_error_sends_no_group_signal() {
+            static LOG: Signals = std::sync::Mutex::new(Vec::new());
+            fn rec(pgid: libc::pid_t) {
+                record(&LOG, pgid, false)
+            }
             let dir = tempfile::tempdir().unwrap();
             let pidfile = dir.path().join("grandchild.pid");
             let bin = fake_cli(
                 dir.path(),
                 "failing",
                 &format!(
-                    "sleep 30 >/dev/null 2>&1 &\necho $! > '{}'\nexit 3",
+                    "sleep 3 >/dev/null 2>&1 &\necho $! > '{}'\nexit 3",
                     pidfile.display()
                 ),
             );
-            let e = run(&bin, 1024, Duration::from_secs(10)).await.unwrap_err();
+            let e = run_with(&bin, 1024, Duration::from_secs(10), rec)
+                .await
+                .unwrap_err();
             assert_eq!(e.code, "cli_failed");
-            assert_dies(read_pid(&pidfile).await, "failure path").await;
+            let seen = LOG.lock().unwrap().clone();
+            assert!(
+                seen.is_empty(),
+                "group signalled after an error exit: {seen:?}"
+            );
+            assert!(alive(read_pid(&pidfile).await), "the group was signalled");
+        }
+
+        /// Control for the two tests above: the real kill is still wired in the
+        /// production path (no seam) and the leader of a normal run is collected.
+        #[tokio::test]
+        async fn a_normal_exit_through_the_real_path_leaves_no_zombie() {
+            let dir = tempfile::tempdir().unwrap();
+            let mainfile = dir.path().join("main.pid");
+            let bin = fake_cli(
+                dir.path(),
+                "plain",
+                &format!("echo $$ > '{}'\necho fine", mainfile.display()),
+            );
+            assert_eq!(
+                run(&bin, 1024, Duration::from_secs(10)).await.unwrap(),
+                "fine\n"
+            );
+            let main = read_pid(&mainfile).await;
+            if Path::new("/proc/self").exists() {
+                assert!(
+                    !Path::new(&format!("/proc/{main}")).exists(),
+                    "leader not collected"
+                );
+            }
         }
 
         #[tokio::test]
