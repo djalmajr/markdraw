@@ -1525,7 +1525,7 @@ export function App() {
   const tabActions = createTabActions({
     rootPaths,
     state,
-    watcher,
+    syncWatcher: loader.syncWatcher,
     loadTabContent: loader.loadTabContent,
     loadFileContent: loader.loadFileContent,
   });
@@ -1535,6 +1535,7 @@ export function App() {
     state,
     watcher,
     onRootClosed: tabActions.closeRootTabs,
+    onFileRenamed: tabActions.renameOpenTab,
   });
 
   function toggleShowHiddenEntries() {
@@ -3133,24 +3134,6 @@ export function App() {
 
     tabActions.closeTabs(pane, [tabId]);
   }
-
-  // Update tab when a file is renamed
-  const originalRename = folder.handleRename;
-  folder.handleRename = async (entry, rootId, newName) => {
-    const oldPath = entry.path;
-    const slash = oldPath.lastIndexOf("/");
-    const parentRel = slash >= 0 ? oldPath.slice(0, slash + 1) : "";
-    const newPath = parentRel + newName;
-
-    await originalRename(entry, rootId, newName);
-
-    // Update any tabs pointing to the renamed file
-    for (const tab of tabStore().tabs()) {
-      if (tab.rootId === rootId && tab.filePath === oldPath) {
-        tabStore().updateTabFile(tab.id, newPath, newName);
-      }
-    }
-  };
 
   // Keyboard shortcuts for tabs
   onSettled(() => {

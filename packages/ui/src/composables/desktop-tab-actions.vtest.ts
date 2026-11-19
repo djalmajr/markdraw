@@ -69,12 +69,13 @@ function fixture() {
     const [rootPaths, setRootPaths] = createSignal(new Map<string, string>());
     const loader = createFileLoader({ state, rootPaths, watcher });
     const actions: ReturnType<typeof createTabActions> = createTabActions({
-      state, rootPaths, watcher, loadTabContent: loader.loadTabContent,
+      state, rootPaths, syncWatcher: loader.syncWatcher, loadTabContent: loader.loadTabContent,
       loadFileContent: loader.loadFileContent,
     });
     const folder: ReturnType<typeof createFolder> = createFolder({
       state, rootPaths, setRootPaths, watcher,
       onRootClosed: actions.closeRootTabs,
+      onFileRenamed: actions.renameOpenTab,
     });
     createFileAutosave(state, folder.handleEditorSave, () => {});
     return { state, paneManager, rootPaths, actions, folder, watcher };
@@ -318,6 +319,134 @@ describe("desktop document transitions in Solid 2", () => {
 });
 
 describe("activation of an unloaded tab", () => {
+  it.each(["before", "after"])("watches Alpha and its includes when focus returns %s the first read", async (when) => {
+    const { paneManager, actions, folder } = fixture();
+    const readAlpha = Promise.withResolvers<string>();
+    const include = "includes/alpha.md";
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return [alpha, beta];
+      if (command === "read_file") return args.path === `${workspace}/alpha.md` ? readAlpha.promise : "Beta";
+      if (command === "read_files_relative") return { [include]: "Included text" };
+      if (command === "plugin:event|listen") return 1;
+    });
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const left = paneManager.activePane();
+    const right = paneManager.splitFromActive();
+    flush();
+    const openingBeta = actions.openFile(beta, workspace);
+    await vi.advanceTimersByTimeAsync(10);
+    await openingBeta;
+    expect(paneManager.activePane()).toBe(right);
+
+    paneManager.setActivePane(0);
+    flush();
+    const openingAlpha = actions.openFile(alpha, workspace);
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls("read_file")).toEqual([{ path: `${workspace}/beta.md` }, { path: `${workspace}/alpha.md` }]);
+      expect(left.loading()).toBe(true);
+      paneManager.setActivePane(1);
+      flush();
+      await vi.advanceTimersByTimeAsync(0);
+      const betaWatch = { paths: [`${workspace}/beta.md`] };
+      expect(calls("watch_paths").at(-1)).toEqual(betaWatch);
+
+      if (when === "before") {
+        paneManager.setActivePane(0);
+        flush();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(calls("watch_paths").at(-1)).toEqual(betaWatch);
+      }
+
+      readAlpha.resolve(`Alpha\n<!-- include: ${include} -->`);
+      await vi.advanceTimersByTimeAsync(10);
+      await openingAlpha;
+      expect(left.loading()).toBe(false);
+      expect(left.tabs.getActiveTab()?.includePaths).toEqual([include]);
+      if (when === "after") {
+        expect(calls("watch_paths").at(-1)).toEqual(betaWatch);
+        paneManager.setActivePane(0);
+        flush();
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(paneManager.activePane()).toBe(left);
+      expect(calls("watch_paths").at(-1)).toEqual({
+        paths: [`${workspace}/alpha.md`, `${workspace}/${include}`],
+      });
+    } finally {
+      readAlpha.resolve("Alpha");
+      await vi.advanceTimersByTimeAsync(10);
+      await openingAlpha;
+    }
+  });
+
+  it("loads the renamed path and keeps editing and Save blocked until the replacement read finishes", async () => {
+    const { state, paneManager, actions, folder } = fixture();
+    const oldRead = Promise.withResolvers<string>();
+    const newRead = Promise.withResolvers<string>();
+    const renamed = { ...alpha, path: "renamed.md", name: "renamed.md" };
+    let entries = [alpha, beta];
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return entries;
+      if (command === "read_file") return args.path === `${workspace}/alpha.md` ? oldRead.promise : newRead.promise;
+      if (command === "rename_file") entries = [renamed, beta];
+      if (command === "plugin:event|listen") return 1;
+    });
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const pane = paneManager.activePane();
+    const opening = actions.openFile(alpha, workspace);
+    try {
+      pane.setEditorMode("edit");
+      flush();
+      const { container } = render(() => createComponent(PaneView, { pane, state, paneIndex: 0, isActive: true }));
+      await vi.advanceTimersByTimeAsync(1);
+      const oldId = pane.tabs.activeTabId();
+      expect(oldId).toBe(`${workspace}::alpha.md`);
+      expect(calls("read_file")).toEqual([{ path: `${workspace}/alpha.md` }]);
+      expect(container.querySelector(".cm-content")).toBeNull();
+
+      await folder.handleRename(alpha, workspace, renamed.name);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls("rename_file")).toEqual([{ root: workspace, oldRelative: alpha.path, newRelative: renamed.path }]);
+      expect(calls("read_file")).toEqual([{ path: `${workspace}/alpha.md` }, { path: `${workspace}/renamed.md` }]);
+      expect(pane.tabs.activeTabId()).toBe(`${workspace}::renamed.md`);
+      expect(pane.tabs.getTab(oldId!)).toBeUndefined();
+      expect(pane.selectedFile()).toEqual(renamed);
+
+      oldRead.resolve("Stale result under the old name");
+      await vi.advanceTimersByTimeAsync(10);
+      await opening;
+      expect(pane.loading()).toBe(true);
+      expect(pane.tabs.getActiveTab()?.needsLoad).toBe(true);
+      expect(pane.editorContent()).toBe("");
+      expect(container.querySelector(".cm-content")).toBeNull();
+      pane.setEditorContent("Write must be blocked");
+      flush();
+      await folder.handleEditorSave();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(calls("write_file")).toEqual([]);
+
+      const diskContent = "Original content from renamed.md";
+      newRead.resolve(diskContent);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(pane.loading()).toBe(false);
+      expect(pane.tabs.getActiveTab()).toMatchObject({
+        filePath: renamed.path, needsLoad: false, editorContent: diskContent, savedContent: diskContent,
+      });
+      const editor = EditorView.findFromDOM(container.querySelector<HTMLElement>(".cm-editor")!);
+      expect(editor?.state.doc.toString()).toBe(diskContent);
+      editor!.dispatch({ changes: { from: diskContent.length, insert: " + edit" } });
+      flush();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(calls("write_file")).toEqual([{ path: `${workspace}/renamed.md`, content: `${diskContent} + edit` }]);
+    } finally {
+      oldRead.resolve("");
+      newRead.resolve("");
+      await vi.advanceTimersByTimeAsync(10);
+      await opening;
+    }
+  });
+
   it.each(["close", "close others", "close right", "move", "reopen", "activate", "first open"])(
     "reads and protects the original document via %s",
     async (route) => {

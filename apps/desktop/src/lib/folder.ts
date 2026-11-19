@@ -3,6 +3,7 @@ import { writeText as clipboardWriteText } from "@tauri-apps/plugin-clipboard-ma
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { findEntryInTree, type AppState } from "@markdraw/ui/composables/create-app-state.ts";
+import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
 import { copyPath, createDir, createFile, movePath, openDirectory, readTree, renameFile, trashPath, writeFile } from "./fs.ts";
 import { joinRelative, nextAvailableName, withDefaultExtension } from "./fs-paths.ts";
 import type { FileWatcher } from "./watcher.ts";
@@ -14,10 +15,11 @@ interface FolderDeps {
   state: AppState;
   watcher: FileWatcher;
   onRootClosed?: (rootId: string) => void;
+  onFileRenamed?: (pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry) => void;
 }
 
 export function createFolder(deps: FolderDeps) {
-  const { rootPaths, setRootPaths, state, watcher, onRootClosed } = deps;
+  const { rootPaths, setRootPaths, state, watcher, onRootClosed, onFileRenamed } = deps;
 
   // Serialize authorization changes together with their UI publication. In
   // particular a close is acknowledged by Rust before it disappears locally;
@@ -261,6 +263,9 @@ export function createFolder(deps: FolderDeps) {
     }
 
     await refreshRoot(rootId);
+    if (entry.kind === "file") {
+      onFileRenamed?.(targetPane, rootId, entry.path, { ...entry, path: newRelative, name: newName });
+    }
   }
 
   async function handleDelete(entry: FSEntry, rootId: string): Promise<void> {

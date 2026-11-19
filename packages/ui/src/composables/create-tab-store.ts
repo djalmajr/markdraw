@@ -46,7 +46,7 @@ export interface TabStore {
   restoreActiveTab(): void;
   updateActiveTabContent(content: TabContent): void;
   updateTabContent(tabId: TabId, content: TabContent & Partial<Pick<TabState, "editorMode" | "needsLoad">>): void;
-  updateTabFile(tabId: TabId, newFilePath: string, newFileName: string): void;
+  updateTabFile(tabId: TabId, newFilePath: string, newFileName: string): TabState | undefined;
   markTabNeedsLoad(tabId: TabId): void;
 
   getTab(tabId: TabId): TabState | undefined;
@@ -386,7 +386,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     );
   }
 
-  function updateTabFile(tabId: TabId, newFilePath: string, newFileName: string): void {
+  function updateTabFile(tabId: TabId, newFilePath: string, newFileName: string): TabState | undefined {
     const tab = getTab(tabId);
     if (!tab) return;
     const newId = makeTabId(tab.rootId, newFilePath);
@@ -398,14 +398,11 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     // keyed by id (close, activate). The FS layer rejects the rename
     // for the same reason — staying consistent at the store level.
     if (newId !== tabId && tabList().some((t) => t.id === newId)) return;
-    setTabList((prev) =>
-      prev.map((t) => {
-        if (t.id !== tabId) return t;
-        return { ...t, id: newId, filePath: newFilePath, fileName: newFileName };
-      }),
-    );
+    const renamedFile = { id: newId, filePath: newFilePath, fileName: newFileName };
+    setTabList((prev) => prev.map((t) => t.id === tabId ? { ...t, ...renamedFile } : t));
     if (activeId() === tabId) setActiveId(newId);
     persistSession();
+    return { ...tab, ...renamedFile };
   }
 
   function markTabNeedsLoad(tabId: TabId): void {

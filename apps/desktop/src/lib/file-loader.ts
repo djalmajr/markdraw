@@ -39,6 +39,18 @@ export function createFileLoader(deps: FileLoaderDeps) {
   const latestRefresh = new WeakMap<object, number>();
   const latestLoad = new WeakMap<PaneStore, object>();
 
+  function syncWatcher(entry: FSEntry | null, rootPath?: string | null, includePaths: string[] = []) {
+    if (entry?.kind === "file" && rootPath) {
+      const kind = fileKind(entry.path);
+      if (kind !== "image" && kind !== "pdf" && kind !== "excalidraw") {
+        watcher.setTarget({ filePath: `${rootPath}/${entry.path}`, includePaths, rootPath });
+        if (state.autoRefresh()) void watcher.start();
+        return;
+      }
+    }
+    void watcher.stop();
+  }
+
   async function loadFileContent(entry: FSEntry, pushHistory = true, force = false, rootId?: string) {
     await load(entry, { pushHistory, force, rootId, external: false });
   }
@@ -89,18 +101,22 @@ export function createFileLoader(deps: FileLoaderDeps) {
         || targetPane.selectedRootId() !== targetRootId
         || targetPane.tabs.getActiveTab()?.needsLoad)
       : latestLoad.get(targetPane) !== request
-        || (tab
-          ? targetPane.tabs.activeTabId() !== tab.id
-          : targetPane.selectedFile()?.path !== entry.path || targetPane.selectedRootId() !== targetRootId);
+        || (tab !== undefined && targetPane.tabs.activeTabId() !== tab.id)
+        || targetPane.selectedFile()?.path !== entry.path
+        || targetPane.selectedRootId() !== targetRootId;
     const isFocused = () => targetPane === state.paneManager.activePane();
     const markTabLoaded = (content: string, html: string, frontmatter: ReturnType<PaneStore["frontmatter"]>, includePaths: string[]) => {
-      if (!tab) return;
-      targetPane.tabs.updateTabContent(tab.id, { editorContent: content, savedContent: content, html, frontmatter, includePaths, needsLoad: false });
+      if (tab) {
+        targetPane.tabs.updateTabContent(tab.id, { editorContent: content, savedContent: content, html, frontmatter, includePaths, needsLoad: false });
+      } else {
+        const activeTab = targetPane.tabs.getActiveTab();
+        if (activeTab?.filePath === entry.path && activeTab.rootId === targetRootId) {
+          targetPane.tabs.updateTabContent(activeTab.id, { includePaths });
+        }
+      }
     };
-    const watch = (filePath: string, includePaths: string[]) => {
-      if (!isFocused()) return;
-      watcher.setTarget({ filePath, includePaths, rootPath: root });
-      if (state.autoRefresh()) void watcher.start();
+    const watch = (includePaths: string[]) => {
+      if (isFocused()) syncWatcher(entry, root, includePaths);
     };
 
     targetPane.setSelectedRootId(targetRootId);
@@ -137,7 +153,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
       targetPane.setFrontmatter(null);
       targetPane.setEditorContent("");
       targetPane.setSavedContent("");
-      if (isFocused()) void watcher.stop();
+      watch([]);
       markTabLoaded("", "", null, []);
       if (!external) targetPane.setLoading(false);
       return;
@@ -203,7 +219,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
         targetPane.setEditorContent(content);
         targetPane.setSavedContent(content);
         markTabLoaded(content, "", null, []);
-        watch(absolutePath, []);
+        watch([]);
         return external;
       }
 
@@ -253,16 +269,16 @@ export function createFileLoader(deps: FileLoaderDeps) {
         : scanPaths;
 
       markTabLoaded(content, result.html, result.frontmatter, includePaths);
-      watch(absolutePath, includePaths);
+      watch(includePaths);
       return external && adoptDisk;
     } catch (e) {
       if (superseded()) return;
       console.error("Failed to convert file:", e);
       targetPane.setHtml(`<div class="error">Error converting file: ${e}</div>`);
     } finally {
-      if (!external && !superseded()) targetPane.setLoading(false);
+      if (!external && latestLoad.get(targetPane) === request) targetPane.setLoading(false);
     }
   }
 
-  return { loadFileContent, loadTabContent, refreshFromDisk };
+  return { loadFileContent, loadTabContent, refreshFromDisk, syncWatcher };
 }

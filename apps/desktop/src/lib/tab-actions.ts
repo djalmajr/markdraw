@@ -1,23 +1,37 @@
+import { createEffect } from "solid-js";
 import type { TabState } from "@markdraw/core/tabs.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
 import type { createFileLoader } from "./file-loader.ts";
 import { SCRATCH_ROOT_ID } from "./scratch.ts";
-import type { FileWatcher } from "./watcher.ts";
 
 interface TabActionDeps {
-  state: Pick<AppState, "paneManager" | "findEntryByPath" | "autoRefresh">;
+  state: Pick<AppState, "paneManager" | "findEntryByPath">;
   rootPaths: () => ReadonlyMap<string, string>;
-  watcher: Pick<FileWatcher, "setTarget" | "start" | "stop">;
+  syncWatcher: ReturnType<typeof createFileLoader>["syncWatcher"];
   loadTabContent: ReturnType<typeof createFileLoader>["loadTabContent"];
   loadFileContent: ReturnType<typeof createFileLoader>["loadFileContent"];
 }
 
 export function createTabActions({
-  state, rootPaths, watcher, loadTabContent, loadFileContent,
+  state, rootPaths, syncWatcher, loadTabContent, loadFileContent,
 }: TabActionDeps) {
   const manager = state.paneManager;
+
+  createEffect(manager.activePane, (pane) => {
+    const tab = pane.tabs.getActiveTab();
+    if (pane.loading() || tab?.needsLoad) {
+      syncWatcher(null);
+      return;
+    }
+    const entry = pane.selectedFile();
+    const rootId = pane.selectedRootId();
+    const includes = tab && tab.filePath === entry?.path && tab.rootId === rootId
+      ? tab.includePaths
+      : [];
+    syncWatcher(entry, rootId ? rootPaths().get(rootId) : undefined, includes);
+  });
 
   function selectTab(pane: PaneStore, tab: TabState | null, focused = pane === manager.activePane(), pushHistory = false) {
     const entry = tab?.rootId === SCRATCH_ROOT_ID
@@ -28,24 +42,14 @@ export function createTabActions({
 
     const rootPath = entry && tab ? rootPaths().get(tab.rootId) : undefined;
     if (tab?.needsLoad && entry && rootPath) {
-      if (focused) void watcher.stop();
+      if (focused) syncWatcher(null);
       return loadTabContent(pane, entry, tab, pushHistory);
     }
     if (tab?.needsLoad && (tab.rootId === SCRATCH_ROOT_ID || !tab.filePath)) {
       pane.tabs.updateTabContent(tab.id, { needsLoad: false });
     }
     pane.setLoading(false);
-    if (!focused) return;
-    if (tab && rootPath) {
-      watcher.setTarget({
-        filePath: `${rootPath}/${tab.filePath}`,
-        includePaths: tab.includePaths,
-        rootPath,
-      });
-      if (state.autoRefresh()) void watcher.start();
-    } else {
-      void watcher.stop();
-    }
+    if (focused) syncWatcher(entry, rootPath, tab?.includePaths);
   }
 
   function activateTab(pane: PaneStore, tabId: string, pushHistory = false) {
@@ -101,6 +105,16 @@ export function createTabActions({
     manager.activePane().tabs.closeTabsByRoot(rootId);
   }
 
+  function renameOpenTab(pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry) {
+    const tab = pane.tabs.findTabByFile(oldPath, rootId);
+    if (!tab) return;
+    const active = pane.tabs.activeTabId() === tab.id;
+    const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name);
+    if (active && renamedTab?.needsLoad) {
+      void loadTabContent(pane, entry, renamedTab);
+    }
+  }
+
   function moveTab(tabId: string, fromPaneIndex: number) {
     const panes = manager.panes();
     const source = panes[fromPaneIndex];
@@ -147,6 +161,6 @@ export function createTabActions({
 
   return {
     selectTab, activateTab, openFile, updateLoadedTabCache,
-    closeTabs, closeRootTabs, moveTab,
+    closeTabs, closeRootTabs, renameOpenTab, moveTab,
   };
 }
