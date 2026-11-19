@@ -5,6 +5,8 @@
 // providers (a model's effort menu depends on who serves it), so we index by
 // provider and resolve a markdraw provider to its models.dev counterpart.
 
+import { ModelListParseError, type CatalogModel } from "./model-catalog.ts";
+
 const MODELS_DEV_URL = "https://models.dev/api.json";
 
 /** A minimal fetch — global `fetch` and the Tauri HTTP plugin's `fetch` (which
@@ -93,4 +95,45 @@ export function modelsDevReasoningFor(
   const mdProvider = modelsDevProviderFor(markdrawProviderId);
   if (!mdProvider) return null;
   return index[mdProvider]?.[modelId] ?? null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Parse the models.dev catalog into provider → normalized model lists.
+ *  Reasoning comes from `reasoning`/`reasoning_options`, context from
+ *  `limit.context` and `status: "deprecated"` is preserved as a flag so the
+ *  update layer can keep a currently selected model while excluding it from
+ *  new lists. Malformed input throws the shared typed parse error. */
+export function parseModelsDevCatalog(raw: unknown): Record<string, CatalogModel[]> {
+  const source = "models.dev";
+  if (!isRecord(raw)) throw new ModelListParseError(source, "catálogo não é um objeto");
+  const result: Record<string, CatalogModel[]> = {};
+  for (const [providerId, provider] of Object.entries(raw)) {
+    if (!isRecord(provider) || provider.models === undefined) continue;
+    if (!isRecord(provider.models)) {
+      throw new ModelListParseError(source, `models de ${providerId} não é um objeto`);
+    }
+    const out: CatalogModel[] = [];
+    for (const [key, entry] of Object.entries(provider.models)) {
+      if (!isRecord(entry)) throw new ModelListParseError(source, `modelo ${key} é inválido`);
+      const id = typeof entry.id === "string" && entry.id.trim() !== "" ? entry.id : key;
+      if (!id.trim()) throw new ModelListParseError(source, `modelo ${key} sem id`);
+      const name = typeof entry.name === "string" && entry.name.trim() !== "" ? entry.name : undefined;
+      const limit = isRecord(entry.limit) ? entry.limit : undefined;
+      const context = typeof limit?.context === "number" ? limit.context : undefined;
+      const reasoning = typeof entry.reasoning === "boolean" ? entry.reasoning : undefined;
+      const deprecated = entry.status === "deprecated" ? true : undefined;
+      out.push({
+        id,
+        ...(name ? { name } : {}),
+        ...(context !== undefined ? { context } : {}),
+        ...(reasoning !== undefined ? { reasoning } : {}),
+        ...(deprecated ? { deprecated } : {}),
+      });
+    }
+    result[providerId] = out;
+  }
+  return result;
 }

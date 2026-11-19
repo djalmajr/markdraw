@@ -1,0 +1,96 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash 1017",
+      "api": {
+        "chat-completions": {}
+      },
+      "recommended_api": "chat-completions",
+      "limit": {
+        "context": 1000000
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "effort": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      },
+      "status": null,
+      "deprecated": null
+    },
+    {
+      "id": "gpt-6-luna",
+      "name": "GPT-6 Luna",
+      "api": {
+        "responses": {}
+      },
+      "recommended_api": "responses",
+      "limit": {
+        "context": 1050000
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "effort": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      },
+      "status": null,
+      "deprecated": null
+    },
+    {
+      "id": "minimax-m3",
+      "name": "MiniMax-M3",
+      "api": {
+        "messages": {}
+      },
+      "recommended_api": "messages",
+      "limit": {
+        "context": 1000000
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "toggle": true
+        }
+      },
+      "status": null,
+      "deprecated": null
+    },
+    {
+      "id": "gemini-4-argon",
+      "name": "Gemini 4 Argon",
+      "api": {
+        "generate-content": {}
+      },
+      "recommended_api": "generate-content",
+      "limit": {
+        "context": 1048576
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "effort": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      },
+      "status": null,
+      "deprecated": null
+    }
+  ]
+}

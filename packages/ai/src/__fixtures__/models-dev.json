@@ -1,0 +1,90 @@
+{
+  "anthropic": {
+    "models": {
+      "claude-sonnet-4-5": {
+        "id": "claude-sonnet-4-5",
+        "name": "Claude Sonnet 4.5 (latest)",
+        "limit": {
+          "context": 200000,
+          "output": 64000
+        },
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "budget_tokens",
+            "min": 1024
+          }
+        ],
+        "status": "deprecated"
+      },
+      "claude-opus-5-5": {
+        "id": "claude-opus-5-5",
+        "name": "Claude Opus 5.5",
+        "limit": {
+          "context": 1000000,
+          "output": 128000
+        },
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          }
+        ],
+        "status": null
+      }
+    }
+  },
+  "opencode-go": {
+    "models": {
+      "glm-5.3-flash": {
+        "id": "glm-5.3-flash",
+        "name": "GLM-5.3-Flash",
+        "limit": {
+          "context": 1000000,
+          "output": 131072
+        },
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": [
+              "low",
+              "high",
+              "max"
+            ]
+          }
+        ],
+        "status": null
+      },
+      "cat-jam-free": {
+        "id": "cat-jam-free",
+        "name": "Cat Jam Free",
+        "limit": {
+          "context": 1048576,
+          "output": 131072
+        },
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          }
+        ],
+        "status": "deprecated"
+      }
+    }
+  }
+}
