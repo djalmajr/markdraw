@@ -14,19 +14,14 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     // Shares the "Claude" connect card with the claude-sub subscription so the
     // user picks API key OR subscription in one place.
     connectGroup: "Claude",
+    // Newest non-deprecated model per Claude family in models.dev, by
+    // release_date (Fable / Haiku / Sonnet / Opus). Names and limits come from
+    // that payload; older generations and dated ids are added by hand if needed.
     models: {
-      "claude-opus-4-8": {
-        name: "Claude Opus 4.8",
-        limit: { context: 200000, output: 64000 },
-      },
-      "claude-sonnet-4-6": {
-        name: "Claude Sonnet 4.6",
-        limit: { context: 200000, output: 64000 },
-      },
-      "claude-haiku-4-5": {
-        name: "Claude Haiku 4.5",
-        limit: { context: 200000, output: 64000 },
-      },
+      "claude-fable-5-2": { name: "Claude Fable 5.2", limit: { context: 1000000, output: 128000 } },
+      "claude-haiku-5-5": { name: "Claude Haiku 5.5", limit: { context: 1000000, output: 128000 } },
+      "claude-sonnet-5-5": { name: "Claude Sonnet 5.5", limit: { context: 1000000, output: 128000 } },
+      "claude-opus-5-5": { name: "Claude Opus 5.5", limit: { context: 1000000, output: 128000 } },
     },
   },
   openai: {
@@ -77,12 +72,12 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     // uses, so we keep the /messages-vs-/chat split curated (no live refresh).
     curatedModels: true,
     models: {
-      "minimax-m3": { name: "MiniMax M3" },
-      "minimax-m2.7": { name: "MiniMax M2.7" },
-      "minimax-m2.5": { name: "MiniMax M2.5" },
-      "qwen3.7-max": { name: "Qwen3.7 Max" },
+      "claude-haiku-5-5": { name: "Claude Haiku 5.5" },
+      "minimax-m3": { name: "MiniMax-M3" },
+      "qwen3.8-max": { name: "Qwen3.8 Max" },
+      "qwen3.8-flash": { name: "Qwen3.8 Flash" },
       "qwen3.7-plus": { name: "Qwen3.7 Plus" },
-      "qwen3.6-plus": { name: "Qwen3.6 Plus" },
+      "qwen4-max": { name: "Qwen4 Max" },
     },
   },
   "opencode-go-chat": {
@@ -91,14 +86,25 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     options: { baseURL: "https://opencode.ai/zen/go/v1" },
     curatedModels: true, // see opencode-go — hand-maintained split
     models: {
-      "glm-5.1": { name: "GLM-5.1" },
-      "glm-5": { name: "GLM-5" },
-      "kimi-k2.7-code": { name: "Kimi K2.7 Code" },
-      "kimi-k2.6": { name: "Kimi K2.6" },
+      "deepseek-v4.1-flash": { name: "DeepSeek V4.1 Flash 1017" },
       "deepseek-v4-pro": { name: "DeepSeek V4 Pro" },
-      "deepseek-v4-flash": { name: "DeepSeek V4 Flash" },
-      "mimo-v2.5": { name: "MiMo-V2.5" },
-      "mimo-v2.5-pro": { name: "MiMo-V2.5-Pro" },
+      "glm-5.3": { name: "GLM-5.3" },
+      "glm-5.3-flash": { name: "GLM-5.3-Flash" },
+      "hy3": { name: "Hy3" },
+      "hy4-preview": { name: "Hy4 preview" },
+      "kimi-k2.7-code": { name: "Kimi K2.7 Code" },
+      "kimi-k3": { name: "Kimi K3" },
+      "mimo-v2.6-flash": { name: "MiMo-V2.6-Flash" },
+      "mimo-v2.6-pro": { name: "MiMo-V2.6-Pro" },
+      "minimax-m3.1-flash": { name: "MiniMax M3.1 Flash" },
+      "longcat-2.0": { name: "LongCat-2.0" },
+      "step-5-preview": { name: "Step 5 Preview" },
+      "beam-free": { name: "Beam Free" },
+      "kimi-k3.1-pro": { name: "Kimi K3.1 Pro" },
+      "iceman-contributor-free": { name: "Iceman Contributor Free" },
+      "hy4": { name: "Hy4" },
+      "longcat-2.5-free": { name: "LongCat 2.5 Free" },
+      "hy4-flash-free": { name: "Hy4 flash Free" },
     },
   },
   // OpenCode Zen (https://opencode.ai/zen/v1) — distinct catalog; models live from /models.
@@ -126,15 +132,12 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     kind: "claude-cli",
     name: "Claude (subscription)",
     connectGroup: "Claude",
+    // Same four-model Claude snapshot as the API-key provider above.
     models: {
-      "claude-opus-4-8": {
-        name: "Claude Opus 4.8",
-        limit: { context: 200000, output: 64000 },
-      },
-      "claude-sonnet-4-6": {
-        name: "Claude Sonnet 4.6",
-        limit: { context: 200000, output: 64000 },
-      },
+      "claude-fable-5-2": { name: "Claude Fable 5.2", limit: { context: 1000000, output: 128000 } },
+      "claude-haiku-5-5": { name: "Claude Haiku 5.5", limit: { context: 1000000, output: 128000 } },
+      "claude-sonnet-5-5": { name: "Claude Sonnet 5.5", limit: { context: 1000000, output: 128000 } },
+      "claude-opus-5-5": { name: "Claude Opus 5.5", limit: { context: 1000000, output: 128000 } },
     },
   },
   "codex-sub": {
@@ -142,11 +145,19 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     name: "Codex (subscription)",
     connectGroup: "OpenAI",
     // Mirrors the official Codex model picker (desktop + CLI), newest first.
+    // Snapshot of ~/.codex/models_cache.json `slug`/`display_name` where
+    // `visibility` is "list" (the picker's visibility field; "hide" is excluded).
     models: {
-      "gpt-5.5": { name: "GPT-5.5" },
-      "gpt-5.4": { name: "GPT-5.4" },
-      "gpt-5.4-mini": { name: "GPT-5.4-Mini" },
-      "gpt-5.3-codex-spark": { name: "GPT-5.3-Codex-Spark" },
+      "gpt-6.2-sol": { name: "GPT-6.2-Sol" },
+      "gpt-6.2-astra": { name: "GPT-6.2-Astra" },
+      "gpt-6.1-terra": { name: "GPT-6.1 Terra" },
+      "gpt-6.1-sol": { name: "GPT-6.1-Sol" },
+      "gpt-6-astra": { name: "GPT-6-Astra" },
+      "gpt-6-sol": { name: "GPT-6-Sol" },
+      "gpt-6-luna": { name: "GPT-6-Luna" },
+      "gpt-5.6-sol": { name: "GPT-5.6-Sol" },
+      "gpt-5.6-terra": { name: "GPT-5.6-Terra" },
+      "gpt-5.6-luna": { name: "GPT-5.6-Luna" },
     },
   },
   // Grok CLI subscription — routed through the official local `grok` binary
@@ -157,8 +168,9 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
     name: "Grok (subscription)",
     connectGroup: "Grok",
     models: {
-      "grok-composer-2.5-fast": { name: "Grok Composer 2.5 Fast" },
-      "grok-build": { name: "Grok Build" },
+      // `grok models` prints ids only (the `*` marks the default).
+      "grok-4.6": { name: "grok-4.6" },
+      "grok-4.5": { name: "grok-4.5" },
     },
   },
   // Google Gemini API (OpenAI-compatible endpoint). Shares the "Antigravity"
@@ -173,19 +185,36 @@ export const BUILTIN_PROVIDERS: Record<string, ProviderConfig> = {
   // Antigravity CLI subscription — routed through the official local `agy`
   // binary (Rust spawn, plain-text stdout). Shares the "Antigravity" connect
   // card with the Gemini API key. Models mirror `agy models` (its agentic
-  // catalog; the display string is passed verbatim to `agy --model`).
+  // catalog): each line is `id<TAB>display name`, and --model accepts the
+  // display name (the values an invalid --model error lists as available),
+  // so the display name is both the key and the label here.
   "antigravity-sub": {
     kind: "antigravity-cli",
     name: "Antigravity (subscription)",
     connectGroup: "Antigravity",
     models: {
-      "Gemini 3.5 Flash (Medium)": { name: "Gemini 3.5 Flash (Medium)" },
-      "Gemini 3.5 Flash (High)": { name: "Gemini 3.5 Flash (High)" },
-      "Gemini 3.5 Flash (Low)": { name: "Gemini 3.5 Flash (Low)" },
-      "Gemini 3.1 Pro (High)": { name: "Gemini 3.1 Pro (High)" },
-      "Gemini 3.1 Pro (Low)": { name: "Gemini 3.1 Pro (Low)" },
-      "Claude Sonnet 4.6 (Thinking)": { name: "Claude Sonnet 4.6 (Thinking)" },
-      "Claude Opus 4.6 (Thinking)": { name: "Claude Opus 4.6 (Thinking)" },
+      "Gemini 4 Neon (High)": { name: "Gemini 4 Neon (High)" },
+      "Gemini 4 Neon (XHigh)": { name: "Gemini 4 Neon (XHigh)" },
+      "Gemini 4 Neon (Medium)": { name: "Gemini 4 Neon (Medium)" },
+      "Gemini 4 Neon (Low)": { name: "Gemini 4 Neon (Low)" },
+      "Gemini 4 Argon (Medium)": { name: "Gemini 4 Argon (Medium)" },
+      "Gemini 4 Argon (High)": { name: "Gemini 4 Argon (High)" },
+      "Gemini 4 Argon (Low)": { name: "Gemini 4 Argon (Low)" },
+      "Gemini 4 Hydrogen (High)": { name: "Gemini 4 Hydrogen (High)" },
+      "Gemini 4 Hydrogen (XHigh)": { name: "Gemini 4 Hydrogen (XHigh)" },
+      "Gemini 4 Hydrogen (Medium)": { name: "Gemini 4 Hydrogen (Medium)" },
+      "Gemini 4 Hydrogen (Low)": { name: "Gemini 4 Hydrogen (Low)" },
+      "Orchestrator (Neon)": { name: "Orchestrator (Neon)" },
+      "Orchestrator (Argon)": { name: "Orchestrator (Argon)" },
+      "Gemini 3.8 Flash (High)": { name: "Gemini 3.8 Flash (High)" },
+      "Gemini 3.8 Flash (Medium)": { name: "Gemini 3.8 Flash (Medium)" },
+      "Gemini 3.8 Flash (Low)": { name: "Gemini 3.8 Flash (Low)" },
+      "Claude Opus 5.5 (Low)": { name: "Claude Opus 5.5 (Low)" },
+      "Claude Opus 5.5 (Medium)": { name: "Claude Opus 5.5 (Medium)" },
+      "Claude Opus 5.5 (High)": { name: "Claude Opus 5.5 (High)" },
+      "Claude Sonnet 5.5 (Low)": { name: "Claude Sonnet 5.5 (Low)" },
+      "Claude Sonnet 5.5 (Medium)": { name: "Claude Sonnet 5.5 (Medium)" },
+      "Claude Sonnet 5.5 (High)": { name: "Claude Sonnet 5.5 (High)" },
       "GPT-OSS 120B (Medium)": { name: "GPT-OSS 120B (Medium)" },
     },
   },
