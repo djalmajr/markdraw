@@ -73,6 +73,7 @@ interface EditorProps {
   findTrigger: number;
   indentMode: IndentMode;
   indentSize: number;
+  readOnly?: boolean;
   redoTrigger: number;
   searchOpen: boolean;
   showInvisibles: boolean;
@@ -197,6 +198,11 @@ export function Editor(props: EditorProps) {
   const themeCompartment = new Compartment();
   const languageCompartment = new Compartment();
   const lineNumbersCompartment = new Compartment();
+  const accessCompartment = new Compartment();
+  const editingAccess = (readOnly: boolean) => [
+    EditorState.readOnly.of(readOnly),
+    EditorView.editable.of(!readOnly),
+  ];
 
   // Highlighting language resolved from the file's extension. md/adoc keep
   // the markdown config; other files resolve against the language-data
@@ -419,6 +425,10 @@ export function Editor(props: EditorProps) {
     const state = EditorState.create({
       doc: props.content,
       extensions: [
+        accessCompartment.of(editingAccess(props.readOnly ?? false)),
+        EditorState.changeFilter.of((transaction) =>
+          !props.readOnly || transaction.annotation(externalContentSwap) === true,
+        ),
         lineNumbersCompartment.of(props.showLineNumbers ? lineNumbers() : []),
         history({ minDepth: EDITOR_HISTORY_MIN_DEPTH }),
         bracketMatching(),
@@ -581,6 +591,13 @@ export function Editor(props: EditorProps) {
       view = undefined;
     };
   });
+
+  createEffect(
+    () => props.readOnly ?? false,
+    (readOnly) => {
+      view?.dispatch({ effects: accessCompartment.reconfigure(editingAccess(readOnly)) });
+    },
+  );
 
   createEffect(
     () => props.content,

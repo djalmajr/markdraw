@@ -70,7 +70,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
     const targetPane = tab?.pane ?? state.paneManager.activePane();
     const targetRootId = rootId ?? targetPane.selectedRootId();
     const root = targetRootId ? rootPaths().get(targetRootId) : null;
-    if (!root || entry.kind !== "file") return;
+    if (!root || entry.kind !== "file" || state.isRootReadOnly?.(targetRootId)) return;
     const isSameFile =
       targetPane.selectedFile()?.path === entry.path
       && targetPane.selectedRootId() === targetRootId;
@@ -92,6 +92,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
         || (tab
           ? targetPane.tabs.activeTabId() !== tab.id
           : targetPane.selectedFile()?.path !== entry.path || targetPane.selectedRootId() !== targetRootId);
+    const shouldIgnore = () => state.isRootReadOnly?.(targetRootId) || superseded();
     const isFocused = () => targetPane === state.paneManager.activePane();
     const markTabLoaded = (content: string, html: string, frontmatter: ReturnType<PaneStore["frontmatter"]>, includePaths: string[]) => {
       if (!tab) return;
@@ -147,13 +148,13 @@ export function createFileLoader(deps: FileLoaderDeps) {
     await new Promise((r) => setTimeout(r, 0));
 
     try {
-      if (superseded()) return;
+      if (shouldIgnore()) return;
       const absolutePath = `${root}/${entry.path}`;
       let content: string;
       try {
         content = await readFileContent(absolutePath);
       } catch (readErr) {
-        if (superseded()) return;
+        if (shouldIgnore()) return;
         // read_file (read_to_string) throws on non-UTF8 input. A binary
         // that isn't an image/PDF (handled above) can be neither rendered
         // nor edited as text → mark it unsupported so PaneView shows the
@@ -168,7 +169,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
         return;
       }
 
-      if (superseded()) return;
+      if (shouldIgnore()) return;
       // A watcher refresh decides between the disk and the live buffer.
       // `source` is the text to render; `adoptDisk` whether the buffer takes
       // the disk text. A normal load always adopts the disk.
@@ -191,7 +192,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
       // refresh may be outdated, or the user may have typed — never apply a
       // result over text newer than what it was based on.
       const stale = () =>
-        superseded() || (external && targetPane.editorContent() !== bufferAtRead);
+        shouldIgnore() || (external && targetPane.editorContent() !== bufferAtRead);
 
       // Non-previewable text (json, txt, yaml, …) skips conversion entirely
       // and opens straight in the editor. The createEffect in app state
@@ -232,7 +233,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
       };
 
       // An outdated refresh must not replace a newer one's include reader.
-      if (superseded()) return;
+      if (shouldIgnore()) return;
       state._readFile = readFile;
 
       const result = await state.convert(entry.path, source, readFile);
@@ -256,7 +257,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
       watch(absolutePath, includePaths);
       return external && adoptDisk;
     } catch (e) {
-      if (superseded()) return;
+      if (shouldIgnore()) return;
       console.error("Failed to convert file:", e);
       targetPane.setHtml(`<div class="error">Error converting file: ${e}</div>`);
     } finally {

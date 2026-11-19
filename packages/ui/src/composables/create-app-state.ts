@@ -160,6 +160,7 @@ interface AppStateConfig {
    *  manager keeps standalone callers (tests, the storybook ext if
    *  any) working without any boilerplate. */
   paneManager?: PaneManager;
+  isRootReadOnly?: (rootId: string | null) => boolean;
   /** Builds the active AI provider for chat/inline/diagram, or null when none
    *  is configured. The single DI seam every AI surface consumes. M1 hosts
    *  inject the MockProvider; DJA-11F swaps in a real engine. */
@@ -240,6 +241,7 @@ export function createAppState(config: AppStateConfig) {
   // existing consumers (Editor, Preview, file-loader, navigation)
   // don't need to know about panes.
   const paneManager: PaneManager = config.paneManager ?? createPaneManager();
+  const isRootReadOnly = (rootId: string | null) => config.isRootReadOnly?.(rootId) ?? false;
 
   // ── Core signals ────────────────────────────────────────────────────────
 
@@ -1591,6 +1593,7 @@ export function createAppState(config: AppStateConfig) {
     // PaneView per pane and the host (app.tsx) can wire shortcuts
     // to splitFromActive / setActivePane.
     paneManager,
+    isRootReadOnly,
 
     // AI assistant — multi-chat session manager + encoded right-panel tab
     aiSessions,

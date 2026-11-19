@@ -36,7 +36,7 @@ export interface TabStore {
   activateTab(tabId: TabId): void;
   reorderTabs(newOrder: TabId[]): void;
   /** Reopen the most recently closed tab. Returns the tab or undefined if stack is empty. */
-  reopenClosedTab(): TabState | undefined;
+  reopenClosedTab(canReopen?: (tab: TabState) => boolean): TabState | undefined;
   /** Pin a tab so it's no longer treated as a preview slot — VSCode
    *  semantics: pinned tabs are permanent (their italic name turns
    *  back to upright) and `loadInActiveTab` won't replace them. */
@@ -334,9 +334,10 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     return closeTabs(tabList().filter((tab) => tab.rootId === rootId).map((tab) => tab.id));
   }
 
-  function reopenClosedTab(): TabState | undefined {
-    const tab = closedTabsStack.pop();
-    if (!tab) return undefined;
+  function reopenClosedTab(canReopen?: (tab: TabState) => boolean): TabState | undefined {
+    const tab = closedTabsStack.at(-1);
+    if (!tab || (canReopen && !canReopen(tab))) return undefined;
+    closedTabsStack.pop();
 
     if (activeId()) snapshotActiveTab();
 

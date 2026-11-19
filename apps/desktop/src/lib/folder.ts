@@ -1,4 +1,4 @@
-import { type Accessor, type Setter } from "solid-js";
+import { createSignal, type Accessor, type Setter } from "solid-js";
 import { writeText as clipboardWriteText } from "@tauri-apps/plugin-clipboard-manager";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { FSEntry } from "@markdraw/core/types.ts";
@@ -14,12 +14,21 @@ interface FolderDeps {
   state: AppState;
   watcher: FileWatcher;
   onRootClosed?: (rootId: string, paths: ReadonlyMap<string, string>) => void;
-  beforeRootClose?: (rootId: string) => Promise<boolean>;
+  beforeRootClose?: (rootId: string, protect: () => void) => Promise<boolean>;
 }
 
 export function createFolder(deps: FolderDeps) {
   const { rootPaths, setRootPaths, state, watcher, onRootClosed, beforeRootClose } = deps;
   const closingRoots = new Set<string>();
+  const protectedRoots = new Set<string>();
+  const [protectionVersion, bumpProtectionVersion] = createSignal(0);
+
+  function isRootReadOnly(rootId: string | null): boolean {
+    // Track the protection in the view and read it immediately in commands,
+    // including those dispatched before Solid publishes the signal update.
+    protectionVersion();
+    return rootId !== null && protectedRoots.has(rootId);
+  }
 
   // Serialize authorization changes together with their UI publication. In
   // particular a close is acknowledged by Rust before it disappears locally;
@@ -63,6 +72,7 @@ export function createFolder(deps: FolderDeps) {
     // Normalize to forward slashes so Windows paths match the events emitted
     // by the Rust watcher (which also normalizes slashes).
     path = path.replace(/\\/g, "/");
+    if (isRootReadOnly(path)) return false;
 
     // If this root is already open, just select it
     if (rootPaths().has(path)) {
@@ -174,15 +184,25 @@ export function createFolder(deps: FolderDeps) {
   async function handleCloseRoot(rootId: string) {
     if (closingRoots.has(rootId)) return;
     closingRoots.add(rootId);
+    function protect() {
+      protectedRoots.add(rootId);
+      bumpProtectionVersion((version) => version + 1);
+    }
     try {
       await updateRoots((next) => { next.delete(rootId); }, (next) => {
         state.removeRoot(rootId);
         onRootClosed?.(rootId, next);
         if (next.size === 0) return watcher.destroy();
-      }, () => rootPaths().has(rootId) && (beforeRootClose?.(rootId) ?? true));
+      }, () => {
+        if (!rootPaths().has(rootId)) return false;
+        if (beforeRootClose) return beforeRootClose(rootId, protect);
+        protect();
+        return true;
+      });
     } catch (e) {
       if (e !== rootUpdateRejected) console.error("Could not close workspace: MCP authorization update failed");
     } finally {
+      if (protectedRoots.delete(rootId)) bumpProtectionVersion((version) => version + 1);
       closingRoots.delete(rootId);
     }
   }
@@ -413,6 +433,7 @@ export function createFolder(deps: FolderDeps) {
   }
 
   return {
+    isRootReadOnly,
     getPathName,
     handleCreateFile,
     handleCreateFolder,

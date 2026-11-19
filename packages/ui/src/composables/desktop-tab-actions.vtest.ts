@@ -8,7 +8,7 @@ import { createFolder } from "../../../../apps/desktop/src/lib/folder.ts";
 import { createFileLoader } from "../../../../apps/desktop/src/lib/file-loader.ts";
 import { createTabActions } from "../../../../apps/desktop/src/lib/tab-actions.ts";
 import { FileWatcher } from "../../../../apps/desktop/src/lib/watcher.ts";
-import { createAppState } from "./create-app-state.ts";
+import { createAppState, type AppState } from "./create-app-state.ts";
 import { createPaneManager } from "./create-pane-manager.ts";
 import type { PaneStore } from "./create-pane-store.ts";
 import { PaneView } from "../components/pane-view.tsx";
@@ -49,7 +49,10 @@ afterEach(async () => {
   }
 });
 
-function fixture(confirmDirtyTab = vi.fn<Parameters<typeof createTabActions>[0]["confirmDirtyTab"]>(async () => "cancel")) {
+function fixture(
+  confirmDirtyTab = vi.fn<Parameters<typeof createTabActions>[0]["confirmDirtyTab"]>(async () => "cancel"),
+  notifyCloseConflict = vi.fn<(name: string) => void>(),
+) {
   const watcher = new FileWatcher(() => {});
   return createRoot((dispose) => {
     disposeFixtures.push(async () => {
@@ -59,8 +62,9 @@ function fixture(confirmDirtyTab = vi.fn<Parameters<typeof createTabActions>[0][
     const paneManager: ReturnType<typeof createPaneManager> = createPaneManager({
       onTabSelected: (pane, tab) => { void actions.selectTab(pane, tab); },
     });
-    const state = createAppState({
+    const state: AppState = createAppState({
       paneManager,
+      isRootReadOnly: (rootId) => folder.isRootReadOnly(rootId),
       getStoredTheme: () => "system",
       applyTheme: () => {},
       convertAdoc: async () => { throw new Error("Unexpected conversion"); },
@@ -69,9 +73,10 @@ function fixture(confirmDirtyTab = vi.fn<Parameters<typeof createTabActions>[0][
     const [rootPaths, setRootPaths] = createSignal(new Map<string, string>());
     const loader = createFileLoader({ state, rootPaths, watcher });
     const actions: ReturnType<typeof createTabActions> = createTabActions({
-      state, rootPaths, watcher, loadTabContent: loader.loadTabContent, confirmDirtyTab,
+      state, rootPaths, watcher, loadTabContent: loader.loadTabContent,
+      loadFileContent: loader.loadFileContent, confirmDirtyTab, notifyCloseConflict,
     });
-    const folder = createFolder({
+    const folder: ReturnType<typeof createFolder> = createFolder({
       state, rootPaths, setRootPaths, watcher,
       beforeRootClose: actions.approveRootClose,
       onRootClosed: actions.closeRootTabs,
@@ -387,6 +392,126 @@ describe("closing a root with an inactive dirty pane", () => {
       expect(left.editorContent()).toBe("Unsaved edit");
       expect(left.savedContent()).toBe("Disk version");
       expect(right.tabs.activeTabId()).toBe(rightId);
+    }
+  });
+});
+
+describe("closing a root with dirty copies of one file", () => {
+  it.each([
+    { rightContent: "Original + right", conflict: true },
+    { rightContent: "Original + left", conflict: false },
+  ])("handles repeated destinations with conflict=$conflict", async ({ rightContent, conflict }) => {
+    const confirmDirtyTab = vi.fn(async () => "confirm" as const);
+    const notifyCloseConflict = vi.fn();
+    const { folder, paneManager, rootPaths } = fixture(confirmDirtyTab, notifyCloseConflict);
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const left = paneManager.activePane();
+    const leftId = openDocument(left, alpha, "Original");
+    left.setEditorContent("Original + left");
+    flush();
+    const right = paneManager.splitFromActive()!;
+    flush();
+    const rightId = openDocument(right, alpha, "Original");
+    right.setEditorContent(rightContent);
+    flush();
+
+    await folder.handleCloseRoot(workspace);
+    flush();
+
+    expect(calls("write_file")).toEqual(conflict
+      ? []
+      : [{ path: `${workspace}/alpha.md`, content: "Original + left" }]);
+    const opened = [{ roots: [] }, { roots: [{ path: workspace, name: "workspace" }] }];
+    expect(calls("mcp_set_roots")).toEqual(conflict ? opened : [...opened, { roots: [] }]);
+    if (conflict) {
+      expect(notifyCloseConflict).toHaveBeenCalledExactlyOnceWith("alpha.md");
+      expect(confirmDirtyTab).not.toHaveBeenCalled();
+      expect(rootPaths().has(workspace)).toBe(true);
+      expect(left.tabs.activeTabId()).toBe(leftId);
+      expect(right.tabs.activeTabId()).toBe(rightId);
+      expect(left.editorContent()).toBe("Original + left");
+      expect(right.editorContent()).toBe(rightContent);
+    } else {
+      expect(notifyCloseConflict).not.toHaveBeenCalled();
+      expect(confirmDirtyTab).toHaveBeenCalledTimes(2);
+      expect(rootPaths().has(workspace)).toBe(false);
+      expect(left.tabs.tabs()).toEqual([]);
+      expect(right.tabs.tabs()).toEqual([]);
+    }
+  });
+});
+
+describe("workspace protection while MCP confirms a close", () => {
+  it.each(["accepts", "rejects"] as const)("blocks editing and saving until MCP %s", async (outcome) => {
+    const { state, folder, paneManager, actions, rootPaths } = fixture();
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const pane = paneManager.activePane();
+    const id = openDocument(pane, alpha, "Original");
+    const { container } = render(() => createComponent(PaneView, { pane, state, paneIndex: 0, isActive: true }));
+    const editor = EditorView.findFromDOM(container.querySelector<HTMLElement>(".cm-editor")!)!;
+    expect(editor.state.doc.toString()).toBe("Original");
+    expect(editor.contentDOM.contentEditable).toBe("true");
+
+    const response = Promise.withResolvers<void>();
+    const received = Promise.withResolvers<void>();
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "mcp_set_roots" && Array.isArray(args.roots) && args.roots.length === 0) {
+        received.resolve();
+        return response.promise;
+      }
+      if (command === "read_file") return "A different document";
+    });
+    const close = folder.handleCloseRoot(workspace);
+    try {
+      await received.promise;
+      flush();
+      expect(rootPaths().has(workspace)).toBe(true);
+      expect(pane.tabs.activeTabId()).toBe(id);
+      editor.dispatch({ changes: { from: 8, insert: " + late edit" } });
+      flush();
+      expect.soft(editor.state.doc.toString()).toBe("Original");
+      expect.soft(pane.editorContent()).toBe("Original");
+      expect.soft(editor.contentDOM.contentEditable).toBe("false");
+      await folder.handleEditorSave();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(calls("write_file")).toEqual([]);
+
+      if (outcome === "rejects") {
+        await actions.openFile(beta, workspace);
+        await actions.openFile(beta, workspace, true);
+        flush();
+        expect(pane.tabs.tabs().map((tab) => tab.id)).toEqual([id]);
+        expect(pane.selectedFile()).toEqual(alpha);
+        expect(calls("read_file")).toEqual([]);
+        vi.spyOn(console, "warn").mockImplementation(() => {});
+        response.reject(new Error("MCP rejected the workspace update"));
+      } else {
+        response.resolve();
+      }
+      await close;
+      flush();
+      expect(state.isRootReadOnly(workspace)).toBe(false);
+
+      if (outcome === "accepts") {
+        expect(rootPaths().has(workspace)).toBe(false);
+        expect(pane.tabs.tabs()).toEqual([]);
+        expect(pane.editorContent()).toBe("");
+        expect(calls("write_file")).toEqual([]);
+      } else {
+        expect(rootPaths().has(workspace)).toBe(true);
+        expect(pane.tabs.activeTabId()).toBe(id);
+        expect(editor.contentDOM.contentEditable).toBe("true");
+        expect(editor.state.doc.toString()).toBe("Original");
+        editor.dispatch({ changes: { from: 8, insert: " + after rejection" } });
+        flush();
+        await folder.handleEditorSave();
+        expect(calls("write_file")).toEqual([{
+          path: `${workspace}/alpha.md`, content: "Original + after rejection",
+        }]);
+      }
+    } finally {
+      response.resolve();
+      await close;
     }
   });
 });

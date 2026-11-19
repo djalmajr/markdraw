@@ -105,6 +105,7 @@
   "command_language_es": "Idioma: espanhol",
   "command_save": "Salvar",
   "command_close_tab": "Fechar aba",
+  "workspace_close_conflicting_edits": "\"{name}\" tem alterações diferentes não salvas em mais de um painel. Salve ou descarte antes de fechar o espaço de trabalho.",
   "command_focus_ai_chat": "Focar no chat de IA",
   "command_add_selection_to_chat": "Adicionar seleção ao chat",
   "command_new_scratch_markdown": "Novo rascunho: Markdown",

@@ -11,9 +11,8 @@ import { invoke } from "./lib/chaos-invoke.ts";
 import { dragOnceMoved, installHyprlandMaximize } from "./lib/hyprland-maximize.ts";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
+import { createAppState, type AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import { createPaneManager } from "@markdraw/ui/composables/create-pane-manager.ts";
-import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
 import { exportChatArtifact, savePlanArtifact } from "./lib/ai-artifacts.ts";
 import { createMockProvider } from "@markdraw/ai/mock-provider.ts";
 import type { AIConfig, MCPServerConfig } from "@markdraw/ai/config-schema.ts";
@@ -426,7 +425,8 @@ export function App() {
     return import.meta.env.DEV ? "Mock (dev)" : null;
   };
 
-  const state = createAppState({
+  const state: AppState = createAppState({
+    isRootReadOnly: (rootId) => folder.isRootReadOnly(rootId),
     paneManager: createPaneManager({
       onTabSelected: (pane, tab) => { void tabActions.selectTab(pane, tab); },
     }),
@@ -1504,7 +1504,7 @@ export function App() {
       // event — each autosave fires one, and re-indexing re-chunks (and, on
       // the Complete tier, re-embeds) the whole document.
       if (changedElsewhere) reindexActiveFile();
-      if (tab && pane.selectedFile()?.path === file.path) updateLoadedTabCache(pane, tab.id);
+      if (tab && pane.selectedFile()?.path === file.path) tabActions.updateLoadedTabCache(pane, tab.id);
     } catch {
       // File likely deleted — the dir watcher will refresh the tree
       // and the tab will show an error until clicked away
@@ -1527,6 +1527,10 @@ export function App() {
     state,
     watcher,
     loadTabContent: loader.loadTabContent,
+    loadFileContent: loader.loadFileContent,
+    notifyCloseConflict: (name) => {
+      void confirm({ title: m.workspace_close_conflicting_edits({ name }), confirmLabel: "OK" });
+    },
     confirmDirtyTab: (tab) => confirmThree({
       title: "Close Tab",
       description: `"${tab.fileName}" has unsaved changes. Discard them?`,
@@ -1877,6 +1881,7 @@ export function App() {
   }
 
   async function handleOpenRecentFolder(path: string) {
+    if (state.isRootReadOnly(path)) return;
     const opened = await folder.openFolderPath(path);
     if (!opened) {
       state.handleRemoveRecentFolder(path);
@@ -2253,6 +2258,7 @@ export function App() {
   }
 
   async function handleOpenRecentFile(recentFile: RecentFile) {
+    if (state.isRootReadOnly(recentFile.rootPath)) return;
     const opened = await folder.openFolderPath(recentFile.rootPath);
     if (!opened) {
       state.handleRemoveRecentFile(recentFile.path, recentFile.rootPath);
@@ -2391,7 +2397,7 @@ export function App() {
       }
 
       // Try to restore tabs whose roots are now available
-      const restorable = session.tabs.filter((t) => paths.has(t.rootId));
+      const restorable = session.tabs.filter((t) => paths.has(t.rootId) && !state.isRootReadOnly(t.rootId));
       if (restorable.length === 0) return;
 
       sessionRestored = true;
@@ -2435,27 +2441,9 @@ export function App() {
 
   // ── Tab handlers ────────────────────────────────────────────────────────
 
-  function updateLoadedTabCache(pane: PaneStore, id: string) {
-    if (pane.tabs.activeTabId() !== id || pane.tabs.getTab(id)?.needsLoad) return;
-    pane.tabs.updateTabContent(id, {
-      editorContent: pane.editorContent(),
-      savedContent: pane.savedContent(),
-      html: pane.html(),
-      frontmatter: pane.frontmatter(),
-    });
-  }
-
   /** Single click: load file in the active tab (replacing its content). */
-  async function handleLoadFileWithTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
-    const pane = state.paneManager.activePane();
-    const existing = pane.tabs.findTabByFile(entry.path, rootId);
-    const id = pane.tabs.loadInActiveTab(entry, rootId);
-    if (existing?.needsLoad) {
-      await tabActions.selectTab(pane, existing, true, true);
-      return;
-    }
-    await loader.loadFileContent(entry, true, false, rootId);
-    updateLoadedTabCache(pane, id);
+  function handleLoadFileWithTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
+    return tabActions.openFile(entry, rootId);
   }
 
   /** Inline create commit from the file tree. Creates the file/folder on disk
@@ -2504,23 +2492,8 @@ export function App() {
    *  this around" gestures. If the file is already open in this
    *  pane, activate + pin in place rather than duplicating (VSCode
    *  semantics). */
-  async function handleOpenInNewTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
-    const pane = state.paneManager.activePane();
-    const store = pane.tabs;
-    const existing = store.findTabByFile(entry.path, rootId);
-    if (existing) {
-      store.pinTab(existing.id);
-      if (existing.needsLoad) {
-        await tabActions.activateTab(pane, existing.id, true);
-      } else {
-        store.activateTab(existing.id);
-        await loader.loadFileContent(entry, true, false, rootId);
-      }
-      return;
-    }
-    const id = store.openTab(entry, rootId);
-    await loader.loadFileContent(entry, true, false, rootId);
-    updateLoadedTabCache(pane, id);
+  function handleOpenInNewTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
+    return tabActions.openFile(entry, rootId, true);
   }
 
   /** Build a folder @-mention's content from the in-memory workspace tree:
@@ -3106,6 +3079,8 @@ export function App() {
 
   /** "+" button: create an empty tab (shows empty state). */
   function handleNewTab() {
+    const rootId = state.selectedRootId() ?? "";
+    if (state.isRootReadOnly(rootId)) return;
     // Snapshot current tab, then clear state for the empty tab
     tabStore().snapshotActiveTab();
 
@@ -3115,7 +3090,6 @@ export function App() {
       kind: "file",
       path: "",
     };
-    const rootId = state.selectedRootId() ?? "";
     tabStore().openTab(emptyEntry, rootId);
 
     state.setSelectedFile(null);
@@ -3268,7 +3242,7 @@ export function App() {
         },
         "tab.reopen": (ev) => {
           ev.preventDefault();
-          tabStore().reopenClosedTab();
+          tabStore().reopenClosedTab((tab) => !state.isRootReadOnly(tab.rootId));
         },
         "tab.next": (ev) => {
           ev.preventDefault();
