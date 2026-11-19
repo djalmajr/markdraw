@@ -1,4 +1,4 @@
-import { createSignal, createMemo, For, Show, createEffect, getObserver, untrack } from "solid-js";
+import { createSignal, createMemo, For, Show, createEffect } from "solid-js";
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -368,15 +368,10 @@ export function FileTree(props: FileTreeProps) {
   function RootHeader(propsRoot: RootHeaderProps) {
     const rootId = propsRoot.rootId;
     const dndId = toRootDndId(rootId);
-    // The dnd adapter spreads its input in the component body, then re-reads
-    // the same getters from its effect. Only the effect read is tracked;
-    // the constructor read is a snapshot of the initial value.
     function dragDisabled(): boolean {
-      if (!getObserver()) return untrack(() => !canReorderRoots());
       return !canReorderRoots();
     }
     function dropDisabled(): boolean {
-      if (!getObserver()) return untrack(() => !canReorderRoots() && !props.onMove);
       return !canReorderRoots() && !props.onMove;
     }
     const draggable = useDraggable({

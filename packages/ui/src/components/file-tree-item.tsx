@@ -1,4 +1,4 @@
-import { createMemo, Show, For, onSettled, createEffect, getObserver, untrack } from "solid-js";
+import { createMemo, Show, For, onSettled, createEffect } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { fileKind, fileManagerKind } from "@markdraw/core/utils.ts";
@@ -392,10 +392,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
     name: props.entry.name,
     kind: props.entry.kind,
   });
-  // The dnd adapter reads this getter once while constructing the entity in
-  // the component body and again from its effect; only the latter tracks.
   function dragDisabled(): boolean {
-    if (!getObserver()) return untrack(() => !props.onMove || isEditing());
     return !props.onMove || isEditing();
   }
   const draggable = useDraggable({
