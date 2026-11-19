@@ -1,4 +1,4 @@
-import { createMemo, createSignal, onCleanup, onSettled, type Setter, createTrackedEffect } from "solid-js";
+import { createEffect, createMemo, createSignal, flush, onSettled, runWithOwner, type Setter } from "solid-js";
 import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@markdraw/core/types.ts";
 import { createPaneManager, type PaneManager } from "./create-pane-manager.ts";
 import { createAiChatSessions } from "./create-ai-chat-sessions.ts";
@@ -242,7 +242,7 @@ export function createAppState(config: AppStateConfig) {
     document.documentElement.classList.contains("dark"),
   );
 
-  createTrackedEffect(() => {
+  onSettled(() => {
     applyCodeTheme("github-light", false);
   });
 
@@ -252,9 +252,12 @@ export function createAppState(config: AppStateConfig) {
     getStoredFontPrefs(),
   );
 
-  createTrackedEffect(() => {
-    applyFontPrefs(fontPrefs());
-  });
+  createEffect(
+    () => fontPrefs(),
+    (prefs) => {
+      applyFontPrefs(prefs);
+    },
+  );
 
   // ── Recent files ────────────────────────────────────────────────────────
 
@@ -310,9 +313,15 @@ export function createAppState(config: AppStateConfig) {
   // Persist via effects rather than in a handler: these setters are
   // toggled from several call sites (app-shell menu, command palette,
   // __DEV__ helpers), and an effect catches every one of them.
-  createTrackedEffect(() => setStoredShowAllDirs(showAllDirs()));
-  createTrackedEffect(() => setStoredShowAllFiles(showAllFiles()));
-  createTrackedEffect(() => setStoredShowHiddenEntries(showHiddenEntries()));
+  createEffect(() => showAllDirs(), (value) => {
+    setStoredShowAllDirs(value);
+  });
+  createEffect(() => showAllFiles(), (value) => {
+    setStoredShowAllFiles(value);
+  });
+  createEffect(() => showHiddenEntries(), (value) => {
+    setStoredShowHiddenEntries(value);
+  });
   const [respectGitignore, setRespectGitignore] = createSignal(getStoredRespectGitignore());
   const [closeBehavior, setCloseBehavior] = createSignal<CloseBehavior>(getStoredCloseBehavior());
 
@@ -455,14 +464,20 @@ export function createAppState(config: AppStateConfig) {
   // "preview" keeps the toggle's active state honest. Non-previewable text
   // is edit-only. Documents (and unsupported binaries, which show their own
   // notice) are left wherever the user put them.
-  createTrackedEffect(() => {
-    const k = viewerKind();
-    if ((k === "image" || k === "pdf") && editorMode() !== "preview") {
-      setEditorMode("preview");
-    } else if (k === "other" && !isUnsupported() && editorMode() !== "edit") {
-      setEditorMode("edit");
-    }
-  });
+  createEffect(
+    () => ({
+      kind: viewerKind(),
+      unsupported: isUnsupported(),
+      mode: editorMode(),
+    }),
+    ({ kind, unsupported, mode }) => {
+      if ((kind === "image" || kind === "pdf") && mode !== "preview") {
+        setEditorMode("preview");
+      } else if (kind === "other" && !unsupported && mode !== "edit") {
+        setEditorMode("edit");
+      }
+    },
+  );
 
   // ── System theme listener ───────────────────────────────────────────────
 
@@ -474,7 +489,7 @@ export function createAppState(config: AppStateConfig) {
       }
     };
     mql.addEventListener("change", handler);
-    onCleanup(() => mql.removeEventListener("change", handler));
+    return () => mql.removeEventListener("change", handler);
   });
 
   // ── Handlers ────────────────────────────────────────────────────────────
@@ -561,10 +576,12 @@ export function createAppState(config: AppStateConfig) {
     if (!f || (k !== "document" && k !== "excalidraw")) return null;
     return { label: f.name, path: f.path };
   });
-  createTrackedEffect(() => {
-    selectedFile()?.path; // re-show the active-file chip on a file switch
-    setActiveFileContextDismissed(false);
-  });
+  createEffect(
+    () => selectedFile()?.path, // re-show the active-file chip on a file switch
+    () => {
+      setActiveFileContextDismissed(false);
+    },
+  );
 
   function addAiContext(item: AiContextItem): void {
     setAiContextItems((prev) => (prev.some((i) => i.id === item.id) ? prev : [...prev, item]));
@@ -832,8 +849,19 @@ export function createAppState(config: AppStateConfig) {
       : {}),
   });
   // Restore persisted chats (open tabs + active) on boot, while this owner is
-  // live so each rebuilt session store nests under it.
-  aiSessions.hydrate(getChatSessionsIndex() ?? { sessions: [], activeId: null });
+  // live so each rebuilt session store nests under it. Detaching only these
+  // init writes keeps them from being mistaken for writes from a component/
+  // computation. Solid 2 commits signal writes on the next flush, so reading aiSessions
+  // right here would still see its pre-hydrate (empty) state. Decide the boot
+  // tab from the snapshot passed to hydrate instead, mirroring the manager's
+  // rule that only open, non-archived sessions are live tabs.
+  const persistedChats = getChatSessionsIndex() ?? { sessions: [], activeId: null as string | null };
+  const restoredChats = persistedChats.sessions.filter((m) => m.isOpen && !m.isArchived);
+  const restoredActive =
+    persistedChats.activeId !== null && restoredChats.some((m) => m.id === persistedChats.activeId)
+      ? persistedChats.activeId
+      : null;
+  runWithOwner(null, () => aiSessions.hydrate(persistedChats));
 
   // Inline overlay (DJA-13): floating ⌘I widget on the editor selection.
   const aiInline = createAiInlineStore({
@@ -865,40 +893,47 @@ export function createAppState(config: AppStateConfig) {
   // fall back to the orderKey sort, AFTER the manually-ordered ones.
   const [rpOrder, setRpOrder] = createSignal<string[]>(persistedRp?.order ?? []);
 
-  const restoredActive = aiSessions.activeId();
-  const [aiActiveTab, setActiveTabSig] = createSignal<string>(
-    (() => {
-      const want = persistedRp?.activeTab ?? "";
-      if (want.startsWith("chat:")) {
-        if (aiSessions.sessions().some((s) => s.id === want.slice(5))) return want;
-      } else if (want === "toc" || want === "backlinks") {
-        if (rpSpecials()[want].open) return want;
-      }
-      return restoredActive ? `chat:${restoredActive}` : "";
-    })(),
-  );
+  const initialActiveTab = (() => {
+    const want = persistedRp?.activeTab ?? "";
+    if (want.startsWith("chat:")) {
+      if (restoredChats.some((s) => s.id === want.slice(5))) return want;
+    } else if (want === "toc" || want === "backlinks") {
+      if (rpSpecials()[want].open) return want;
+    }
+    return restoredActive ? `chat:${restoredActive}` : "";
+  })();
+  const [aiActiveTab, setActiveTabSig] = createSignal<string>(initialActiveTab);
   const [aiComposerFocusTrigger, setAiComposerFocusTrigger] = createSignal(0);
 
   // AI-first default: the right panel always boots onto a usable chat. With no
   // open chats and no open specials, create one so the assistant is the first tab.
-  if (aiSessions.sessions().length === 0 && !rpSpecials().toc.open && !rpSpecials().backlinks.open) {
-    setActiveTabSig(`chat:${aiSessions.createSession()}`);
-  } else if (aiActiveTab() === "") {
-    const firstChat = aiSessions.sessions()[0];
-    setActiveTabSig(firstChat ? `chat:${firstChat.id}` : rpSpecials().toc.open ? "toc" : "backlinks");
-  }
+  // This is boot-time initialization, intentionally outside the component scope.
+  runWithOwner(null, () => {
+    if (restoredChats.length === 0 && !rpSpecials().toc.open && !rpSpecials().backlinks.open) {
+      setActiveTabSig(`chat:${aiSessions.createSession()}`);
+    } else if (initialActiveTab === "") {
+      const firstChat = restoredChats[0];
+      setActiveTabSig(firstChat ? `chat:${firstChat.id}` : rpSpecials().toc.open ? "toc" : "backlinks");
+    }
+  });
 
   // Persist the special-tab state + the encoded active tab (chats persist via
   // the sessions manager). Direct write — low frequency, localStorage is cheap.
-  createTrackedEffect(() => {
-    const specials = rpSpecials();
-    setRightPanelTabsState({
-      toc: specials.toc,
-      backlinks: specials.backlinks,
+  createEffect(
+    () => ({
+      specials: rpSpecials(),
       activeTab: aiActiveTab(),
       order: rpOrder(),
-    });
-  });
+    }),
+    ({ specials, activeTab, order }) => {
+      setRightPanelTabsState({
+        toc: specials.toc,
+        backlinks: specials.backlinks,
+        activeTab,
+        order,
+      });
+    },
+  );
 
   function patchSpecial(kind: SpecialKind, patch: Partial<SpecialTabState>): void {
     setRpSpecials((s) => ({ ...s, [kind]: { ...s[kind], ...patch } }));
@@ -996,6 +1031,9 @@ export function createAppState(config: AppStateConfig) {
   // manager's neighbor chat, else any open chat, else an open special, else
   // none. Done imperatively so the tab updates synchronously with the action.
   function reconcileActiveTab(): void {
+    // The caller just changed sessions/specials; Solid 2 commits those writes
+    // on the next flush, so settle before deciding which tab is still present.
+    flush();
     if (tabPresent(aiActiveTab())) return;
     const next = aiSessions.activeId();
     if (next && aiSessions.sessions().some((s) => s.id === next)) {
