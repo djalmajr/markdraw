@@ -1528,22 +1528,12 @@ export function App() {
     watcher,
     loadTabContent: loader.loadTabContent,
     loadFileContent: loader.loadFileContent,
-    notifyCloseConflict: (name) => {
-      void confirm({ title: m.workspace_close_conflicting_edits({ name }), confirmLabel: "OK" });
-    },
-    confirmDirtyTab: (tab) => confirmThree({
-      title: "Close Tab",
-      description: `"${tab.fileName}" has unsaved changes. Discard them?`,
-      confirmLabel: m.command_save(),
-      denyLabel: "Discard",
-    }),
   });
   const folder = createFolder({
     rootPaths,
     setRootPaths,
     state,
     watcher,
-    beforeRootClose: tabActions.prepareRootClose,
     onRootClosed: tabActions.closeRootTabs,
   });
 
@@ -3126,8 +3116,19 @@ export function App() {
         // "deny" (discard) falls through to close
       }
       scratchScenes.delete(tab.filePath);
-    } else if (!await tabActions.approveTabClose(pane, tabId)) {
-      return;
+    } else {
+      const isDirty = tabId === pane.tabs.activeTabId()
+        ? pane.editorContent() !== pane.savedContent()
+        : tab.editorContent !== tab.savedContent;
+
+      if (isDirty) {
+        const discard = await confirm({
+          title: "Close Tab",
+          description: `"${tab.fileName}" has unsaved changes. Discard them?`,
+          confirmLabel: "Discard",
+        });
+        if (!discard) return;
+      }
     }
 
     tabActions.closeTabs(pane, [tabId]);

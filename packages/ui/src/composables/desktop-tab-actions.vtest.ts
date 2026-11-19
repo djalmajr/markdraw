@@ -49,10 +49,7 @@ afterEach(async () => {
   }
 });
 
-function fixture(
-  confirmDirtyTab = vi.fn<Parameters<typeof createTabActions>[0]["confirmDirtyTab"]>(async () => "cancel"),
-  notifyCloseConflict = vi.fn<(name: string) => void>(),
-) {
+function fixture() {
   const watcher = new FileWatcher(() => {});
   return createRoot((dispose) => {
     disposeFixtures.push(async () => {
@@ -73,11 +70,10 @@ function fixture(
     const loader = createFileLoader({ state, rootPaths, watcher });
     const actions: ReturnType<typeof createTabActions> = createTabActions({
       state, rootPaths, watcher, loadTabContent: loader.loadTabContent,
-      loadFileContent: loader.loadFileContent, confirmDirtyTab, notifyCloseConflict,
+      loadFileContent: loader.loadFileContent,
     });
     const folder: ReturnType<typeof createFolder> = createFolder({
       state, rootPaths, setRootPaths, watcher,
-      beforeRootClose: actions.prepareRootClose,
       onRootClosed: actions.closeRootTabs,
     });
     createFileAutosave(state, folder.handleEditorSave, () => {});
@@ -98,6 +94,20 @@ function openDocument(pane: PaneStore, entry: FSEntry, buffer: string) {
 
 function calls(command: string) {
   return invoke.mock.calls.filter(([called]) => called === command).map(([, args]) => args);
+}
+
+function holdMcpClose() {
+  const response = Promise.withResolvers<void>();
+  const received = Promise.withResolvers<void>();
+  const defaultImplementation = invoke.getMockImplementation()!;
+  invoke.mockImplementation(async (command, args) => {
+    if (command === "mcp_set_roots") {
+      received.resolve();
+      return response.promise;
+    }
+    return defaultImplementation(command, args);
+  });
+  return { response, received };
 }
 
 describe("desktop document transitions in Solid 2", () => {
@@ -195,10 +205,9 @@ describe("desktop document transitions in Solid 2", () => {
   });
 
   it("publishes the empty MCP snapshot before stopping the last root's watcher", async () => {
-    const { folder, paneManager, rootPaths, watcher } = fixture();
+    const { folder, rootPaths, state, watcher } = fixture();
     expect(await folder.openFolderPath(workspace)).toBe(true);
-    const pane = paneManager.activePane();
-    openDocument(pane, alpha, "Alpha buffer");
+    // With no open tab, a selection change cannot stop the watcher for us.
     watcher.setTarget({ filePath: `${workspace}/alpha.md`, includePaths: [], rootPath: workspace });
     await watcher.start();
 
@@ -213,13 +222,103 @@ describe("desktop document transitions in Solid 2", () => {
       "mcp_set_roots", "plugin:event|unlisten", "stop_watching",
     ]);
     expect(rootPaths().size).toBe(0);
-    expect(pane.tabs.tabs()).toEqual([]);
-    expect(pane.selectedFile()).toBeNull();
+    expect(state.roots().has(workspace)).toBe(false);
+  });
+
+  it("closes only the acknowledged root's tabs in the active pane, including a dirty tab", async () => {
+    const { folder, paneManager, rootPaths, state, watcher } = fixture();
+    const other = "/other";
+    expect(await folder.openFolderPath(other)).toBe(true);
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const inactive = paneManager.activePane();
+    const inactiveId = openDocument(inactive, alpha, "Inactive buffer");
+    inactive.setEditorContent("Inactive unsaved changes");
+    flush();
+
+    const active = paneManager.splitFromActive()!;
+    flush();
+    const otherId = active.tabs.openTab(beta, other, { background: true });
+    const alphaId = openDocument(active, alpha, "Active buffer");
+    const betaId = openDocument(active, beta, "Another tab in this workspace");
+    active.setEditorContent("Active unsaved changes");
+    flush();
+    expect(paneManager.activePane()).toBe(active);
+
+    watcher.setTarget({ filePath: `${workspace}/beta.md`, includePaths: [], rootPath: workspace });
+    await watcher.start();
+    const update = holdMcpClose();
+    const close = folder.handleCloseRoot(workspace);
+    try {
+      await update.received.promise;
+      expect(calls("mcp_set_roots").at(-1)).toEqual({ roots: [{ path: other, name: "other" }] });
+      expect(rootPaths().has(workspace)).toBe(true);
+      expect(state.roots().has(workspace)).toBe(true);
+      expect(active.tabs.tabs().map(({ id }) => id)).toEqual([otherId, alphaId, betaId]);
+      expect(calls("stop_watching")).toEqual([]);
+
+      update.response.resolve();
+      await close;
+
+      expect([...rootPaths().keys()]).toEqual([other]);
+      expect([...state.roots().keys()]).toEqual([other]);
+      expect(active.tabs.tabs().map(({ id }) => id)).toEqual([otherId]);
+      expect(active.tabs.activeTabId()).toBe(otherId);
+      expect(active.selectedFile()).toEqual(beta);
+      expect(active.selectedRootId()).toBe(other);
+      expect(inactive.tabs.activeTabId()).toBe(inactiveId);
+      expect(inactive.editorContent()).toBe("Inactive unsaved changes");
+      expect(calls("stop_watching")).toEqual([]);
+      expect(calls("write_file")).toEqual([]);
+    } finally {
+      update.response.resolve();
+      await close;
+    }
+  });
+
+  it("preserves roots, tabs, buffer and watcher when MCP rejects the close", async () => {
+    const { folder, paneManager, rootPaths, state, watcher } = fixture();
+    expect(await folder.openFolderPath(workspace)).toBe(true);
+    const pane = paneManager.activePane();
+    const id = openDocument(pane, alpha, "Saved text");
+    pane.setEditorContent("Unsaved text");
+    flush();
+    watcher.setTarget({ filePath: `${workspace}/alpha.md`, includePaths: [], rootPath: workspace });
+    await watcher.start();
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const update = holdMcpClose();
+    const close = folder.handleCloseRoot(workspace);
+    try {
+      await update.received.promise;
+      update.response.reject(new Error("MCP rejected the workspace update"));
+      await close;
+
+      expect(calls("mcp_set_roots")).toEqual([
+        { roots: [] },
+        { roots: [{ path: workspace, name: "workspace" }] },
+        { roots: [] },
+      ]);
+      expect(warn).toHaveBeenCalledWith("Could not update MCP workspaces");
+      expect([...rootPaths().keys()]).toEqual([workspace]);
+      expect([...state.roots().keys()]).toEqual([workspace]);
+      expect(pane.tabs.tabs().map((tab) => tab.id)).toEqual([id]);
+      expect(pane.tabs.activeTabId()).toBe(id);
+      expect(pane.selectedFile()).toEqual(alpha);
+      expect(pane.selectedRootId()).toBe(workspace);
+      expect(pane.editorContent()).toBe("Unsaved text");
+      expect(pane.savedContent()).toBe("Saved text");
+      expect(calls("stop_watching")).toEqual([]);
+      expect(calls("plugin:event|unlisten")).toEqual([]);
+      expect(calls("write_file")).toEqual([]);
+    } finally {
+      update.response.resolve();
+      await close;
+    }
   });
 });
 
 describe("activation of an unloaded tab", () => {
-  it.each(["close", "close others", "close right", "move", "reopen", "activate"])(
+  it.each(["close", "close others", "close right", "move", "reopen", "activate", "first open"])(
     "reads and protects the original document via %s",
     async (route) => {
       const { state, paneManager, actions, folder } = fixture();
@@ -232,21 +331,25 @@ describe("activation of an unloaded tab", () => {
       });
       expect(await folder.openFolderPath(workspace)).toBe(true);
       const source = paneManager.activePane();
-      const alphaId = source.tabs.openTab(alpha, workspace, { background: true });
-      source.tabs.markTabNeedsLoad(alphaId);
+      const alphaId = route === "first open" ? null : source.tabs.openTab(alpha, workspace, { background: true });
+      if (alphaId) source.tabs.markTabNeedsLoad(alphaId);
       flush();
       const betaId = openDocument(source, beta, "Beta buffer");
 
       if (route === "close") actions.closeTabs(source, [betaId]);
-      if (route === "close others") source.tabs.closeOtherTabs(alphaId);
-      if (route === "close right") source.tabs.closeTabsToRight(alphaId);
-      if (route === "move") actions.moveTab(alphaId, 0);
-      if (route === "reopen") {
-        actions.closeTabs(source, [alphaId]);
-        flush();
-        expect(source.tabs.reopenClosedTab()?.id).toBe(alphaId);
+      if (alphaId) {
+        if (route === "close others") source.tabs.closeOtherTabs(alphaId);
+        if (route === "close right") source.tabs.closeTabsToRight(alphaId);
+        if (route === "move") actions.moveTab(alphaId, 0);
+        if (route === "reopen") {
+          actions.closeTabs(source, [alphaId]);
+          flush();
+          expect(source.tabs.reopenClosedTab()?.id).toBe(alphaId);
+        }
+        if (route === "activate") void actions.activateTab(source, alphaId);
+      } else {
+        void actions.openFile(alpha, workspace);
       }
-      if (route === "activate") void actions.activateTab(source, alphaId);
       flush();
       const pane = paneManager.activePane();
       pane.setEditorMode("edit");
@@ -333,404 +436,5 @@ describe("activation of an unloaded tab", () => {
     expect(pane.editorContent()).toBe("Beta buffer");
     expect(pane.tabs.getTab(alphaId)?.needsLoad).toBe(true);
     expect(pane.loading()).toBe(false);
-  });
-});
-
-describe("closing a root with an inactive dirty pane", () => {
-  it.each([
-    { decision: "confirm", failSave: false, closes: true },
-    { decision: "deny", failSave: false, closes: true },
-    { decision: "cancel", failSave: false, closes: false },
-    { decision: "confirm", failSave: true, closes: false },
-  ] as const)("handles $decision with failSave=$failSave", async ({ decision, failSave, closes }) => {
-    const answer = Promise.withResolvers<"confirm" | "deny" | "cancel">();
-    const confirmDirtyTab = vi.fn(() => answer.promise);
-    const { folder, paneManager, rootPaths } = fixture(confirmDirtyTab);
-    if (failSave) {
-      vi.spyOn(console, "error").mockImplementation(() => {});
-      invoke.mockImplementation(async (command) => {
-        if (command === "read_dir") return [alpha, beta];
-        if (command === "write_file") throw new Error("Disk write failed");
-      });
-    }
-    expect(await folder.openFolderPath(workspace)).toBe(true);
-    const left = paneManager.activePane();
-    const id = openDocument(left, alpha, "Disk version");
-    // An inactive pane can have a live edit newer than the tab's snapshot.
-    left.setEditorContent("Unsaved edit");
-    flush();
-    const right = paneManager.splitFromActive()!;
-    flush();
-    const rightId = openDocument(right, beta, "Beta buffer");
-
-    const close = folder.handleCloseRoot(workspace);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(confirmDirtyTab).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id }));
-    expect(calls("write_file")).toEqual([]);
-    const registered = [{ roots: [] }, { roots: [{ path: workspace, name: "workspace" }] }];
-    expect(calls("mcp_set_roots")).toEqual(registered);
-    expect(rootPaths().has(workspace)).toBe(true);
-    answer.resolve(decision);
-    await close;
-    flush();
-
-    expect(calls("write_file")).toEqual(decision === "confirm"
-      ? [{ path: `${workspace}/alpha.md`, content: "Unsaved edit" }]
-      : []);
-    expect(calls("mcp_set_roots")).toEqual(closes ? [...registered, { roots: [] }] : registered);
-    expect(rootPaths().has(workspace)).toBe(!closes);
-    if (closes) {
-      expect(left.tabs.tabs()).toEqual([]);
-      expect(right.tabs.tabs()).toEqual([]);
-      if (decision === "confirm") {
-        const commands = invoke.mock.calls.map(([name]) => name);
-        expect(commands.indexOf("write_file")).toBeLessThan(commands.lastIndexOf("mcp_set_roots"));
-      }
-    } else {
-      expect(left.tabs.activeTabId()).toBe(id);
-      expect(left.editorContent()).toBe("Unsaved edit");
-      expect(left.savedContent()).toBe("Disk version");
-      expect(right.tabs.activeTabId()).toBe(rightId);
-    }
-  });
-});
-
-describe("closing a root with dirty copies of one file", () => {
-  it.each([
-    { rightContent: "Original + right", conflict: true },
-    { rightContent: "Original + left", conflict: false },
-  ])("handles repeated destinations with conflict=$conflict", async ({ rightContent, conflict }) => {
-    const confirmDirtyTab = vi.fn(async () => "confirm" as const);
-    const notifyCloseConflict = vi.fn();
-    const { folder, paneManager, rootPaths } = fixture(confirmDirtyTab, notifyCloseConflict);
-    expect(await folder.openFolderPath(workspace)).toBe(true);
-    const left = paneManager.activePane();
-    const leftId = openDocument(left, alpha, "Original");
-    left.setEditorContent("Original + left");
-    flush();
-    const right = paneManager.splitFromActive()!;
-    flush();
-    const rightId = openDocument(right, alpha, "Original");
-    right.setEditorContent(rightContent);
-    flush();
-
-    await folder.handleCloseRoot(workspace);
-    flush();
-
-    expect(calls("write_file")).toEqual(conflict
-      ? []
-      : [{ path: `${workspace}/alpha.md`, content: "Original + left" }]);
-    const opened = [{ roots: [] }, { roots: [{ path: workspace, name: "workspace" }] }];
-    expect(calls("mcp_set_roots")).toEqual(conflict ? opened : [...opened, { roots: [] }]);
-    if (conflict) {
-      expect(notifyCloseConflict).toHaveBeenCalledExactlyOnceWith("alpha.md");
-      expect(confirmDirtyTab).not.toHaveBeenCalled();
-      expect(rootPaths().has(workspace)).toBe(true);
-      expect(left.tabs.activeTabId()).toBe(leftId);
-      expect(right.tabs.activeTabId()).toBe(rightId);
-      expect(left.editorContent()).toBe("Original + left");
-      expect(right.editorContent()).toBe(rightContent);
-    } else {
-      expect(notifyCloseConflict).not.toHaveBeenCalled();
-      expect(confirmDirtyTab).toHaveBeenCalledTimes(2);
-      expect(rootPaths().has(workspace)).toBe(false);
-      expect(left.tabs.tabs()).toEqual([]);
-      expect(right.tabs.tabs()).toEqual([]);
-    }
-  });
-});
-
-function holdMcpClose(otherHandlers?: (command: string, args: Record<string, unknown>) => unknown) {
-  const response = Promise.withResolvers<void>();
-  const received = Promise.withResolvers<void>();
-  const defaultImplementation = invoke.getMockImplementation();
-  let caught = false;
-  invoke.mockImplementation(async (command, args) => {
-    if (!caught && command === "mcp_set_roots" && Array.isArray(args.roots)
-      && !args.roots.some((root) => root.path === workspace)) {
-      caught = true;
-      received.resolve();
-      return response.promise;
-    }
-    if (otherHandlers) return otherHandlers(command, args);
-    return defaultImplementation?.(command, args);
-  });
-  return { response, received };
-}
-
-function mountEditor(state: AppState, pane: PaneStore) {
-  const { container } = render(() => createComponent(PaneView, { pane, state, paneIndex: 0, isActive: true }));
-  const element = container.querySelector<HTMLElement>(".cm-editor");
-  expect(element).not.toBeNull();
-  return EditorView.findFromDOM(element!)!;
-}
-
-describe("workspace close while MCP responds", () => {
-  it("keeps a first read that completes before MCP rejects the close", async () => {
-    const { folder, paneManager, rootPaths, state, actions } = fixture();
-    expect(await folder.openFolderPath(workspace)).toBe(true);
-    const read = Promise.withResolvers<string>();
-    const { response, received } = holdMcpClose((command) => {
-      if (command === "read_file") return read.promise;
-      if (command === "plugin:event|listen") return 1;
-    });
-    const opening = actions.openFile(alpha, workspace);
-    const pane = paneManager.activePane();
-    pane.setEditorMode("edit");
-    flush();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(calls("read_file")).toEqual([{ path: `${workspace}/alpha.md` }]);
-    expect(pane.tabs.getActiveTab()?.needsLoad).toBe(true);
-    await folder.handleEditorSave();
-
-    const close = folder.handleCloseRoot(workspace);
-    try {
-      await received.promise;
-      read.resolve("Original file on disk");
-      await vi.advanceTimersByTimeAsync(10);
-      await opening;
-      expect(pane.editorContent()).toBe("Original file on disk");
-      expect(pane.tabs.getActiveTab()?.needsLoad).toBe(false);
-      expect(calls("write_file")).toEqual([]);
-
-      vi.spyOn(console, "warn").mockImplementation(() => {});
-      response.reject(new Error("MCP rejected the workspace update"));
-      await close;
-      expect(rootPaths().has(workspace)).toBe(true);
-      const editor = mountEditor(state, pane);
-      expect(editor.state.doc.toString()).toBe("Original file on disk");
-      editor.dispatch({ changes: { from: editor.state.doc.length, insert: " + later edit" } });
-      flush();
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(calls("write_file")).toEqual([{
-        path: `${workspace}/alpha.md`, content: "Original file on disk + later edit",
-      }]);
-    } finally {
-      read.resolve("Original file on disk");
-      response.resolve();
-      await opening;
-      await close;
-    }
-  });
-
-  it("saves editing during the MCP wait before removing the tabs", async () => {
-    const { folder, paneManager, state } = fixture();
-    expect(await folder.openFolderPath(workspace)).toBe(true);
-    const pane = paneManager.activePane();
-    const id = openDocument(pane, alpha, "Original");
-    const editor = mountEditor(state, pane);
-    const { response, received } = holdMcpClose();
-    const close = folder.handleCloseRoot(workspace);
-    try {
-      await received.promise;
-      editor.dispatch({ changes: { from: 8, insert: " + manual save" } });
-      flush();
-      await folder.handleEditorSave();
-      expect(calls("write_file")).toEqual([{
-        path: `${workspace}/alpha.md`, content: "Original + manual save",
-      }]);
-
-      editor.dispatch({ changes: { from: editor.state.doc.length, insert: " + during MCP" } });
-      flush();
-      expect(pane.tabs.activeTabId()).toBe(id);
-      response.resolve();
-      await close;
-      flush();
-
-      expect(calls("write_file")).toEqual([
-        { path: `${workspace}/alpha.md`, content: "Original + manual save" },
-        { path: `${workspace}/alpha.md`, content: "Original + manual save + during MCP" },
-      ]);
-      expect(pane.tabs.tabs()).toEqual([]);
-    } finally {
-      response.resolve();
-      await close;
-    }
-  });
-
-  it("keeps two conflicting edits and republishes the workspace after acknowledgement", async () => {
-    const notifyCloseConflict = vi.fn();
-    const { folder, paneManager, rootPaths } = fixture(undefined, notifyCloseConflict);
-    expect(await folder.openFolderPath(workspace)).toBe(true);
-    const left = paneManager.activePane();
-    const leftId = openDocument(left, alpha, "Original");
-    const right = paneManager.splitFromActive()!;
-    flush();
-    const rightId = openDocument(right, alpha, "Original");
-
-    const { response, received } = holdMcpClose();
-    const close = folder.handleCloseRoot(workspace);
-    try {
-      await received.promise;
-      left.setEditorContent("Original + left");
-      right.setEditorContent("Original + right");
-      flush();
-      response.resolve();
-      await close;
-      flush();
-
-      expect(calls("write_file")).toEqual([]);
-      expect(notifyCloseConflict).toHaveBeenCalledExactlyOnceWith("alpha.md");
-      const registered = { roots: [{ path: workspace, name: "workspace" }] };
-      expect(calls("mcp_set_roots")).toEqual([{ roots: [] }, registered, { roots: [] }, registered]);
-      expect(rootPaths().has(workspace)).toBe(true);
-      expect(left.tabs.activeTabId()).toBe(leftId);
-      expect(right.tabs.activeTabId()).toBe(rightId);
-      expect(left.editorContent()).toBe("Original + left");
-      expect(right.editorContent()).toBe("Original + right");
-    } finally {
-      response.resolve();
-      await close;
-    }
-  });
-
-  it.each([false, true])("saves changes made after Discard, with final write failure=%s", async (failWrite) => {
-    const confirmDirtyTab = vi.fn(async () => "deny" as const);
-    const { folder, paneManager, rootPaths } = fixture(confirmDirtyTab);
-    expect(await folder.openFolderPath(workspace)).toBe(true);
-    const pane = paneManager.activePane();
-    const id = openDocument(pane, alpha, "Original");
-    pane.setEditorContent("Discarded version");
-    flush();
-    const { response, received } = holdMcpClose((command) => {
-      if (command === "write_file" && failWrite) throw new Error("Disk write failed");
-    });
-    if (failWrite) vi.spyOn(console, "error").mockImplementation(() => {});
-    const close = folder.handleCloseRoot(workspace);
-    try {
-      await received.promise;
-      expect(confirmDirtyTab).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id }));
-      expect(calls("write_file")).toEqual([]);
-      pane.setEditorContent("Edit after Discard");
-      flush();
-      response.resolve();
-      await close;
-      flush();
-
-      expect(calls("write_file")).toEqual([{
-        path: `${workspace}/alpha.md`, content: "Edit after Discard",
-      }]);
-      expect(rootPaths().has(workspace)).toBe(failWrite);
-      if (failWrite) {
-        expect(pane.tabs.activeTabId()).toBe(id);
-        expect(pane.editorContent()).toBe("Edit after Discard");
-        expect(calls("mcp_set_roots").at(-1)).toEqual({ roots: [{ path: workspace, name: "workspace" }] });
-      } else {
-        expect(pane.tabs.tabs()).toEqual([]);
-      }
-    } finally {
-      response.resolve();
-      await close;
-    }
-  });
-
-  it("never saves the current document to a different selected folder", async () => {
-    const { folder, paneManager, state, rootPaths } = fixture();
-    const other = "/other-workspace";
-    expect(await folder.openFolderPath(other)).toBe(true);
-    expect(await folder.openFolderPath(workspace)).toBe(true);
-    const pane = paneManager.activePane();
-    const id = openDocument(pane, alpha, "Original");
-    const editor = mountEditor(state, pane);
-    const { response, received } = holdMcpClose();
-    const close = folder.handleCloseRoot(workspace);
-    try {
-      await received.promise;
-      expect(await folder.openFolderPath(other)).toBe(true);
-      flush();
-      expect(pane.selectedRootId()).toBe(other);
-      expect(pane.tabs.activeTabId()).toBe(id);
-      editor.dispatch({ changes: { from: 8, insert: " + belongs to Alpha" } });
-      flush();
-      await folder.handleEditorSave();
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(calls("write_file")).toEqual([]);
-      response.resolve();
-      await close;
-      flush();
-
-      expect(calls("write_file")).toEqual([{
-        path: `${workspace}/alpha.md`, content: "Original + belongs to Alpha",
-      }]);
-      expect(rootPaths().has(other)).toBe(true);
-      expect(pane.tabs.tabs()).toEqual([]);
-    } finally {
-      response.resolve();
-      await close;
-    }
-  });
-
-  it.each(["pending", "failed"])("closes a %s first read without writing an incomplete buffer", async (status) => {
-    const { folder, actions, paneManager } = fixture();
-    expect(await folder.openFolderPath(workspace)).toBe(true);
-    const read = Promise.withResolvers<string>();
-    invoke.mockImplementation(async (command) => {
-      if (command === "read_file") return read.promise;
-      if (command === "plugin:event|listen") return 1;
-    });
-    const opening = actions.openFile(alpha, workspace);
-    try {
-      await vi.advanceTimersByTimeAsync(1);
-      expect(calls("read_file")).toEqual([{ path: `${workspace}/alpha.md` }]);
-      if (status === "failed") {
-        vi.spyOn(console, "error").mockImplementation(() => {});
-        read.reject(new Error("Cannot read Alpha"));
-        await opening;
-      }
-      const pane = paneManager.activePane();
-      expect(pane.tabs.getActiveTab()?.needsLoad).toBe(true);
-      await folder.handleCloseRoot(workspace);
-      expect(pane.tabs.tabs()).toEqual([]);
-      expect(calls("write_file")).toEqual([]);
-    } finally {
-      read.resolve("Original");
-      await opening;
-    }
-  });
-
-  it("serializes a manual save that races with a final sweep write", async () => {
-    const { folder, paneManager } = fixture();
-    expect(await folder.openFolderPath(workspace)).toBe(true);
-    const pane = paneManager.activePane();
-    openDocument(pane, alpha, "Original");
-
-    const writeStarted = Promise.withResolvers<void>();
-    const firstWrite = Promise.withResolvers<void>();
-    const { response, received } = holdMcpClose((command, args) => {
-      if (command === "write_file" && args.content === "First late version") {
-        writeStarted.resolve();
-        return firstWrite.promise;
-      }
-    });
-    const close = folder.handleCloseRoot(workspace);
-    let manualSave: Promise<void> | undefined;
-    try {
-      await received.promise;
-      pane.setEditorContent("First late version");
-      flush();
-      response.resolve();
-      await writeStarted.promise;
-
-      pane.setEditorContent("Newer version");
-      flush();
-      manualSave = folder.handleEditorSave();
-      expect(calls("write_file")).toEqual([{
-        path: `${workspace}/alpha.md`, content: "First late version",
-      }]);
-      expect(pane.tabs.tabs()).toHaveLength(1);
-      firstWrite.resolve();
-      await manualSave;
-      await close;
-
-      expect(calls("write_file").at(-1)).toEqual({
-        path: `${workspace}/alpha.md`, content: "Newer version",
-      });
-      expect(pane.tabs.tabs()).toEqual([]);
-    } finally {
-      response.resolve();
-      firstWrite.resolve();
-      await manualSave;
-      await close;
-    }
   });
 });

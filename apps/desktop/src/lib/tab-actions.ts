@@ -2,9 +2,7 @@ import type { TabState } from "@markdraw/core/tabs.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
-import { writeFile } from "./fs.ts";
 import type { createFileLoader } from "./file-loader.ts";
-import type { FinishRootClose } from "./folder.ts";
 import { SCRATCH_ROOT_ID } from "./scratch.ts";
 import type { FileWatcher } from "./watcher.ts";
 
@@ -14,12 +12,10 @@ interface TabActionDeps {
   watcher: Pick<FileWatcher, "setTarget" | "start" | "stop">;
   loadTabContent: ReturnType<typeof createFileLoader>["loadTabContent"];
   loadFileContent: ReturnType<typeof createFileLoader>["loadFileContent"];
-  confirmDirtyTab: (tab: TabState) => Promise<"confirm" | "deny" | "cancel">;
-  notifyCloseConflict: (name: string) => void;
 }
 
 export function createTabActions({
-  state, rootPaths, watcher, loadTabContent, loadFileContent, confirmDirtyTab, notifyCloseConflict,
+  state, rootPaths, watcher, loadTabContent, loadFileContent,
 }: TabActionDeps) {
   const manager = state.paneManager;
 
@@ -102,112 +98,7 @@ export function createTabActions({
   }
 
   function closeRootTabs(rootId: string) {
-    for (const pane of manager.panes()) {
-      pane.tabs.closeTabsByRoot(rootId);
-    }
-  }
-
-  type TabTarget = { pane: PaneStore; id: string };
-  type DirtyTab = { pane: PaneStore; tab: TabState; content: string };
-
-  function dirtyTabs(targets: readonly TabTarget[]): DirtyTab[] {
-    return targets.flatMap(({ pane, id }) => {
-      const tab = pane.tabs.getTab(id);
-      if (!tab || tab.needsLoad) return [];
-      const active = pane.tabs.activeTabId() === id;
-      const content = active ? pane.editorContent() : tab.editorContent;
-      const saved = active ? pane.savedContent() : tab.savedContent;
-      return content === saved ? [] : [{ pane, tab, content }];
-    });
-  }
-
-  function groupByDestination(items: DirtyTab[]) {
-    const groups = new Map<string, DirtyTab[]>();
-    for (const item of items) {
-      const root = rootPaths().get(item.tab.rootId);
-      const path = `${(root ?? item.tab.rootId).replace(/\/+$/, "")}/${item.tab.filePath}`;
-      const group = groups.get(path);
-      if (group && group[0]!.content !== item.content) {
-        notifyCloseConflict(item.tab.fileName);
-        return null;
-      }
-      if (group) group.push(item);
-      else groups.set(path, [item]);
-    }
-    return groups;
-  }
-
-  async function saveBuffer(path: string, item: DirtyTab): Promise<boolean> {
-    if (!rootPaths().has(item.tab.rootId) || !item.tab.filePath) return false;
-    try {
-      await writeFile(path, item.content);
-      return true;
-    } catch (error) {
-      console.error("Failed to save file:", error);
-      return false;
-    }
-  }
-
-  async function prepareClose(targets: () => TabTarget[], allowChanges: boolean) {
-    const initial = dirtyTabs(targets());
-    if (!groupByDestination(initial)) return null;
-    const approved: Array<DirtyTab & { save: boolean }> = [];
-    for (const pending of initial) {
-      const decision = await confirmDirtyTab(pending.tab);
-      if (decision === "cancel") return null;
-      approved.push({ ...pending, save: decision === "confirm" });
-    }
-
-    // A modal decision applies only to the version the user was asked about.
-    const isApproved = (pending: DirtyTab) =>
-      approved.find(({ pane, tab, content }) =>
-        pane === pending.pane && tab.id === pending.tab.id && content === pending.content,
-      );
-    const pending = dirtyTabs(targets());
-    const groups = groupByDestination(pending);
-    if (!groups || (!allowChanges && !pending.every(isApproved))) return null;
-    const saved = new Map<string, string>();
-    for (const [path, group] of groups) {
-      const item = group.find((candidate) => isApproved(candidate)?.save);
-      if (!item) continue;
-      if (!await saveBuffer(path, item)) return null;
-      saved.set(path, item.content);
-    }
-    return { isApproved, saved };
-  }
-
-  async function approveTabClose(pane: PaneStore, id: string) {
-    const targets = () => [{ pane, id }];
-    const decision = await prepareClose(targets, false);
-    return decision !== null && dirtyTabs(targets()).every(decision.isApproved);
-  }
-
-  async function prepareRootClose(rootId: string): Promise<FinishRootClose | null> {
-    const targets = () => manager.panes().flatMap((pane) =>
-      pane.tabs.tabs().filter((tab) => tab.rootId === rootId).map((tab) => ({ pane, id: tab.id })),
-    );
-    const decision = await prepareClose(targets, true);
-    if (!decision) return null;
-
-    return async (commit) => {
-      while (true) {
-        const groups = groupByDestination(dirtyTabs(targets()));
-        if (!groups) return;
-        const next = [...groups].find(([path, group]) =>
-          decision.saved.get(path) !== group[0]!.content
-          && group.some((item) => decision.isApproved(item)?.save !== false),
-        );
-        if (!next) {
-          // No await between the last scan and removing the tabs.
-          commit();
-          return;
-        }
-        const [path, group] = next;
-        const item = group[0]!;
-        if (!await saveBuffer(path, item)) return;
-        decision.saved.set(path, item.content);
-      }
-    };
+    manager.activePane().tabs.closeTabsByRoot(rootId);
   }
 
   function moveTab(tabId: string, fromPaneIndex: number) {
@@ -256,6 +147,6 @@ export function createTabActions({
 
   return {
     selectTab, activateTab, openFile, updateLoadedTabCache,
-    closeTabs, closeRootTabs, approveTabClose, prepareRootClose, moveTab,
+    closeTabs, closeRootTabs, moveTab,
   };
 }

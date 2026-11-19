@@ -1,4 +1,4 @@
-import { type Accessor, type Setter } from "solid-js";
+import type { Accessor, Setter } from "solid-js";
 import { writeText as clipboardWriteText } from "@tauri-apps/plugin-clipboard-manager";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { FSEntry } from "@markdraw/core/types.ts";
@@ -8,20 +8,16 @@ import { joinRelative, nextAvailableName, withDefaultExtension } from "./fs-path
 import type { FileWatcher } from "./watcher.ts";
 import { invoke } from "./chaos-invoke.ts";
 
-export type FinishRootClose = (commit: () => void) => Promise<void>;
-
 interface FolderDeps {
   rootPaths: Accessor<Map<string, string>>;
   setRootPaths: Setter<Map<string, string>>;
   state: AppState;
   watcher: FileWatcher;
-  onRootClosed?: (rootId: string, paths: ReadonlyMap<string, string>) => void;
-  beforeRootClose?: (rootId: string) => Promise<FinishRootClose | null>;
+  onRootClosed?: (rootId: string) => void;
 }
 
 export function createFolder(deps: FolderDeps) {
-  const { rootPaths, setRootPaths, state, watcher, onRootClosed, beforeRootClose } = deps;
-  const pendingRootClosures = new Set<string>();
+  const { rootPaths, setRootPaths, state, watcher, onRootClosed } = deps;
 
   // Serialize authorization changes together with their UI publication. In
   // particular a close is acknowledged by Rust before it disappears locally;
@@ -30,21 +26,23 @@ export function createFolder(deps: FolderDeps) {
   let rootUpdates = invoke<void>("mcp_set_roots", { roots: [] }).catch(() => {
     console.warn("Could not initialize MCP workspaces");
   });
-  function queueRootUpdate(updateRoots: () => Promise<void>) {
-    const update = rootUpdates.then(updateRoots);
+  function updateRoots(change: (next: Map<string, string>) => void, publish: (next: ReadonlyMap<string, string>) => void) {
+    const update = rootUpdates.then(async () => {
+      const next = new Map(rootPaths());
+      change(next);
+      await invoke("mcp_set_roots", {
+        roots: Array.from(next.values(), (path) => ({ path, name: getPathName(path) })),
+      }).catch(() => {
+        console.warn("Could not update MCP workspaces");
+        throw rootUpdateRejected;
+      });
+      setRootPaths(next);
+      publish(next);
+    });
+    // A failed update leaves both the registry and local roots unchanged;
+    // subsequent user actions may retry without a poisoned promise queue.
     rootUpdates = update.catch(() => undefined);
     return update;
-  }
-
-  async function publishMcpRoots(paths: ReadonlyMap<string, string>) {
-    try {
-      await invoke("mcp_set_roots", {
-        roots: Array.from(paths.values(), (path) => ({ path, name: getPathName(path) })),
-      });
-    } catch {
-      console.warn("Could not update MCP workspaces");
-      throw rootUpdateRejected;
-    }
   }
 
   function getPathName(path: string) {
@@ -73,10 +71,7 @@ export function createFolder(deps: FolderDeps) {
         state.respectGitignore(),
       );
 
-      await queueRootUpdate(async () => {
-        const next = new Map(rootPaths()).set(path, path);
-        await publishMcpRoots(next);
-        setRootPaths(next);
+      await updateRoots((next) => next.set(path, path), () => {
         state.addRoot({
           collapsed: false,
           entries,
@@ -170,42 +165,14 @@ export function createFolder(deps: FolderDeps) {
   }
 
   async function handleCloseRoot(rootId: string) {
-    if (pendingRootClosures.has(rootId)) return;
-    pendingRootClosures.add(rootId);
     try {
-      await queueRootUpdate(async () => {
-        const previous = rootPaths();
-        if (!previous.has(rootId)) return;
-        const finish = await beforeRootClose?.(rootId);
-        if (finish === null) return;
-
-        const next = new Map(previous);
-        next.delete(rootId);
-        await publishMcpRoots(next);
-
-        let committed = false;
-        let cleanup: Promise<void> | undefined;
-        const commitClose = () => {
-          setRootPaths(next);
-          committed = true;
-          state.removeRoot(rootId);
-          onRootClosed?.(rootId, next);
-          if (next.size === 0) cleanup = watcher.destroy();
-        };
-        try {
-          if (finish) await finish(commitClose);
-          else commitClose();
-        } finally {
-          // A conflict or failed write leaves local state untouched. Restore
-          // the registry inside the same queue before processing other roots.
-          if (!committed) await publishMcpRoots(previous);
-        }
-        await cleanup;
+      await updateRoots((next) => { next.delete(rootId); }, (next) => {
+        state.removeRoot(rootId);
+        if (next.size === 0) void watcher.destroy();
+        if (!next.has(rootId)) onRootClosed?.(rootId);
       });
     } catch (e) {
       if (e !== rootUpdateRejected) console.error("Could not close workspace: MCP authorization update failed");
-    } finally {
-      pendingRootClosures.delete(rootId);
     }
   }
 
@@ -222,10 +189,9 @@ export function createFolder(deps: FolderDeps) {
     const rootId = targetPane.selectedRootId();
     const rootPath = rootId ? rootPaths().get(rootId) : null;
     if (!entry || !rootId || !rootPath || tab?.needsLoad) return;
-    if (tab && (tab.rootId !== rootId || tab.filePath !== entry.path)) return;
 
     try {
-      const absolutePath = `${rootPath.replace(/\/+$/, "")}/${entry.path}`;
+      const absolutePath = `${rootPath}/${entry.path}`;
       const content = targetPane.editorContent();
       await writeFile(absolutePath, content);
       if (targetPane.tabs.activeTabId() === (tab?.id ?? null)

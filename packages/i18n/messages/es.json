@@ -105,7 +105,6 @@
   "command_language_es": "Idioma: español",
   "command_save": "Guardar",
   "command_close_tab": "Cerrar pestaña",
-  "workspace_close_conflicting_edits": "\"{name}\" tiene cambios distintos sin guardar en más de un panel. Guárdalos o descártalos antes de cerrar el espacio de trabajo.",
   "command_focus_ai_chat": "Enfocar el chat de IA",
   "command_add_selection_to_chat": "Añadir selección al chat",
   "command_new_scratch_markdown": "Nuevo borrador: Markdown",
