@@ -30,6 +30,12 @@ const guideCategoryTranslations = {
 
 export default defineConfig({
   site: "https://markdraw.app",
+  // Starlight 0.43 stopped forcing Astro's "where" scope strategy and now
+  // follows Astro's default ("attribute"). Keep the strategy the site was
+  // styled against: the unscoped overrides in src/styles/starlight.css were
+  // written against `:where(.astro-HASH)` selectors, and attribute selectors
+  // are more specific, so some of them would stop applying.
+  scopedStyleStrategy: "where",
   integrations: [
     starlight({
       title: "Markdraw",

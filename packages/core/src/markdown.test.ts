@@ -147,4 +147,32 @@ describe("convertMarkdown", () => {
     });
     expect(html).toContain("😄");
   });
+
+  // The preview imports `katex/dist/katex.min.css` from the same version range
+  // this package depends on, and that stylesheet only knows the prefixed
+  // internal classes (`katex-base`, `katex-strut`, `katex-sizing`, …) that KaTeX
+  // 0.18 introduced. {@link "@traptitech/markdown-it-katex"} pulls its own
+  // `katex` 0.16 unless it is handed one, and 0.16 renders the unprefixed
+  // classes (`base`, `strut`, `sizing`), which the current CSS cannot lay out —
+  // the maths would render with collapsed struts.
+  it("renders maths with the KaTeX version the preview stylesheet is from", async () => {
+    const inline = await convertMarkdown({
+      filePath: "d.md",
+      fileContent: "$E = mc^2$",
+      readFile: noopRead,
+    });
+    expect(inline.html).toContain('<span class="katex-html" aria-hidden="true">');
+    expect(inline.html).toContain('<span class="katex-strut"');
+    expect(inline.html).not.toContain('<span class="strut"');
+    expect(inline.html).not.toContain('<span class="base"');
+
+    const block = await convertMarkdown({
+      filePath: "d.md",
+      fileContent: "$$\n\\int_0^1 x\\,dx = \\frac{1}{2}\n$$",
+      readFile: noopRead,
+    });
+    expect(block.html).toContain('<span class="katex-display"');
+    expect(block.html).toContain('<span class="katex-sizing');
+    expect(block.html).not.toContain('<span class="sizing');
+  });
 });

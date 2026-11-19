@@ -11,6 +11,7 @@ import MarkdownIt, { type MarkdownIt as MarkdownItInstance } from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
 import mk from "@traptitech/markdown-it-katex";
+import katex from "katex";
 import { alert } from "@mdit/plugin-alert";
 import footnote from "markdown-it-footnote";
 import { full as emoji } from "markdown-it-emoji";
@@ -185,7 +186,7 @@ function getMd(): MarkdownItInstance {
   md.linkify.set({ fuzzyLink: true, urlAuth: true });
   md.use(anchor, { slugify });
   md.use(taskLists, { enabled: true, label: true });
-  md.use(mk, { throwOnError: false, errorColor: "#cc0000" });
+  md.use(mk, { throwOnError: false, errorColor: "#cc0000", katex });
   // --- GitHub-style alerts (NOTE, WARNING, TIP, CAUTION, IMPORTANT) ---
   // @mdit/plugin-alert 2.x echoes the label as written (`[!NOTE]` becomes
   // "NOTE" and goes through renderInline); 0.23.x capitalised it and lowercased
