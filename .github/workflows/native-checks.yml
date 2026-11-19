@@ -70,3 +70,12 @@ jobs:
         shell: bash
         working-directory: apps/desktop/src-tauri
         run: cargo test --locked --test mcp_stdio
+
+      # Process groups and Job Objects, waitid and no-follow opens have
+      # per-platform code paths that only these runners exercise.
+      - name: Model listing unit tests
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        env:
+          ASCIIMARK_EMBED_TEST_MANIFEST: "1"
+        run: cargo test --locked --lib model_list
