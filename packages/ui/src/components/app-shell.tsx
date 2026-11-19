@@ -34,6 +34,7 @@ import {
   type SettingsMcpServer,
   type SettingsSkill,
 } from "./settings-dialog.tsx";
+import type { ModelCacheStatus } from "./model-picker.tsx";
 import { QuickOpen } from "./quick-open.tsx";
 import { ShortcutsHelp } from "./shortcuts-help.tsx";
 import { CommandPalette } from "./command-palette.tsx";
@@ -180,8 +181,12 @@ interface AppShellProps {
   onConnectProvider?: (input: { providerId: string; apiKey: string }) => void | Promise<void>;
   /** Disconnect a provider group (every id behind a merged base name). */
   onRemoveProvider?: (ids: string[]) => void | Promise<void>;
-  /** Re-fetch a provider's live model list (openai-compatible /models). */
-  onRefreshModels?: (providerId: string) => void | Promise<void>;
+  /** Refresh model lists through the shared per-provider orchestrator. */
+  onRefreshModels?: (providerIds: string[]) => void | Promise<void>;
+  /** Connected providers with a working model source. */
+  refreshableProviders?: string[];
+  /** Per-provider cache timestamps for the refresh tooltips. */
+  modelCacheInfo?: Record<string, ModelCacheStatus>;
   onOpenInNewTab?: (entry: FSEntry, rootId: string) => void;
   /** Resolve a file or folder as a chat context chip (desktop reads the file
    *  content, or builds a subtree listing for `kind: "dir"` — `path: ""` means
@@ -639,6 +644,9 @@ export function AppShell(props: AppShellProps) {
           displayText={props.aiDisplayText}
           onSelectModel={props.onSelectAiModel}
           onManageModels={props.onOpenSettings}
+          onRefreshModels={props.onRefreshModels}
+          refreshableProviders={props.refreshableProviders}
+          modelCacheInfo={props.modelCacheInfo}
           contextItems={s.aiContextItems()}
           activeFileContext={s.activeFileContext()}
           onRemoveContext={s.removeAiContext}
@@ -727,7 +735,9 @@ export function AppShell(props: AppShellProps) {
           onSaveCustomProvider={(i) => props.onSaveCustomProvider?.(i)}
           onConnectProvider={(i) => props.onConnectProvider?.(i)}
           onRemoveProvider={(ids) => props.onRemoveProvider?.(ids)}
-          onRefreshModels={(id) => props.onRefreshModels?.(id)}
+          onRefreshModels={(ids) => props.onRefreshModels?.(ids)}
+          refreshableProviders={props.refreshableProviders ?? []}
+          modelCacheInfo={props.modelCacheInfo}
           mcpServers={props.mcpServers ?? []}
           skills={props.skills ?? []}
           onSaveMcpServer={(s) => props.onSaveMcpServer?.(s)}

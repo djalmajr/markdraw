@@ -64,8 +64,15 @@ import {
   aiIndexSync,
   type EmbeddingMeta,
 } from "./lib/ai-index.ts";
-import { fetchModels } from "@markdraw/ai/model-catalog.ts";
+import { fetchModels, isOpenAiChatModelId } from "@markdraw/ai/model-catalog.ts";
 import { loadAIConfig, loadUserAIConfig, saveAIConfig, saveFetchedModels } from "./lib/ai-config.ts";
+import { readModelCache } from "./lib/model-cache.ts";
+import {
+  canRefreshProvider,
+  refreshProviderModels,
+  refreshStaleProviders,
+  staleProviderIds,
+} from "./lib/model-refresh.ts";
 import { buildMcpTools } from "@markdraw/ai/mcp-tools.ts";
 import {
   createMcpBridge,
@@ -478,6 +485,20 @@ export function App() {
       // Independent of config-load success — the builtins-only fallback still
       // needs its keychain probe so connected providers surface in the pickers.
       await refreshConnectedProviders();
+      // Background model-list refresh: stale/never-fetched connected providers
+      // only, one at a time. No error toast — the old list stays usable.
+      const stale = staleProviderIds(refreshableProviderIds(), readModelCache());
+      if (stale.length > 0) {
+        void refreshStaleProviders(stale, {
+          providers: aiConfig().provider,
+          apiKeyFor: (id) => getApiKey(id),
+        })
+          .then((result) => {
+            if (result.refreshed.length === 0) return;
+            return reloadAiConfigAndProviders().then(() => syncModelCacheInfo());
+          })
+          .catch(() => {});
+      }
       // (MCP discovery from connected tools runs via a reactive effect keyed on
       // the open roots + provider connectivity — see below.)
       // A previously-saved "Complete" tier downgrades to "Fast" when no embedding
@@ -506,6 +527,23 @@ export function App() {
   // (dodges webview CORS); a failure is non-fatal — the table covers every
   // built-in model on its own.
   const [modelsDevIndex, setModelsDevIndex] = createSignal<ModelsDevReasoningIndex | null>(null);
+  // Timestamps of the versioned model cache — feeds the refresh tooltips and is
+  // re-read after every manual/background refresh (localStorage isn't reactive).
+  const [modelCacheInfo, setModelCacheInfo] = createSignal<
+    Record<string, { fetchedAt?: string; source?: string }>
+  >({});
+  function syncModelCacheInfo(): void {
+    const cache = readModelCache();
+    setModelCacheInfo(
+      Object.fromEntries(
+        Object.entries(cache).map(([id, entry]) => [
+          id,
+          { fetchedAt: entry.fetchedAt, source: entry.source },
+        ]),
+      ),
+    );
+  }
+  syncModelCacheInfo();
   onSettled(() => {
     void fetchModelsDevReasoning(tauriFetch)
       .then(setModelsDevIndex)
@@ -605,6 +643,15 @@ export function App() {
     setAiConfig(config);
     await refreshConnectedProviders(config);
   }
+
+  /** Connected providers whose models can actually be refreshed (the UI shows
+   *  the icon only for these; a subscription that isn't connected is never
+   *  touched at startup). */
+  const refreshableProviderIds = createMemo(() =>
+    Object.entries(aiConfig().provider)
+      .filter(([id, provider]) => connectedProviders()[id] && canRefreshProvider(id, provider))
+      .map(([id]) => id),
+  );
 
   // Model picker shown in the chat composer footer. Reads `aiConfig()` so it
   // re-derives when the selection changes (selectAiModel bumps the config).
@@ -823,13 +870,8 @@ export function App() {
     );
     const ids = list.map((mdl) => mdl.id);
     // OpenAI's /v1/models also lists embeddings, audio, image and legacy models.
-    // Keep only chat-capable ids (prefix allowlist + non-chat denylist) so the
-    // picker isn't flooded. Other openai-compatible providers return clean lists.
-    if (provider?.kind === "openai") {
-      const CHAT_OK = /^(gpt-|o\d|chatgpt-)/;
-      const NON_CHAT = /(embedding|whisper|tts|audio|image|moderation|realtime|transcribe|search|dall-e)/;
-      return ids.filter((id) => CHAT_OK.test(id) && !NON_CHAT.test(id));
-    }
+    // The chat-only rule lives in the shared reader, not duplicated here.
+    if (provider?.kind === "openai") return ids.filter(isOpenAiChatModelId);
     return ids;
   }
 
@@ -926,25 +968,18 @@ export function App() {
    *  is cleared). Custom providers — present in the raw user config with
    *  kind+name — are also dropped from ai.json; built-ins keep their catalog
    *  entry and merely lose the credential (the connected filter hides them). */
-  /** Re-fetch a provider's live model list (openai-compatible /models) using the
-   *  stored key and overwrite its catalog entry. Used by the "Refresh models"
-   *  action on the provider page. No-ops for providers without a baseURL. */
-  async function refreshModels(providerId: string): Promise<void> {
-    const provider = aiConfig().provider[providerId];
-    if (!provider?.options?.baseURL || isCliProviderKind(provider.kind)) return;
-    const key = (await getApiKey(providerId)) ?? "";
-    let ids: string[] = [];
-    try {
-      ids = await listAiModels(providerId, key);
-    } catch {
-      ids = [];
-    }
-    if (!ids.length) return;
-    // Fetched ids go to the versioned localStorage cache; ai.json keeps ONLY
-    // hand-written models, so a refresh can never erase the user's list.
-    saveFetchedModels(providerId, ids, "/models");
-    const selected = getStoredAiModel();
-    setAiConfig(await loadAIConfig(aiConfig(), selected ? [selected] : []));
+  /** Refresh one or several providers through the shared orchestrator. The
+   *  OpenCode Go pair is deduplicated there; a failure leaves every cache entry
+   *  and every hand-written model untouched. */
+  async function refreshModels(providerIds: string | string[]): Promise<void> {
+    const ids = Array.isArray(providerIds) ? providerIds : [providerIds];
+    const result = await refreshProviderModels(ids, {
+      providers: aiConfig().provider,
+      apiKeyFor: (id) => getApiKey(id),
+    });
+    if (result.refreshed.length === 0) throw new Error("model refresh failed");
+    await reloadAiConfigAndProviders();
+    syncModelCacheInfo();
   }
 
   async function removeProvider(ids: string[]): Promise<void> {
@@ -3379,6 +3414,8 @@ export function App() {
       aiSelectedModel={getStoredAiModel()}
       aiAllModels={aiModelGroupsAll()}
       aiHiddenModels={hiddenModels()}
+      refreshableProviders={refreshableProviderIds()}
+      modelCacheInfo={modelCacheInfo()}
       onToggleModel={toggleHiddenModel}
       indexingTier={indexingTier()}
       onIndexingTierChange={(t) => {
