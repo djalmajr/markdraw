@@ -308,10 +308,13 @@ impl Endpoint {
     }
 }
 pub async fn connect(path: &Path) -> io::Result<(Stream, String)> {
-    let security = Security::new()?;
-    let _directory = security.open_directory(path)?;
-    let token = security.read_token(&path.join("token"))?;
-    let name = pipe_name(&security.sid);
+    let (_directory, token, name) = {
+        let security = Security::new()?;
+        let directory = security.open_directory(path)?;
+        let token = security.read_token(&path.join("token"))?;
+        let name = pipe_name(&security.sid);
+        (directory, token, name)
+    };
     // ERROR_PIPE_BUSY is transient while the listener publishes its next instance.
     for _ in 0..50 {
         match ClientOptions::new().open(&name) {

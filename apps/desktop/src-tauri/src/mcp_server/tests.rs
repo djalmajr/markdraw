@@ -68,14 +68,22 @@ fn registry_is_atomic_and_ids_are_session_local() {
     assert_eq!(registry.list().unwrap(), serde_json::json!({"roots":[]}));
 }
 
+/// The origin Tauri treats as the app's own for IPC: `tauri://localhost`, or
+/// `http://tauri.localhost` where wry serves the custom protocol over HTTP
+/// (Windows and Android), as `tauri::manager` pins in its own tests.
+fn local_ipc_origin() -> tauri::Url {
+    if cfg!(windows) || cfg!(target_os = "android") {
+        "http://tauri.localhost".parse().unwrap()
+    } else {
+        "tauri://localhost".parse().unwrap()
+    }
+}
+
 #[cfg(unix)]
 fn fixture() -> tempfile::TempDir {
     // Honors TMPDIR when set, else the system temp dir (CI).
     use std::os::unix::fs::PermissionsExt;
-    let fixture = tempfile::tempdir_in(
-        std::env::temp_dir(),
-    )
-    .unwrap();
+    let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
     std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     fixture
 }
@@ -457,7 +465,7 @@ fn sec_review_tauri_command_respects_window_capability() {
     let app = tauri::test::mock_builder()
         .manage(registry.clone())
         .invoke_handler(tauri::generate_handler![crate::mcp_server::mcp_set_roots])
-        .build(tauri::generate_context!())
+        .build(crate::tauri_context())
         .unwrap();
     let webview =
         tauri::WebviewWindowBuilder::new(&app, "sec-review-no-capability", Default::default())
@@ -469,7 +477,7 @@ fn sec_review_tauri_command_respects_window_capability() {
             cmd: "mcp_set_roots".into(),
             callback: tauri::ipc::CallbackFn(0),
             error: tauri::ipc::CallbackFn(1),
-            url: "tauri://localhost".parse().unwrap(),
+            url: local_ipc_origin(),
             body: tauri::ipc::InvokeBody::Json(
                 json!({"roots":[{"name":"probe", "path":std::env::current_dir().unwrap()}]}),
             ),
@@ -496,7 +504,7 @@ fn sec_review_tauri_command_respects_window_capability() {
             cmd: "mcp_set_roots".into(),
             callback: tauri::ipc::CallbackFn(0),
             error: tauri::ipc::CallbackFn(1),
-            url: "tauri://localhost".parse().unwrap(),
+            url: local_ipc_origin(),
             body: tauri::ipc::InvokeBody::Json(
                 json!({"roots":[{"name":"main", "path":std::env::current_dir().unwrap()}]}),
             ),
@@ -516,7 +524,7 @@ fn sec_review_tauri_command_respects_window_capability() {
             cmd: "mcp_set_roots".into(),
             callback: tauri::ipc::CallbackFn(0),
             error: tauri::ipc::CallbackFn(1),
-            url: "tauri://localhost".parse().unwrap(),
+            url: local_ipc_origin(),
             body: tauri::ipc::InvokeBody::Json(json!({"roots": []})),
             headers: Default::default(),
             invoke_key: tauri::test::INVOKE_KEY.to_string(),
@@ -721,7 +729,7 @@ fn round2_manifest_keeps_existing_read_dir_callable() {
     let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
     let app = tauri::test::mock_builder()
         .invoke_handler(tauri::generate_handler![crate::read_dir])
-        .build(tauri::generate_context!())
+        .build(crate::tauri_context())
         .unwrap();
     let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
@@ -732,7 +740,7 @@ fn round2_manifest_keeps_existing_read_dir_callable() {
             cmd: "read_dir".into(),
             callback: tauri::ipc::CallbackFn(0),
             error: tauri::ipc::CallbackFn(1),
-            url: "tauri://localhost".parse().unwrap(),
+            url: local_ipc_origin(),
             body: tauri::ipc::InvokeBody::Json(json!({"path":fixture.path()})),
             headers: Default::default(),
             invoke_key: tauri::test::INVOKE_KEY.to_string(),
