@@ -25,15 +25,33 @@ const ProviderKindSchema = v.picklist([
   "antigravity-cli",
 ] as const);
 
+/** A fetched catalog may only know the context window (or neither size), so
+ *  limits are partial here; hand-written entries still accept the full shape.
+ *  Consumers that need a number already read `limit?.context` as optional. */
 const ModelLimitSchema = v.object({
-  context: v.number(),
-  output: v.number(),
+  context: v.optional(v.number()),
+  output: v.optional(v.number()),
 });
 
 /** Reasoning-effort labels a model exposes in the composer's effort picker.
  *  Shared with `@markdraw/ai/reasoning.ts` (the OpenCode-ported source of truth)
  *  so the schema and the picker can never drift. */
 const ReasoningLevelSchema = v.picklist(REASONING_LABELS);
+
+/** One model from a fetched catalog (the localStorage model cache). Fields the
+ *  catalog doesn't provide are omitted; `name` falls back to the id on merge. */
+const CachedModelSchema = v.object({
+  name: v.optional(v.string()),
+  limit: v.optional(ModelLimitSchema),
+  reasoning: v.optional(v.array(ReasoningLevelSchema)),
+});
+
+/** A provider's fetched list, versioned by the localStorage key holding it. */
+const ModelCacheEntrySchema = v.object({
+  source: v.string(),
+  fetchedAt: v.string(),
+  models: v.record(v.string(), CachedModelSchema),
+});
 
 const ModelConfigSchema = v.object({
   name: v.string(),
@@ -189,6 +207,10 @@ const UserAIConfigSchema = v.object({
 type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
 type ModelLimit = v.InferOutput<typeof ModelLimitSchema>;
 type ReasoningLevel = v.InferOutput<typeof ReasoningLevelSchema>;
+type CachedModel = v.InferOutput<typeof CachedModelSchema>;
+type ModelCacheEntry = v.InferOutput<typeof ModelCacheEntrySchema>;
+/** Fetched lists keyed by provider id — the shape stored in localStorage. */
+type ModelCache = Record<string, ModelCacheEntry>;
 type ModelConfig = v.InferOutput<typeof ModelConfigSchema>;
 type EmbeddingModelConfig = v.InferOutput<typeof EmbeddingModelConfigSchema>;
 type ProviderOptions = v.InferOutput<typeof ProviderOptionsSchema>;
@@ -227,29 +249,59 @@ function mergeEmbeddingModels(
   return Object.keys(merged).length > 0 ? { embeddingModels: merged } : {};
 }
 
+/** Turn fetched catalog entries into resolved model configs (id as the name
+ *  fallback). Pure: the caller owns the cache object and it is never mutated. */
+function cachedModels(
+  models: Record<string, CachedModel> | undefined,
+): Record<string, ModelConfig> {
+  const result: Record<string, ModelConfig> = {};
+  for (const [id, cached] of Object.entries(models ?? {})) {
+    result[id] = {
+      name: cached.name ?? id,
+      ...(cached.limit ? { limit: cached.limit } : {}),
+      ...(cached.reasoning ? { reasoning: cached.reasoning } : {}),
+    };
+  }
+  return result;
+}
+
 /**
- * Deep-merge a user config over the built-in provider catalog, producing a
- * fully-resolved `AIConfig`. Known providers inherit `npm`/`name`/`models`
- * from the builtin and let the user override `options` (e.g. baseURL) and add
- * models. Unknown ("custom") providers must supply at least `npm` + `name`,
- * otherwise they are dropped (an incomplete custom provider can't build an
- * adapter). Engine-agnostic: pass whichever builtin catalog the chosen engine
- * defines.
+ * Deep-merge the user config over the built-in provider catalog, producing a
+ * fully-resolved `AIConfig`. Model lists merge in the order BUILTIN → CACHE →
+ * USER: a fetched list can replace an embedded model but never a hand-written
+ * one. `keep` carries the selected `provider/model` refs plus the config that
+ * was live before a refresh, so a selection that drops out of a new cached
+ * list still resolves exactly as it did before.
+ *
+ * Known providers inherit `npm`/`name`/`options` from the builtin; unknown
+ * ("custom") providers must supply at least `kind` + `name`, otherwise they
+ * are dropped. Cache entries alone never create a provider. Engine-agnostic:
+ * pass whichever builtin catalog the chosen engine defines.
  */
 function mergeConfigs(
   builtins: Record<string, ProviderConfig>,
   user: UserAIConfig,
+  cache: ModelCache = {},
+  keep?: { selected?: string[]; previous?: AIConfig },
 ): AIConfig {
   const provider: Record<string, ProviderConfig> = structuredClone(builtins);
+  // Cache over builtins. It cannot add a provider (no kind/name to build an
+  // adapter from), so only entries matching a known provider are applied.
+  for (const [id, entry] of Object.entries(cache)) {
+    const base = provider[id];
+    if (base) base.models = { ...base.models, ...cachedModels(entry.models) };
+  }
   for (const [id, up] of Object.entries(user.provider ?? {})) {
     const base = provider[id];
+    const fromCache = cachedModels(cache[id]?.models);
     if (base) {
       provider[id] = {
         kind: up.kind ?? base.kind,
         name: up.name ?? base.name,
         npm: up.npm ?? base.npm,
         options: mergeOptions(base.options, up.options),
-        models: { ...base.models, ...(up.models ?? {}) },
+        // Manual entries are last, so they always win over cached/builtin ids.
+        models: { ...base.models, ...fromCache, ...(up.models ?? {}) },
         ...mergeEmbeddingModels(base.embeddingModels, up.embeddingModels),
         ...(up.connectGroup ?? base.connectGroup
           ? { connectGroup: up.connectGroup ?? base.connectGroup }
@@ -264,13 +316,26 @@ function mergeConfigs(
         name: up.name,
         npm: up.npm,
         options: up.options,
-        models: up.models ?? {},
+        models: { ...fromCache, ...(up.models ?? {}) },
         ...mergeEmbeddingModels(undefined, up.embeddingModels),
         ...(up.connectGroup ? { connectGroup: up.connectGroup } : {}),
         ...(up.curatedModels ? { curatedModels: up.curatedModels } : {}),
       };
     }
     // else: incomplete custom provider — ignored
+  }
+  // A selected model that a refresh dropped from the cache stays resolvable,
+  // with its previous name/limit intact (never a synthesized `{name: id}`).
+  for (const ref of keep?.selected ?? []) {
+    const slash = ref.indexOf("/");
+    if (slash <= 0 || slash >= ref.length - 1) continue;
+    const providerId = ref.slice(0, slash);
+    const modelId = ref.slice(slash + 1);
+    const previous = keep?.previous?.provider[providerId]?.models[modelId];
+    const current = provider[providerId];
+    if (previous && current && !current.models[modelId]) {
+      current.models[modelId] = structuredClone(previous);
+    }
   }
   return {
     model: user.model,
@@ -299,9 +364,12 @@ function providerCanEmbed(p: ProviderConfig): boolean {
 
 export {
   type AIConfig,
+  type CachedModel,
   type EmbeddingModelConfig,
   type MCPServerConfig,
   type MCPTransport,
+  type ModelCache,
+  type ModelCacheEntry,
   type ModelConfig,
   type ModelLimit,
   type ProviderConfig,
@@ -311,9 +379,11 @@ export {
   type UserAIConfig,
   type UserProviderConfig,
   AIConfigSchema,
+  CachedModelSchema,
   EmbeddingModelConfigSchema,
   MCPServerConfigSchema,
   MCPTransportSchema,
+  ModelCacheEntrySchema,
   ModelConfigSchema,
   ProviderConfigSchema,
   ProviderKindSchema,

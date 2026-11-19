@@ -4,6 +4,7 @@ import IconSearch from "~icons/lucide/search";
 import IconSlidersHorizontal from "~icons/lucide/sliders-horizontal";
 import IconCheck from "~icons/lucide/check";
 import IconChevronDown from "~icons/lucide/chevron-down";
+import IconRefreshCw from "~icons/lucide/refresh-cw";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
@@ -12,6 +13,41 @@ export interface ModelOption {
   /** "provider/model" ref. */
   value: string;
   label: string;
+}
+
+export interface ModelCacheStatus {
+  fetchedAt?: string;
+  source?: string;
+}
+
+const messages = m as unknown as Record<string, () => string>;
+const LABEL_FALLBACKS: Record<string, string> = {
+  settings_ai_refresh_models: "Refresh models",
+  ai_models_refresh_error: "Could not update the model list.",
+  ai_models_refreshing: "Updating…",
+  ai_models_updated: "Updated",
+  ai_models_never_updated: "Never updated",
+};
+
+/** Generated messages lag behind the source JSON until `i18n:compile` runs. */
+export function modelRefreshLabel(key: string): string {
+  return messages[key]?.() ?? LABEL_FALLBACKS[key] ?? key;
+}
+
+export function modelCacheFreshnessLabel(fetchedAt: string | undefined, locale: string): string {
+  const updated = modelRefreshLabel("ai_models_updated");
+  if (!fetchedAt) return `${updated}: ${modelRefreshLabel("ai_models_never_updated")}`;
+  const time = Date.parse(fetchedAt);
+  if (!Number.isFinite(time)) return `${updated}: ${modelRefreshLabel("ai_models_never_updated")}`;
+  const minutes = Math.max(0, Math.floor((Date.now() - time) / 60_000));
+  const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const when =
+    minutes < 60
+      ? relative.format(-minutes, "minute")
+      : minutes < 60 * 24
+        ? relative.format(-Math.floor(minutes / 60), "hour")
+        : relative.format(-Math.floor(minutes / (60 * 24)), "day");
+  return `${updated}: ${when}`;
 }
 
 export interface ModelGroup {
@@ -36,6 +72,12 @@ export interface ModelPickerProps {
   /** "⚙" — open the model manager (Settings → AI), where providers are
    *  connected/added and model visibility is toggled. */
   onManage?: () => void;
+  /** Refresh the model list of the CURRENT provider only (its id is passed). */
+  onRefreshModels?: (providerIds: string[]) => void | Promise<void>;
+  /** Connected providers with a working model source. */
+  refreshableProviders?: string[];
+  /** Per-provider cache timestamps, for the refresh tooltip. */
+  modelCacheInfo?: Record<string, ModelCacheStatus>;
 }
 
 /**
@@ -48,6 +90,32 @@ export interface ModelPickerProps {
 export function ModelPicker(props: ModelPickerProps): JSX.Element {
   const [open, setOpen] = createSignal(false);
   const [query, setQuery] = createSignal("");
+  const [refreshing, setRefreshing] = createSignal(false);
+  const [refreshError, setRefreshError] = createSignal(false);
+  const currentProviderId = (): string => props.current?.split("/")[0] ?? "";
+  const canRefresh = (): boolean =>
+    !!props.onRefreshModels &&
+    !!currentProviderId() &&
+    (props.refreshableProviders ?? []).includes(currentProviderId());
+  const refreshTooltip = (): string =>
+    `${modelRefreshLabel("settings_ai_refresh_models")} · ${modelCacheFreshnessLabel(
+      props.modelCacheInfo?.[currentProviderId()]?.fetchedAt,
+      useLocale(),
+    )}`;
+
+  async function refreshCurrentProvider(): Promise<void> {
+    if (!canRefresh()) return;
+    setRefreshing(true);
+    setRefreshError(false);
+    try {
+      await props.onRefreshModels?.([currentProviderId()]);
+    } catch {
+      // Never echo an upstream error: it can carry a key, a URL or a header.
+      setRefreshError(true);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const filtered = createMemo<ModelGroup[]>(() => {
     const q = query().trim().toLowerCase();
@@ -112,6 +180,19 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
               onInput={(e) => setQuery(e.currentTarget.value)}
             />
           </div>
+          <Show when={canRefresh()}>
+            <button
+              type="button"
+              class="ai-mp-icon-btn"
+              data-model-refresh={currentProviderId()}
+              title={refreshTooltip()}
+              aria-label={refreshTooltip()}
+              disabled={refreshing()}
+              onClick={() => void refreshCurrentProvider()}
+            >
+              <IconRefreshCw width={15} height={15} class={refreshing() ? "animate-spin" : ""} />
+            </button>
+          </Show>
           <Show when={props.onManage}>
             <button
               type="button"
@@ -127,6 +208,11 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
             </button>
           </Show>
         </div>
+        <Show when={refreshError()}>
+          <p class="ai-mp-empty ai-refresh-error" role="status">
+            {(useLocale(), modelRefreshLabel("ai_models_refresh_error"))}
+          </p>
+        </Show>
         <div class="ai-mp-list" ref={scrollActiveIntoView}>
           <For each={filtered()}>
             {(group) => (

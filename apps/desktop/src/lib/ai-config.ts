@@ -4,14 +4,22 @@
 
 import { invoke } from "./chaos-invoke.ts";
 import type { AIConfig, UserAIConfig } from "@markdraw/ai/config-schema.ts";
-import { parseUserConfig } from "@markdraw/ai/config-schema.ts";
-import { withBuiltins } from "@markdraw/ai/builtin-providers.ts";
+import { mergeConfigs, parseUserConfig } from "@markdraw/ai/config-schema.ts";
+import { BUILTIN_PROVIDERS } from "@markdraw/ai/builtin-providers.ts";
+import { readModelCache, saveFetchedModels } from "./model-cache.ts";
 
-/** Load the fully-resolved config: ai.json (if any) merged over the builtins. */
-export async function loadAIConfig(): Promise<AIConfig> {
+export { saveFetchedModels };
+
+/** Load the effective config: builtins → localStorage cache → ai.json (manual).
+ *  `previous` + `selected` keep a chosen model that a refresh dropped from the
+ *  cache resolvable with its old definition. */
+export async function loadAIConfig(
+  previous?: AIConfig,
+  selected: string[] = [],
+): Promise<AIConfig> {
   const raw = await invoke<string | null>("ai_read_config");
   const user = parseUserConfig(raw) ?? {};
-  return withBuiltins(user);
+  return mergeConfigs(BUILTIN_PROVIDERS, user, readModelCache(), { previous, selected });
 }
 
 /** Load the RAW user config (pre-merge) so callers can read-modify-write ai.json

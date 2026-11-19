@@ -1,5 +1,6 @@
 import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { waitFor } from "@solidjs/testing-library";
 import { cleanup, fireEvent, render, screen, within } from "@solidjs/testing-library";
 import { ModelPicker, type ModelGroup } from "./model-picker.tsx";
 
@@ -103,5 +104,80 @@ describe("ModelPicker", () => {
     fireEvent.input(search, { target: { value: "zzzzz" } });
     flush();
     expect(baseElement.querySelector(".ai-mp-empty")).not.toBeNull();
+  });
+});
+
+describe("ModelPicker — refresh do provider atual", () => {
+  const cacheInfo = {
+    openai: { fetchedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+  };
+
+  function setup(overrides: Record<string, unknown> = {}) {
+    const onRefreshModels = vi.fn(async () => {});
+    const result = render(() => (
+      <ModelPicker
+        groups={GROUPS}
+        current="openai/gpt-5"
+        currentLabel="GPT-5.4"
+        onSelect={() => {}}
+        onRefreshModels={onRefreshModels as never}
+        refreshableProviders={["openai"]}
+        modelCacheInfo={cacheInfo}
+        {...overrides}
+      />
+    ));
+    open(result.baseElement);
+    return { ...result, onRefreshModels };
+  }
+
+  it("só mostra o ícone para o provider conectado e com fonte", () => {
+    const shown = setup();
+    expect(shown.baseElement.querySelector("[data-model-refresh]")).not.toBeNull();
+    cleanup();
+    const hidden = setup({ refreshableProviders: ["opencode"] });
+    expect(hidden.baseElement.querySelector("[data-model-refresh]")).toBeNull();
+  });
+
+  it("tem rótulo acessível com a ação e a última atualização", () => {
+    const { baseElement } = setup();
+    const button = baseElement.querySelector("[data-model-refresh]") as HTMLElement;
+    expect(button.getAttribute("aria-label")).toContain("Refresh models");
+    expect(button.getAttribute("aria-label")).toContain("Updated:");
+    expect(button.getAttribute("title")).toBe(button.getAttribute("aria-label"));
+  });
+
+  it("clica e atualiza somente o provider do modelo atual", () => {
+    const { baseElement, onRefreshModels } = setup();
+    fireEvent.click(baseElement.querySelector("[data-model-refresh]") as HTMLElement);
+    flush();
+    expect(onRefreshModels).toHaveBeenCalledTimes(1);
+    expect(onRefreshModels).toHaveBeenCalledWith(["openai"]);
+  });
+
+  it("mostra o estado girando enquanto atualiza e o remove ao terminar", async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const { baseElement } = setup({ onRefreshModels: () => pending });
+    const button = baseElement.querySelector("[data-model-refresh]") as HTMLElement;
+    fireEvent.click(button);
+    flush();
+    expect(button.querySelector("svg.animate-spin")).not.toBeNull();
+    expect(button.hasAttribute("disabled")).toBe(true);
+    finish();
+    await waitFor(() => expect(button.querySelector("svg.animate-spin")).toBeNull());
+    expect(button.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("mostra erro curto, sem detalhe técnico nem chave", async () => {
+    const { baseElement } = setup({
+      onRefreshModels: () => Promise.reject(new Error("Authorization Bearer SECRET-TOKEN failed")),
+    });
+    fireEvent.click(baseElement.querySelector("[data-model-refresh]") as HTMLElement);
+    await waitFor(() => expect(baseElement.querySelector(".ai-refresh-error")).not.toBeNull());
+    const error = baseElement.querySelector(".ai-refresh-error") as HTMLElement;
+    expect(error.textContent).toContain("Could not update the model list.");
+    expect(error.textContent).not.toContain("SECRET-TOKEN");
   });
 });

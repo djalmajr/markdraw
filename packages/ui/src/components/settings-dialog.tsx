@@ -14,6 +14,7 @@ import IconPencil from "~icons/lucide/pencil";
 import IconPalette from "~icons/lucide/palette";
 import IconKeyboard from "~icons/lucide/keyboard";
 import IconRotate from "~icons/lucide/rotate-ccw";
+import IconRefreshCw from "~icons/lucide/refresh-cw";
 import IconInfo from "~icons/lucide/info";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -51,7 +52,12 @@ import {
   SwitchThumb,
 } from "./ui/switch.tsx";
 import { TierCard } from "./settings/tier-card.tsx";
-import { ModelPicker } from "./model-picker.tsx";
+import {
+  ModelPicker,
+  modelCacheFreshnessLabel,
+  modelRefreshLabel,
+  type ModelCacheStatus,
+} from "./model-picker.tsx";
 import { confirm } from "./confirm-dialog.tsx";
 
 const messages = m as unknown as Record<string, () => string>;
@@ -196,8 +202,12 @@ export interface SettingsDialogProps {
   /** Disconnect a provider group — receives EVERY provider id behind the merged
    *  base name (e.g. "OpenCode Go" → ["opencode-go", "opencode-go-chat"]). */
   onRemoveProvider?: (ids: string[]) => void | Promise<void>;
-  /** Re-fetch a provider's live model list. */
-  onRefreshModels?: (providerId: string) => void | Promise<void>;
+  /** Refresh the listed providers' model lists through the shared orchestrator. */
+  onRefreshModels?: (providerIds: string[]) => void | Promise<void>;
+  /** Connected providers with a working model source (gates the refresh icon). */
+  refreshableProviders?: string[];
+  /** Per-provider cache timestamps for the refresh tooltip. */
+  modelCacheInfo?: Record<string, ModelCacheStatus>;
   appVersion?: string;
   platform?: Platform;
   /** Configured MCP servers with live connection/tool status. */
@@ -694,24 +704,47 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     }
     return undefined;
   };
-  /** Fetchable + connected ids in the group → eligible for "Refresh models". */
+  /** Connected ids in the group with a real source — includes CLI providers. */
   const groupRefreshableIds = (): string[] =>
-    groupApiIds().filter(
+    (providerViewData()?.ids ?? []).filter(
       (id) =>
-        props.aiProviders.find((p) => p.id === id)?.fetchable && connectedProviderIds().has(id),
+        (props.refreshableProviders ?? []).includes(id) && connectedProviderIds().has(id),
     );
-  const [refreshing, setRefreshing] = createSignal(false);
-  async function refreshGroupModels(): Promise<void> {
-    const ids = groupRefreshableIds();
-    if (ids.length === 0) return;
-    setError(null);
-    setRefreshing(true);
+  const headerRefreshIds = (group: { models: { value: string }[] }): string[] =>
+    groupProviderIds(group).filter(
+      (id) =>
+        (props.refreshableProviders ?? []).includes(id) && connectedProviderIds().has(id),
+    );
+  const refreshKey = (ids: string[]): string => ids.join("+");
+  const [refreshState, setRefreshState] = createSignal<
+    Record<string, { busy: boolean; error: boolean }>
+  >({});
+  const stateFor = (key: string): { busy: boolean; error: boolean } =>
+    refreshState()[key] ?? { busy: false, error: false };
+  const refreshTooltip = (ids: string[]): string => {
+    const stamps = ids
+      .map((id) => props.modelCacheInfo?.[id]?.fetchedAt)
+      .filter((at): at is string => !!at)
+      .sort();
+    return `${modelRefreshLabel("settings_ai_refresh_models")} · ${modelCacheFreshnessLabel(
+      stamps.at(-1),
+      useLocale(),
+    )}`;
+  };
+  async function refreshGroupModels(ids: string[]): Promise<void> {
+    const eligible = ids.filter(
+      (id) =>
+        (props.refreshableProviders ?? []).includes(id) && connectedProviderIds().has(id),
+    );
+    if (eligible.length === 0) return;
+    const key = refreshKey(eligible);
+    setRefreshState((cur) => ({ ...cur, [key]: { busy: true, error: false } }));
     try {
-      for (const id of ids) await props.onRefreshModels?.(id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRefreshing(false);
+      await props.onRefreshModels?.(eligible);
+      setRefreshState((cur) => ({ ...cur, [key]: { busy: false, error: false } }));
+    } catch {
+      // Fixed, short text only: an upstream error can carry a key or URL.
+      setRefreshState((cur) => ({ ...cur, [key]: { busy: false, error: true } }));
     }
   }
   /** Subscription description keyed to THIS card's CLI (so the Codex card never
@@ -750,19 +783,6 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
     setModels(props.aiProviders.find((p) => p.id === id)?.models ?? []);
     setModelId("");
     setSaved(false);
-  }
-
-  async function loadModels(): Promise<void> {
-    setLoadingAction("models");
-    setError(null);
-    try {
-      const list = await props.onListModels(providerId(), apiKey());
-      setModels(list);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoadingAction(null);
-    }
   }
 
   async function save(): Promise<void> {
@@ -877,9 +897,18 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
             </div>
             <Show when={groupRefreshableIds().length > 0}>
               <div class="settings-row settings-row-end">
-                <Button size="sm" onClick={() => void refreshGroupModels()} loading={refreshing()}>
+                <Button
+                  size="sm"
+                  onClick={() => void refreshGroupModels(groupRefreshableIds())}
+                  loading={stateFor(refreshKey(groupRefreshableIds())).busy}
+                >
                   {(useLocale(), label("settings_ai_refresh_models"))}
                 </Button>
+                <Show when={stateFor(refreshKey(groupRefreshableIds())).error}>
+                  <span class="ai-refresh-error" role="status">
+                    {(useLocale(), modelRefreshLabel("ai_models_refresh_error"))}
+                  </span>
+                </Show>
               </div>
             </Show>
           </Show>
@@ -1027,6 +1056,23 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
                       : group.name)}
                   </span>
                   <div class="settings-models-group-actions">
+                    <Show when={headerRefreshIds(group).length > 0}>
+                      <button
+                        type="button"
+                        class="ai-mp-icon-btn"
+                        data-group-refresh={refreshKey(headerRefreshIds(group))}
+                        title={refreshTooltip(headerRefreshIds(group))}
+                        aria-label={refreshTooltip(headerRefreshIds(group))}
+                        disabled={stateFor(refreshKey(headerRefreshIds(group))).busy}
+                        onClick={() => void refreshGroupModels(headerRefreshIds(group))}
+                      >
+                        <IconRefreshCw
+                          width={14}
+                          height={14}
+                          class={stateFor(refreshKey(headerRefreshIds(group))).busy ? "animate-spin" : ""}
+                        />
+                      </button>
+                    </Show>
                     <button
                       type="button"
                       class="ai-mp-icon-btn"
@@ -1048,6 +1094,11 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
                       </SwitchControl>
                     </ToggleSwitch>
                   </div>
+                  <Show when={stateFor(refreshKey(headerRefreshIds(group))).error}>
+                    <p class="ai-refresh-error" role="status">
+                      {(useLocale(), modelRefreshLabel("ai_models_refresh_error"))}
+                    </p>
+                  </Show>
                 </div>
                 <For each={group.models}>
                   {(mdl) => (

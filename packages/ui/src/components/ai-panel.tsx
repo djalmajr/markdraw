@@ -17,7 +17,11 @@ import type { AiContextItem, AiInlineReference } from "../composables/ai-context
 import { Button } from "./ui/button.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { ScrollArea } from "./ui/scroll-area.tsx";
-import { ModelPicker, type ModelGroup } from "./model-picker.tsx";
+import {
+  ModelPicker,
+  type ModelCacheStatus,
+  type ModelGroup,
+} from "./model-picker.tsx";
 import { AiMessage } from "./ai-message.tsx";
 import { AiPlan, type AiPlanItemModel } from "./ai-plan.tsx";
 import { PillPicker } from "./pill-picker.tsx";
@@ -73,6 +77,12 @@ export interface AiPanelProps {
   onSelectModel?: (modelRef: string) => void;
   /** "⚙" in the picker — open Settings → AI (manage models / connect providers). */
   onManageModels?: () => void;
+  /** Refresh the current model's provider list through the shared orchestrator. */
+  onRefreshModels?: (providerIds: string[]) => void | Promise<void>;
+  /** Connected providers with a working model source. */
+  refreshableProviders?: string[];
+  /** Per-provider cache timestamps for the refresh tooltip. */
+  modelCacheInfo?: Record<string, ModelCacheStatus>;
   /** Reasoning effort for the chosen model (an OpenCode-style label, e.g.
    *  "default"|"low"|"high"|"max") + handler. Rendered next to the model picker
    *  — it only applies to the selected model, so it lives by the model, not in
@@ -1487,6 +1497,9 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
             currentLabel={currentModelLabel()}
             onSelect={(v) => props.onSelectModel?.(v)}
             onManage={props.onManageModels}
+            onRefreshModels={props.onRefreshModels}
+            refreshableProviders={props.refreshableProviders}
+            modelCacheInfo={props.modelCacheInfo}
           />
           {/* Reasoning effort — per-model: shown only once a specific model is
               selected AND that model actually exposes effort levels. The level

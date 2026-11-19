@@ -39,15 +39,29 @@ export function openCodeReasoningVariants(modelId: string): ReasoningLabel[] | n
   if (/qwen|big-pickle|cohere/.test(id)) return [];
   if (/kimi|k2p/.test(id)) return []; // Kimi: thinking on by default, no picker
   if (/glm/.test(id) && !/glm-?5\.2/.test(id)) return []; // only GLM-5.2 has a picker
-  if (/minimax/.test(id) && !/minimax-m3/.test(id)) return []; // only MiniMax M3
+  // MiniMax M3 (toggle) and M3.1 Flash (effort) both have a picker.
+  if (/minimax/.test(id) && !/^minimax-m3(?:\.1-flash)?$/.test(id)) return [];
   if (/deepseek/.test(id) && /(chat|reasoner|r1|v3)/.test(id)) return []; // only V4
   if (/grok/.test(id) && !/grok-3-mini/.test(id)) return []; // only grok-3-mini
 
   // ── Per-family label sets ──
   if (/glm-?5\.2/.test(id)) return ["high", "max"];
   if (/deepseek-v4/.test(id)) return ["low", "medium", "high", "max"];
+  // models.dev `opencode-go` / opencode.ai Go catalog: M3.1 Flash declares
+  // effort low..max; plain M3 is a thinking toggle.
+  if (/^minimax-m3\.1-flash$/.test(id)) return ["low", "medium", "high", "xhigh", "max"];
   if (/minimax-m3/.test(id)) return ["none", "thinking"];
   if (/grok-3-mini/.test(id)) return ["low", "high"];
+
+  // GPT-6 / GPT-5.6 in the Codex picker, cross-checked against models.dev
+  // `openai` reasoning_options. Not every GPT-6 variant declares "none";
+  // Codex's extra "ultra" level is not a REASONING_LABELS value, so it is not
+  // invented here.
+  if (/^gpt-6(?:\.2-(?:sol|astra)|\.1-sol|-(?:sol|astra))$/.test(id))
+    return ["low", "medium", "high", "xhigh", "max"];
+  if (/^gpt-6(?:\.1-terra|-luna)$/.test(id))
+    return ["none", "low", "medium", "high", "xhigh", "max"];
+  if (/^gpt-5\.6/.test(id)) return ["none", "low", "medium", "high", "xhigh", "max"];
 
   // OpenAI GPT-5.x (transform.ts L517–595)
   if (/gpt-5/.test(id)) {
@@ -62,12 +76,21 @@ export function openCodeReasoningVariants(modelId: string): ReasoningLabel[] | n
   // HYPHENS for the Claude version (claude-opus-4-8), so match "-<major>-<minor>"
   // rather than a dotted version (unlike GPT-5.x / GLM-5.2 above, which use dots).
   if (/claude|^opus|^sonnet|^haiku|fable/.test(id)) {
-    if (/opus-4-[789]|-[5-9]-\d|fable/.test(id)) return ["low", "medium", "high", "xhigh", "max"];
+    // agy models prints display names with dots ("Claude Opus 5.5 (High)");
+    // builtins use hyphens ("claude-opus-5-5"), already covered by -<major>-<minor>.
+    if (/opus-4-[789]|-[5-9]-\d|fable|claude (?:opus|sonnet) 5\.\d+/.test(id))
+      return ["low", "medium", "high", "xhigh", "max"];
     if (/-4-6(?!\d)/.test(id)) return ["low", "medium", "high", "max"];
     return ["high", "max"]; // classic thinking budget (e.g. Haiku 4.5)
   }
 
   // Google Gemini (transform.ts L626–663)
+  // Gemini 4 comes from agy display names/ids; models.dev `google` declares
+  // effort low..max for Neon/Hydrogen and low..high for Argon.
+  if (/gemini[- ]4[- ](?:neon|hydrogen)/.test(id)) return ["low", "medium", "high", "xhigh"];
+  if (/gemini[- ]4[- ]argon/.test(id)) return ["low", "medium", "high"];
+  // agy's Gemini 3.8 Flash display names use a space, not a hyphen.
+  if (/gemini[- ]3\.8/.test(id)) return ["low", "medium", "high"];
   if (/gemini-3/.test(id)) return /flash/.test(id) ? ["minimal", "low", "medium", "high"] : ["low", "medium", "high"];
   if (/gemini-2\.5/.test(id)) return ["high", "max"];
 

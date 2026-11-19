@@ -537,6 +537,116 @@ describe("SettingsDialog", () => {
     expect(avatar.querySelector(".settings-mcp-status-dot-connected")).not.toBeNull();
   });
 
+  describe("Manage models — refresh por provider", () => {
+    const allModels = [
+      {
+        id: "openai",
+        name: "OpenAI",
+        models: [{ value: "openai/gpt-5", label: "GPT-5" }],
+      },
+    ];
+    const cacheInfo = {
+      openai: { fetchedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() },
+    };
+
+    it("mostra o ícone só para grupos conectados com fonte, com rótulo e tooltip", () => {
+      const { baseElement } = setup({
+        allModels: [
+          ...allModels,
+          {
+            id: "anthropic",
+            name: "Anthropic",
+            models: [{ value: "anthropic/claude", label: "Claude" }],
+          },
+        ],
+        refreshableProviders: ["openai"],
+        modelCacheInfo: cacheInfo,
+      });
+      const icons = baseElement.querySelectorAll("[data-group-refresh]");
+      expect(icons.length).toBe(1);
+      const icon = icons[0] as HTMLElement;
+      expect(icon.getAttribute("data-group-refresh")).toBe("openai");
+      expect(icon.getAttribute("aria-label")).toContain("Refresh models");
+      expect(icon.getAttribute("aria-label")).toContain("Updated:");
+      expect(icon.getAttribute("title")).toBe(icon.getAttribute("aria-label"));
+    });
+
+    it("o clique passa todos os ids do grupo (OpenCode Go)", () => {
+      const onRefreshModels = vi.fn(async () => {});
+      const { baseElement } = setup({
+        allModels: [
+          {
+            id: "opencode",
+            name: "OpenCode Go",
+            models: [
+              { value: "opencode-go/claude", label: "Claude" },
+              { value: "opencode-go-chat/glm", label: "GLM" },
+            ],
+          },
+        ],
+        refreshableProviders: ["opencode-go", "opencode-go-chat"],
+        onRefreshModels: onRefreshModels as never,
+      });
+      fireEvent.click(baseElement.querySelector("[data-group-refresh]") as HTMLElement);
+      flush();
+      expect(onRefreshModels).toHaveBeenCalledTimes(1);
+      expect(onRefreshModels).toHaveBeenCalledWith(["opencode-go", "opencode-go-chat"]);
+    });
+
+    it("gira enquanto atualiza e mostra erro curto sem detalhe técnico", async () => {
+      let finish!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const onRefreshModels = vi.fn(() => pending);
+      const { baseElement } = setup({
+        allModels,
+        refreshableProviders: ["openai"],
+        onRefreshModels: onRefreshModels as never,
+      });
+      const icon = baseElement.querySelector("[data-group-refresh]") as HTMLElement;
+      fireEvent.click(icon);
+      flush();
+      expect(icon.querySelector("svg.animate-spin")).not.toBeNull();
+      expect(icon.hasAttribute("disabled")).toBe(true);
+      finish();
+      await waitFor(() => expect(icon.querySelector("svg.animate-spin")).toBeNull());
+      expect(baseElement.querySelector(".ai-refresh-error")).toBeNull();
+
+      // Segundo clique: falha com um erro que tenta carregar uma chave.
+      onRefreshModels.mockImplementationOnce(() =>
+        Promise.reject(new Error("Authorization Bearer SECRET-TOKEN failed")),
+      );
+      fireEvent.click(icon);
+      await waitFor(() => expect(baseElement.querySelector(".ai-refresh-error")).not.toBeNull());
+      const error = baseElement.querySelector(".ai-refresh-error") as HTMLElement;
+      expect(error.textContent).toContain("Could not update the model list.");
+      expect(error.textContent).not.toContain("SECRET-TOKEN");
+      expect(icon.querySelector("svg.animate-spin")).toBeNull();
+    });
+
+    it("o botão de texto Refresh da sub-página usa o mesmo handler", () => {
+      const onRefreshModels = vi.fn(async () => {});
+      const { baseElement } = setup({
+        allModels,
+        refreshableProviders: ["openai"],
+        onRefreshModels: onRefreshModels as never,
+      });
+      const edit = [...baseElement.querySelectorAll(".settings-models-group button")].find((b) =>
+        (b.getAttribute("aria-label") ?? "").startsWith("Edit provider"),
+      ) as HTMLElement;
+      fireEvent.click(edit);
+      flush();
+      const textButton = [...baseElement.querySelectorAll("button")].find(
+        (b) => (b.textContent ?? "").trim() === "Refresh models",
+      ) as HTMLElement;
+      expect(textButton).not.toBeUndefined();
+      fireEvent.click(textButton);
+      flush();
+      expect(onRefreshModels).toHaveBeenCalledWith(["openai"]);
+    });
+  });
+
   it("tool chips collapse past 6 and expand via Show more / Show less", () => {
     const tools = ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"];
     const { baseElement } = setup({
