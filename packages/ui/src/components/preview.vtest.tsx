@@ -1,7 +1,67 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { flush } from "solid-js";
-import { render } from "@solidjs/testing-library";
+import { cleanup, render, waitFor } from "@solidjs/testing-library";
+
+// Controlled diagram renderers: the readiness tests hold a diagram in a
+// promise while a navigation request arrives, then decide when (or whether)
+// it completes. Other tests keep the fast, successful default.
+const diagramCtl = vi.hoisted(() => ({
+  mode: {
+    mermaid: "resolve" as "resolve" | "pending" | "reject",
+    kroki: "resolve" as "resolve" | "pending" | "reject",
+  },
+  pending: {
+    mermaid: null as ((value: { svg: string }) => void) | null,
+    kroki: null as ((value: string) => void) | null,
+  },
+  started: { mermaid: [] as string[], kroki: [] as string[] },
+  reset() {
+    this.mode.mermaid = "resolve";
+    this.mode.kroki = "resolve";
+    this.pending.mermaid = null;
+    this.pending.kroki = null;
+    this.started.mermaid.length = 0;
+    this.started.kroki.length = 0;
+  },
+}));
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: () => {},
+    render: (id: string) => {
+      if (id === "mermaid-prewarm") {
+        return Promise.resolve({ svg: '<svg viewBox="0 0 10 10"></svg>' });
+      }
+      diagramCtl.started.mermaid.push(id);
+      if (diagramCtl.mode.mermaid === "reject") {
+        return Promise.reject(new Error("mermaid failed"));
+      }
+      if (diagramCtl.mode.mermaid === "pending") {
+        return new Promise<{ svg: string }>((resolve) => {
+          diagramCtl.pending.mermaid = resolve;
+        });
+      }
+      return Promise.resolve({ svg: '<svg viewBox="0 0 10 400"><text>Ready</text></svg>' });
+    },
+  },
+}));
+
+vi.mock("@markdraw/core/kroki.ts", () => ({
+  renderKroki: (_type: string, source: string) => {
+    diagramCtl.started.kroki.push(source);
+    if (diagramCtl.mode.kroki === "reject") {
+      return Promise.reject(new Error("kroki failed"));
+    }
+    if (diagramCtl.mode.kroki === "pending") {
+      return new Promise<string>((resolve) => {
+        diagramCtl.pending.kroki = resolve;
+      });
+    }
+    return Promise.resolve('<svg viewBox="0 0 10 400"><text>Ready</text></svg>');
+  },
+}));
+
 import { Preview, setupTocScrollTracking } from "./preview.tsx";
 import { FrontmatterPanel } from "./frontmatter-panel.tsx";
 import { ImageLightbox } from "./image-lightbox.tsx";
@@ -554,6 +614,209 @@ describe("Preview — navigation requests on an already-rendered document", () =
     flush();
     expect(opened).toHaveBeenCalledWith(true);
   });
+});
+
+describe("Preview — navigation readiness after post-processing", () => {
+  type DiagramEngine = "mermaid" | "kroki";
+  const NAV_HTML = '<h1 id="target">Target</h1><p>Body</p>';
+  const READY_SVG = '<svg viewBox="0 0 10 400"><text>Ready</text></svg>';
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
+
+  const diagramHtml = (engine: DiagramEngine) =>
+    `<div class="${engine}" data-type="plantuml">graph TD; A-->B</div><h1 id="target">Target</h1>`;
+
+  function resolveDiagram(engine: DiagramEngine) {
+    if (engine === "mermaid") diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+    else diagramCtl.pending.kroki?.(READY_SVG);
+  }
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    diagramCtl.reset();
+  });
+
+  it("repeats the same fragment once per cleared request without rerendering HTML", async () => {
+    const [fragment, setFragment] = createSignal<string | null>(null);
+    const handled = vi.fn(() => setFragment(null));
+    const { container } = render(() => (
+      <div class="content">
+        <Preview
+          {...withDefaults({ html: NAV_HTML, currentFilePath: "a.md" })}
+          pendingFragment={fragment()}
+          onFragmentHandled={handled}
+        />
+      </div>
+    ));
+    await tick();
+    const original = container.querySelector("#target");
+    const scroll = vi
+      .spyOn(container.querySelector(".content") as HTMLElement, "scrollTo")
+      .mockImplementation(() => {});
+
+    setFragment("target");
+    flush();
+    await waitFor(() => expect(handled).toHaveBeenCalledTimes(1));
+    await tick();
+    setFragment("target");
+    flush();
+    await waitFor(() => expect(handled).toHaveBeenCalledTimes(2));
+
+    expect(scroll).toHaveBeenCalledTimes(2);
+    expect(container.querySelector("#target")).toBe(original);
+  });
+
+  it("handles simultaneous new HTML and request once against the new article", async () => {
+    const [html, setHtml] = createSignal('<h1 id="old">Old</h1>');
+    const [fragment, setFragment] = createSignal<string | null>(null);
+    const handled = vi.fn(() => setFragment(null));
+    const { container } = render(() => (
+      <div class="content">
+        <Preview
+          {...withDefaults({ html: html(), currentFilePath: "a.md" })}
+          pendingFragment={fragment()}
+          onFragmentHandled={handled}
+        />
+      </div>
+    ));
+    await tick();
+    const scroll = vi
+      .spyOn(container.querySelector(".content") as HTMLElement, "scrollTo")
+      .mockImplementation(() => {});
+
+    setHtml('<h1 id="target">New</h1>');
+    setFragment("target");
+    flush();
+    await tick();
+
+    expect(container.querySelector("#target")?.textContent).toBe("New");
+    expect(handled).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  for (const engine of ["mermaid", "kroki"] as const) {
+    it(`waits for ${engine} completion before consuming a request in the new file`, async () => {
+      diagramCtl.mode[engine] = "pending";
+      const [html, setHtml] = createSignal("<h1>Old</h1>");
+      const [fragment, setFragment] = createSignal<string | null>(null);
+      const handled = vi.fn(() => setFragment(null));
+      const { container } = render(() => (
+        <div class="content">
+          <Preview
+            {...withDefaults({ html: html(), currentFilePath: "a.md" })}
+            pendingFragment={fragment()}
+            onFragmentHandled={handled}
+          />
+        </div>
+      ));
+      await tick();
+      const scroller = container.querySelector(".content") as HTMLElement;
+      const scroll = vi.spyOn(scroller, "scrollTo").mockImplementation(() => {});
+
+      setHtml("");
+      flush();
+      setHtml(diagramHtml(engine));
+      flush();
+      await waitFor(() => expect(diagramCtl.pending[engine]).toBeTypeOf("function"));
+
+      const target = container.querySelector("#target") as HTMLElement;
+      vi.spyOn(target, "getBoundingClientRect").mockImplementation(
+        () =>
+          ({
+            top: container.querySelector(`.${engine} svg`) ? 500 : 100,
+          }) as DOMRect,
+      );
+      setFragment("target");
+      flush();
+      await tick();
+      const callbacksBeforeRenderFinished = handled.mock.calls.length;
+
+      resolveDiagram(engine);
+      await waitFor(() =>
+        expect(container.querySelector(`.${engine}[data-processed="true"] svg`)).not.toBeNull(),
+      );
+      await tick();
+
+      expect(callbacksBeforeRenderFinished).toBe(0);
+      expect(handled).toHaveBeenCalledTimes(1);
+      expect(scroll).toHaveBeenLastCalledWith({ top: 484, behavior: "smooth" });
+    });
+  }
+
+  it("does not jump in a file replaced while a diagram is still rendering", async () => {
+    diagramCtl.mode.mermaid = "pending";
+    const [html, setHtml] = createSignal('<h1 id="old">Old</h1>');
+    const [fragment, setFragment] = createSignal<string | null>(null);
+    const handled = vi.fn(() => setFragment(null));
+    const { container } = render(() => (
+      <div class="content">
+        <Preview
+          {...withDefaults({ html: html(), currentFilePath: "a.md" })}
+          pendingFragment={fragment()}
+          onFragmentHandled={handled}
+        />
+      </div>
+    ));
+    await tick();
+    const scroll = vi
+      .spyOn(container.querySelector(".content") as HTMLElement, "scrollTo")
+      .mockImplementation(() => {});
+
+    setHtml(diagramHtml("mermaid"));
+    flush();
+    await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+    setFragment("target");
+    flush();
+    await tick();
+    expect(handled).not.toHaveBeenCalled();
+
+    setHtml('<h1 id="other">Other</h1>');
+    flush();
+    resolveDiagram("mermaid");
+    await tick();
+    await tick();
+
+    expect(container.querySelector("#other")).not.toBeNull();
+    // The stale request is cleared against the new article, but it must not
+    // scroll: the old diagram's completion cannot unlock the old position.
+    expect(scroll).not.toHaveBeenCalled();
+    expect(handled).toHaveBeenCalledTimes(1);
+
+    setFragment("other");
+    flush();
+    await waitFor(() => expect(handled).toHaveBeenCalledTimes(2));
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  for (const engine of ["mermaid", "kroki"] as const) {
+    it(`still navigates when the ${engine} renderer fails`, async () => {
+      diagramCtl.mode[engine] = "reject";
+      const [html, setHtml] = createSignal('<h1 id="old">Old</h1>');
+      const [fragment, setFragment] = createSignal<string | null>(null);
+      const handled = vi.fn(() => setFragment(null));
+      const { container } = render(() => (
+        <div class="content">
+          <Preview
+            {...withDefaults({ html: html(), currentFilePath: "a.md" })}
+            pendingFragment={fragment()}
+            onFragmentHandled={handled}
+          />
+        </div>
+      ));
+      await tick();
+      const scroll = vi
+        .spyOn(container.querySelector(".content") as HTMLElement, "scrollTo")
+        .mockImplementation(() => {});
+
+      setHtml(diagramHtml(engine));
+      setFragment("target");
+      flush();
+      await waitFor(() => expect(handled).toHaveBeenCalledTimes(1), { timeout: 2000 });
+
+      expect(container.querySelector(`.${engine} .mermaid-error`)).not.toBeNull();
+      expect(scroll).toHaveBeenCalledTimes(1);
+    });
+  }
 });
 
 describe("FrontmatterPanel — collapse state follows the file", () => {

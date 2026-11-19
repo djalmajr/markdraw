@@ -842,6 +842,30 @@ export function Preview(props: PreviewProps) {
   let renderGen = 0;
   const isStale: IsStaleFn = (gen) => gen !== renderGen;
 
+  // Navigation readiness is tied to a generation, not just to the html
+  // string: a request that arrives while highlight/mermaid/kroki are
+  // still running must wait for the final layout. Post-processing is
+  // best-effort (a diagram error must not strand navigation), but a
+  // superseded generation must never publish readiness.
+  async function finishPostProcessing(
+    gen: number,
+    html: string,
+    steps: Array<() => Promise<void>>,
+  ) {
+    try {
+      for (const step of steps) {
+        if (isStale(gen)) return;
+        try {
+          await step();
+        } catch {
+          // Highlighting/diagram rendering is best-effort; keep going.
+        }
+      }
+    } finally {
+      if (!isStale(gen)) setRenderedHtml(html);
+    }
+  }
+
   function computeScrollRatio(scrollTop: number, scrollHeight: number, clientHeight: number): number {
     const maxScrollTop = scrollHeight - clientHeight;
     if (maxScrollTop <= 0) return 0;
@@ -1222,6 +1246,10 @@ export function Preview(props: PreviewProps) {
     }
 
     const gen = ++renderGen;
+    // Invalidate the previous generation immediately: a request arriving
+    // during this render must not consume against an article that is about
+    // to be swapped, nor against the half-processed new one.
+    setRenderedHtml(null);
     const isNewDocument = pendingNewDocument;
     pendingNewDocument = false;
     const sanitizedHtml = sanitizeHtmlFragment(_html);
@@ -1277,12 +1305,6 @@ export function Preview(props: PreviewProps) {
       }
 
       articleRef!.style.opacity = "";
-
-      // Publish the rendered document to the navigation effect below.
-      // Doing it here (after the swap) keeps a request that arrived with
-      // the file change from jumping against the old article, and makes
-      // that request execute exactly once.
-      setRenderedHtml(_html);
     }
 
     // New document (file switch): double-buffer to avoid FOUC — process in
@@ -1296,39 +1318,35 @@ export function Preview(props: PreviewProps) {
       wrapImagesForScroll(buffer);
       if (props.resolveImageSrc) rewriteImageSources(buffer, props.resolveImageSrc);
 
-      queueMicrotask(async () => {
-        // Syntax highlighting can run against the detached buffer —
-        // it's pure DOM mutation with no document-level
-        // dependencies, and finishing it before the swap eliminates
-        // the FOUC of unhighlighted code.
-        await highlightCodeBlocks(buffer, gen, isStale);
-        if (isStale(gen)) return;
-
-        // Swap to the live article BEFORE running mermaid / kroki —
-        // both libraries create temp elements in `document.body`
-        // and read layout / fonts off the surrounding document. On
-        // a detached buffer the very first call randomly throws
-        // `null is not an object (evaluating 'element.firstChild')`
-        // because mermaid couldn't measure the temp container's
-        // size. Swap first → live measurement → reliable renders.
-        const scrollContainer = articleRef!.closest(".content");
-        const prevScrollTop = scrollContainer?.scrollTop ?? 0;
-        articleRef!.replaceChildren(...Array.from(buffer.childNodes));
-        if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
-
-        afterSwap(articleRef!, true, tocVis);
-
-        // Wait one paint frame so the freshly-attached article has
-        // been laid out before mermaid measures. Without this, the
-        // first block races with layout and throws `firstChild`.
-        await nextPaintFrame();
-        if (isStale(gen)) return;
-
-        await renderMermaidBlocks(articleRef!, gen, isStale);
-        if (isStale(gen)) return;
-
-        await renderKrokiBlocks(articleRef!, gen, isStale);
-      });
+      queueMicrotask(() =>
+        finishPostProcessing(gen, _html, [
+          // Syntax highlighting can run against the detached buffer —
+          // it's pure DOM mutation with no document-level
+          // dependencies, and finishing it before the swap eliminates
+          // the FOUC of unhighlighted code.
+          () => highlightCodeBlocks(buffer, gen, isStale),
+          async () => {
+            // Swap to the live article BEFORE running mermaid / kroki —
+            // both libraries create temp elements in `document.body`
+            // and read layout / fonts off the surrounding document. On
+            // a detached buffer the very first call randomly throws
+            // `null is not an object (evaluating 'element.firstChild')`
+            // because mermaid couldn't measure the temp container's
+            // size. Swap first → live measurement → reliable renders.
+            const scrollContainer = articleRef!.closest(".content");
+            const prevScrollTop = scrollContainer?.scrollTop ?? 0;
+            articleRef!.replaceChildren(...Array.from(buffer.childNodes));
+            if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
+            afterSwap(articleRef!, true, tocVis);
+          },
+          // Wait one paint frame so the freshly-attached article has
+          // been laid out before mermaid measures. Without this, the
+          // first block races with layout and throws `firstChild`.
+          () => nextPaintFrame(),
+          () => renderMermaidBlocks(articleRef!, gen, isStale),
+          () => renderKrokiBlocks(articleRef!, gen, isStale),
+        ]),
+      );
     } else {
       const scrollContainer = articleRef!.closest(".content");
       const prevScrollTop = scrollContainer?.scrollTop ?? 0;
@@ -1340,15 +1358,13 @@ export function Preview(props: PreviewProps) {
 
       afterSwap(articleRef!, false, tocVis);
 
-      queueMicrotask(async () => {
-        await highlightCodeBlocks(articleRef!, gen, isStale);
-        if (isStale(gen)) return;
-
-        await renderMermaidBlocks(articleRef!, gen, isStale);
-        if (isStale(gen)) return;
-
-        await renderKrokiBlocks(articleRef!, gen, isStale);
-      });
+      queueMicrotask(() =>
+        finishPostProcessing(gen, _html, [
+          () => highlightCodeBlocks(articleRef!, gen, isStale),
+          () => renderMermaidBlocks(articleRef!, gen, isStale),
+          () => renderKrokiBlocks(articleRef!, gen, isStale),
+        ]),
+      );
     }
     return () => {
       ++renderGen;
@@ -1368,9 +1384,10 @@ export function Preview(props: PreviewProps) {
     () => ({
       fragment: props.pendingFragment,
       heading: props.pendingHeadingText,
-      // `renderedHtml` is updated by afterSwap, once the new content is
-      // in the DOM. Waiting for it also prevents a double jump when the
-      // file and the request arrive in the same update.
+      // `renderedHtml` is published only after the current generation's
+      // post-processing finishes. Waiting for it prevents a jump into a
+      // half-processed article and a double jump when the file and the
+      // request arrive in the same update.
       ready: !!props.html && renderedHtml() === props.html,
     }),
     ({ fragment, heading, ready }) => {
