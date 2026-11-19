@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createRoot } from "solid-js";
+import { createRoot, flush, runWithOwner } from "solid-js";
 import type { FSEntry } from "@markdraw/core/types.ts";
+import { setChatSessionsIndex } from "@markdraw/core/ai-chat-sessions.ts";
 import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AITool, ToolApprovalRequest } from "@markdraw/ai/types.ts";
 import { createAppState, type ThemeMode } from "./create-app-state.ts";
+import { createPaneStore } from "./create-pane-store.ts";
 
 // Storage helpers — happy-dom ships localStorage, but we still clear
 // it between suites so module-level singletons (recent-files cache,
@@ -34,7 +36,28 @@ function withState<T>(
   overrides: Partial<Parameters<typeof createAppState>[0]> = {},
 ): T {
   const deps = makeConfig(overrides);
-  return createRoot(() => fn(createAppState(deps), deps));
+  const state = createRoot(() => createAppState(deps));
+  flush();
+  // Handlers run from DOM events in the app, outside any owner. Drive them
+  // the same way here, and settle each call before the assertions read back.
+  const live = new Proxy(state, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        const result = runWithOwner(null, () => (value as (...a: unknown[]) => unknown).apply(target, args));
+        if (result && typeof (result as Promise<unknown>).then === "function") {
+          return (result as Promise<unknown>).then((settled) => {
+            flush();
+            return settled;
+          });
+        }
+        flush();
+        return result;
+      };
+    },
+  });
+  return runWithOwner(null, () => fn(live, deps));
 }
 
 describe("AppState — theme slice (DJA-42)", () => {
@@ -61,6 +84,29 @@ describe("AppState — theme slice (DJA-42)", () => {
     });
   });
 
+  it("the system theme listener is removed when the state owner is disposed", () => {
+    const add = vi.fn();
+    const remove = vi.fn();
+    const matchMedia = vi.spyOn(window, "matchMedia").mockReturnValue({
+      addEventListener: add,
+      removeEventListener: remove,
+    } as unknown as MediaQueryList);
+    try {
+      let dispose!: () => void;
+      createRoot((stop) => {
+        dispose = stop;
+        createAppState(makeConfig());
+      });
+      flush();
+      expect(add).toHaveBeenCalledTimes(1);
+      dispose();
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(remove.mock.calls[0]![0]).toBe("change");
+    } finally {
+      matchMedia.mockRestore();
+    }
+  });
+
   it("darkMode mirrors the document class state on each theme change", () => {
     // Domain rule: dark mode UI cues (icons, code theme) read from
     // `darkMode()` instead of inspecting the document directly. The
@@ -79,6 +125,119 @@ describe("AppState — theme slice (DJA-42)", () => {
       expect(state.darkMode()).toBe(false);
     });
   });
+});
+
+describe("effective editor mode", () => {
+  it("restores Markdown split mode after opening a PDF in another tab", () => {
+    withState((s) => {
+      const md: FSEntry = { name: "doc.md", path: "doc.md", kind: "file" };
+      const pdf: FSEntry = { name: "doc.pdf", path: "doc.pdf", kind: "file" };
+      const pane = s.paneManager.activePane();
+      const mdId = pane.tabs.openTab(md, "root");
+      flush();
+      s.setSelectedFile(md);
+      s.setEditorMode("split");
+      const pdfId = pane.tabs.openTab(pdf, "root");
+      flush();
+      s.setSelectedFile(pdf);
+      expect(s.editorMode()).toBe("preview");
+      pane.tabs.activateTab(mdId);
+      s.setSelectedFile(md);
+      expect(s.editorMode()).toBe("split");
+      pane.tabs.activateTab(pdfId);
+      s.setSelectedFile(pdf);
+      expect(s.editorMode()).toBe("preview");
+    });
+  });
+  it("keeps each pane's chosen mode through media and unsupported files", () => {
+    const warn = vi.spyOn(console, "warn");
+    const error = vi.spyOn(console, "error");
+    try {
+      withState((s) => {
+        const file = (name: string): FSEntry => ({ name, path: name, kind: "file" });
+        s.setEditorMode("split");
+        s.setSelectedFile(file("doc.md"));
+        expect(s.editorMode()).toBe("split");
+        s.setSelectedFile(file("doc.pdf"));
+        expect(s.editorMode()).toBe("preview");
+        expect(s.paneManager.activePane().editorMode()).toBe("split");
+        s.setSelectedFile(file("photo.png"));
+        expect(s.editorMode()).toBe("preview");
+        s.setSelectedFile(file("plain.txt"));
+        expect(s.editorMode()).toBe("edit");
+        s.setHtml(UNSUPPORTED_CONTENT);
+        expect(s.editorMode()).toBe("split");
+        s.setHtml("");
+        s.setSelectedFile(file("doc.md"));
+        expect(s.editorMode()).toBe("split");
+        const first = s.paneManager.activePane();
+        first.tabs.openTab(file("doc.md"), "root");
+        flush();
+        s.setSelectedFile(file("doc.pdf"));
+        expect(s.editorMode()).toBe("preview");
+        first.tabs.snapshotActiveTab();
+        flush();
+        expect(first.tabs.getActiveTab()?.editorMode).toBe("split");
+        s.setSelectedFile(file("doc.md"));
+        s.paneManager.splitFromActive();
+        flush();
+        s.setSelectedFile(file("other.md"));
+        s.setEditorMode("edit");
+        expect(s.editorMode()).toBe("edit");
+        s.paneManager.setActivePane(0);
+        flush();
+        expect(s.editorMode()).toBe("split");
+        first.setEditorMode("preview");
+        flush();
+        first.tabs.restoreActiveTab();
+        flush();
+        expect(s.editorMode()).toBe("split");
+      });
+      expect(warn.mock.calls.flat().join(" ")).not.toContain("EFFECT_WRITES_OWN_SOURCE");
+      expect(error.mock.calls.flat().join(" ")).not.toMatch(/PRIMITIVE_|REACTIVE_WRITE/);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
+});
+
+it("restores the pane mode and content when closing and reopening a PDF tab", () => {
+  const { pane, dispose } = createRoot((dispose) => ({
+    pane: createPaneStore("close-reopen"),
+    dispose,
+  }));
+  try {
+    const markdownId = pane.tabs.openTab({ kind: "file", name: "doc.md", path: "doc.md" }, "root");
+    flush();
+    pane.setEditorMode("split");
+    flush();
+    pane.setEditorContent("From Markdown");
+    flush();
+
+    const pdfId = pane.tabs.openTab({ kind: "file", name: "doc.pdf", path: "doc.pdf" }, "root");
+    flush();
+    pane.setEditorMode("preview");
+    flush();
+    pane.setEditorContent("From PDF");
+    flush();
+    pane.tabs.snapshotActiveTab();
+    flush();
+
+    pane.tabs.closeTab(pdfId);
+    flush();
+    expect(pane.tabs.activeTabId()).toBe(markdownId);
+    expect(pane.editorMode()).toBe("split");
+    expect(pane.editorContent()).toBe("From Markdown");
+
+    pane.tabs.reopenClosedTab();
+    flush();
+    expect(pane.tabs.activeTabId()).toBe(pdfId);
+    expect(pane.editorMode()).toBe("preview");
+    expect(pane.editorContent()).toBe("From PDF");
+  } finally {
+    dispose();
+  }
 });
 
 describe("AppState — sidebar / TOC slices (DJA-42)", () => {
@@ -173,6 +332,28 @@ describe("AppState — fonts slice (DJA-42)", () => {
       expect(state.fontPrefs().family).toBe("Inter");
       expect(state.fontPrefs().size).toBe("lg");
     });
+  });
+
+  it("applies the real font preference keys to the document CSS", () => {
+    localStorage.setItem(
+      "markdraw-font-prefs",
+      JSON.stringify({ fontFamily: "serif", fontSize: 24 }),
+    );
+    const css = document.documentElement.style;
+    try {
+      withState((state) => {
+        expect(state.fontPrefs()).toEqual({ fontFamily: "serif", fontSize: 24 });
+        expect(css.getPropertyValue("--doc-font-family")).toContain("Georgia");
+        expect(css.getPropertyValue("--doc-font-size")).toBe("24px");
+        state.handleFontPrefsChange({ fontFamily: "monospace", fontSize: 32 });
+        expect(state.fontPrefs()).toEqual({ fontFamily: "monospace", fontSize: 32 });
+        expect(css.getPropertyValue("--doc-font-family")).toBe("var(--font-mono)");
+        expect(css.getPropertyValue("--doc-font-size")).toBe("32px");
+      });
+    } finally {
+      css.removeProperty("--doc-font-family");
+      css.removeProperty("--doc-font-size");
+    }
   });
 });
 
@@ -400,6 +581,29 @@ describe("AppState — AI multi-chat tab routing", () => {
       expect(state.aiActiveTab().startsWith("chat:")).toBe(true);
       expect(state.aiSessions.sessions()).toHaveLength(1);
     }, aiConfig);
+  });
+
+  it("restores a persisted open chat on two consecutive boots without creating an empty chat", () => {
+    for (let boot = 0; boot < 2; boot++) {
+      setChatSessionsIndex({
+        sessions: [
+          { id: "existing", title: "Saved", createdAt: 1, lastActiveAt: 1, isArchived: false, isOpen: true },
+        ],
+        activeId: "existing",
+      });
+      let dispose!: () => void;
+      const state = createRoot((stop) => {
+        dispose = stop;
+        return createAppState(makeConfig(aiConfig));
+      });
+      flush();
+      try {
+        expect(state.aiSessions.sessions().map((s) => s.id)).toEqual(["existing"]);
+        expect(state.aiActiveTab()).toBe("chat:existing");
+      } finally {
+        dispose();
+      }
+    }
   });
 
   it("focusAiComposer creates a chat when none exist and fronts it", () => {

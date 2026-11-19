@@ -1,4 +1,5 @@
-import { Show, type JSX } from "solid-js";
+import { Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import IconCheck from "~icons/lucide/check";
 
 export interface TierCardProps {
@@ -20,14 +21,14 @@ export function TierCard(props: TierCardProps): JSX.Element {
     <button
       type="button"
       role="radio"
-      aria-checked={props.selected}
-      aria-disabled={props.disabled}
+      aria-checked={props.selected ? "true" : "false"}
+      aria-disabled={props.disabled ? "true" : "false"}
       disabled={props.disabled}
-      class="settings-tier-card"
-      classList={{
+      class={["settings-tier-card", {
         "settings-tier-card-selected": props.selected,
         "settings-tier-card-disabled": props.disabled,
-      }}
+      }]}
+      
       onClick={() => {
         if (!props.disabled) props.onSelect();
       }}

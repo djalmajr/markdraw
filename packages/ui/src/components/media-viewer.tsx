@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
+import { For, Show, createSignal, onCleanup, createEffect, untrack } from "solid-js";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -94,14 +94,14 @@ export function MediaViewer(props: MediaViewerProps) {
   // Load (or tear down) the PDF whenever the source or kind changes —
   // covers reusing the same pane for a different file.
   createEffect(
-    on(
-      () => [props.kind, props.src] as const,
-      async ([kind, src]) => {
+    () => ({ kind: props.kind, src: props.src }),
+    ({ kind, src }) => {
+    void (async () => {
         cancelRenders();
         releasePdf();
         setScale(1);
         imageZoom.reset();
-        setFit(props.kind === "image");
+        setFit(kind === "image");
         setImageError(false);
         setPdfError(null);
         setPageCount(0);
@@ -116,7 +116,7 @@ export function MediaViewer(props: MediaViewerProps) {
           task = pdfjs.getDocument({ url: src });
           const doc = await task.promise;
           // A newer load may have superseded this one mid-await.
-          if (src !== props.src) {
+          if (src !== untrack(() => props.src)) {
             void task.destroy();
             return;
           }
@@ -142,18 +142,18 @@ export function MediaViewer(props: MediaViewerProps) {
         } finally {
           setPdfLoading(false);
         }
-      },
-    ),
+    })();
+    },
   );
 
   // Render every page into its canvas on load and on zoom change. Pages are
   // drawn sequentially; a generation counter + task cancellation bail out
   // when a newer render (zoom or file switch) supersedes this pass.
   createEffect(
-    on(
-      () => [pageCount(), scale()] as const,
-      async ([count]) => {
-        if (props.kind !== "pdf" || !pdfDoc || count === 0) return;
+    () => ({ count: pageCount(), scale: scale() }),
+    ({ count }) => {
+    void (async () => {
+        if (untrack(() => props.kind) !== "pdf" || !pdfDoc || count === 0) return;
         const gen = ++renderGen;
         cancelRenders();
         // Let the <For> mount its canvases before we reach for the refs.
@@ -177,8 +177,8 @@ export function MediaViewer(props: MediaViewerProps) {
             // RenderingCancelledException fires on superseded renders — benign.
           }
         }
-      },
-    ),
+    })();
+    },
   );
 
   onCleanup(() => {
@@ -291,8 +291,8 @@ export function MediaViewer(props: MediaViewerProps) {
         {/* Pannable image stage: clipped (overflow:hidden) with the zoomed image
             moved by transform — drag to pan, wheel/pinch to zoom (see onImage*). */}
         <div
-          class="media-stage media-stage-image"
-          classList={{ "media-stage-pan": !fit(), "is-grabbing": imageZoom.dragging() }}
+          class={["media-stage media-stage-image", { "media-stage-pan": !fit(), "is-grabbing": imageZoom.dragging() }]}
+          
           ref={(el) => imageZoom.setContainer(el)}
           onWheel={onImageWheel}
           onPointerDown={onImagePointerDown}
@@ -309,8 +309,8 @@ export function MediaViewer(props: MediaViewerProps) {
               fallback={<div class="media-message">{(useLocale(), m.media_unable_to_display({ name: props.fileName }))}</div>}
             >
               <img
-                class="media-image"
-                classList={{ "media-image-fit": fit() }}
+                class={["media-image", { "media-image-fit": fit() }]}
+                
                 src={props.src!}
                 alt={props.fileName}
                 style={imageStyle()}

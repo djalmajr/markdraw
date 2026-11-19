@@ -1,6 +1,14 @@
+/* ui-sdk (Solid 2 component base) needs a cascade layer of its own, declared
+   before Tailwind so its built-in rules sit below the app's utilities. */
+@layer ui-sdk;
+
 @import "tailwindcss";
 @import "tw-animate-css";
-
+/* `@ui-sdk/core/web.css` is deliberately not imported: it is ui-sdk's optional
+   default look (borders and fills on buttons, toggles, triggers), and our
+   primitives are fully styled with Tailwind. The behavioral CSS ui-sdk needs
+   (hidden closed popups, backdrops) is injected at runtime into the ui-sdk
+   layer declared above. */
 /* Class-based dark mode — the app toggles `.dark` on <html>. v4 defaults
    to prefers-color-scheme, so register the variant explicitly. */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -1212,13 +1220,17 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   transition: background-color 0.15s, color 0.15s;
 }
 
-.content-toolbar-btn:hover:not(:disabled) {
+.content-toolbar-btn:hover:not(:disabled):not([aria-disabled="true"]) {
   background: hsl(var(--accent));
   color: hsl(var(--accent-foreground));
 }
 
-.content-toolbar-btn:disabled {
+.content-toolbar-btn:disabled,
+.content-toolbar-btn[aria-disabled="true"] {
   opacity: 0.3;
+}
+
+.content-toolbar-btn:disabled {
   pointer-events: none;
 }
 
@@ -1804,7 +1816,7 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   color: hsl(var(--foreground));
   background: hsl(var(--bg-hover));
 }
-.rp-icon-btn[data-expanded] {
+.rp-icon-btn[data-open] {
   color: hsl(var(--foreground));
   background: hsl(var(--bg-selected));
 }
@@ -2088,11 +2100,11 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   font-weight: 400;
 }
 .ai-mp-trigger:hover,
-.ai-mp-trigger[data-expanded] {
+.ai-mp-trigger[data-open] {
   background: hsl(var(--bg-hover-deep));
 }
 .ai-mp-trigger-form:hover,
-.ai-mp-trigger-form[data-expanded] {
+.ai-mp-trigger-form[data-open] {
   border-color: hsl(var(--input));
   background: hsl(var(--background));
 }
@@ -3054,7 +3066,7 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   background: hsl(var(--bg-hover));
   color: hsl(var(--foreground));
 }
-.ai-context-btn[data-expanded] {
+.ai-context-btn[data-open] {
   background: hsl(var(--bg-selected));
   color: hsl(var(--foreground));
 }

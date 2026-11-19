@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
+import { createSignal, flush } from "solid-js";
 import { switchLocale } from "@markdraw/i18n/solid";
 
 // The viewer's labels are i18n'd; pin English so the text assertions below
@@ -54,6 +55,7 @@ describe("MediaViewer — image", () => {
     expect(container.querySelector(".media-image-fit")).not.toBeNull();
 
     fireEvent.click(getByLabelText("Zoom in"));
+    flush();
     expect(getByText("125%")).not.toBeNull();
     expect(container.querySelector(".media-image-fit")).toBeNull();
   });
@@ -63,9 +65,24 @@ describe("MediaViewer — image", () => {
       <MediaViewer kind="image" src="asset://photo.png" fileName="photo.png" />
     ));
     fireEvent.click(getByLabelText("Zoom in"));
+    flush();
     expect(getByText("125%")).not.toBeNull();
     fireEvent.click(getByLabelText("Fit to window"));
+    flush();
     expect(getByText("Fit")).not.toBeNull();
+  });
+
+  it("loads a PDF when the same pane switches away from an image", async () => {
+    const [kind, setKind] = createSignal<"image" | "pdf">("image");
+    const { findByText, container } = render(() => (
+      <MediaViewer kind={kind()} src="asset://doc.pdf" fileName="doc.pdf" />
+    ));
+    expect(container.querySelector("img.media-image")).not.toBeNull();
+
+    setKind("pdf");
+    flush();
+    expect(await findByText("3 pages")).not.toBeNull();
+    expect(container.querySelectorAll(".media-pdf-page").length).toBe(3);
   });
 
   it("shows a fallback message when the host can't resolve the src", () => {

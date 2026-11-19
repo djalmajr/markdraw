@@ -2,7 +2,7 @@ import { createSignal, type Setter } from "solid-js";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
 import { getStoredTableWrap } from "@markdraw/core/editor-prefs.ts";
-import { migrateLegacyTabSession } from "@markdraw/core/tabs.ts";
+import { migrateLegacyTabSession, type TabState } from "@markdraw/core/tabs.ts";
 import { createTabStore, type TabStore } from "./create-tab-store.ts";
 
 export type EditorMode = "edit" | "split" | "preview";
@@ -56,12 +56,14 @@ export interface PaneStore extends PaneViewSlice {
   setTableWrap: Setter<boolean>;
 }
 
+export type OnPaneTabSelected = (pane: PaneStore, tab: TabState | null) => void;
+
 /**
  * Build a fresh `PaneStore` with empty content and an attached
  * TabStore. The TabStore captures the slice's setters at creation
  * time so its snapshot/restore writes back to THIS pane's signals.
  */
-export function createPaneStore(paneId: string): PaneStore {
+export function createPaneStore(paneId: string, onTabSelected?: OnPaneTabSelected): PaneStore {
   const [editorContent, setEditorContent] = createSignal("");
   const [savedContent, setSavedContent] = createSignal("");
   const [html, setHtml] = createSignal("");
@@ -103,13 +105,17 @@ export function createPaneStore(paneId: string): PaneStore {
     migrateLegacyTabSession(storageKey);
   }
 
-  const tabs = createTabStore({ pane: slice, storageKey });
-
-  return {
+  const tabs = createTabStore({
+    pane: slice,
+    storageKey,
+    onTabSelected: (tab) => onTabSelected?.(pane, tab),
+  });
+  const pane: PaneStore = {
     paneId,
     ...slice,
     tabs,
     tableWrap,
     setTableWrap,
   };
+  return pane;
 }

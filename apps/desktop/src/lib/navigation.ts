@@ -1,4 +1,4 @@
-import type { Accessor } from "solid-js";
+import { type Accessor } from "solid-js";
 import type { FSEntry, QualifiedPath } from "@markdraw/core/types.ts";
 import { makeTabId } from "@markdraw/core/tabs.ts";
 import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
@@ -16,10 +16,11 @@ interface NavigationDeps {
    *  pane is in focus when the user fires a back/forward / link click. */
   tabStore?: () => TabStore;
   onActivateTab?: (tabId: string) => void;
+  onOpenHistoryTab?: (entry: FSEntry, rootId: string) => void;
 }
 
 export function createNavigation(deps: NavigationDeps) {
-  const { loadFileContent, rootPaths, state, tabStore: getTabStore, onActivateTab } = deps;
+  const { loadFileContent, rootPaths, state, tabStore: getTabStore, onActivateTab, onOpenHistoryTab } = deps;
 
   function canGoBack() {
     return state.navIndex() > 0;
@@ -115,6 +116,10 @@ export function createNavigation(deps: NavigationDeps) {
       const tab = tabStore.getTab(tabId);
       if (tab) {
         onActivateTab(tabId);
+        return;
+      }
+      if (onOpenHistoryTab) {
+        onOpenHistoryTab(entry, qp.rootId);
         return;
       }
       // Target not in a tab — open it as a pinned tab

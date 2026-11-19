@@ -1,7 +1,81 @@
-import { describe, expect, it, vi } from "vitest";
-import { createSignal } from "solid-js";
-import { render } from "@solidjs/testing-library";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSignal, flush, untrack } from "solid-js";
+import { cleanup, render, waitFor } from "@solidjs/testing-library";
+
+// Controlled diagram renderers: the readiness tests hold a diagram in a
+// promise while a navigation request arrives, then decide when (or whether)
+// it completes. Other tests keep the fast, successful default.
+const diagramCtl = vi.hoisted(() => ({
+  mode: {
+    mermaid: "resolve" as "resolve" | "pending" | "reject",
+    kroki: "resolve" as "resolve" | "pending" | "reject",
+  },
+  pending: {
+    mermaid: null as ((value: { svg: string }) => void) | null,
+    kroki: null as ((value: string) => void) | null,
+  },
+  started: { mermaid: [] as string[], kroki: [] as string[] },
+  reset() {
+    this.mode.mermaid = "resolve";
+    this.mode.kroki = "resolve";
+    this.pending.mermaid = null;
+    this.pending.kroki = null;
+    this.started.mermaid.length = 0;
+    this.started.kroki.length = 0;
+  },
+}));
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: () => {},
+    render: (id: string) => {
+      if (id === "mermaid-prewarm") {
+        return Promise.resolve({ svg: '<svg viewBox="0 0 10 10"></svg>' });
+      }
+      diagramCtl.started.mermaid.push(id);
+      if (diagramCtl.mode.mermaid === "reject") {
+        return Promise.reject(new Error("mermaid failed"));
+      }
+      if (diagramCtl.mode.mermaid === "pending") {
+        return new Promise<{ svg: string }>((resolve) => {
+          diagramCtl.pending.mermaid = resolve;
+        });
+      }
+      return Promise.resolve({ svg: '<svg viewBox="0 0 10 400"><text>Ready</text></svg>' });
+    },
+  },
+}));
+
+vi.mock("@markdraw/core/kroki.ts", () => ({
+  renderKroki: (_type: string, source: string) => {
+    diagramCtl.started.kroki.push(source);
+    if (diagramCtl.mode.kroki === "reject") {
+      return Promise.reject(new Error("kroki failed"));
+    }
+    if (diagramCtl.mode.kroki === "pending") {
+      return new Promise<string>((resolve) => {
+        diagramCtl.pending.kroki = resolve;
+      });
+    }
+    return Promise.resolve('<svg viewBox="0 0 10 400"><text>Ready</text></svg>');
+  },
+}));
+
+// PaneView's other children pull in CodeMirror / dnd-kit; the host-signal
+// lifecycle tests below only need PaneView, Preview and HtmlPreview itself.
+vi.mock("./editor.tsx", () => ({ Editor: () => <div data-testid="editor-stub" /> }));
+vi.mock("./editor-toolbar.tsx", () => ({ EditorToolbar: () => null }));
+vi.mock("./content-toolbar.tsx", () => ({ ContentToolbar: () => null }));
+vi.mock("./tab-bar.tsx", () => ({ TabBar: () => null }));
+vi.mock("./empty-state.tsx", () => ({ EmptyState: () => null }));
+vi.mock("../lib/dnd/index.ts", () => ({
+  useDroppable: () => ({ ref: () => {}, isDropTarget: () => false }),
+}));
+
 import { Preview, setupTocScrollTracking } from "./preview.tsx";
+import { PaneView } from "./pane-view.tsx";
+import { FrontmatterPanel } from "./frontmatter-panel.tsx";
+import { ImageLightbox } from "./image-lightbox.tsx";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
 
 interface BaseProps {
@@ -18,11 +92,15 @@ interface BaseProps {
   findTrigger?: number;
   currentFilePath?: string | null;
   pendingFragment?: string | null;
+  pendingHeadingText?: string | null;
   onNavigate?: (path: string, frag?: string | null) => void;
   onScrollRatioChange?: (n: number) => void;
   onSearchOpenChange?: (b: boolean) => void;
   onTocChange?: (b: boolean) => void;
   onFragmentHandled?: () => void;
+  onHeadingHandled?: () => void;
+  onFragmentDiscarded?: (fragment: string) => void;
+  onHeadingDiscarded?: (heading: string) => void;
 }
 
 function withDefaults(p: BaseProps = {}) {
@@ -40,11 +118,13 @@ function withDefaults(p: BaseProps = {}) {
     findTrigger: p.findTrigger ?? 0,
     currentFilePath: p.currentFilePath ?? null,
     pendingFragment: p.pendingFragment ?? null,
+    pendingHeadingText: p.pendingHeadingText ?? null,
     onNavigate: p.onNavigate ?? (() => {}),
     onScrollRatioChange: p.onScrollRatioChange ?? (() => {}),
     onSearchOpenChange: p.onSearchOpenChange ?? (() => {}),
     onTocChange: p.onTocChange ?? (() => {}),
     onFragmentHandled: p.onFragmentHandled ?? (() => {}),
+    onHeadingHandled: p.onHeadingHandled ?? (() => {}),
   };
 }
 
@@ -94,7 +174,7 @@ describe("Preview", () => {
   });
 
   it("adds .doc-tables-wrap on the article when wrapTables is on, omits it when off", async () => {
-    // Mutation captured: dropping the `classList={{ "doc-tables-wrap": ... }}`
+    // Mutation captured: dropping the `class={{ "doc-tables-wrap": ... }}`
     // binding on the article leaves wide tables stuck in horizontal-scroll
     // mode regardless of the preference. The wrap CSS keys off this class.
     const on = render(() => (
@@ -419,6 +499,817 @@ describe("Preview", () => {
       // same way as a real browser, we just verify the handler shape.
       expect(typeof onNavigate).toBe("function");
     }
+  });
+});
+
+describe("Preview — navigation requests on an already-rendered document", () => {
+  const NAV_HTML = '<h1 id="target">Target</h1><p>Body</p>';
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
+
+  it("handles a fragment arriving after the same file has rendered", async () => {
+    const [fragment, setFragment] = createSignal<string | null>(null);
+    const handled = vi.fn();
+    const { container } = render(() => (
+      <div class="content">
+        <Preview
+          {...withDefaults({ html: NAV_HTML, currentFilePath: "a.md" })}
+          pendingFragment={fragment()}
+          onFragmentHandled={handled}
+        />
+      </div>
+    ));
+    await tick();
+    const scroller = container.querySelector(".content") as HTMLElement;
+    const scroll = vi.spyOn(scroller, "scrollTo");
+
+    setFragment("target");
+    flush();
+    await tick();
+    expect(handled).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenCalled();
+  });
+
+  it("handles a heading search arriving after the same file has rendered", async () => {
+    const [heading, setHeading] = createSignal<string | null>(null);
+    const handled = vi.fn();
+    const { container } = render(() => (
+      <div class="content">
+        <Preview
+          {...withDefaults({ html: NAV_HTML, currentFilePath: "a.md" })}
+          pendingHeadingText={heading()}
+          onHeadingHandled={handled}
+        />
+      </div>
+    ));
+    await tick();
+    const scroller = container.querySelector(".content") as HTMLElement;
+    const scroll = vi.spyOn(scroller, "scrollTo");
+
+    setHeading("Target");
+    flush();
+    await tick();
+    expect(handled).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenCalled();
+  });
+
+  it("handles a fragment already present on mount exactly once", async () => {
+    const handled = vi.fn();
+    const scroller = document.createElement("div");
+    scroller.className = "content";
+    document.body.appendChild(scroller);
+    // Spy before render: the mount jump happens in the same flush as the
+    // initial html render.
+    const scroll = vi.spyOn(scroller, "scrollTo");
+    try {
+      render(() => (
+        <Preview
+          {...withDefaults({ html: NAV_HTML, currentFilePath: "a.md" })}
+          pendingFragment="target"
+          onFragmentHandled={handled}
+        />
+      ), { container: scroller });
+      await tick();
+      expect(handled).toHaveBeenCalledTimes(1);
+      expect(scroll).toHaveBeenCalledTimes(1);
+    } finally {
+      scroller.remove();
+    }
+  });
+
+  it("preserves saved scroll on mount and syncs only when version changes", async () => {
+    const [version, setVersion] = createSignal(7);
+    const scroller = document.createElement("div");
+    scroller.className = "content";
+    scroller.scrollTop = 123;
+    Object.defineProperty(scroller, "scrollHeight", { value: 1000 });
+    Object.defineProperty(scroller, "clientHeight", { value: 200 });
+    document.body.appendChild(scroller);
+    try {
+      render(() => (
+        <Preview
+          {...withDefaults({
+            html: NAV_HTML,
+            syncScrollActive: true,
+            syncScrollTargetRatio: 0.5,
+            syncScrollTargetVersion: version(),
+          })}
+        />
+      ), { container: scroller });
+      await tick();
+      expect(scroller.scrollTop).toBe(123);
+
+      setVersion(8);
+      flush();
+      expect(scroller.scrollTop).toBe(400);
+    } finally {
+      scroller.remove();
+    }
+  });
+
+  it("keeps search already open and responds to a new find trigger", async () => {
+    const [trigger, setTrigger] = createSignal(7);
+    const opened = vi.fn();
+    const { container } = render(() => (
+      <Preview
+        {...withDefaults({
+          html: NAV_HTML,
+          searchOpen: true,
+          findTrigger: trigger(),
+        })}
+        onSearchOpenChange={opened}
+      />
+    ));
+    await tick();
+    expect(container.querySelector(".search-overlay")).not.toBeNull();
+    expect(opened).not.toHaveBeenCalled();
+
+    setTrigger(8);
+    flush();
+    expect(opened).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("Preview — navigation readiness after post-processing", () => {
+  type DiagramEngine = "mermaid" | "kroki";
+  const NAV_HTML = '<h1 id="target">Target</h1><p>Body</p>';
+  const READY_SVG = '<svg viewBox="0 0 10 400"><text>Ready</text></svg>';
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
+
+  const diagramHtml = (engine: DiagramEngine) =>
+    `<div class="${engine}" data-type="plantuml">graph TD; A-->B</div><h1 id="target">Target</h1>`;
+
+  function resolveDiagram(engine: DiagramEngine) {
+    if (engine === "mermaid") diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+    else diagramCtl.pending.kroki?.(READY_SVG);
+  }
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    diagramCtl.reset();
+  });
+
+  it("repeats the same fragment once per cleared request without rerendering HTML", async () => {
+    const [fragment, setFragment] = createSignal<string | null>(null);
+    const handled = vi.fn(() => setFragment(null));
+    const { container } = render(() => (
+      <div class="content">
+        <Preview
+          {...withDefaults({ html: NAV_HTML, currentFilePath: "a.md" })}
+          pendingFragment={fragment()}
+          onFragmentHandled={handled}
+        />
+      </div>
+    ));
+    await tick();
+    const original = container.querySelector("#target");
+    const scroll = vi
+      .spyOn(container.querySelector(".content") as HTMLElement, "scrollTo")
+      .mockImplementation(() => {});
+
+    setFragment("target");
+    flush();
+    await waitFor(() => expect(handled).toHaveBeenCalledTimes(1));
+    await tick();
+    setFragment("target");
+    flush();
+    await waitFor(() => expect(handled).toHaveBeenCalledTimes(2));
+
+    expect(scroll).toHaveBeenCalledTimes(2);
+    expect(container.querySelector("#target")).toBe(original);
+  });
+
+  it("handles simultaneous new HTML and request once against the new article", async () => {
+    const [html, setHtml] = createSignal('<h1 id="old">Old</h1>');
+    const [fragment, setFragment] = createSignal<string | null>(null);
+    const handled = vi.fn(() => setFragment(null));
+    const { container } = render(() => (
+      <div class="content">
+        <Preview
+          {...withDefaults({ html: html(), currentFilePath: "a.md" })}
+          pendingFragment={fragment()}
+          onFragmentHandled={handled}
+        />
+      </div>
+    ));
+    await tick();
+    const scroll = vi
+      .spyOn(container.querySelector(".content") as HTMLElement, "scrollTo")
+      .mockImplementation(() => {});
+
+    setHtml('<h1 id="target">New</h1>');
+    setFragment("target");
+    flush();
+    await tick();
+
+    expect(container.querySelector("#target")?.textContent).toBe("New");
+    expect(handled).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  for (const engine of ["mermaid", "kroki"] as const) {
+    it(`waits for ${engine} completion before consuming a request in the new file`, async () => {
+      diagramCtl.mode[engine] = "pending";
+      const [html, setHtml] = createSignal("<h1>Old</h1>");
+      const [fragment, setFragment] = createSignal<string | null>(null);
+      const handled = vi.fn(() => setFragment(null));
+      const { container } = render(() => (
+        <div class="content">
+          <Preview
+            {...withDefaults({ html: html(), currentFilePath: "a.md" })}
+            pendingFragment={fragment()}
+            onFragmentHandled={handled}
+          />
+        </div>
+      ));
+      await tick();
+      const scroller = container.querySelector(".content") as HTMLElement;
+      const scroll = vi.spyOn(scroller, "scrollTo").mockImplementation(() => {});
+
+      setHtml("");
+      flush();
+      setHtml(diagramHtml(engine));
+      flush();
+      await waitFor(() => expect(diagramCtl.pending[engine]).toBeTypeOf("function"));
+
+      const target = container.querySelector("#target") as HTMLElement;
+      vi.spyOn(target, "getBoundingClientRect").mockImplementation(
+        () =>
+          ({
+            top: container.querySelector(`.${engine} svg`) ? 500 : 100,
+          }) as DOMRect,
+      );
+      setFragment("target");
+      flush();
+      await tick();
+      const callbacksBeforeRenderFinished = handled.mock.calls.length;
+
+      resolveDiagram(engine);
+      await waitFor(() =>
+        expect(container.querySelector(`.${engine}[data-processed="true"] svg`)).not.toBeNull(),
+      );
+      await tick();
+
+      expect(callbacksBeforeRenderFinished).toBe(0);
+      expect(handled).toHaveBeenCalledTimes(1);
+      expect(scroll).toHaveBeenLastCalledWith({ top: 484, behavior: "smooth" });
+    });
+  }
+
+  it("does not jump in a file replaced while a diagram is still rendering", async () => {
+    diagramCtl.mode.mermaid = "pending";
+    const [path, setPath] = createSignal("a.md");
+    const [html, setHtml] = createSignal('<h1 id="old">Old</h1>');
+    const [fragment, setFragment] = createSignal<string | null>(null);
+    const completions: string[] = [];
+    const handled = vi.fn(() => {
+      completions.push(path());
+      setFragment(null);
+    });
+    const { container } = render(() => (
+      <div class="content">
+        <Preview
+          {...withDefaults({ html: html(), currentFilePath: path() })}
+          pendingFragment={fragment()}
+          onFragmentHandled={handled}
+        />
+      </div>
+    ));
+    await tick();
+    const scroll = vi
+      .spyOn(container.querySelector(".content") as HTMLElement, "scrollTo")
+      .mockImplementation(() => {});
+
+    setHtml(diagramHtml("mermaid"));
+    flush();
+    await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+    setFragment("target");
+    flush();
+    await tick();
+    expect(handled).not.toHaveBeenCalled();
+
+    // Real file switch: the request belonged to a.md; opening b.md must
+    // discard it without completing it in the new document.
+    setPath("b.md");
+    setHtml('<h1 id="other">Other</h1>');
+    flush();
+    resolveDiagram("mermaid");
+    await tick();
+    await tick();
+
+    expect(container.querySelector("#other")).not.toBeNull();
+    // The old diagram's completion cannot unlock the old position, and the
+    // new article never reports the old request as handled.
+    expect(scroll).not.toHaveBeenCalled();
+    expect(completions).toEqual([]);
+    expect(handled).not.toHaveBeenCalled();
+
+    setFragment("other");
+    flush();
+    await waitFor(() => expect(completions).toEqual(["b.md"]));
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  for (const engine of ["mermaid", "kroki"] as const) {
+    it(`still navigates when the ${engine} renderer fails`, async () => {
+      diagramCtl.mode[engine] = "reject";
+      const [html, setHtml] = createSignal('<h1 id="old">Old</h1>');
+      const [fragment, setFragment] = createSignal<string | null>(null);
+      const handled = vi.fn(() => setFragment(null));
+      const { container } = render(() => (
+        <div class="content">
+          <Preview
+            {...withDefaults({ html: html(), currentFilePath: "a.md" })}
+            pendingFragment={fragment()}
+            onFragmentHandled={handled}
+          />
+        </div>
+      ));
+      await tick();
+      const scroll = vi
+        .spyOn(container.querySelector(".content") as HTMLElement, "scrollTo")
+        .mockImplementation(() => {});
+
+      setHtml(diagramHtml(engine));
+      setFragment("target");
+      flush();
+      await waitFor(() => expect(handled).toHaveBeenCalledTimes(1), { timeout: 2000 });
+
+      expect(container.querySelector(`.${engine} .mermaid-error`)).not.toBeNull();
+      expect(scroll).toHaveBeenCalledTimes(1);
+    });
+  }
+});
+
+describe("Preview — a jump request belongs to its own document", () => {
+  type RequestKind = "heading" | "fragment";
+  type Order = "path-first" | "request-first";
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
+  const READY_SVG = '<svg viewBox="0 0 10 400"><text>Ready</text></svg>';
+  const A_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="target">Target</h1>';
+  const B_TARGET_HTML = '<h1 id="target">Target</h1><p>FILE B</p>';
+  const B_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="target">Target</h1><p>FILE B</p>';
+  const scrollers: HTMLElement[] = [];
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    diagramCtl.reset();
+    for (const el of scrollers.splice(0)) el.remove();
+  });
+
+  function mountPreview(opts: {
+    path: () => string;
+    html: () => string;
+    fragment: () => string | null;
+    heading: () => string | null;
+    completions: string[];
+    setFragment?: (value: string | null) => void;
+    setHeading?: (value: string | null) => void;
+    onFragmentDiscarded?: (fragment: string) => void;
+    onHeadingDiscarded?: (heading: string) => void;
+  }) {
+    const scroller = document.createElement("div");
+    scroller.className = "content";
+    document.body.appendChild(scroller);
+    scrollers.push(scroller);
+    const scroll = vi.spyOn(scroller, "scrollTo").mockImplementation(() => {});
+    const mounted = render(() => (
+      <Preview
+        {...withDefaults({ html: opts.html(), currentFilePath: opts.path() })}
+        pendingFragment={opts.fragment()}
+        pendingHeadingText={opts.heading()}
+        onFragmentHandled={() => {
+          opts.completions.push(opts.path());
+          opts.setFragment?.(null);
+        }}
+        onHeadingHandled={() => {
+          opts.completions.push(opts.path());
+          opts.setHeading?.(null);
+        }}
+        onFragmentDiscarded={opts.onFragmentDiscarded}
+        onHeadingDiscarded={opts.onHeadingDiscarded}
+      />
+    ), { container: scroller });
+    return { scroller, scroll, unmount: mounted.unmount };
+  }
+
+  for (const kind of ["heading", "fragment"] as const) {
+    it(`does not apply an A ${kind} request to a homonymous target in B`, async () => {
+      diagramCtl.mode.mermaid = "pending";
+      const [path, setPath] = createSignal("a.md");
+      const [html, setHtml] = createSignal(A_DIAGRAM_HTML);
+      const [fragment, setFragment] = createSignal<string | null>(kind === "fragment" ? "target" : null);
+      const [heading, setHeading] = createSignal<string | null>(kind === "heading" ? "Target" : null);
+      const completions: string[] = [];
+      const { scroller, scroll } = mountPreview({
+        path, html, fragment, heading, completions, setFragment, setHeading,
+      });
+      await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+      expect(completions).toEqual([]);
+      expect(scroll).not.toHaveBeenCalled();
+
+      // The real file switch passes through empty HTML, then B's article.
+      setPath("b.md");
+      setHtml("");
+      flush();
+      setHtml(B_TARGET_HTML);
+      flush();
+      await tick();
+      await tick();
+      // A's renderer finishes after B is already on screen.
+      diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+      await tick();
+      await tick();
+
+      expect(scroller.textContent).toContain("FILE B");
+      expect(scroll).not.toHaveBeenCalled();
+      expect(completions).toEqual([]);
+    });
+  }
+
+  it("shows a plain document before any paint-frame callback and completes its request once", async () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const [fragment, setFragment] = createSignal<string | null>("target");
+    const completions: string[] = [];
+    const { scroller, scroll } = mountPreview({
+      path: () => "a.md",
+      html: () => '<h1 id="target">Target</h1>',
+      fragment,
+      heading: () => null,
+      completions,
+      setFragment,
+    });
+    expect(scroller.querySelector("article")?.textContent).toBe("Target");
+    expect(scroller.querySelector("article")?.style.opacity).not.toBe("0");
+    await waitFor(() => expect(completions).toEqual(["a.md"]));
+    expect(scroll).toHaveBeenCalledTimes(1);
+    raf.mockRestore();
+  });
+
+  for (const kind of ["heading", "fragment"] as const) {
+    for (const order of ["path-first", "request-first"] as const) {
+      it(`opens B with a B ${kind} request (${order}): one jump after the SVG`, async () => {
+        diagramCtl.mode.mermaid = "pending";
+        const [path, setPath] = createSignal("a.md");
+        const [html, setHtml] = createSignal('<h1 id="old">Old</h1>');
+        const [fragment, setFragment] = createSignal<string | null>(null);
+        const [heading, setHeading] = createSignal<string | null>(null);
+        const completions: string[] = [];
+        const { scroller, scroll } = mountPreview({
+          path, html, fragment, heading, completions, setFragment, setHeading,
+        });
+        await tick();
+        const setRequest = () => {
+          if (kind === "heading") setHeading("Target");
+          else setFragment("target");
+        };
+        setHtml("");
+        if (order === "path-first") {
+          setPath("b.md");
+          setRequest();
+        } else {
+          setRequest();
+          setPath("b.md");
+        }
+        flush();
+        setHtml(B_DIAGRAM_HTML);
+        flush();
+        await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+        expect(completions).toEqual([]);
+        expect(scroll).not.toHaveBeenCalled();
+
+        const target = scroller.querySelector("#target") as HTMLElement;
+        vi.spyOn(target, "getBoundingClientRect").mockImplementation(
+          () => ({ top: 500 }) as DOMRect,
+        );
+        diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+        await waitFor(() =>
+          expect(scroller.querySelector('.mermaid[data-processed="true"] svg')).not.toBeNull(),
+        );
+        await tick();
+
+        expect(scroller.textContent).toContain("FILE B");
+        expect(completions).toEqual(["b.md"]);
+        expect(scroll).toHaveBeenCalledTimes(1);
+        expect(scroll).toHaveBeenLastCalledWith({ top: 484, behavior: "smooth" });
+      });
+    }
+  }
+
+  it("does not resurrect a discarded request when the old file is reopened", async () => {
+    diagramCtl.mode.mermaid = "pending";
+    const [path, setPath] = createSignal("a.md");
+    const [html, setHtml] = createSignal(A_DIAGRAM_HTML);
+    const [fragment, setFragment] = createSignal<string | null>("target");
+    const completions: string[] = [];
+    const { scroller, scroll } = mountPreview({
+      path, html, fragment, heading: () => null, completions, setFragment,
+    });
+    await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+    expect(completions).toEqual([]);
+
+    setPath("b.md");
+    setHtml(B_TARGET_HTML);
+    flush();
+    diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+    await tick();
+    expect(completions).toEqual([]);
+
+    setPath("a.md");
+    setHtml('<h1 id="target">Target AGAIN</h1>');
+    flush();
+    await tick();
+    await tick();
+    expect(scroll).not.toHaveBeenCalled();
+    expect(completions).toEqual([]);
+
+    // A brand-new request in the reopened document still works.
+    setFragment(null);
+    flush();
+    setFragment("target");
+    flush();
+    await waitFor(() => expect(completions).toEqual(["a.md"]));
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  for (const kind of ["heading", "fragment"] as const) {
+    it(`does not resurrect a discarded host ${kind} on a fresh Preview when A is reopened`, async () => {
+      // Conversion of the reviewer's probe: the request signals live
+      // outside Preview, like create-app-state, and a discard clears the
+      // host signal without reporting a completed jump.
+      diagramCtl.mode.mermaid = "pending";
+      const [path, setPath] = createSignal("a.md");
+      const [html, setHtml] = createSignal(A_DIAGRAM_HTML);
+      const [fragment, setFragment] = createSignal<string | null>(kind === "fragment" ? "target" : null);
+      const [heading, setHeading] = createSignal<string | null>(kind === "heading" ? "Target" : null);
+      const completions: string[] = [];
+      const discards: string[] = [];
+      const mount = () => mountPreview({
+        path, html, fragment, heading, completions, setFragment, setHeading,
+        onFragmentDiscarded: (value) => {
+          discards.push(`fragment:${value}`);
+          if (untrack(fragment) === value) setFragment(null);
+        },
+        onHeadingDiscarded: (value) => {
+          discards.push(`heading:${value}`);
+          if (untrack(heading) === value) setHeading(null);
+        },
+      });
+
+      const first = mount();
+      await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+      expect(completions).toEqual([]);
+      expect(first.scroll).not.toHaveBeenCalled();
+
+      // A's renderer is still pending when B opens with a homonymous target.
+      setPath("b.md");
+      setHtml(B_TARGET_HTML);
+      flush();
+      diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+      await tick();
+      await tick();
+
+      const discarded = kind === "fragment" ? "fragment:target" : "heading:Target";
+      expect(discards).toEqual([discarded]);
+      expect(untrack(fragment)).toBeNull();
+      expect(untrack(heading)).toBeNull();
+      expect(completions).toEqual([]);
+      expect(first.scroll).not.toHaveBeenCalled();
+      expect(first.scroller.textContent).toContain("FILE B");
+
+      // PaneView can dispose Preview; a fresh instance must not inherit A.
+      first.unmount();
+      setPath("a.md");
+      setHtml('<h1 id="target">Target AGAIN</h1>');
+      flush();
+      const second = mount();
+      await tick();
+      await tick();
+
+      expect(second.scroll).not.toHaveBeenCalled();
+      expect(completions).toEqual([]);
+      expect(discards).toEqual([discarded]);
+      expect(untrack(fragment)).toBeNull();
+      expect(untrack(heading)).toBeNull();
+    });
+  }
+
+  for (const kind of ["heading", "fragment"] as const) {
+    for (const order of ["path-first", "request-first"] as const) {
+      it(`keeps a B ${kind} request when A is discarded in the same batch (${order})`, async () => {
+        diagramCtl.mode.mermaid = "pending";
+        const oldValue = kind === "fragment" ? "target-a" : "Target A";
+        const newValue = kind === "fragment" ? "target-b" : "Target B";
+        const [path, setPath] = createSignal("a.md");
+        const [html, setHtml] = createSignal(A_DIAGRAM_HTML);
+        const [fragment, setFragment] = createSignal<string | null>(kind === "fragment" ? oldValue : null);
+        const [heading, setHeading] = createSignal<string | null>(kind === "heading" ? oldValue : null);
+        const completions: string[] = [];
+        const discards: string[] = [];
+        const request = () => (kind === "fragment" ? fragment() : heading());
+        const setRequest = (value: string | null) => {
+          if (kind === "fragment") setFragment(value);
+          else setHeading(value);
+        };
+        const { scroll } = mountPreview({
+          path, html, fragment, heading, completions, setFragment, setHeading,
+          onFragmentDiscarded: (value) => {
+            discards.push(`fragment:${value}`);
+            if (untrack(fragment) === value) setFragment(null);
+          },
+          onHeadingDiscarded: (value) => {
+            discards.push(`heading:${value}`);
+            if (untrack(heading) === value) setHeading(null);
+          },
+        });
+        await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+        expect(completions).toEqual([]);
+        expect(scroll).not.toHaveBeenCalled();
+
+        setHtml('<h1 id="target-b">Target B</h1>');
+        if (order === "path-first") {
+          setPath("b.md");
+          setRequest(newValue);
+        } else {
+          setRequest(newValue);
+          setPath("b.md");
+        }
+        flush();
+
+        expect(discards).toEqual([`${kind}:${oldValue}`]);
+        expect(untrack(request)).toBe(newValue);
+        expect(completions).toEqual([]);
+        expect(scroll).not.toHaveBeenCalled();
+
+        diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+        await waitFor(() => expect(completions).toEqual(["b.md"]));
+        expect(scroll).toHaveBeenCalledTimes(1);
+        expect(untrack(request)).toBeNull();
+      });
+    }
+  }
+});
+
+describe("PaneView + Preview — host jump signal lifecycle", () => {
+  // The reviewer's eight-case probe, kept as a permanent regression.
+  // PaneView, Preview and HtmlPreview are the real components; only the
+  // renderer and PaneView's unrelated children are stubbed. Host signals
+  // live outside Preview, like create-app-state, and renderer promises are
+  // controlled so the request stays pending across the file switch.
+  type Order = "discard-only" | "path-first" | "request-first" | "html-then-reopen";
+  const READY_SVG = '<svg viewBox="0 0 10 400"><text>Ready</text></svg>';
+  const A_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="target-a">Target A</h1>';
+  const B_HTML = '<h1 id="target-b">Target B</h1><p>FILE B</p>';
+  const A_HTML = '<h1 id="target-a">Target A</h1><p>FILE A</p>';
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    diagramCtl.reset();
+  });
+
+  for (const kind of ["fragment", "heading"] as const) {
+    for (const order of ["discard-only", "path-first", "request-first", "html-then-reopen"] as const) {
+      it(`real PaneView/Preview ${kind}: ${order}`, async () => {
+        diagramCtl.mode.mermaid = "pending";
+        const oldValue = kind === "fragment" ? "target-a" : "Target A";
+        const newValue = kind === "fragment" ? "target-b" : "Target B";
+        const [request, setRequest] = createSignal<string | null>(oldValue);
+        const [file, setFile] = createSignal({ kind: "file", name: "a.md", path: "a.md" });
+        const [html, setHtml] = createSignal(A_DIAGRAM_HTML);
+        const [editorContent] = createSignal("<p>HTML B</p>");
+        let phase = "initial";
+        const writes: Array<{ value: string | null; committed: string | null; phase: string }> = [];
+        const write = (value: string | null) => {
+          writes.push({ value, committed: untrack(request), phase });
+          setRequest(value);
+        };
+        const pane = {
+          paneId: "p0",
+          editorMode: () => "preview",
+          selectedFile: file,
+          selectedRootId: () => "root",
+          html,
+          editorContent,
+          frontmatter: () => null,
+          loading: () => false,
+          tableWrap: () => false,
+          tabs: { tabs: () => [] },
+        } as any;
+        const state = {
+          pendingFragment: kind === "fragment" ? request : () => null,
+          pendingHeadingText: kind === "heading" ? request : () => null,
+          setPendingFragment: kind === "fragment" ? write : () => {},
+          setPendingHeadingText: kind === "heading" ? write : () => {},
+          editorWidth: () => 50,
+          syncScroll: () => false,
+          previewFindTrigger: () => 0,
+          previewSearchOpen: () => false,
+          tocVisible: () => false,
+          setHasToc: () => {},
+          setPreviewSearchOpen: () => {},
+        } as any;
+        const scroll = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(() => {});
+        const mount = () => render(() => (
+          <PaneView pane={pane} state={state} paneIndex={0} isActive={true} />
+        ));
+        const first = mount();
+        await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+        expect(scroll).not.toHaveBeenCalled();
+
+        phase = "before-flush";
+        setHtml(B_HTML);
+        const path = order === "html-then-reopen" ? "b.html" : "b.md";
+        const changePath = () => setFile({ kind: "file", name: path, path });
+        if (order === "request-first") {
+          write(newValue);
+          changePath();
+        } else {
+          changePath();
+          if (order === "path-first") write(newValue);
+        }
+        // Solid publishes writes in the effect phase, not at setter time.
+        expect(untrack(request)).toBe(oldValue);
+
+        phase = "inside-flush";
+        flush();
+        diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+        phase = "after-flush";
+        await tick();
+        await tick();
+
+        if (order === "html-then-reopen") {
+          // b.html destroys Preview before its path-change effect can run.
+          // Teardown must hand the still-pending A request back to the host.
+          expect(untrack(request)).toBeNull();
+          expect(writes.some((w) => w.value === null && w.committed === oldValue)).toBe(true);
+          expect(scroll).not.toHaveBeenCalled();
+
+          setFile({ kind: "file", name: "a.md", path: "a.md" });
+          setHtml(A_HTML);
+          flush();
+          await tick();
+          await tick();
+          expect(untrack(request)).toBeNull();
+          expect(scroll).not.toHaveBeenCalled();
+        } else if (order === "discard-only") {
+          expect(untrack(request)).toBeNull();
+          expect(scroll).not.toHaveBeenCalled();
+          first.unmount();
+          setFile({ kind: "file", name: "a.md", path: "a.md" });
+          setHtml(A_HTML);
+          flush();
+          mount();
+          await tick();
+          expect(untrack(request)).toBeNull();
+          expect(scroll).not.toHaveBeenCalled();
+        } else {
+          // A request written for B in the same batch survives A's discard.
+          expect(untrack(request)).toBeNull();
+          expect(scroll).toHaveBeenCalledTimes(1);
+          expect(writes.filter((w) => w.value === null)).toEqual([
+            { value: null, committed: newValue, phase: "after-flush" },
+          ]);
+        }
+      });
+    }
+  }
+});
+
+describe("FrontmatterPanel — collapse state follows the file", () => {
+  it("restores the stored collapse state when currentFilePath changes", () => {
+    localStorage.setItem("frontmatter-collapsed:a.md", "1");
+    localStorage.setItem("frontmatter-collapsed:b.md", "0");
+    const [path, setPath] = createSignal("a.md");
+    const { container } = render(() => (
+      <FrontmatterPanel
+        frontmatter={{ title: "My Doc" }}
+        currentFilePath={path()}
+        onNavigate={() => {}}
+      />
+    ));
+    expect(container.querySelector(".frontmatter-panel")?.classList.contains("frontmatter-collapsed")).toBe(true);
+
+    setPath("b.md");
+    flush();
+    expect(container.querySelector(".frontmatter-panel")?.classList.contains("frontmatter-collapsed")).toBe(false);
+
+    localStorage.removeItem("frontmatter-collapsed:a.md");
+    localStorage.removeItem("frontmatter-collapsed:b.md");
+  });
+});
+
+describe("ImageLightbox — scroll lock cleanup", () => {
+  it("restores body overflow when the lightbox unmounts", () => {
+    const previous = document.body.style.overflow;
+    const { unmount } = render(() => (
+      <ImageLightbox src="asset://photo.png" onClose={() => {}} />
+    ));
+    expect(document.body.style.overflow).toBe("hidden");
+    unmount();
+    expect(document.body.style.overflow).toBe(previous);
   });
 });
 

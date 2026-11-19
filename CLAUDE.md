@@ -19,6 +19,17 @@ changelog. Therefore:
 - Keep subjects as Conventional Commits (`type(scope): summary`) and
   reader-facing; they ship straight into the release notes.
 
+## UI components (ui-sdk)
+
+The UI primitives in `packages/ui/src/components/ui/` are built on ui-sdk
+(`@ui-sdk/solid`, Solid 2). Before using ui-sdk, follow the `ui-sdk` skill
+(`.agents/skills/ui-sdk`) and read
+`packages/ui/node_modules/@ui-sdk/solid/docs/llms.txt`. A screen built from
+existing primitives (the skill's path 1) needs only the pages it uses. To build
+a component or behavior ui-sdk doesn't ship, or to extend one (path 2), also
+search `packages/ui/node_modules/@ui-sdk/solid/docs/core.md` by heading, and
+read `rendering.md` next to it.
+
 <!-- ai-memory:start -->
 ## Long-term memory (ai-memory)
 

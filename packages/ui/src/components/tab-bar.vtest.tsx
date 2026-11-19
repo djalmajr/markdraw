@@ -1,9 +1,26 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { flush } from "solid-js";
+import type { BeforeDragStartEvent } from "@dnd-kit/dom";
 import { createPaneStore } from "../composables/create-pane-store.ts";
+import { DragDropProvider } from "../lib/dnd/index.ts";
 import { TabBar } from "./tab-bar.tsx";
 
-afterEach(cleanup);
+const animations = Object.getOwnPropertyDescriptor(document, "getAnimations");
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  Object.defineProperty(document, "getAnimations", { configurable: true, value: () => [] });
+});
+afterEach(() => {
+  try {
+    cleanup();
+    vi.runOnlyPendingTimers();
+  } finally {
+    vi.useRealTimers();
+    if (animations) Object.defineProperty(document, "getAnimations", animations);
+    else Reflect.deleteProperty(document, "getAnimations");
+  }
+});
 
 function setupPaneWithTabs(filenames: string[]) {
   const pane = createPaneStore("test-pane");
@@ -13,7 +30,115 @@ function setupPaneWithTabs(filenames: string[]) {
   return pane;
 }
 
+describe("TabBar — keyboard activation", () => {
+  it.each(["Enter", "Space"])("activates a focused tab with %s without starting a drag", (code) => {
+    const pane = setupPaneWithTabs(["a.md", "b.md"]);
+    flush();
+    expect(pane.tabs.activeTabId()).toBe("root::b.md");
+    const activate = vi.fn(pane.tabs.activateTab);
+    const beforeDrag = vi.fn((event: BeforeDragStartEvent) => event.preventDefault());
+    const { getByRole } = render(() => (
+      <DragDropProvider onBeforeDragStart={beforeDrag}>
+        <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={activate} onCloseTab={() => {}} />
+      </DragDropProvider>
+    ));
+    const tab = getByRole("button", { name: "a.md" });
+    expect(tab.tabIndex).toBe(0);
+    tab.focus();
+    expect(document.activeElement).toBe(tab);
+    expect(fireEvent.keyDown(tab, { key: code === "Space" ? " " : code, code })).toBe(false);
+    flush();
+    expect(beforeDrag).not.toHaveBeenCalled();
+    expect(activate).toHaveBeenCalledExactlyOnceWith("root::a.md");
+    expect(pane.tabs.activeTabId()).toBe("root::a.md");
+  });
+
+  it("still starts and finishes a tab drag with the pointer", async () => {
+    const pane = setupPaneWithTabs(["a.md"]);
+    flush();
+    const start = vi.fn();
+    const end = vi.fn();
+    const { getByRole, unmount } = render(() => (
+      <DragDropProvider onDragStart={start} onDragEnd={end}>
+        <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={() => {}} onCloseTab={() => {}} />
+      </DragDropProvider>
+    ));
+    const pointer = { pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0 };
+    try {
+      const tab = getByRole("button", { name: "a.md" });
+      fireEvent.pointerDown(tab, { ...pointer, buttons: 1, clientX: 10, clientY: 10 });
+      fireEvent.pointerMove(tab, { ...pointer, buttons: 1, clientX: 22, clientY: 10 });
+      await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(tab.classList.contains("tab-bar-item-dragging")).toBe(true));
+
+      fireEvent.pointerUp(tab, { ...pointer, buttons: 0, clientX: 22, clientY: 10 });
+      await vi.waitFor(() => expect(end).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(tab.classList.contains("tab-bar-item-dragging")).toBe(false));
+    } finally {
+      unmount();
+    }
+  });
+
+  it("leaves the close button and keyboard context menu in control of their keys", () => {
+    const pane = setupPaneWithTabs(["a.md"]);
+    flush();
+    const activate = vi.fn();
+    const close = vi.fn();
+    const { getByRole } = render(() => (
+      <TabBar tabStore={pane.tabs} onActivateTab={activate} onCloseTab={close} />
+    ));
+    const tab = getByRole("button", { name: "a.md" });
+    const closeButton = getByRole("button", { name: "Close Tab" });
+    expect(fireEvent.keyDown(closeButton, { key: "Enter" })).toBe(true);
+    expect(fireEvent.keyDown(closeButton, { key: " " })).toBe(true);
+    fireEvent.click(closeButton);
+    expect(close).toHaveBeenCalledExactlyOnceWith("root::a.md");
+
+    expect(fireEvent.keyDown(tab, { key: "ContextMenu" })).toBe(true);
+    expect(fireEvent.keyDown(tab, { key: "F10", shiftKey: true })).toBe(true);
+    fireEvent.contextMenu(tab, { button: 0 });
+    flush();
+    expect(screen.getByRole("menuitem", { name: "Close Others" })).toBeTruthy();
+    expect(activate).not.toHaveBeenCalled();
+  });
+});
+
 describe("TabBar — Move to Other Pane menu entry", () => {
+  it("retains a named tab element across updates and keeps its menu usable", () => {
+    const pane = setupPaneWithTabs(["a.md"]);
+    flush();
+    const activate = vi.fn();
+    const { container } = render(() => <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={activate} onCloseTab={() => {}} />);
+    const first = container.querySelector<HTMLElement>(".tab-bar-item")!;
+    expect(first.getAttribute("aria-label")).toBe("a.md");
+    expect(first.getAttribute("role")).toBe("button");
+    fireEvent.click(first);
+    expect(activate).toHaveBeenCalledOnce();
+    pane.tabs.updateActiveTabContent({ editorContent: "updated" });
+    flush();
+    expect(container.querySelector(".tab-bar-item")).toBe(first);
+    expect(pane.tabs.getActiveTab()?.editorContent).toBe("updated");
+    expect(first.getAttribute("aria-label")).toBe("a.md");
+    const tooltipTrigger = container.querySelector<HTMLElement>(".tab-bar-item-tooltip-trigger")!;
+    expect(tooltipTrigger.getAttribute("aria-label")).toBe("a.md");
+    expect(tooltipTrigger.tabIndex).toBe(-1);
+    fireEvent.contextMenu(first);
+    flush();
+    expect(screen.getByText("Close Others")).toBeTruthy();
+  });
+
+  it("names both scroll controls when the tab list overflows", async () => {
+    const pane = setupPaneWithTabs(["a.md", "b.md"]);
+    flush();
+    const { container, getByRole } = render(() => <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={() => {}} onCloseTab={() => {}} />);
+    const list = container.querySelector<HTMLElement>(".tab-bar-list")!;
+    Object.defineProperties(list, { scrollWidth: { configurable: true, value: 600 }, clientWidth: { configurable: true, value: 100 }, scrollLeft: { configurable: true, value: 50 } });
+    fireEvent.scroll(list);
+    flush();
+    await Promise.resolve();
+    expect(getByRole("button", { name: "Scroll tabs left" })).toBeTruthy();
+    expect(getByRole("button", { name: "Scroll tabs right" })).toBeTruthy();
+  });
   it("hides the menu entry entirely when onMoveToOtherPane prop is missing", () => {
     const pane = setupPaneWithTabs(["a.md"]);
     render(() => (
@@ -32,7 +157,7 @@ describe("TabBar — Move to Other Pane menu entry", () => {
   });
 
   it("shows the menu entry with the supplied label when onMoveToOtherPane is wired", () => {
-    // The item's click→onSelect behaviour is Kobalte's responsibility
+    // The item's click→onSelect behaviour is ui-sdk's responsibility
     // (well-tested upstream); this test guards the prop wiring — the
     // entry must be rendered with the supplied label so the user can
     // see + activate it.
@@ -49,6 +174,7 @@ describe("TabBar — Move to Other Pane menu entry", () => {
     ));
     const tab = screen.getByText("a.md");
     fireEvent.contextMenu(tab);
+    flush();
     expect(screen.getByText("Open in Split Pane")).not.toBeNull();
   });
 
@@ -64,6 +190,7 @@ describe("TabBar — Move to Other Pane menu entry", () => {
     ));
     const tab = screen.getByText("a.md");
     fireEvent.contextMenu(tab);
+    flush();
     expect(screen.getByText("Move to Other Pane")).not.toBeNull();
   });
 });
@@ -82,6 +209,7 @@ describe("TabBar — translated context menu (DJA-30)", () => {
       />
     ));
     fireEvent.contextMenu(screen.getByText("doc.md"));
+    flush();
     // EN is the base locale resolved by paraglide when no locale is set;
     // these labels must come through the i18n catalog, not be hardcoded.
     for (const label of ["Close", "Close Others", "Close to the Right", "Close All"]) {

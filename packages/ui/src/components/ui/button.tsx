@@ -1,8 +1,7 @@
-import type { JSX, ValidComponent } from "solid-js"
-import { Show, splitProps } from "solid-js"
+import type { ComponentProps, JSX } from "@solidjs/web"
+import { Show, omit } from "solid-js"
 
-import * as ButtonPrimitive from "@kobalte/core/button"
-import type { PolymorphicProps } from "@kobalte/core/polymorphic"
+import { Button as ButtonPrimitive } from "@ui-sdk/solid/button"
 import type { VariantProps } from "class-variance-authority"
 import { cva } from "class-variance-authority"
 
@@ -34,7 +33,9 @@ const buttonVariants = cva(
   }
 )
 
-type ButtonProps<T extends ValidComponent = "button"> = ButtonPrimitive.ButtonRootProps<T> &
+/** Native `button` props. The Kobalte `as`/polymorphism generic is gone: no
+ *  call site used it, and ui-sdk renders a different tag through `render`. */
+type ButtonProps = ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     class?: string | undefined
     children?: JSX.Element
@@ -42,24 +43,29 @@ type ButtonProps<T extends ValidComponent = "button"> = ButtonPrimitive.ButtonRo
     loading?: boolean
   }
 
-const Button = <T extends ValidComponent = "button">(
-  props: PolymorphicProps<T, ButtonProps<T>>
-) => {
-  const [local, others] = splitProps(props as ButtonProps, [
+/** `class`, `variant`, `size`, `loading`, `children` and `disabled` are ours;
+ *  everything else (native props, event handlers) spreads onto the part. */
+const Button = (props: ButtonProps) => {
+  // The DOM prop type admits `false`/RemoveAttribute on `type`, `style`, etc.;
+  // the ui-sdk part only accepts real HTML values.
+  const others = omit(
+    props,
     "variant",
     "size",
     "class",
     "loading",
     "children",
-    "disabled"
-  ])
+    "disabled",
+    "style",
+  ) as Omit<ComponentProps<typeof ButtonPrimitive>, "class" | "disabled" | "children" | "style">
   return (
-    <ButtonPrimitive.Root
-      class={cn(buttonVariants({ variant: local.variant, size: local.size }), local.class)}
-      disabled={local.loading || local.disabled}
+    <ButtonPrimitive
+      class={cn(buttonVariants({ variant: props.variant, size: props.size }), props.class)}
+      disabled={!!(props.loading || props.disabled)}
+      style={props.style as string | JSX.CSSProperties | undefined}
       {...others}
     >
-      <Show when={local.loading}>
+      <Show when={props.loading}>
         {/* Inline lucide `loader-circle` — keeps this shared primitive consumable
             by builds without unplugin-icons (e.g. the marketing site), matching
             the inline-svg convention of the sibling Kobalte wrappers. */}
@@ -76,8 +82,8 @@ const Button = <T extends ValidComponent = "button">(
           <path d="M21 12a9 9 0 1 1-6.219-8.56" />
         </svg>
       </Show>
-      {local.children}
-    </ButtonPrimitive.Root>
+      {props.children}
+    </ButtonPrimitive>
   )
 }
 

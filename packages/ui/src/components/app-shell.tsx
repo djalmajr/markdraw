@@ -1,5 +1,6 @@
-import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
-import { DragDropProvider, DragOverlay } from "@dnd-kit/solid";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { DragDropProvider, DragOverlay } from "../lib/dnd/index.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -407,8 +408,8 @@ export function AppShell(props: AppShellProps) {
    *   - Reading targetPane from a wrong place sends the tab to the
    *     wrong pane.
    */
-  // Use `any` because `@dnd-kit/solid`'s emitted shapes for the drag
-  // event aren't exported as a single nameable type — the runtime
+  // Use `any` because the drag operation shapes coming out of the DnD
+  // adapter aren't exported as a single nameable type — the runtime
   // shape we care about is `event.operation.{source,target}.id`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleTabDragEnd(event: any) {
@@ -481,12 +482,14 @@ export function AppShell(props: AppShellProps) {
   // `hasToc`; for everything else we clear it and drop the orphan DOM nodes
   // from the shared container so the `<Show when={!s.hasToc()}>` placeholder
   // gets a clean canvas.
-  createEffect(() => {
-    const file = s.selectedFile();
-    if (file && fileKind(file.name) === "document") return;
-    s.setHasToc(false);
-    if (tocContainerRef) tocContainerRef.textContent = "";
-  });
+  createEffect(
+    () => s.selectedFile(),
+    (file) => {
+      if (file && fileKind(file.name) === "document") return;
+      s.setHasToc(false);
+      if (tocContainerRef) tocContainerRef.textContent = "";
+    },
+  );
 
   // Lazily flatten the workspace only while the Quick Open overlay is open.
   // `state.rootsList` is reactive, so the memo refreshes when files are
@@ -821,8 +824,7 @@ export function AppShell(props: AppShellProps) {
         onClose={() => props.onFindInFilesClose?.()}
       />
       <div
-        class="app"
-        classList={{
+        class={["app", {
           "drag-over": s.dragOver(),
           "window-frame-toolbar": !!props.windowFrameToolbar,
           // Reader / Zen mode — drives the chrome-collapsing rules
@@ -831,7 +833,8 @@ export function AppShell(props: AppShellProps) {
           // hide without unmounting heavy subtrees so toggling is
           // instant.
           "reader-mode": s.readerMode(),
-        }}
+        }]}
+        
         ref={appRef}
         onDragOver={props.onDragOver}
         onDragLeave={props.onDragLeave}

@@ -1,16 +1,5 @@
-import {
-  For,
-  Match,
-  Show,
-  Switch,
-  createEffect,
-  createMemo,
-  createSignal,
-  on,
-  onCleanup,
-  onMount,
-  type JSX,
-} from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, flush, onCleanup, onSettled, untrack } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import IconSparkles from "~icons/lucide/sparkles";
@@ -202,18 +191,17 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   let messagesScrollFrame: ReturnType<typeof requestAnimationFrame> | undefined;
   let messagesViewportCleanup: (() => void) | undefined;
 
-  createEffect(() => {
-    props.focusTrigger;
-    textarea?.focus();
-  });
+  createEffect(() => props.focusTrigger, () => textarea?.focus());
 
-  createEffect(() => {
-    props.store.messages();
-    props.store.streaming();
-    props.store.streamingText();
-    props.store.toolActivity();
-    scheduleMessagesScrollSync();
-  });
+  createEffect(
+    () => {
+      props.store.messages();
+      props.store.streaming();
+      props.store.streamingText();
+      props.store.toolActivity();
+    },
+    () => scheduleMessagesScrollSync(),
+  );
 
   function isMessagesAtBottom(el: HTMLElement): boolean {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_BOTTOM_THRESHOLD_PX;
@@ -311,12 +299,10 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   // The panel is a single instance fed the ACTIVE session's store — a pending
   // edit must die on chat switch or its index would truncate the wrong chat.
   createEffect(
-    on(
       () => props.store,
-      () => cancelEditing(),
+      () => untrack(() => cancelEditing()),
       { defer: true },
-    ),
-  );
+    );
 
   function startEditing(index: number, content: string): void {
     setEditing({ index });
@@ -458,7 +444,6 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   // `props.slashCommands` inside its memo, so a late-arriving fresh list
   // updates the already-open popover in place.
   createEffect(
-    on(
       () => slashQuery() !== null,
       (open, wasOpen) => {
         if (open && !wasOpen) {
@@ -466,8 +451,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           props.onSkillsMenuOpen?.();
         }
       },
-    ),
-  );
+    );
 
   // Selecting a command replaces the typed "/<partial>" prefix with "/name "
   // (the trailing space closes the list) and keeps the caret right after it,
@@ -550,13 +534,11 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   }
 
   createEffect(
-    on(
       () => skillQuery() !== null,
       (open, wasOpen) => {
         if (open && !wasOpen) props.onSkillsMenuOpen?.();
       },
-    ),
-  );
+    );
 
   function selectSkill(skill: AiSkillEntry): void {
     const ta = textarea;
@@ -649,22 +631,26 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   // the moment the host lands it. Matched by identity, so a twin (same label,
   // other root) landing in the same batch survives. Only the matched
   // identities clear; the rest of the set keeps waiting.
-  createEffect(() => {
-    const items = props.contextItems ?? [];
-    const pending = pendingRemovals();
-    if (pending.size === 0) return;
-    const matched = items.filter((i) => {
-      const identity = itemIdentity(i);
-      return identity !== null && pending.has(identity);
-    });
-    if (matched.length === 0) return;
-    for (const item of matched) props.onRemoveContext?.(item.id);
-    setPendingRemovals((prev) => {
-      const next = new Set(prev);
-      for (const item of matched) next.delete(itemIdentity(item)!);
-      return next;
-    });
-  });
+  createEffect(
+    () => {
+      const items = props.contextItems ?? [];
+      const pending = pendingRemovals();
+      if (pending.size === 0) return [];
+      return items.filter((i) => {
+        const identity = itemIdentity(i);
+        return identity !== null && pending.has(identity);
+      });
+    },
+    (matched) => {
+      if (matched.length === 0) return;
+      for (const item of matched) props.onRemoveContext?.(item.id);
+      setPendingRemovals((prev) => {
+        const next = new Set(prev);
+        for (const item of matched) next.delete(itemIdentity(item)!);
+        return next;
+      });
+    },
+  );
 
   /** Untrack every token whose literal string no longer occurs in `text` and
    *  remove its resolved item. Called ONLY from the textarea's input event —
@@ -766,6 +752,10 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       if (item) ids.push(item.id);
     }
     props.onReorderContext?.(ids);
+    // Solid 2 commits signal writes on flush. The host reorders context by
+    // writing a signal; commit it before sendMessage/editAndResend resolves
+    // getContext so the provider sees the tokens' textual order in this send.
+    flush();
     setConsumedRefs((prev) => {
       const next = new Map(prev);
       for (const ref of tracked.values()) {
@@ -846,7 +836,9 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
     if (!ta) return;
     let token = `@${rawToken}`;
     for (let n = 2; ; n += 1) {
-      const tracked = inlineRefs().get(token);
+      // A one-time snapshot at insertion: re-running the token-request effect
+      // because the draft changed would insert the same token twice.
+      const tracked = untrack(() => inlineRefs().get(token));
       if (!tracked) break;
       if (tracked.kind === "item" && tracked.itemId === itemId) {
         ta.focus();
@@ -854,7 +846,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       }
       token = `@${rawToken}-${n}`;
     }
-    const text = input();
+    const text = untrack(input);
     const focused = document.activeElement === ta;
     const at = focused ? (ta.selectionStart ?? text.length) : text.length;
     // A separating space when the insertion point follows non-whitespace —
@@ -884,21 +876,21 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   // closed when the user hit ⌘I and focusAiComposer just created it) — is a
   // pending request, never a stale replay.
   createEffect(
-    on(
-      () => props.inlineReference?.seq,
-      (seq) => {
-        const ref = props.inlineReference;
-        if (!ref || seq === undefined) return;
-        // A transient detached AiPanel instance (mounted, DOM removed, but its
-        // effects still alive) would otherwise consume this reference first —
-        // inserting the token into its orphaned textarea and acking it — so the
-        // visible panel never gets it (the chip stays, the token never appears).
-        // Only the instance actually in the document should handle it.
-        if (!textarea || !textarea.isConnected) return;
-        insertItemToken(ref.itemId, ref.token);
-        props.onInlineReferenceHandled?.();
-      },
-    ),
+    () => {
+      const ref = props.inlineReference;
+      return ref ? { seq: ref.seq, itemId: ref.itemId, token: ref.token } : null;
+    },
+    (request) => {
+      if (!request || request.seq === undefined) return;
+      // A transient detached AiPanel instance (mounted, DOM removed, but its
+      // effects still alive) would otherwise consume this reference first —
+      // inserting the token into its orphaned textarea and acking it — so the
+      // visible panel never gets it (the chip stays, the token never appears).
+      // Only the instance actually in the document should handle it.
+      if (!textarea || !textarea.isConnected) return;
+      untrack(() => insertItemToken(request.itemId, request.token));
+      props.onInlineReferenceHandled?.();
+    },
   );
 
   /** The input split on tracked tokens (longest-first on ties) for the
@@ -1144,7 +1136,7 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
           contentClass="ai-messages-content"
           viewportRef={attachMessagesViewport}
         >
-          <Show when={hasConversation()} fallback={<AiEmptyState {...props} />}>
+          <Show when={hasConversation()} fallback={<AiEmptyState store={props.store} onOpenSettings={props.onOpenSettings} />}>
             <For each={props.store.messages()}>
               {(msg, i) => (
                 <AiMessage
@@ -1214,8 +1206,8 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
       </Show>
 
       <div
-        class="ai-composer"
-        classList={{ "ai-composer-dragover": dragOver() }}
+        class={["ai-composer", { "ai-composer-dragover": dragOver() }]}
+        
         onDragOver={(e) => {
           if (!props.onContextDrop) return;
           e.preventDefault();
@@ -1306,11 +1298,11 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
             <For each={mentionMatches()}>
               {(file, i) => (
                 <button
-                  class="ai-mention-item"
-                  classList={{
+                  class={["ai-mention-item", {
                     "ai-mention-item-active": i() === mentionIndex(),
                     "ai-mention-root": file.path === "",
-                  }}
+                  }]}
+                  
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -1345,11 +1337,11 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
             <For each={slashMatches()}>
               {(match, i) => (
                 <button
-                  class="ai-mention-item ai-slash-item"
-                  classList={{
+                  class={["ai-mention-item ai-slash-item", {
                     "ai-mention-item-active": i() === slashIndex(),
                     "ai-slash-skill-item": match.kind === "skill",
-                  }}
+                  }]}
+                  
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -1374,8 +1366,8 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
             <For each={skillMatches()}>
               {(skill, i) => (
                 <button
-                  class="ai-mention-item ai-skill-item"
-                  classList={{ "ai-mention-item-active": i() === skillIndex() }}
+                  class={["ai-mention-item ai-skill-item", { "ai-mention-item-active": i() === skillIndex() }]}
+                  
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -1580,7 +1572,7 @@ function ContextUsage(props: { store: AiChatStore; contextLimit?: number }): JSX
       toolCount: tools.length,
     });
   }
-  onMount(() => void loadBase());
+  onSettled(() => void loadBase());
 
   const conversation = createMemo(() => {
     const chars = props.store.messages().reduce((n, msg) => {
@@ -1639,7 +1631,7 @@ function ContextUsage(props: { store: AiChatStore; contextLimit?: number }): JSX
   );
 }
 
-function AiEmptyState(props: AiPanelProps): JSX.Element {
+function AiEmptyState(props: Pick<AiPanelProps, "store" | "onOpenSettings">): JSX.Element {
   return (
     <div class="ai-empty">
       <IconSparkles width={28} height={28} class="ai-empty-icon" />

@@ -1,4 +1,4 @@
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal, onSettled } from "solid-js";
 
 export interface PaneSplitterProps {
   /** Current ratio of the left pane width to the container width
@@ -30,10 +30,22 @@ const MAX_RATIO = 0.9;
 export function PaneSplitter(props: PaneSplitterProps) {
   const [dragging, setDragging] = createSignal(false);
   let rootRef: HTMLDivElement | undefined;
+  let activeMove: ((event: MouseEvent) => void) | undefined;
+  let activeUp: (() => void) | undefined;
+
+  function removeDragListeners() {
+    if (activeMove) document.removeEventListener("mousemove", activeMove);
+    if (activeUp) document.removeEventListener("mouseup", activeUp);
+    activeMove = undefined;
+    activeUp = undefined;
+  }
+
+  onSettled(() => () => removeDragListeners());
 
   function onMouseDown(event: MouseEvent) {
     event.preventDefault();
     setDragging(true);
+    removeDragListeners();
 
     const containerEl = props.container?.() ?? rootRef?.parentElement ?? null;
     if (!containerEl) {
@@ -51,17 +63,13 @@ export function PaneSplitter(props: PaneSplitterProps) {
 
     function onUp() {
       setDragging(false);
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
+      removeDragListeners();
     }
 
+    activeMove = onMove;
+    activeUp = onUp;
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
-
-    onCleanup(() => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    });
   }
 
   function onDoubleClick(event: MouseEvent) {
@@ -72,8 +80,8 @@ export function PaneSplitter(props: PaneSplitterProps) {
   return (
     <div
       ref={rootRef}
-      class="pane-splitter"
-      classList={{ "pane-splitter-dragging": dragging() }}
+      class={["pane-splitter", { "pane-splitter-dragging": dragging() }]}
+      
       role="separator"
       aria-orientation="vertical"
       aria-valuenow={Math.round(props.ratio * 100)}

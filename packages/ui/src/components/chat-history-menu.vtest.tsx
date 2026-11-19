@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { AiChatSessionMeta } from "../composables/create-ai-chat-sessions.ts";
@@ -42,6 +43,7 @@ function baseProps(over: Partial<ChatHistoryMenuProps> = {}): ChatHistoryMenuPro
 function open(props: ChatHistoryMenuProps) {
   const result = render(() => <ChatHistoryMenu {...props} />);
   fireEvent.click(screen.getByLabelText("Chat history"));
+  flush();
   return result;
 }
 
@@ -59,6 +61,7 @@ describe("ChatHistoryMenu", () => {
     open(baseProps());
     const input = screen.getByPlaceholderText("Search chats…");
     fireEvent.input(input, { target: { value: "project" } });
+    flush();
     expect(screen.getByText("Project status")).not.toBeNull();
     expect(screen.queryByText("Old archived")).toBeNull();
   });
@@ -67,6 +70,7 @@ describe("ChatHistoryMenu", () => {
     const onActivate = vi.fn();
     open(baseProps({ onActivate }));
     fireEvent.click(screen.getByText("Project status"));
+    flush();
     expect(onActivate).toHaveBeenCalledWith("a");
   });
 
@@ -82,8 +86,11 @@ describe("ChatHistoryMenu", () => {
     const activeRow = screen.getByText("Project status").closest(".rp-history-row")!;
     const menuBtn = activeRow.querySelector(".rp-history-row-menu")!;
     fireEvent.pointerDown(menuBtn, { button: 0, pointerType: "mouse" });
+    flush();
     fireEvent.pointerUp(menuBtn, { button: 0, pointerType: "mouse" });
+    flush();
     fireEvent.click(menuBtn);
+    flush();
     expect(screen.getByText("Archive")).not.toBeNull();
     expect(baseElement.querySelector(".rp-history-delete")).not.toBeNull();
   });
@@ -94,12 +101,18 @@ describe("ChatHistoryMenu", () => {
     const activeRow = screen.getByText("Project status").closest(".rp-history-row")!;
     const menuBtn = activeRow.querySelector(".rp-history-row-menu")!;
     fireEvent.pointerDown(menuBtn, { button: 0, pointerType: "mouse" });
+    flush();
     fireEvent.pointerUp(menuBtn, { button: 0, pointerType: "mouse" });
+    flush();
     fireEvent.click(menuBtn);
+    flush();
     const fork = screen.getByText("Duplicate chat");
     fireEvent.pointerDown(fork, { button: 0, pointerType: "mouse" });
+    flush();
     fireEvent.pointerUp(fork, { button: 0, pointerType: "mouse" });
+    flush();
     fireEvent.click(fork);
+    flush();
     expect(onForkSession).toHaveBeenCalledWith("a");
   });
 
@@ -108,8 +121,11 @@ describe("ChatHistoryMenu", () => {
     const activeRow = screen.getByText("Project status").closest(".rp-history-row")!;
     const menuBtn = activeRow.querySelector(".rp-history-row-menu")!;
     fireEvent.pointerDown(menuBtn, { button: 0, pointerType: "mouse" });
+    flush();
     fireEvent.pointerUp(menuBtn, { button: 0, pointerType: "mouse" });
+    flush();
     fireEvent.click(menuBtn);
+    flush();
     expect(screen.getByText("Archive")).not.toBeNull(); // menu is open
     expect(screen.queryByText("Duplicate chat")).toBeNull();
   });

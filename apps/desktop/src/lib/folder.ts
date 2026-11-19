@@ -2,7 +2,8 @@ import type { Accessor, Setter } from "solid-js";
 import { writeText as clipboardWriteText } from "@tauri-apps/plugin-clipboard-manager";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { FSEntry } from "@markdraw/core/types.ts";
-import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
+import { findEntryInTree, type AppState } from "@markdraw/ui/composables/create-app-state.ts";
+import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
 import { copyPath, createDir, createFile, movePath, openDirectory, readTree, renameFile, trashPath, writeFile } from "./fs.ts";
 import { joinRelative, nextAvailableName, withDefaultExtension } from "./fs-paths.ts";
 import type { FileWatcher } from "./watcher.ts";
@@ -13,10 +14,12 @@ interface FolderDeps {
   setRootPaths: Setter<Map<string, string>>;
   state: AppState;
   watcher: FileWatcher;
+  onRootClosed?: (rootId: string) => void;
+  onFileRenamed?: (pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry) => void;
 }
 
 export function createFolder(deps: FolderDeps) {
-  const { rootPaths, setRootPaths, state, watcher } = deps;
+  const { rootPaths, setRootPaths, state, watcher, onRootClosed, onFileRenamed } = deps;
 
   // Serialize authorization changes together with their UI publication. In
   // particular a close is acknowledged by Rust before it disappears locally;
@@ -25,7 +28,7 @@ export function createFolder(deps: FolderDeps) {
   let rootUpdates = invoke<void>("mcp_set_roots", { roots: [] }).catch(() => {
     console.warn("Could not initialize MCP workspaces");
   });
-  function updateRoots(change: (next: Map<string, string>) => void, publish: () => void) {
+  function updateRoots(change: (next: Map<string, string>) => void, publish: (next: ReadonlyMap<string, string>) => void) {
     const update = rootUpdates.then(async () => {
       const next = new Map(rootPaths());
       change(next);
@@ -36,7 +39,7 @@ export function createFolder(deps: FolderDeps) {
         throw rootUpdateRejected;
       });
       setRootPaths(next);
-      publish();
+      publish(next);
     });
     // A failed update leaves both the registry and local roots unchanged;
     // subsequent user actions may retry without a poisoned promise queue.
@@ -121,7 +124,7 @@ export function createFolder(deps: FolderDeps) {
       state.updateRootEntries(rootId, entries);
 
       // If selected file was in this root and was deleted, clear the selection
-      if (currentPath && targetPane.selectedRootId() === rootId && !state.findEntryByPath(currentPath, rootId)) {
+      if (currentPath && targetPane.selectedRootId() === rootId && !findEntryInTree(entries, currentPath)) {
         targetPane.setSelectedFile(null);
         targetPane.setHtml("");
       }
@@ -139,9 +142,10 @@ export function createFolder(deps: FolderDeps) {
    * points consistent and is required for the new `respectGitignore`
    * toggle to take effect when re-reading.
    */
-  async function refreshAllRoots() {
-    const includeHiddenEntries = state.showHiddenEntries();
-    const respectGitignore = state.respectGitignore();
+  async function refreshAllRoots({
+    includeHiddenEntries = state.showHiddenEntries(),
+    respectGitignore = state.respectGitignore(),
+  } = {}) {
     const ids = Array.from(rootPaths().keys());
     // Same race rule as refreshRoot: pin at call time so a pane flip
     // during the parallel reads doesn't redirect the cleanup to the
@@ -155,7 +159,7 @@ export function createFolder(deps: FolderDeps) {
       const currentPath = targetPane.selectedFile()?.path;
       state.updateRootEntries(rootId, entries);
 
-      if (currentPath && targetPane.selectedRootId() === rootId && !state.findEntryByPath(currentPath, rootId)) {
+      if (currentPath && targetPane.selectedRootId() === rootId && !findEntryInTree(entries, currentPath)) {
         targetPane.setSelectedFile(null);
         targetPane.setHtml("");
       }
@@ -164,9 +168,10 @@ export function createFolder(deps: FolderDeps) {
 
   async function handleCloseRoot(rootId: string) {
     try {
-      await updateRoots((next) => { next.delete(rootId); }, () => {
+      await updateRoots((next) => { next.delete(rootId); }, (next) => {
         state.removeRoot(rootId);
-        if (rootPaths().size === 0) watcher.destroy();
+        if (next.size === 0) void watcher.destroy();
+        if (!next.has(rootId)) onRootClosed?.(rootId);
       });
     } catch (e) {
       if (e !== rootUpdateRejected) console.error("Could not close workspace: MCP authorization update failed");
@@ -181,16 +186,21 @@ export function createFolder(deps: FolderDeps) {
     // not the pane whose buffer we actually persisted. See Round 4
     // Lesson 6 for the canonical write-up.
     const targetPane = state.paneManager.activePane();
+    const tab = targetPane.tabs.getActiveTab();
     const entry = targetPane.selectedFile();
     const rootId = targetPane.selectedRootId();
     const rootPath = rootId ? rootPaths().get(rootId) : null;
-    if (!entry || !rootPath) return;
+    if (!entry || !rootId || !rootPath || tab?.needsLoad) return;
 
     try {
       const absolutePath = `${rootPath}/${entry.path}`;
       const content = targetPane.editorContent();
       await writeFile(absolutePath, content);
-      targetPane.setSavedContent(content);
+      if (targetPane.tabs.activeTabId() === (tab?.id ?? null)
+        && targetPane.selectedFile()?.path === entry.path
+        && targetPane.selectedRootId() === rootId) {
+        targetPane.setSavedContent(content);
+      }
     } catch (e) {
       console.error("Failed to save file:", e);
     }
@@ -253,6 +263,18 @@ export function createFolder(deps: FolderDeps) {
     }
 
     await refreshRoot(rootId);
+    if (entry.kind === "file") {
+      onFileRenamed?.(targetPane, rootId, entry.path, { ...entry, path: newRelative, name: newName });
+    } else {
+      const pending = targetPane.tabs.getActiveTab();
+      if (pending?.needsLoad && pending.rootId === rootId && pending.filePath.startsWith(entry.path + "/")) {
+        onFileRenamed?.(targetPane, rootId, pending.filePath, {
+          path: newRelative + pending.filePath.slice(entry.path.length),
+          name: pending.fileName,
+          kind: "file",
+        });
+      }
+    }
   }
 
   async function handleDelete(entry: FSEntry, rootId: string): Promise<void> {

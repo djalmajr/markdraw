@@ -233,11 +233,6 @@ describe("createFolder.refreshRoot — pin per-doc target before await (DJA-41)"
     pane1.setSelectedFile({ name: "kept.md", path: "kept.md", kind: "file" });
 
     const state = makeState(paneManager);
-    // findEntryByPath returns null for the deleted entry only (acts
-    // like the file is gone from the refreshed tree).
-    (state as unknown as { findEntryByPath: (p: string) => unknown }).findEntryByPath = (path: string) =>
-      path === "kept.md" ? { name: "kept.md", path: "kept.md", kind: "file" } : null;
-
     const folder = createFolder({
       rootPaths: () => new Map([["root1", "/work/root1"]]),
       setRootPaths: () => {},
@@ -247,7 +242,7 @@ describe("createFolder.refreshRoot — pin per-doc target before await (DJA-41)"
     const refreshPromise = folder.refreshRoot("root1");
     // Flip BEFORE readTree resolves.
     paneManager.setActivePane(1);
-    resolveReadTree!([]);
+    resolveReadTree!([{ name: "kept.md", path: "kept.md", kind: "file" }]);
     await refreshPromise;
 
     expect(pane0.selectedFile()).toBeNull(); // gone — cleared on origin pane
@@ -285,10 +280,6 @@ describe("createFolder.handleMove", () => {
     pane.setSelectedRootId("root1");
     pane.setSelectedFile({ name: "a.md", path: "a.md", kind: "file" });
     const state = makeState(paneManager);
-    // After the move, refreshRoot looks the open file up by its NEW path;
-    // make it resolve so the selection isn't cleared as a vanished entry.
-    (state as unknown as { findEntryByPath: (p: string) => unknown }).findEntryByPath = (path: string) =>
-      path === "sub/a.md" ? { name: "a.md", path: "sub/a.md", kind: "file" } : null;
     const folder = createFolder({
       rootPaths: () => new Map([["root1", "/work/root1"]]),
       setRootPaths: () => {},
@@ -303,7 +294,12 @@ describe("createFolder.handleMove", () => {
     );
     resolveRename!();
     await Promise.resolve();
-    resolveReadTree!([]);
+    resolveReadTree!([{
+      kind: "directory",
+      name: "sub",
+      path: "sub",
+      children: [{ kind: "file", name: "a.md", path: "sub/a.md" }],
+    }]);
     await movePromise;
 
     expect(pane.selectedFile()?.path).toBe("sub/a.md");

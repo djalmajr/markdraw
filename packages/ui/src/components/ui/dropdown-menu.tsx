@@ -1,179 +1,273 @@
-import type { JSX, ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
+import { createContext, omit, useContext } from "solid-js";
+import { Dynamic, type JSX, type ValidComponent } from "@solidjs/web";
 
-import type { PolymorphicProps } from "@kobalte/core"
-import * as DropdownMenuPrimitive from "@kobalte/core/dropdown-menu"
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuContent,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuItemIndicator,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuSub,
+  MenuSubContent,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "@ui-sdk/solid/menu";
 
 import { cn } from "@markdraw/core/utils.ts"
 
-const DropdownMenu = DropdownMenuPrimitive.Root
-const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger
-const DropdownMenuGroup = DropdownMenuPrimitive.Group
-const DropdownMenuGroupLabel = DropdownMenuPrimitive.GroupLabel
-const DropdownMenuSub = DropdownMenuPrimitive.Sub
-const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup
+const MenuLayoutContext = createContext<() => { gutter?: number }>(() => ({}))
 
-type DropdownMenuContentProps = DropdownMenuPrimitive.DropdownMenuContentProps & {
-  class?: string | undefined
+const DropdownMenuGroup = MenuGroup
+const DropdownMenuGroupLabel = MenuGroupLabel
+const DropdownMenuSub = MenuSub
+// The SDK requires `value` on these parts; our wrapper keeps Kobalte's looser
+// public signature so existing call sites keep compiling.
+const CheckboxItem = MenuCheckboxItem as (props: any) => JSX.Element
+const RadioItem = MenuRadioItem as (props: any) => JSX.Element
+
+const asRender = (
+  as: ValidComponent | undefined,
+  render: ((props: Record<string, any>, state: any) => JSX.Element) | undefined
+) =>
+  render ??
+  (as
+    ? (props: Record<string, any>) => <Dynamic component={as} {...props} />
+    : undefined)
+
+/** Kobalte called this `gutter`; the SDK takes `sideOffset` on the content. */
+const DropdownMenu = (props: { gutter?: number; [key: string]: any }) => (
+  <MenuLayoutContext value={() => ({ gutter: props.gutter })}>
+    <Menu {...omit(props, "gutter")} />
+  </MenuLayoutContext>
+)
+
+const DropdownMenuTrigger = (props: {
+  as?: ValidComponent
+  render?: (props: Record<string, any>, state: any) => JSX.Element
+  [key: string]: any
+}) => {
+  const others = omit(props, "as", "render")
+  return <MenuTrigger render={asRender(props.as, props.render)} {...others} />
 }
 
-const DropdownMenuContent = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuContentProps>
+const closeAutoFocusToFinalFocus = (
+  onCloseAutoFocus: ((event: Event) => void) | undefined,
+  finalFocus: any
 ) => {
-  const [local, others] = splitProps(props as DropdownMenuContentProps, ["class"])
-  return (
-    <DropdownMenuPrimitive.Portal>
-      <DropdownMenuPrimitive.Content
-        class={cn(
-          // `outline-none`: the menu container is focusable (focus lands here
-          // when the pointer is over a non-item like a separator); without it
-          // the browser paints its default blue focus ring. Items show their
-          // own `focus:bg-accent`, so nothing else needs the outline.
-          "z-50 min-w-[8rem] origin-[var(--kb-menu-content-transform-origin)] animate-content-hide overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-none outline-none data-[expanded]:animate-content-show",
-          local.class
-        )}
-        {...others}
-      />
-    </DropdownMenuPrimitive.Portal>
+  if (finalFocus !== undefined) return finalFocus
+  if (!onCloseAutoFocus) return undefined
+  return () => {
+    let prevented = false
+    onCloseAutoFocus({
+      preventDefault: () => {
+        prevented = true
+      },
+    } as unknown as Event)
+    return prevented ? "none" : "trigger"
+  }
+}
+
+const contentClasses =
+  "z-50 min-w-[8rem] origin-[var(--transform-origin)] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-none outline-none transition-[opacity,scale] duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 motion-reduce:transition-opacity motion-reduce:data-[starting-style]:scale-100 motion-reduce:data-[ending-style]:scale-100"
+
+const DropdownMenuContent = (props: {
+  class?: string | undefined
+  sideOffset?: number
+  onCloseAutoFocus?: (event: Event) => void
+  [key: string]: any
+}) => {
+  const layout = useContext(MenuLayoutContext)
+  const others = omit(
+    props,
+    "class",
+    "sideOffset",
+    "onCloseAutoFocus",
+    "finalFocus"
   )
-}
-
-type DropdownMenuItemProps = DropdownMenuPrimitive.DropdownMenuItemProps & {
-  class?: string | undefined
-}
-
-const DropdownMenuItem = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuItemProps>
-) => {
-  const [local, others] = splitProps(props as DropdownMenuItemProps, ["class"])
   return (
-    <DropdownMenuPrimitive.Item
-      class={cn(
-        "relative flex cursor-default select-none items-center gap-1.5 rounded-sm px-2 py-1 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        local.class
+    <MenuContent
+      sideOffset={props.sideOffset ?? layout().gutter ?? 4}
+      finalFocus={closeAutoFocusToFinalFocus(
+        props.onCloseAutoFocus,
+        props.finalFocus
       )}
+      class={cn(contentClasses, props.class)}
       {...others}
     />
   )
 }
 
-type DropdownMenuSeparatorProps = DropdownMenuPrimitive.DropdownMenuSeparatorProps & {
+const DropdownMenuItem = (props: {
   class?: string | undefined
-}
-
-const DropdownMenuSeparator = <T extends ValidComponent = "hr">(
-  props: PolymorphicProps<T, DropdownMenuSeparatorProps>
-) => {
-  const [local, others] = splitProps(props as DropdownMenuSeparatorProps, ["class"])
+  as?: ValidComponent
+  render?: (props: Record<string, any>, state: any) => JSX.Element
+  [key: string]: any
+}) => {
+  const others = omit(props, "class", "as", "render")
   return (
-    <DropdownMenuPrimitive.Separator
-      class={cn("-mx-1 my-1 h-px bg-muted", local.class)}
+    <MenuItem
+      class={cn(
+        "relative flex cursor-default select-none items-center gap-1.5 rounded-sm px-2 py-1 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        props.class
+      )}
+      render={asRender(props.as, props.render)}
       {...others}
     />
   )
 }
 
-type DropdownMenuCheckboxItemProps = DropdownMenuPrimitive.DropdownMenuCheckboxItemProps & {
+const DropdownMenuSeparator = (props: {
   class?: string | undefined
-  children?: JSX.Element
-}
-
-const DropdownMenuCheckboxItem = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuCheckboxItemProps>
-) => {
-  const [local, others] = splitProps(props as DropdownMenuCheckboxItemProps, ["class", "children"])
+  as?: ValidComponent
+  render?: (props: Record<string, any>, state: any) => JSX.Element
+  [key: string]: any
+}) => {
+  const others = omit(props, "class", "as", "render")
   return (
-    <DropdownMenuPrimitive.CheckboxItem
-      class={cn(
-        "relative flex cursor-default select-none items-center gap-1.5 rounded-sm py-1 pl-7 pr-2 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        local.class
-      )}
-      {...(others as any)}
-    >
-      <span class="absolute left-2 flex size-3 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
-      {local.children}
-    </DropdownMenuPrimitive.CheckboxItem>
+    <MenuSeparator
+      class={cn("-mx-1 my-1 h-px bg-muted", props.class)}
+      render={asRender(props.as, props.render)}
+      {...others}
+    />
   )
 }
 
-type DropdownMenuSubTriggerProps = DropdownMenuPrimitive.DropdownMenuSubTriggerProps & {
+const indicatorMarkup = (path: JSX.Element) => (
+  <span class="absolute left-2 flex size-3 items-center justify-center">
+    <MenuItemIndicator>{path}</MenuItemIndicator>
+  </span>
+)
+
+const checkMark = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+)
+
+const radioMark = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+    <circle cx="12" cy="12" r="5" fill="currentColor" />
+  </svg>
+)
+
+const DropdownMenuCheckboxItem = (props: {
   class?: string | undefined
   children?: JSX.Element
-}
-
-const DropdownMenuSubTrigger = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuSubTriggerProps>
-) => {
-  const [local, others] = splitProps(props as DropdownMenuSubTriggerProps, ["class", "children"])
+  as?: ValidComponent
+  render?: (props: Record<string, any>, state: any) => JSX.Element
+  [key: string]: any
+}) => {
+  const others = omit(props, "class", "children", "as", "render")
   return (
-    <DropdownMenuPrimitive.SubTrigger
+    <CheckboxItem
       class={cn(
-        "relative flex cursor-default select-none items-center gap-1.5 rounded-sm px-2 py-1 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        local.class
+        "relative flex cursor-default select-none items-center gap-1.5 rounded-sm py-1 pl-7 pr-2 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        props.class
       )}
-      {...(others as any)}
+      render={asRender(props.as, props.render)}
+      {...others}
     >
-      {local.children}
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-auto size-3.5">
-        <polyline points="9 18 15 12 9 6" />
-      </svg>
-    </DropdownMenuPrimitive.SubTrigger>
+      {indicatorMarkup(checkMark())}
+      {props.children}
+    </CheckboxItem>
   )
 }
 
-type DropdownMenuSubContentProps = DropdownMenuPrimitive.DropdownMenuSubContentProps & {
-  class?: string | undefined
-}
+const submenuChevron = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-auto size-3.5">
+    <polyline points="9 18 15 12 9 6" />
+  </svg>
+)
 
-const DropdownMenuSubContent = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuSubContentProps>
-) => {
-  const [local, others] = splitProps(props as DropdownMenuSubContentProps, ["class"])
+const DropdownMenuSubTrigger = (props: {
+  class?: string | undefined
+  children?: JSX.Element
+  as?: ValidComponent
+  render?: (props: Record<string, any>, state: any) => JSX.Element
+  [key: string]: any
+}) => {
+  const others = omit(props, "class", "children", "as", "render")
   return (
-    <DropdownMenuPrimitive.Portal>
-      <DropdownMenuPrimitive.SubContent
-        class={cn(
-          "z-50 min-w-[8rem] origin-[var(--kb-menu-content-transform-origin)] animate-content-hide overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-none data-[expanded]:animate-content-show",
-          local.class
-        )}
-        {...others}
-      />
-    </DropdownMenuPrimitive.Portal>
+    <MenuSubTrigger
+      class={cn(
+        "relative flex cursor-default select-none items-center gap-1.5 rounded-sm px-2 py-1 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[open]:bg-accent data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        props.class
+      )}
+      render={asRender(props.as, props.render)}
+      {...others}
+    >
+      {props.children}
+      {submenuChevron()}
+    </MenuSubTrigger>
   )
 }
 
-type DropdownMenuRadioItemProps = DropdownMenuPrimitive.DropdownMenuRadioItemProps & {
+const DropdownMenuSubContent = (props: {
   class?: string | undefined
-  children?: JSX.Element
+  sideOffset?: number
+  onCloseAutoFocus?: (event: Event) => void
+  [key: string]: any
+}) => {
+  const layout = useContext(MenuLayoutContext)
+  const others = omit(
+    props,
+    "class",
+    "sideOffset",
+    "onCloseAutoFocus",
+    "finalFocus"
+  )
+  return (
+    <MenuSubContent
+      sideOffset={props.sideOffset ?? layout().gutter ?? 4}
+      finalFocus={closeAutoFocusToFinalFocus(
+        props.onCloseAutoFocus,
+        props.finalFocus
+      )}
+      class={cn(contentClasses, props.class)}
+      {...others}
+    />
+  )
 }
 
-const DropdownMenuRadioItem = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, DropdownMenuRadioItemProps>
-) => {
-  const [local, others] = splitProps(props as DropdownMenuRadioItemProps, ["class", "children"])
+/** Kobalte's radio group used `onChange`; the SDK calls it `onValueChange`. */
+const DropdownMenuRadioGroup = (props: {
+  onChange?: (value: string) => void
+  [key: string]: any
+}) => {
+  const others = omit(props, "onChange", "onValueChange")
   return (
-    <DropdownMenuPrimitive.RadioItem
+    <MenuRadioGroup
+      {...others}
+      onValueChange={props.onValueChange ?? props.onChange}
+    />
+  )
+}
+
+const DropdownMenuRadioItem = (props: {
+  class?: string | undefined
+  children?: JSX.Element
+  as?: ValidComponent
+  render?: (props: Record<string, any>, state: any) => JSX.Element
+  [key: string]: any
+}) => {
+  const others = omit(props, "class", "children", "as", "render")
+  return (
+    <RadioItem
       class={cn(
-        "relative flex cursor-default select-none items-center gap-1.5 rounded-sm py-1 pl-7 pr-2 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        local.class
+        "relative flex cursor-default select-none items-center gap-1.5 rounded-sm py-1 pl-7 pr-2 text-xs outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        props.class
       )}
-      {...(others as any)}
+      render={asRender(props.as, props.render)}
+      {...others}
     >
-      <span class="absolute left-2 flex size-3 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
-            <circle cx="12" cy="12" r="5" fill="currentColor" />
-          </svg>
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
-      {local.children}
-    </DropdownMenuPrimitive.RadioItem>
+      {indicatorMarkup(radioMark())}
+      {props.children}
+    </RadioItem>
   )
 }
 

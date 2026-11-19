@@ -130,14 +130,18 @@ export function Toolbar(props: ToolbarProps) {
     <Show when={props.hasRoot}>
       <Tooltip>
         <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={props.sidebarVisible}
-          onChange={props.onToggleSidebar}
           aria-label={(useLocale(), m.toolbar_toggle_sidebar())}
-        >
-          <IconPanelLeft width={14} height={14} />
-        </TooltipTrigger>
+          render={(triggerProps) => (
+            <Toggle
+              {...triggerProps}
+              size="sm"
+              pressed={props.sidebarVisible}
+              onChange={props.onToggleSidebar}
+            >
+              <IconPanelLeft width={14} height={14} />
+            </Toggle>
+          )}
+        />
         <TooltipContent>{(useLocale(), m.toolbar_toggle_sidebar())}</TooltipContent>
       </Tooltip>
     </Show>
@@ -146,14 +150,18 @@ export function Toolbar(props: ToolbarProps) {
   const renderTocToggle = () => (
     <Tooltip>
       <TooltipTrigger
-        as={Toggle}
-        size="sm"
-        pressed={props.tocVisible}
-        onChange={props.onToggleToc}
         aria-label={(useLocale(), m.toolbar_toggle_toc())}
-      >
-        <IconPanelRight width={14} height={14} />
-      </TooltipTrigger>
+        render={(triggerProps) => (
+          <Toggle
+            {...triggerProps}
+            size="sm"
+            pressed={props.tocVisible}
+            onChange={props.onToggleToc}
+          >
+            <IconPanelRight width={14} height={14} />
+          </Toggle>
+        )}
+      />
       <TooltipContent>{(useLocale(), m.toolbar_toggle_toc())}</TooltipContent>
     </Tooltip>
   );
@@ -162,14 +170,18 @@ export function Toolbar(props: ToolbarProps) {
     <Show when={props.onToggleSplit && props.hasRoot}>
       <Tooltip>
         <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={!!props.isSplit}
-          onChange={() => props.onToggleSplit?.()}
           aria-label={(useLocale(), m.toolbar_split_editor())}
-        >
-          <IconColumns width={14} height={14} />
-        </TooltipTrigger>
+          render={(triggerProps) => (
+            <Toggle
+              {...triggerProps}
+              size="sm"
+              pressed={!!props.isSplit}
+              onChange={() => props.onToggleSplit?.()}
+            >
+              <IconColumns width={14} height={14} />
+            </Toggle>
+          )}
+        />
         <TooltipContent>{(useLocale(), m.toolbar_split_editor())}</TooltipContent>
       </Tooltip>
     </Show>
@@ -363,8 +375,8 @@ export function Toolbar(props: ToolbarProps) {
 
   return (
     <header
-      class="toolbar no-print"
-      classList={{ "toolbar-window-frame": !!props.inWindowFrame }}
+      class={["toolbar no-print", { "toolbar-window-frame": !!props.inWindowFrame }]}
+      
       data-tauri-drag-region={props.inWindowFrame ? "" : undefined}
       ref={(el) => {
         const update = () => {
@@ -391,10 +403,10 @@ export function Toolbar(props: ToolbarProps) {
           <Tooltip>
             <TooltipTrigger
               as="button"
-              class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-30"
+              class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground aria-disabled:opacity-30"
               aria-label={(useLocale(), m.toolbar_go_back())}
-              disabled={!props.canGoBack}
-              onClick={props.onGoBack}
+              aria-disabled={props.canGoBack ? "false" : "true"}
+              onClick={() => { if (props.canGoBack) props.onGoBack?.(); }}
             >
               <IconArrowLeft width={14} height={14} />
             </TooltipTrigger>
@@ -403,10 +415,10 @@ export function Toolbar(props: ToolbarProps) {
           <Tooltip>
             <TooltipTrigger
               as="button"
-              class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-30"
+              class="inline-flex h-6 w-6 items-center justify-center rounded-[2px] text-xs hover:bg-accent hover:text-accent-foreground aria-disabled:opacity-30"
               aria-label={(useLocale(), m.toolbar_go_forward())}
-              disabled={!props.canGoForward}
-              onClick={props.onGoForward}
+              aria-disabled={props.canGoForward ? "false" : "true"}
+              onClick={() => { if (props.canGoForward) props.onGoForward?.(); }}
             >
               <IconArrowRight width={14} height={14} />
             </TooltipTrigger>
@@ -418,7 +430,7 @@ export function Toolbar(props: ToolbarProps) {
         <div class="toolbar-center" data-tauri-drag-region={props.inWindowFrame ? "" : undefined}>
           <Tabs
             value={props.editorMode}
-            onChange={(v) => props.onEditorModeChange(v as "edit" | "split" | "preview")}
+            onChange={(v: unknown) => props.onEditorModeChange(String(v) as "edit" | "split" | "preview")}
           >
             <TabsList>
               <TabsTrigger disabled={!props.hasFile || !props.supportsEdit} value="edit">{(useLocale(), m.toolbar_editor_mode_edit())}</TabsTrigger>

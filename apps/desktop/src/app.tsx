@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onSettled, Show, untrack } from "solid-js";
 import { createConverter } from "@markdraw/core/converter.ts";
 import ConvertWorker from "@markdraw/core/convert-worker.ts?worker";
 import type { IndexedFile } from "@markdraw/core/file-index.ts";
@@ -12,6 +12,7 @@ import { dragOnceMoved, installHyprlandMaximize } from "./lib/hyprland-maximize.
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
+import { createPaneManager } from "@markdraw/ui/composables/create-pane-manager.ts";
 import { exportChatArtifact, savePlanArtifact } from "./lib/ai-artifacts.ts";
 import { createMockProvider } from "@markdraw/ai/mock-provider.ts";
 import type { AIConfig, MCPServerConfig } from "@markdraw/ai/config-schema.ts";
@@ -129,6 +130,8 @@ import { FileWatcher } from "./lib/watcher.ts";
 import { createFileLoader } from "./lib/file-loader.ts";
 import { createNavigation } from "./lib/navigation.ts";
 import { createFolder } from "./lib/folder.ts";
+import { createFileAutosave } from "./lib/file-autosave.ts";
+import { createTabActions } from "./lib/tab-actions.ts";
 import {
   ExcalidrawFrame,
   type ExcalidrawFrameApi,
@@ -423,6 +426,9 @@ export function App() {
   };
 
   const state = createAppState({
+    paneManager: createPaneManager({
+      onTabSelected: (pane, tab) => { void tabActions.selectTab(pane, tab); },
+    }),
     applyTheme,
     convertAdoc,
     convertMarkdown,
@@ -458,27 +464,29 @@ export function App() {
 
   // Load the AI config (ai.json merged with builtins) once at startup, then
   // connect any enabled MCP servers so their tools are ready for the first turn.
-  onMount(async () => {
-    try {
-      const cfg = await loadAIConfig();
-      setAiConfig(cfg);
-      await connectEnabledServers(cfg.mcp);
-      await refreshMcpStatuses();
-    } catch {
-      // keep the builtins-only config
-    }
-    // Independent of config-load success — the builtins-only fallback still
-    // needs its keychain probe so connected providers surface in the pickers.
-    await refreshConnectedProviders();
-    // (MCP discovery from connected tools runs via a reactive effect keyed on
-    // the open roots + provider connectivity — see below.)
-    // A previously-saved "Complete" tier downgrades to "Fast" when no embedding
-    // provider is connected (the Full card is gated, but the stored choice may
-    // predate a disconnect).
-    if (indexingTier() === "full" && !embeddingCapable()) {
-      setIndexingTier("lite");
-      setStoredIndexingTier("lite");
-    }
+  onSettled(() => {
+    void (async () => {
+      try {
+        const cfg = await loadAIConfig();
+        setAiConfig(cfg);
+        await connectEnabledServers(cfg.mcp);
+        await refreshMcpStatuses();
+      } catch {
+        // keep the builtins-only config
+      }
+      // Independent of config-load success — the builtins-only fallback still
+      // needs its keychain probe so connected providers surface in the pickers.
+      await refreshConnectedProviders();
+      // (MCP discovery from connected tools runs via a reactive effect keyed on
+      // the open roots + provider connectivity — see below.)
+      // A previously-saved "Complete" tier downgrades to "Fast" when no embedding
+      // provider is connected (the Full card is gated, but the stored choice may
+      // predate a disconnect).
+      if (indexingTier() === "full" && !embeddingCapable()) {
+        setIndexingTier("lite");
+        setStoredIndexingTier("lite");
+      }
+    })();
   });
 
   // ── Settings modal (DJA-15) ────────────────────────────────────────────
@@ -497,7 +505,7 @@ export function App() {
   // (dodges webview CORS); a failure is non-fatal — the table covers every
   // built-in model on its own.
   const [modelsDevIndex, setModelsDevIndex] = createSignal<ModelsDevReasoningIndex | null>(null);
-  onMount(() => {
+  onSettled(() => {
     void fetchModelsDevReasoning(tauriFetch)
       .then(setModelsDevIndex)
       .catch((err: unknown) => {
@@ -558,10 +566,10 @@ export function App() {
     if (key.length <= 10) return "•".repeat(8);
     return `${key.slice(0, 6)}…${key.slice(-4)}`;
   }
-  async function refreshConnectedProviders(): Promise<void> {
+  async function refreshConnectedProviders(config = aiConfig()): Promise<void> {
     const next: Record<string, boolean> = {};
     const masked: Record<string, string> = {};
-    for (const [id, p] of Object.entries(aiConfig().provider)) {
+    for (const [id, p] of Object.entries(config.provider)) {
       try {
         if (isCliProviderKind(p.kind)) {
           // No startup probe: a subscription is connected only if the user
@@ -588,6 +596,12 @@ export function App() {
     }
     setConnectedProviders(next);
     setMaskedApiKeys(masked);
+  }
+
+  async function reloadAiConfigAndProviders(): Promise<void> {
+    const config = await loadAIConfig();
+    setAiConfig(config);
+    await refreshConnectedProviders(config);
   }
 
   // Model picker shown in the chat composer footer. Reads `aiConfig()` so it
@@ -623,16 +637,17 @@ export function App() {
   // doesn't offer the current level — including when it exposes NO picker (empty
   // levels) — snap to "default" so a stale effort isn't sent to a model that
   // doesn't support it; otherwise keep the current level.
-  createEffect(() => {
-    const levels = aiReasoningLevels();
-    const current = untrack(aiReasoning);
-    if (levels.includes(current)) return;
-    const next: AIReasoningEffort =
-      levels.length === 0 || levels.includes("default") ? "default" : levels[0]!;
-    if (next === current) return;
-    setAiReasoning(next);
-    setStoredAiReasoning(next);
-  });
+  createEffect(
+    () => ({ levels: aiReasoningLevels(), current: untrack(aiReasoning) }),
+    ({ levels, current }) => {
+      if (levels.includes(current)) return;
+      const next: AIReasoningEffort =
+        levels.length === 0 || levels.includes("default") ? "default" : levels[0]!;
+      if (next === current) return;
+      setAiReasoning(next);
+      setStoredAiReasoning(next);
+    },
+  );
   // Every CONNECTED provider's models grouped by provider (drives Settings →
   // Manage models and the chat picker). Providers whose display name shares a base — e.g.
   // "OpenCode Go" (kind: anthropic) and "OpenCode Go (chat)" (kind:
@@ -838,8 +853,7 @@ export function App() {
       }),
     );
     setStoredAiModel(modelRef);
-    setAiConfig(await loadAIConfig());
-    await refreshConnectedProviders();
+    await reloadAiConfigAndProviders();
   }
 
   /** Add a custom OpenAI-compatible provider to ai.json (+ key → keychain).
@@ -874,8 +888,7 @@ export function App() {
         },
       }),
     );
-    setAiConfig(await loadAIConfig());
-    await refreshConnectedProviders();
+    await reloadAiConfigAndProviders();
   }
 
   /** Connect a built-in provider: store its key (keychain) and, when it lists no
@@ -890,8 +903,7 @@ export function App() {
         throw new Error(probe.error ?? "CLI subscription not available");
       }
       persistConnectedSubscription(providerId, true); // remember across launches
-      setAiConfig(await loadAIConfig());
-      await refreshConnectedProviders();
+      await reloadAiConfigAndProviders();
       return;
     }
     if (apiKey) await setApiKey(providerId, apiKey);
@@ -916,8 +928,7 @@ export function App() {
         );
       }
     }
-    setAiConfig(await loadAIConfig());
-    await refreshConnectedProviders();
+    await reloadAiConfigAndProviders();
   }
 
   /** Disconnect a provider group ("Remove provider" in Manage models). Receives
@@ -976,8 +987,7 @@ export function App() {
       ? selected.slice(0, selected.indexOf("/"))
       : null;
     if (selectedProvider && ids.includes(selectedProvider)) setStoredAiModel(null);
-    setAiConfig(await loadAIConfig());
-    await refreshConnectedProviders();
+    await reloadAiConfigAndProviders();
   }
 
   // ── MCP servers + in-process tools (chat tool-calling) ─────────────────
@@ -1223,15 +1233,19 @@ export function App() {
     setImportOpenCode(on);
     setImportOpenCodeMcps(on);
   }
+  const [rootPaths, setRootPaths] = createSignal<Map<string, string>>(new Map());
   // Re-discover whenever the open roots, provider connectivity, or the OpenCode
   // toggle change. Fires once on mount too (empty connectivity → no-op until the
   // keychain probe lands), and is latest-wins via the guard inside.
-  createEffect(() => {
-    rootPaths();
-    connectedProviders();
-    importOpenCode();
-    void refreshDiscoveredMcp();
-  });
+  createEffect(
+    () => {
+      rootPaths();
+      aiConfig();
+      connectedProviders();
+      return importOpenCode();
+    },
+    () => { void untrack(() => refreshDiscoveredMcp()); },
+  );
 
   /** Persist the MCP server list into ai.json, preserving sibling sections. */
   async function persistMcpServers(servers: MCPServerConfig[]): Promise<void> {
@@ -1282,7 +1296,6 @@ export function App() {
   // failed, callback timeout…). Surfaced on the card only while it still needs
   // auth; cleared on a fresh attempt and auto-hidden once the server connects.
   const [mcpAuthErrors, setMcpAuthErrors] = createSignal<Map<string, string>>(new Map());
-  const [rootPaths, setRootPaths] = createSignal<Map<string, string>>(new Map());
 
   /** Kick off the interactive OAuth flow for an OAuth-gated server (Rust opens
    *  the browser), then refresh so the now-connected server shows its tools. A
@@ -1445,12 +1458,16 @@ export function App() {
       if (isLatest()) setAiMemoryScopes(scopes);
     });
   }
-  // reloadAiCommands reads rootPaths() synchronously, so the effect tracks it.
-  createEffect(() => reloadAiCommands());
-  createEffect(() => {
-    rootPaths();
-    void refreshDiscoveredSkills();
-  });
+  // The compute phase reads rootPaths() (as reloadAiCommands does synchronously),
+  // the effect phase starts the reload.
+  createEffect(
+    () => rootPaths(),
+    () => untrack(() => reloadAiCommands()),
+  );
+  createEffect(
+    () => rootPaths(),
+    () => { void untrack(() => refreshDiscoveredSkills()); },
+  );
 
   // Quick Open (Cmd/Ctrl+P) overlay visibility — owned here so the keyboard
   // handler can toggle it without round-tripping through AppShell.
@@ -1471,14 +1488,13 @@ export function App() {
   // Find in Files (Cmd/Ctrl+Shift+F).
   const [findInFilesVisible, setFindInFilesVisible] = createSignal(false);
 
-  // Flag to suppress auto-save during tab switches
-  let isTabSwitching = false;
-
   // File watcher (watches current file + includes for content changes).
   // Also fires for our own autosave writes, so the refresh keeps unsaved edits.
   const watcher = new FileWatcher(async () => {
-    const file = state.selectedFile();
-    if (!file) return;
+    const pane = state.paneManager.activePane();
+    const tab = pane.tabs.getActiveTab();
+    const file = pane.selectedFile();
+    if (!file || tab?.needsLoad) return;
 
     try {
       const changedElsewhere = await loader.refreshFromDisk(file);
@@ -1487,12 +1503,7 @@ export function App() {
       // event — each autosave fires one, and re-indexing re-chunks (and, on
       // the Complete tier, re-embeds) the whole document.
       if (changedElsewhere) reindexActiveFile();
-      tabStore().updateActiveTabContent({
-        editorContent: state.editorContent(),
-        savedContent: state.savedContent(),
-        html: state.html(),
-        frontmatter: state.frontmatter(),
-      });
+      if (tab && pane.selectedFile()?.path === file.path) tabActions.updateLoadedTabCache(pane, tab.id);
     } catch {
       // File likely deleted — the dir watcher will refresh the tree
       // and the tab will show an error until clicked away
@@ -1508,14 +1519,30 @@ export function App() {
     state,
     tabStore,
     onActivateTab: (tabId) => handleActivateTab(tabId),
+    onOpenHistoryTab: (entry, rootId) => { void tabActions.openFile(entry, rootId, true, false); },
   });
 
+  const tabActions = createTabActions({
+    rootPaths,
+    state,
+    syncWatcher: loader.syncWatcher,
+    loadTabContent: loader.loadTabContent,
+    loadFileContent: loader.loadFileContent,
+  });
   const folder = createFolder({
     rootPaths,
     setRootPaths,
     state,
     watcher,
+    onRootClosed: tabActions.closeRootTabs,
+    onFileRenamed: tabActions.renameOpenTab,
   });
+
+  function toggleShowHiddenEntries() {
+    const includeHiddenEntries = !state.showHiddenEntries();
+    state.setShowHiddenEntries(includeHiddenEntries);
+    return folder.refreshAllRoots({ includeHiddenEntries });
+  }
 
   setupTauriDnd({
     addRoot: folder.openFolderPath,
@@ -1532,10 +1559,7 @@ export function App() {
         state.setCreatingAt({ parentPath, rootId, kind }),
       toggleShowAllFiles: () => state.setShowAllFiles((v) => !v),
       toggleShowAllDirs: () => state.setShowAllDirs((v) => !v),
-      toggleShowHidden: () => {
-        state.setShowHiddenEntries((v) => !v);
-        return folder.refreshAllRoots();
-      },
+      toggleShowHidden: toggleShowHiddenEntries,
       getState: () => ({
         showAllFiles: state.showAllFiles(),
         showAllDirs: state.showAllDirs(),
@@ -1544,7 +1568,7 @@ export function App() {
       }),
       // Drive the move-tab handler directly. Useful for E2E that
       // can't reliably synthesize a Kobalte ContextMenu click.
-      moveTab: (tabId: string, fromPaneIndex: number) => handleMoveTab(tabId, fromPaneIndex),
+      moveTab: tabActions.moveTab,
       simulatePendingUpdate: (version: string, currentVersion: string, notes: string) =>
         _devSetPendingUpdate({
           version,
@@ -1584,26 +1608,31 @@ export function App() {
   }
 
   // Toggle auto-refresh (only when roots are open)
-  createEffect(() => {
-    if (rootPaths().size === 0) return;
-    if (state.autoRefresh()) {
-      watcher.start();
-    } else {
-      watcher.stop();
-    }
-  });
+  createEffect(
+    () => ({ hasRoots: rootPaths().size > 0, autoRefresh: state.autoRefresh() }),
+    ({ hasRoots, autoRefresh }) => {
+      if (!hasRoots) return;
+      if (autoRefresh) {
+        watcher.start();
+      } else {
+        watcher.stop();
+      }
+    },
+  );
 
   // Watch workspace directories for file tree changes (rename/delete/create)
-  createEffect(() => {
-    const paths = rootPaths();
-    if (paths.size === 0) {
-      void invoke("stop_watching_dirs");
-      return;
-    }
-    void invoke("watch_dirs", { paths: Array.from(paths.values()) });
-  });
+  createEffect(
+    () => Array.from(rootPaths().values()),
+    (paths) => {
+      if (paths.length === 0) {
+        void invoke("stop_watching_dirs");
+        return;
+      }
+      void invoke("watch_dirs", { paths });
+    },
+  );
 
-  onMount(() => {
+  onSettled(() => {
     const pendingRoots = new Set<string>();
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     const unlisten = listen<{ paths: string[] }>("fs-tree-change", (event) => {
@@ -1626,41 +1655,20 @@ export function App() {
         pendingRoots.clear();
       }, 300);
     });
-    onCleanup(() => {
+    return () => {
       clearTimeout(refreshTimer);
       void unlisten.then((fn) => fn());
-    });
+    };
   });
 
-  // Auto-save: debounce 1s after editor content changes
-  let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
-  createEffect(() => {
-    const content = state.editorContent();
-    if (isTabSwitching) return;
-    if (state.editorMode() === "preview") return;
-    if (!state.selectedFile()) return;
-    clearTimeout(autoSaveTimer);
-    autoSaveTimer = setTimeout(() => {
-      // Nothing to write when the buffer equals the last save (a watcher
-      // reload or an undo back to it). Writing it anyway would overwrite an
-      // external change made since, and wake the watcher for nothing.
-      if (state.editorContent() === state.savedContent()) return;
-      // Save, then re-index the saved file (the Rust staleness diff makes this
-      // cheap — only the changed doc is re-chunked/embedded).
-      void Promise.resolve(folder.handleEditorSave()).then(() => reindexActiveFile());
-    }, 1000);
-  });
-
-  onCleanup(() => {
-    clearTimeout(autoSaveTimer);
-    watcher.destroy();
-  });
+  createFileAutosave(state, folder.handleEditorSave, reindexActiveFile);
+  onCleanup(() => { void watcher.destroy(); });
 
   // Hyprland: the toolbar and the welcome screen move the window only once
   // the pointer moves (see `dragOnceMoved`).
   let hyprlandTitleBar = false;
   const startDragging = () => getCurrentWindow().startDragging();
-  onMount(() => {
+  onSettled(() => {
     let disposed = false;
     let remove = () => {};
     void invoke<boolean>("hyprland_window_control").then((active) => {
@@ -1668,7 +1676,7 @@ export function App() {
       hyprlandTitleBar = true;
       remove = installHyprlandMaximize(window, invoke, startDragging);
     });
-    onCleanup(() => { disposed = true; remove(); });
+    return () => { disposed = true; remove(); };
   });
 
   // Caption buttons the compositor acts on (custom-frame platforms only).
@@ -1676,7 +1684,7 @@ export function App() {
 
   // Native app menu (macOS menu bar, Windows/Linux window menu) and tray icon.
   // Both are fire-and-forget; errors are logged but don't break the app.
-  onMount(() => {
+  onSettled(() => {
     // macOS traffic lights sit in the top-left corner of the overlay title
     // bar. Reserve space so toolbar controls don't overlap them.
     // On Windows and Linux the custom WindowControls (min/max/close) are drawn
@@ -1803,7 +1811,7 @@ export function App() {
   }
 
   // Cold start: check if the app was launched with a file argument
-  onMount(() => {
+  onSettled(() => {
     void invoke<string[]>("get_startup_args").then((args) => {
       const filePath = args.find((a) => !a.startsWith("-") && isSupportedFile(a));
       if (filePath) void openFileByAbsolutePath(filePath);
@@ -1813,18 +1821,18 @@ export function App() {
   });
 
   // Already running: single-instance plugin forwards file path via event
-  onMount(() => {
+  onSettled(() => {
     const unlisten = listen<string>("open-file", (event) => {
       if (event.payload) void openFileByAbsolutePath(event.payload);
     });
-    onCleanup(() => { void unlisten.then((fn) => fn()); });
+    return () => { void unlisten.then((fn) => fn()); };
   });
 
   // Hydrate the About dialog's version string. Pulled from
   // @tauri-apps/api/app at runtime instead of bundling at build time so
   // we don't have to rebuild the frontend just to update the displayed
   // version on a hot-reloaded dev session.
-  onMount(() => {
+  onSettled(() => {
     void getVersion().then(setAppVersion).catch(() => {});
   });
 
@@ -1837,21 +1845,21 @@ export function App() {
   // In production, block the native WebView context menu (Reload / Inspect
   // Element). Kobalte's ContextMenu triggers call preventDefault() before this
   // listener fires, so custom menus (file tree, etc.) keep working.
-  onMount(() => {
+  onSettled(() => {
     if (!import.meta.env.PROD) return;
     const handler = (e: Event) => { if (!e.defaultPrevented) e.preventDefault(); };
     document.addEventListener("contextmenu", handler);
-    onCleanup(() => document.removeEventListener("contextmenu", handler));
+    return () => document.removeEventListener("contextmenu", handler);
   });
 
   // Check for app updates a few seconds after boot — silent so any network
   // hiccup or "you're up to date" doesn't interrupt the user. The manual
   // menu item still surfaces feedback.
-  onMount(() => {
+  onSettled(() => {
     const updateTimer = window.setTimeout(() => {
       void checkForAppUpdates(true);
     }, 3000);
-    onCleanup(() => window.clearTimeout(updateTimer));
+    return () => window.clearTimeout(updateTimer);
   });
 
   async function handleWindowDragStart(event?: MouseEvent) {
@@ -2269,45 +2277,46 @@ export function App() {
   // I/O for every workspace event.
   const [workspaceSymbols, setWorkspaceSymbols] = createSignal<readonly WorkspaceSymbol[]>([]);
   let workspaceBuildToken = 0;
-  createEffect(() => {
-    const roots = state.rootsList();
-    const paths = rootPaths();
-    if (roots.length === 0 || paths.size === 0) {
-      state.setBacklinkIndex(new Map());
-      setWorkspaceSymbols([]);
-      return;
-    }
-    const token = ++workspaceBuildToken;
-    void (async () => {
-      const indexed = flattenWorkspace(roots).filter((f) => isSupportedFile(f.path));
-      const filesForBacklinks: { path: string; content: string }[] = [];
-      const filesForSymbols: {
-        rootId: string;
-        rootName: string;
-        path: string;
-        content: string;
-      }[] = [];
-      for (const file of indexed) {
-        const root = paths.get(file.rootId);
-        if (!root) continue;
-        try {
-          const content = await readFileContent(`${root}/${file.path}`);
-          filesForBacklinks.push({ path: file.path, content });
-          filesForSymbols.push({
-            rootId: file.rootId,
-            rootName: file.rootName,
-            path: file.path,
-            content,
-          });
-        } catch {
-          // Permission / deleted between scan and read — skip silently.
-        }
+  createEffect(
+    () => ({ roots: state.rootsList(), paths: rootPaths() }),
+    ({ roots, paths }) => {
+      if (roots.length === 0 || paths.size === 0) {
+        state.setBacklinkIndex(new Map());
+        setWorkspaceSymbols([]);
+        return;
       }
-      if (token !== workspaceBuildToken) return; // newer build started
-      state.setBacklinkIndex(buildBacklinkIndex(filesForBacklinks));
-      setWorkspaceSymbols(buildWorkspaceSymbols(filesForSymbols));
-    })();
-  });
+      const token = ++workspaceBuildToken;
+      void (async () => {
+        const indexed = flattenWorkspace(roots).filter((f) => isSupportedFile(f.path));
+        const filesForBacklinks: { path: string; content: string }[] = [];
+        const filesForSymbols: {
+          rootId: string;
+          rootName: string;
+          path: string;
+          content: string;
+        }[] = [];
+        for (const file of indexed) {
+          const root = paths.get(file.rootId);
+          if (!root) continue;
+          try {
+            const content = await readFileContent(`${root}/${file.path}`);
+            filesForBacklinks.push({ path: file.path, content });
+            filesForSymbols.push({
+              rootId: file.rootId,
+              rootName: file.rootName,
+              path: file.path,
+              content,
+            });
+          } catch {
+            // Permission / deleted between scan and read — skip silently.
+          }
+        }
+        if (token !== workspaceBuildToken) return; // newer build started
+        state.setBacklinkIndex(buildBacklinkIndex(filesForBacklinks));
+        setWorkspaceSymbols(buildWorkspaceSymbols(filesForSymbols));
+      })();
+    },
+  );
 
   // ── Workspace index (Fast/Complete tiers, DJA-15) ─────────────────────────
   // Enumerate → sha-diff → chunk → embed (Complete) → push to the per-root Rust
@@ -2332,12 +2341,18 @@ export function App() {
     getTier: () => indexingTier(),
     getEmbedding: () => buildEmbeddingProvider(),
   });
-  createEffect(() => {
-    const tier = indexingTier();
-    rootPaths(); // re-index when the open roots change
-    if (tier === "off") return;
-    void workspaceIndexer.reindexAll();
-  });
+  createEffect(
+    () => {
+      const tier = indexingTier();
+      rootPaths(); // re-index when the open roots change
+      state.rootsList(); // ...and when their trees change (watcher adds a file)
+      return tier;
+    },
+    (tier) => {
+      if (tier === "off") return;
+      void untrack(() => workspaceIndexer.reindexAll());
+    },
+  );
   /** Re-index the active document after it's saved (called from the autosave
    *  debounce). Cheap — the staleness diff re-embeds only the changed file.
    *  Skips scratch docs, unsupported files, and the Off tier. */
@@ -2358,67 +2373,51 @@ export function App() {
   // Restore tabs when roots become available after startup.
   let sessionRestored = false;
 
-  createEffect(() => {
+  createEffect(
     // React to rootPaths changing (roots being opened)
-    const paths = rootPaths();
-    if (paths.size === 0 || sessionRestored) return;
+    () => rootPaths(),
+    (paths) => untrack(() => {
+      if (paths.size === 0 || sessionRestored) return;
 
-    const session = tabStore().getPersistedSession();
-    if (!session || session.tabs.length === 0) {
-      sessionRestored = true;
-      return;
-    }
-
-    // Try to restore tabs whose roots are now available
-    const restorable = session.tabs.filter((t) => paths.has(t.rootId));
-    if (restorable.length === 0) return;
-
-    sessionRestored = true;
-
-    // Restore all tabs synchronously (no file loading), mark as needsLoad.
-    // Only the active tab gets its content loaded immediately.
-    let activeEntry: import("@markdraw/core/types.ts").FSEntry | null = null;
-    let activeRootId: string | null = null;
-
-    for (const persisted of restorable) {
-      const entry = state.findEntryByPath(persisted.filePath, persisted.rootId);
-      if (!entry || entry.kind !== "file") continue;
-
-      const isActive = persisted.id === session.activeTabId;
-      tabStore().openTab(entry, persisted.rootId, { background: true });
-
-      // Mark all restored tabs as needing content load
-      const tabId = tabStore().tabs().find((t) => t.filePath === persisted.filePath && t.rootId === persisted.rootId)?.id;
-      if (tabId) tabStore().markTabNeedsLoad(tabId);
-
-      if (isActive) {
-        activeEntry = entry;
-        activeRootId = persisted.rootId;
+      const session = tabStore().getPersistedSession();
+      if (!session || session.tabs.length === 0) {
+        sessionRestored = true;
+        return;
       }
-    }
 
-    // Load only the active tab
-    if (activeEntry && activeRootId) {
-      void (async () => {
-        await loader.loadFileContent(activeEntry!, false, false, activeRootId!);
-        tabStore().updateActiveTabContent({
-          editorContent: state.editorContent(),
-          savedContent: state.savedContent(),
-          html: state.html(),
-          frontmatter: state.frontmatter(),
+      // Try to restore tabs whose roots are now available
+      const restorable = session.tabs.filter((t) => paths.has(t.rootId));
+      if (restorable.length === 0) return;
+
+      sessionRestored = true;
+
+      // The IDs returned by openTab also cover tabs still pending publication.
+      const store = tabStore();
+      let firstTabId: string | undefined;
+      let activeTabId: string | undefined;
+      for (const persisted of restorable) {
+        const entry = state.findEntryByPath(persisted.filePath, persisted.rootId);
+        if (!entry || entry.kind !== "file") continue;
+
+        const id = store.openTab(entry, persisted.rootId, { background: true });
+        store.markTabNeedsLoad(id);
+        firstTabId ??= id;
+        if (persisted.id === session.activeTabId) activeTabId = id;
+      }
+
+      const id = activeTabId ?? firstTabId;
+      if (id) {
+        // Let the session batch publish before the regular activation handler
+        // resolves the tab and loads the selected file.
+        queueMicrotask(() => {
+          if (tabStore() === store) void handleActivateTab(id);
         });
-        // Activate after content is loaded
-        const tabId = tabStore().tabs().find((t) => t.filePath === activeEntry!.path && t.rootId === activeRootId)?.id;
-        if (tabId) handleActivateTab(tabId);
-      })();
-    } else if (tabStore().tabs().length > 0) {
-      // No active tab from session — activate the first
-      void handleActivateTab(tabStore().tabs()[0]!.id);
-    }
-  });
+      }
+    }),
+  );
 
   // Snapshot active tab before app hides (close-to-tray)
-  onMount(() => {
+  onSettled(() => {
     const win = getCurrentWindow();
     const unlisten = win.onFocusChanged((focused) => {
       if (!focused.payload) {
@@ -2426,21 +2425,14 @@ export function App() {
         tabStore().persistSession();
       }
     });
-    onCleanup(() => { void unlisten.then((fn) => fn()); });
+    return () => { void unlisten.then((fn) => fn()); };
   });
 
   // ── Tab handlers ────────────────────────────────────────────────────────
 
   /** Single click: load file in the active tab (replacing its content). */
-  async function handleLoadFileWithTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
-    tabStore().loadInActiveTab(entry, rootId);
-    await loader.loadFileContent(entry, true, false, rootId);
-    tabStore().updateActiveTabContent({
-      editorContent: state.editorContent(),
-      savedContent: state.savedContent(),
-      html: state.html(),
-      frontmatter: state.frontmatter(),
-    });
+  function handleLoadFileWithTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
+    return tabActions.openFile(entry, rootId);
   }
 
   /** Inline create commit from the file tree. Creates the file/folder on disk
@@ -2489,23 +2481,8 @@ export function App() {
    *  this around" gestures. If the file is already open in this
    *  pane, activate + pin in place rather than duplicating (VSCode
    *  semantics). */
-  async function handleOpenInNewTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
-    const store = tabStore();
-    const existing = store.findTabByFile(entry.path, rootId);
-    if (existing) {
-      store.activateTab(existing.id);
-      store.pinTab(existing.id);
-      await loader.loadFileContent(entry, true, false, rootId);
-      return;
-    }
-    store.openTab(entry, rootId);
-    await loader.loadFileContent(entry, true, false, rootId);
-    store.updateActiveTabContent({
-      editorContent: state.editorContent(),
-      savedContent: state.savedContent(),
-      html: state.html(),
-      frontmatter: state.frontmatter(),
-    });
+  function handleOpenInNewTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
+    return tabActions.openFile(entry, rootId, true);
   }
 
   /** Build a folder @-mention's content from the in-memory workspace tree:
@@ -2686,89 +2663,6 @@ export function App() {
     return new Set(getRecentFiles().map((f) => `${f.rootPath}::${f.path}`));
   });
 
-  /**
-   * Move a tab from `fromPaneIndex` to the other pane. Opens the file
-   * in the destination pane (creates the pane via `splitFromActive`
-   * when there's only one) and closes the original. Same `editorMode`
-   * is preserved so a split-side preview stays a preview.
-   *
-   * Mutation-survival contracts (locked in by the host-level domain
-   * test in app.test.ts):
-   *   - skipping `closeTab` on the origin → tab is duplicated.
-   *   - skipping the `openTab` on the target → tab vanishes.
-   *   - reading `fromPaneIndex` from the wrong end → tab moved from
-   *     wrong pane.
-   */
-  function handleMoveTab(tabId: string, fromPaneIndex: number) {
-    const panes = state.paneManager.panes();
-    const sourcePane = panes[fromPaneIndex];
-    if (!sourcePane) return;
-    const tab = sourcePane.tabs.getTab(tabId);
-    if (!tab) return;
-
-    if (panes.length < 2) {
-      state.paneManager.splitFromActive();
-    }
-    const updatedPanes = state.paneManager.panes();
-    const targetIndex = fromPaneIndex === 0 ? 1 : 0;
-    const targetPane = updatedPanes[targetIndex];
-    if (!targetPane) return;
-
-    const entry = state.findEntryByPath(tab.filePath, tab.rootId);
-    if (!entry || entry.kind !== "file") return;
-
-    // The TabState carries everything the editor/preview need to
-    // render the moved file without reloading from disk. Snapshot
-    // off the source tab itself (NOT the source pane's live signals
-    // — those reflect whichever tab is currently active in the
-    // source pane, which may not be the one being moved).
-    const snapshot = {
-      editorContent: tab.editorContent,
-      savedContent: tab.savedContent,
-      html: tab.html,
-      frontmatter: tab.frontmatter,
-      editorMode: tab.editorMode,
-    };
-
-    // Activate the target pane BEFORE writing through the AppState
-    // proxy, so `state.setHtml` etc. land in the target pane's
-    // signals. Without this, the proxy still points at the source
-    // pane and the moved file would render in the wrong column.
-    state.paneManager.setActivePane(targetIndex);
-
-    // Open the file in the target pane's tab list. `openTab` (non-
-    // background) sets the new tab active inside the target pane.
-    targetPane.tabs.openTab(entry, tab.rootId);
-
-    // Push the source's content into the new tab's TabState so
-    // future tab-switches inside the target pane snapshot/restore
-    // the correct content (otherwise the new tab is empty until the
-    // user reloads from disk and tab-switches show stale content).
-    targetPane.tabs.updateActiveTabContent({
-      editorContent: snapshot.editorContent,
-      savedContent: snapshot.savedContent,
-      html: snapshot.html,
-      frontmatter: snapshot.frontmatter,
-    });
-
-    // Mirror the snapshot through the AppState proxy so the editor
-    // and preview update immediately for the user — restoreActiveTab
-    // already runs inside `openTab` but reads from the freshly-empty
-    // TabState (we hadn't written the content yet at that point).
-    state.setEditorContent(snapshot.editorContent);
-    state.setSavedContent(snapshot.savedContent);
-    state.setHtml(snapshot.html);
-    state.setFrontmatter(snapshot.frontmatter);
-    state.setEditorMode(snapshot.editorMode);
-    state.setSelectedFile(entry);
-    state.setSelectedRootId(tab.rootId);
-
-    // Finally remove the tab from the source pane. closeTab handles
-    // the case where this was the last tab (clears source signals)
-    // or activates a sibling (restores its content into source).
-    sourcePane.tabs.closeTab(tabId);
-  }
-
   async function handleQuickOpenSelect(file: IndexedFile) {
     setQuickOpenVisible(false);
     const entry = state.findEntryByPath(file.path, file.rootId);
@@ -2839,8 +2733,7 @@ export function App() {
         title: m.command_toggle_hidden_files(),
         when: () => hasRoot,
         run: () => {
-          state.setShowHiddenEntries((v) => !v);
-          void folder.refreshAllRoots();
+          void toggleShowHiddenEntries();
         },
       },
       {
@@ -3175,6 +3068,7 @@ export function App() {
 
   /** "+" button: create an empty tab (shows empty state). */
   function handleNewTab() {
+    const rootId = state.selectedRootId() ?? "";
     // Snapshot current tab, then clear state for the empty tab
     tabStore().snapshotActiveTab();
 
@@ -3184,7 +3078,6 @@ export function App() {
       kind: "file",
       path: "",
     };
-    const rootId = state.selectedRootId() ?? "";
     tabStore().openTab(emptyEntry, rootId);
 
     state.setSelectedFile(null);
@@ -3195,65 +3088,13 @@ export function App() {
     state.setEditorMode("preview");
   }
 
-  async function handleActivateTab(tabId: string) {
-    const tab = tabStore().getTab(tabId);
-    if (!tab) return;
-
-    isTabSwitching = true;
-    clearTimeout(autoSaveTimer);
-
-    tabStore().activateTab(tabId);
-
-    // Scratch tab: it has no entry in any workspace tree, so reconstruct the
-    // sentinel selectedFile directly. activateTab already restored the buffer
-    // (md/adoc content from the tab; an Excalidraw scene re-seeds from
-    // scratchScenes when its frame remounts). No disk load, no watcher.
-    if (tab.rootId === SCRATCH_ROOT_ID) {
-      state.setSelectedFile({ name: tab.fileName, kind: "file", path: tab.filePath });
-      state.setSelectedRootId(SCRATCH_ROOT_ID);
-      void watcher.stop();
-      queueMicrotask(() => {
-        isTabSwitching = false;
-      });
-      return;
-    }
-
-    // Set the selected file/root from the tab
-    const entry = state.findEntryByPath(tab.filePath, tab.rootId);
-    if (entry) {
-      state.setSelectedFile(entry);
-      state.setSelectedRootId(tab.rootId);
-    }
-
-    // If the tab needs content loaded (restored from session or reopened)
-    if (tab.needsLoad && entry) {
-      await loader.loadFileContent(entry, false, false, tab.rootId);
-      tabStore().updateActiveTabContent({
-        editorContent: state.editorContent(),
-        savedContent: state.savedContent(),
-        html: state.html(),
-        frontmatter: state.frontmatter(),
-      });
-    }
-
-    // Re-arm file watcher for the new active tab
-    const rootPath = rootPaths().get(tab.rootId);
-    if (rootPath && tab.filePath) {
-      watcher.setTarget({
-        filePath: `${rootPath}/${tab.filePath}`,
-        includePaths: tab.includePaths,
-        rootPath,
-      });
-      if (state.autoRefresh()) watcher.start();
-    }
-
-    queueMicrotask(() => {
-      isTabSwitching = false;
-    });
+  function handleActivateTab(tabId: string) {
+    return tabActions.activateTab(state.paneManager.activePane(), tabId);
   }
 
   async function handleCloseTab(tabId: string) {
-    const tab = tabStore().getTab(tabId);
+    const pane = state.paneManager.activePane();
+    const tab = pane.tabs.getTab(tabId);
     if (!tab) return;
 
     const isScratch = tab.rootId === SCRATCH_ROOT_ID || isScratchPath(tab.filePath);
@@ -3277,9 +3118,8 @@ export function App() {
       }
       scratchScenes.delete(tab.filePath);
     } else {
-      // For the active tab, check live dirty state; for others, check cached
-      const isDirty = tabId === tabStore().activeTabId()
-        ? state.isDirty()
+      const isDirty = tabId === pane.tabs.activeTabId()
+        ? pane.editorContent() !== pane.savedContent()
         : tab.editorContent !== tab.savedContent;
 
       if (isDirty) {
@@ -3292,55 +3132,11 @@ export function App() {
       }
     }
 
-    tabStore().closeTab(tabId);
-
-    // After close, activate the new active tab
-    const newActive = tabStore().getActiveTab();
-    if (newActive) {
-      const entry = state.findEntryByPath(newActive.filePath, newActive.rootId);
-      if (entry) {
-        state.setSelectedFile(entry);
-        state.setSelectedRootId(newActive.rootId);
-      }
-      const rootPath = rootPaths().get(newActive.rootId);
-      if (rootPath) {
-        watcher.setTarget({
-          filePath: `${rootPath}/${newActive.filePath}`,
-          includePaths: newActive.includePaths,
-          rootPath,
-        });
-        if (state.autoRefresh()) watcher.start();
-      }
-    }
+    tabActions.closeTabs(pane, [tabId]);
   }
 
-  // Close tabs when a root is closed
-  const originalCloseRoot = folder.handleCloseRoot;
-  folder.handleCloseRoot = async (rootId: string) => {
-    await originalCloseRoot(rootId);
-    if (!rootPaths().has(rootId)) tabStore().closeTabsByRoot(rootId);
-  };
-
-  // Update tab when a file is renamed
-  const originalRename = folder.handleRename;
-  folder.handleRename = async (entry, rootId, newName) => {
-    const oldPath = entry.path;
-    const slash = oldPath.lastIndexOf("/");
-    const parentRel = slash >= 0 ? oldPath.slice(0, slash + 1) : "";
-    const newPath = parentRel + newName;
-
-    await originalRename(entry, rootId, newName);
-
-    // Update any tabs pointing to the renamed file
-    for (const tab of tabStore().tabs()) {
-      if (tab.rootId === rootId && tab.filePath === oldPath) {
-        tabStore().updateTabFile(tab.id, newPath, newName);
-      }
-    }
-  };
-
   // Keyboard shortcuts for tabs
-  onMount(() => {
+  onSettled(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const isMac = navigator.platform.startsWith("Mac");
       const platform: "mac" | "other" = isMac ? "mac" : "other";
@@ -3427,8 +3223,7 @@ export function App() {
         },
         "tab.reopen": (ev) => {
           ev.preventDefault();
-          const reopened = tabStore().reopenClosedTab();
-          if (reopened) void handleActivateTab(reopened.id);
+          tabStore().reopenClosedTab();
         },
         "tab.next": (ev) => {
           ev.preventDefault();
@@ -3543,7 +3338,7 @@ export function App() {
     }
 
     window.addEventListener("keydown", handleKeyDown);
-    onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
+    return () => window.removeEventListener("keydown", handleKeyDown);
   });
 
   const customWindowFrame = usesCustomWindowFrame(navigator.platform);
@@ -3641,7 +3436,7 @@ export function App() {
       onActivateTab={handleActivateTab}
       onCloseTab={handleCloseTab}
       onNewTab={handleNewTab}
-      onMoveTab={handleMoveTab}
+      onMoveTab={tabActions.moveTab}
       quickOpenOpen={quickOpenVisible()}
       quickOpenRecents={quickOpenRecents()}
       onQuickOpenSelect={handleQuickOpenSelect}
@@ -3695,7 +3490,8 @@ export function App() {
         });
         if (confirmed) {
           // Close ALL tabs for deleted files (including duplicates)
-          const tabsToClose = tabStore().tabs().filter((t) =>
+          const pane = state.paneManager.activePane();
+          const tabsToClose = pane.tabs.tabs().filter((t) =>
             t.rootId === rootId && (
               t.filePath === entry.path ||
               (entry.kind === "directory" && t.filePath.startsWith(entry.path + "/"))
@@ -3711,9 +3507,7 @@ export function App() {
           setExcalidrawSavesSuppressed(excalidrawPathsToSuppress, true);
           try {
             await folder.handleDelete(entry, rootId);
-            for (const tab of tabsToClose) {
-              tabStore().closeTab(tab.id);
-            }
+            tabActions.closeTabs(pane, tabsToClose.map((tab) => tab.id));
           } finally {
             setExcalidrawSavesSuppressed(excalidrawPathsToSuppress, false);
           }
@@ -3748,8 +3542,8 @@ export function App() {
           />
         ) : null;
       }}
-      onToggleShowHiddenEntries={() => folder.refreshAllRoots()}
-      onToggleRespectGitignore={() => folder.refreshAllRoots()}
+      onToggleShowHiddenEntries={(includeHiddenEntries) => folder.refreshAllRoots({ includeHiddenEntries })}
+      onToggleRespectGitignore={(respectGitignore) => folder.refreshAllRoots({ respectGitignore })}
       onReorderRoots={(newOrder) => state.reorderRoots(newOrder)}
     />
     <UpdateAvailableDialog
@@ -3803,8 +3597,8 @@ export function App() {
               <For each={req().details}>
                 {(detail) => (
                   <div
-                    class="tool-approval-detail"
-                    classList={{ "tool-approval-detail-multiline": detail.multiline }}
+                    class={["tool-approval-detail", { "tool-approval-detail-multiline": detail.multiline }]}
+                    
                   >
                     <div class="tool-approval-detail-label">{detail.label}</div>
                     <pre class="tool-approval-detail-value">{detail.value}</pre>

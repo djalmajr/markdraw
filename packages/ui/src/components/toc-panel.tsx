@@ -1,4 +1,5 @@
-import { Show, createSignal, type JSX } from "solid-js";
+import { Show, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import {
@@ -117,11 +118,11 @@ export function TocPanel(props: TocPanelProps) {
 
   return (
     <aside
-      class="toc-panel"
-      classList={{
+      class={["toc-panel", {
         "toc-hidden": !props.tocVisible || !props.hasRoot,
         "toc-empty": !props.hasToc,
-      }}
+      }]}
+      
       data-toc-levels={props.tocLevels}
       style={props.width != null ? { "--toc-width": `${props.width}px` } : undefined}
       ref={(el) => props.panelRef?.(el)}

@@ -1,5 +1,6 @@
-import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
-import { useDroppable } from "@dnd-kit/solid";
+import { Show, createEffect, createMemo, createSignal, untrack } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { useDroppable } from "../lib/dnd/index.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { fileKind, UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import { setStoredTableWrap } from "@markdraw/core/editor-prefs.ts";
@@ -8,7 +9,7 @@ import { useLocale } from "@markdraw/i18n/solid";
 import type { RecentFile } from "@markdraw/core/recent-files.ts";
 import type { RecentFolder } from "@markdraw/core/recent-folders.ts";
 import type { FavoriteFile } from "@markdraw/core/favorites.ts";
-import type { AppState } from "../composables/create-app-state.ts";
+import { effectivePaneEditorMode, type AppState } from "../composables/create-app-state.ts";
 import type { PaneStore } from "../composables/create-pane-store.ts";
 import { ContentToolbar } from "./content-toolbar.tsx";
 import { Editor, type EditorApi } from "./editor.tsx";
@@ -121,6 +122,11 @@ export interface PaneViewProps {
 export function PaneView(props: PaneViewProps) {
   const pane = () => props.pane;
   const s = props.state;
+  const isActive = createMemo(() => props.isActive);
+  const editorMode = createMemo(() => effectivePaneEditorMode(pane()));
+  const onSelectionPopover = (info: Parameters<AppState["setSelectionPopover"]>[0]) => {
+    if (untrack(isActive)) s.setSelectionPopover(info);
+  };
 
   // When the selected file is an image or PDF, the media viewer takes
   // over the whole content area — there's no text to edit or convert.
@@ -233,13 +239,16 @@ export function PaneView(props: PaneViewProps) {
   // Sync scroll: only when this pane is in split mode AND the user
   // enabled it AND a file is loaded. Other panes don't influence.
   const syncScrollActive = () =>
-    pane().editorMode() === "split" && s.syncScroll() && !!pane().selectedFile();
+    editorMode() === "split" && s.syncScroll() && !!pane().selectedFile();
 
-  createEffect(() => {
-    if (syncScrollActive()) return;
-    setEditorSyncTargetRatio(null);
-    setPreviewSyncTargetRatio(null);
-  });
+  createEffect(
+    () => syncScrollActive(),
+    (active) => {
+      if (active) return;
+      setEditorSyncTargetRatio(null);
+      setPreviewSyncTargetRatio(null);
+    },
+  );
 
   // Expose the scroll-to-line setters via property assignment — used
   // when this pane is the target of a Symbol or Find-in-Files jump.
@@ -293,6 +302,9 @@ export function PaneView(props: PaneViewProps) {
           pendingFragment={s.pendingFragment()}
           pendingHeadingText={s.pendingHeadingText()}
           onHeadingHandled={() => s.setPendingHeadingText(null)}
+          onHeadingDiscarded={(heading) => {
+            if (untrack(s.pendingHeadingText) === heading) s.setPendingHeadingText(null);
+          }}
           previewOverlayHost={previewPanelRef}
           onScrollRatioChange={(ratio) => {
             if (!syncScrollActive()) return;
@@ -300,12 +312,13 @@ export function PaneView(props: PaneViewProps) {
             setEditorSyncTargetVersion((value) => value + 1);
           }}
           onFragmentHandled={() => s.setPendingFragment(null)}
+          onFragmentDiscarded={(fragment) => {
+            if (untrack(s.pendingFragment) === fragment) s.setPendingFragment(null);
+          }}
           onNavigate={props.onNavigate ?? (() => {})}
           onOpenExternal={props.onOpenExternal}
           onSearchOpenChange={s.setPreviewSearchOpen}
-          onSelectionPopover={
-            props.isActive ? (info) => s.setSelectionPopover(info) : undefined
-          }
+          onSelectionPopover={onSelectionPopover}
           onTocChange={(has) => s.setHasToc(has)}
         />
           }
@@ -323,11 +336,11 @@ export function PaneView(props: PaneViewProps) {
   return (
     <div
       ref={paneDroppable.ref}
-      class="pane-view"
-      classList={{
+      class={["pane-view", {
         "pane-view-active": props.isActive,
         "pane-view-drop-target": paneDroppable.isDropTarget(),
-      }}
+      }]}
+      
       data-pane-index={props.paneIndex}
       style={props.flexBasis !== undefined ? { flex: props.flexBasis } : undefined}
       onMouseDown={() => props.onActivate?.()}
@@ -377,11 +390,11 @@ export function PaneView(props: PaneViewProps) {
             </div>
           </div>
         </Show>
-        <Show when={!isMedia() && !isExcalidraw() && !isUnsupported() && pane().editorMode() !== "preview" && pane().selectedFile()}>
+        <Show when={!isMedia() && !isExcalidraw() && !isUnsupported() && editorMode() !== "preview" && pane().selectedFile()}>
           <div
             class="editor-panel"
             ref={editorPanelRef}
-            style={pane().editorMode() === "split" ? { flex: s.editorWidth() } : { flex: 1 }}
+            style={editorMode() === "split" ? { flex: s.editorWidth() } : { flex: 1 }}
           >
             <Show when={props.showToolbar}>
               <EditorToolbar
@@ -389,7 +402,7 @@ export function PaneView(props: PaneViewProps) {
                 canUndo={canUndo()}
                 showInvisibles={s.showInvisibles()}
                 showLineNumbers={s.showLineNumbers()}
-                showSyncScroll={pane().editorMode() === "split"}
+                showSyncScroll={editorMode() === "split"}
                 indentMode={s.indentMode()}
                 indentSize={s.indentSize()}
                 syncScroll={s.syncScroll()}
@@ -428,9 +441,7 @@ export function PaneView(props: PaneViewProps) {
                 // can read the selection and apply AI edits to THIS pane.
                 (pane() as PaneStore & { editorApi?: EditorApi }).editorApi = api;
               }}
-              onSelectionPopover={
-                props.isActive ? (info) => s.setSelectionPopover(info) : undefined
-              }
+              onSelectionPopover={onSelectionPopover}
               redoTrigger={editorRedoTrigger()}
               searchOpen={s.editorSearchOpen()}
               undoTrigger={editorUndoTrigger()}
@@ -465,18 +476,18 @@ export function PaneView(props: PaneViewProps) {
             />
           </div>
         </Show>
-        <Show when={!isMedia() && !isExcalidraw() && !isUnsupported() && pane().editorMode() === "split" && pane().selectedFile()}>
+        <Show when={!isMedia() && !isExcalidraw() && !isUnsupported() && editorMode() === "split" && pane().selectedFile()}>
           <div
             class="resize-handle"
             onDblClick={s.onEditorResizeReset}
             onMouseDown={(e) => s.onEditorResizeStart(e, contentPanelsRef, contentPanelsRef)}
           />
         </Show>
-        <Show when={!isMedia() && !isExcalidraw() && !isUnsupported() && pane().editorMode() !== "edit"}>
+        <Show when={!isMedia() && !isExcalidraw() && !isUnsupported() && editorMode() !== "edit"}>
           <div
             class="preview-panel"
             ref={previewPanelRef}
-            style={pane().editorMode() === "split" ? { flex: 100 - s.editorWidth() } : undefined}
+            style={editorMode() === "split" ? { flex: 100 - s.editorWidth() } : undefined}
           >
             {/* HTML renders in an isolated iframe with its own styles, so the
                 preview toolbar's font / table-wrap / find controls don't apply

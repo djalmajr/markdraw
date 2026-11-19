@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@solidjs/testing-library";
+import { flush } from "solid-js";
 import { ScrollArea, thumbGeometry } from "./scroll-area.tsx";
 
 describe("thumbGeometry", () => {
@@ -87,5 +88,69 @@ describe("ScrollArea", () => {
     expect(vp).toBeInstanceOf(HTMLElement);
     // The host can drive native scroll (e.g. scroll-to-bottom) through it.
     expect(typeof vp!.scrollTop).toBe("number");
+  });
+
+  it("pins each axis in the viewport inline style, ahead of the SDK shorthand", () => {
+    for (const [orientation, x, y] of [
+      ["vertical", "hidden", "auto"],
+      ["horizontal", "auto", "hidden"],
+      ["both", "auto", "auto"],
+    ] as const) {
+      const { container } = render(() => (
+        <ScrollArea orientation={orientation}>
+          <p>content</p>
+        </ScrollArea>
+      ));
+      flush();
+      const viewport = container.querySelector(
+        '[data-slot="scroll-area-viewport"]'
+      ) as HTMLElement;
+      expect(viewport.style.getPropertyValue("overflow-x")).toBe(x);
+      expect(viewport.style.getPropertyValue("overflow-y")).toBe(y);
+      expect(viewport.style.getPropertyPriority("overflow-x")).toBe("important");
+      expect(viewport.style.getPropertyPriority("overflow-y")).toBe("important");
+    }
+  });
+
+  it("does not add flex-grow to the vertical thumb", () => {
+    const { container } = render(() => (
+      <ScrollArea>
+        <p>content</p>
+      </ScrollArea>
+    ));
+    flush();
+    const thumb = container.querySelector(
+      '[data-orientation="vertical"] [data-slot="scroll-area-thumb"]'
+    ) as HTMLElement;
+    expect(thumb).toBeTruthy();
+    // happy-dom has no layout: the class proves the axis is not stretched; the
+    // rendered height in the real app is checked by the orchestrator.
+    expect(thumb.classList.contains("flex-1")).toBe(false);
+    expect(thumb.classList.contains("flex-none")).toBe(true);
+    expect(thumb.classList.contains("w-full")).toBe(true);
+  });
+
+  it("uses SDK parts and keeps type='always' overflow-only (no phantom bar)", () => {
+    const { container } = render(() => (
+      <ScrollArea type="always">
+        <p>fits</p>
+      </ScrollArea>
+    ));
+    flush();
+    const root = container.querySelector('[data-slot="scroll-area"]');
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]');
+    const content = container.querySelector('[data-slot="scroll-area-content"]');
+    const bar = container.querySelector('[data-slot="scroll-area-scrollbar"]');
+    const thumb = container.querySelector('[data-slot="scroll-area-thumb"]');
+    expect(root).toBeTruthy();
+    expect(viewport).toBeTruthy();
+    expect(content).toBeTruthy();
+    expect(bar).toBeTruthy();
+    expect(thumb).toBeTruthy();
+    // Mutation: passing the SDK's "always" straight through keeps the scrollbar
+    // displayed with no thumb when nothing overflows. Markdraw's "always" is
+    // "auto": the SDK sets `display: none` on an overflowing-axis bar that fits.
+    expect((bar as HTMLElement).style.display).toBe("none");
+    expect(bar!.hasAttribute("data-visible")).toBe(false);
   });
 });

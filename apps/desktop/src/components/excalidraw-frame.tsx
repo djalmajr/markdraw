@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { createEffect, createSignal, onCleanup, onMount, untrack } from "solid-js";
+import { createEffect, createRenderEffect, createSignal, onSettled, untrack } from "solid-js";
 // Registers the <z-frame> custom element (from the published @zomme/frame core).
 import "@zomme/frame";
 import { SHORTCUTS, detectPlatform } from "@markdraw/core/keyboard-shortcuts.ts";
@@ -105,14 +105,18 @@ function Frame(props: Record<string, unknown> & { name: string; src: string }): 
 
   // Set `sandbox`/`pathname` BEFORE `src`: the z-frame builds the iframe when
   // `src` lands (reading `pathname` to form the final URL), so setting them
-  // afterwards forces a wasteful iframe recreation on mount.
-  createEffect(() => setAttr("name", props.name));
-  createEffect(() => setAttr("sandbox", (props.sandbox as string) ?? "allow-scripts allow-same-origin"));
-  createEffect(() => setAttr("pathname", props.pathname));
-  createEffect(() => setAttr("src", props.src));
-  createEffect(() => setAttr("style", props.style));
+  // afterwards forces a wasteful iframe recreation on mount. Render effects
+  // keep that order during the initial render.
+  createRenderEffect(() => props.name, (value) => setAttr("name", value));
+  createRenderEffect(
+    () => (props.sandbox as string) ?? "allow-scripts allow-same-origin",
+    (value) => setAttr("sandbox", value),
+  );
+  createRenderEffect(() => props.pathname, (value) => setAttr("pathname", value));
+  createRenderEffect(() => props.src, (value) => setAttr("src", value));
+  createRenderEffect(() => props.style, (value) => setAttr("style", value));
 
-  onMount(() => {
+  onSettled(() => {
     for (const key of Object.keys(props)) {
       if (!isEventKey(key) || typeof props[key] !== "function") continue;
       const eventName = key.slice(2).toLowerCase();
@@ -123,17 +127,20 @@ function Frame(props: Record<string, unknown> & { name: string; src: string }): 
       el.addEventListener(eventName, handler);
       attached.push([eventName, handler]);
     }
-  });
-  onCleanup(() => {
-    for (const [eventName, handler] of attached) el.removeEventListener(eventName, handler);
+    return () => {
+      for (const [eventName, handler] of attached) el.removeEventListener(eventName, handler);
+    };
   });
 
-  createEffect(() => {
-    for (const key of Object.keys(props)) {
-      if (RESERVED.has(key) || isEventKey(key)) continue;
-      (el as unknown as Record<string, unknown>)[key] = props[key];
-    }
-  });
+  createRenderEffect(
+    () => Object.keys(props).map((key) => [key, props[key]] as const),
+    (entries) => {
+      for (const [key, value] of entries) {
+        if (RESERVED.has(key) || isEventKey(key)) continue;
+        (el as unknown as Record<string, unknown>)[key] = value;
+      }
+    },
+  );
 
   return el;
 }
@@ -179,52 +186,63 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
     attempt(1);
   };
 
-  createEffect(() => {
-    if (!props.suppressSave) return;
-    clearTimeout(writeTimer);
-    writeTimer = undefined;
-  });
-
-  // (Re)load when the target file changes; flush the previous file's latest edit
-  // before switching (and on unmount) via the effect's onCleanup.
-  createEffect(() => {
-    const path = props.filePath;
-    // Track the reload nonce so a host-side rewrite re-runs this effect and
-    // re-reads the file even when `filePath` is unchanged.
-    void props.reloadToken;
-    // Ephemeral (scratch) mode: seed from the host-held scene and never touch
-    // disk. `untrack` so a later host scene update (on every edit) doesn't
-    // re-run this effect and reset the canvas — we only re-seed when `filePath`
-    // (a tracked dep) changes, i.e. on a real switch between scratch canvases.
-    if (props.ephemeral) {
-      setScene(untrack(() => props.initialScene) ?? { appState: {}, elements: [], files: {} });
-      latest = undefined;
-      return;
-    }
-    setScene(undefined);
-    latest = undefined;
-    invoke<string>("read_file", { path })
-      .then((content) => {
-        const json = JSON.parse(content) as Scene;
-        setScene({
-          appState: json.appState ?? {},
-          elements: json.elements ?? [],
-          files: json.files ?? {},
-        });
-      })
-      .catch(() => {
-        setScene({ appState: {}, elements: [], files: {} });
-      });
-
-    onCleanup(() => {
+  createEffect(
+    () => props.suppressSave,
+    (suppressed) => {
+      if (!suppressed) return;
       clearTimeout(writeTimer);
       writeTimer = undefined;
-      if (latest) writeNow(path, latest);
-    });
-  });
+    },
+  );
+
+  // (Re)load when the target file changes; flush the previous file's latest edit
+  // before switching (and on unmount) via the effect's returned cleanup.
+  createEffect(
+    () => {
+      const path = props.filePath;
+      // Track the reload nonce so a host-side rewrite re-runs this effect and
+      // re-reads the file even when `filePath` is unchanged.
+      const reloadToken = props.reloadToken;
+      void reloadToken;
+      const ephemeral = props.ephemeral;
+      // Ephemeral (scratch) mode: seed from the host-held scene and never touch
+      // disk. `untrack` so a later host scene update (on every edit) doesn't
+      // re-run this effect and reset the canvas — we only re-seed when the
+      // tracked deps change, i.e. on a real switch between scratch canvases.
+      const initialScene = ephemeral ? untrack(() => props.initialScene) : undefined;
+      return { path, ephemeral, initialScene };
+    },
+    ({ path, ephemeral, initialScene }) => {
+      if (ephemeral) {
+        setScene(initialScene ?? { appState: {}, elements: [], files: {} });
+        latest = undefined;
+        return;
+      }
+      setScene(undefined);
+      latest = undefined;
+      invoke<string>("read_file", { path })
+        .then((content) => {
+          const json = JSON.parse(content) as Scene;
+          setScene({
+            appState: json.appState ?? {},
+            elements: json.elements ?? [],
+            files: json.files ?? {},
+          });
+        })
+        .catch(() => {
+          setScene({ appState: {}, elements: [], files: {} });
+        });
+
+      return () => {
+        clearTimeout(writeTimer);
+        writeTimer = undefined;
+        if (latest) writeNow(path, latest);
+      };
+    },
+  );
 
   // Called by the guest (RPC) on every coalesced change. Keep the latest scene
-  // and debounce the disk write; onCleanup flushes whatever is pending.
+  // and debounce the disk write; the effect cleanup flushes whatever is pending.
   const save = async (s: Scene) => {
     if (props.suppressSave) return { ok: true };
     // Ephemeral scratch: hand the scene to the host (kept in memory) instead of
@@ -294,11 +312,13 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
       }
     },
   };
-  createEffect(() => {
-    const path = props.filePath;
-    props.onFrameApi?.(path, api);
-    onCleanup(() => props.onFrameApi?.(path, null));
-  });
+  createEffect(
+    () => ({ path: props.filePath, onFrameApi: props.onFrameApi }),
+    ({ path, onFrameApi }) => {
+      onFrameApi?.(path, api);
+      return () => onFrameApi?.(path, null);
+    },
+  );
 
   // ── Host shortcut forwarding ──────────────────────────────────────────────
   // Keydown never crosses the iframe boundary, so with the canvas focused no
@@ -357,7 +377,7 @@ export function ExcalidrawFrame(props: ExcalidrawFrameProps) {
     };
   };
 
-  onCleanup(() => {
+  onSettled(() => () => {
     detachKeyForwarding?.();
     detachKeyForwarding = undefined;
   });

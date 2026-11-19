@@ -53,14 +53,19 @@ export function EditorToolbar(props: EditorToolbarProps) {
     <div class="editor-toolbar no-print space-x-0.5">
       <Tooltip>
         <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={props.searchOpen}
           aria-label="Find in editor"
-          onChange={() => props.onToggleFind()}
-        >
-          <IconSearch width={14} height={14} />
-        </TooltipTrigger>
+          render={(triggerProps) => (
+            <Toggle
+              {...triggerProps}
+              aria-label="Find in editor"
+              size="sm"
+              pressed={props.searchOpen}
+              onChange={() => props.onToggleFind()}
+            >
+              <IconSearch width={14} height={14} />
+            </Toggle>
+          )}
+        />
         <TooltipContent>Find in editor</TooltipContent>
       </Tooltip>
       <Tooltip>
@@ -68,8 +73,8 @@ export function EditorToolbar(props: EditorToolbarProps) {
           as="button"
           class="content-toolbar-btn"
           aria-label="Undo"
-          disabled={!props.canUndo}
-          onClick={props.onUndo}
+          aria-disabled={props.canUndo ? "false" : "true"}
+          onClick={() => { if (props.canUndo) props.onUndo(); }}
         >
           <IconUndo2 width={14} height={14} />
         </TooltipTrigger>
@@ -80,8 +85,8 @@ export function EditorToolbar(props: EditorToolbarProps) {
           as="button"
           class="content-toolbar-btn"
           aria-label="Redo"
-          disabled={!props.canRedo}
-          onClick={props.onRedo}
+          aria-disabled={props.canRedo ? "false" : "true"}
+          onClick={() => { if (props.canRedo) props.onRedo(); }}
         >
           <IconRedo2 width={14} height={14} />
         </TooltipTrigger>
@@ -90,51 +95,71 @@ export function EditorToolbar(props: EditorToolbarProps) {
       <Separator orientation="vertical" class="content-toolbar-separator" />
       <Tooltip>
         <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={props.showLineNumbers}
-          onChange={props.onToggleShowLineNumbers}
           aria-label="Show line numbers"
-        >
-          <IconListOrdered width={14} height={14} />
-        </TooltipTrigger>
+          render={(triggerProps) => (
+            <Toggle
+              {...triggerProps}
+              aria-label="Show line numbers"
+              size="sm"
+              pressed={props.showLineNumbers}
+              onChange={props.onToggleShowLineNumbers}
+            >
+              <IconListOrdered width={14} height={14} />
+            </Toggle>
+          )}
+        />
         <TooltipContent>Line numbers</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={props.showInvisibles}
-          onChange={props.onToggleShowInvisibles}
           aria-label="Show invisibles"
-        >
-          <IconPilcrow width={14} height={14} />
-        </TooltipTrigger>
+          render={(triggerProps) => (
+            <Toggle
+              {...triggerProps}
+              aria-label="Show invisibles"
+              size="sm"
+              pressed={props.showInvisibles}
+              onChange={props.onToggleShowInvisibles}
+            >
+              <IconPilcrow width={14} height={14} />
+            </Toggle>
+          )}
+        />
         <TooltipContent>Show invisibles</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger
-          as={Toggle}
-          size="sm"
-          pressed={props.wrapText}
-          onChange={props.onToggleWrapText}
           aria-label="Wrap text"
-        >
-          <IconFileText width={14} height={14} />
-        </TooltipTrigger>
+          render={(triggerProps) => (
+            <Toggle
+              {...triggerProps}
+              aria-label="Wrap text"
+              size="sm"
+              pressed={props.wrapText}
+              onChange={props.onToggleWrapText}
+            >
+              <IconFileText width={14} height={14} />
+            </Toggle>
+          )}
+        />
         <TooltipContent>Wrap text</TooltipContent>
       </Tooltip>
       <Show when={props.showSyncScroll}>
         <Tooltip>
           <TooltipTrigger
-            as={Toggle}
-            size="sm"
-            pressed={props.syncScroll}
-            onChange={props.onToggleSyncScroll}
             aria-label="Sync scroll"
-          >
-            <IconArrowUpDown width={14} height={14} />
-          </TooltipTrigger>
+            render={(triggerProps) => (
+              <Toggle
+                {...triggerProps}
+              aria-label="Sync scroll"
+                size="sm"
+                pressed={props.syncScroll}
+                onChange={props.onToggleSyncScroll}
+              >
+                <IconArrowUpDown width={14} height={14} />
+              </Toggle>
+            )}
+          />
           <TooltipContent>Sync scroll</TooltipContent>
         </Tooltip>
       </Show>

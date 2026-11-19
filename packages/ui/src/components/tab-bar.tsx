@@ -1,5 +1,6 @@
-import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
-import { useDraggable, useDroppable } from "@dnd-kit/solid";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { PointerSensor } from "@dnd-kit/dom";
+import { useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import type { TabStore } from "../composables/create-tab-store.ts";
 import type { TabState } from "@markdraw/core/tabs.ts";
 import {
@@ -79,6 +80,7 @@ function DraggableTab(props: {
   const draggable = useDraggable({
     get id() { return dndId(); },
     get disabled() { return !props.canDrag; },
+    sensors: [PointerSensor],
   });
   const droppable = useDroppable({
     get id() { return dndId(); },
@@ -90,26 +92,39 @@ function DraggableTab(props: {
   // doesn't expose a direct callback at this layer, but the boolean
   // flips synchronously when the gesture commits, which is the
   // exact moment we want to pin.
-  createEffect(() => {
-    if (draggable.isDragging() && !props.tab.isPinned) {
-      props.onPin?.();
-    }
-  });
+  createEffect(
+    () => ({
+      dragging: draggable.isDragging(),
+      pinned: props.tab.isPinned,
+      onPin: props.onPin,
+    }),
+    ({ dragging, pinned, onPin }) => {
+      if (dragging && !pinned) onPin?.();
+    },
+  );
 
   return (
     <Tooltip openDelay={600}>
       <ContextMenu>
-        <TooltipTrigger as="span" class="tab-bar-item-tooltip-trigger" data-tab-id={props.tab.id}>
+        <TooltipTrigger as="span" class="tab-bar-item-tooltip-trigger" data-tab-id={props.tab.id} aria-label={props.displayName} tabIndex={-1}>
           <ContextMenuTrigger
             as="div"
-            class={`tab-bar-item ${props.isActive ? "tab-bar-item-active" : ""}`}
-            classList={{ "tab-bar-item-dragging": draggable.isDragging() }}
+            aria-label={props.displayName}
+            role="button"
+            tabIndex={0}
+            class={[`tab-bar-item ${props.isActive ? "tab-bar-item-active" : ""}`, { "tab-bar-item-dragging": draggable.isDragging() }]}
+            
             data-preview={!props.tab.isPinned ? "true" : undefined}
             ref={(el: HTMLElement) => {
               draggable.ref(el);
               droppable.ref(el);
             }}
             onClick={() => props.onActivate()}
+            onKeyDown={(e: KeyboardEvent) => {
+              if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+              e.preventDefault();
+              props.onActivate();
+            }}
             onDblClick={() => props.onPin?.()}
             onMouseDown={(e: MouseEvent) => {
               if (e.button === 1) {
@@ -125,8 +140,9 @@ function DraggableTab(props: {
               <span class="tab-bar-item-dirty" />
             </Show>
             <button
-              class="tab-bar-item-close"
-              classList={{ "tab-bar-item-close-dirty": props.isDirty }}
+              class={["tab-bar-item-close", { "tab-bar-item-close-dirty": props.isDirty }]}
+              aria-label={(useLocale(), m.command_close_tab())}
+              
               onClick={(e) => {
                 e.stopPropagation();
                 props.onClose();
@@ -183,23 +199,25 @@ export function TabBar(props: TabBarProps) {
   }
 
   // Watch for overflow changes
-  createEffect(() => {
-    tabs();
-    queueMicrotask(updateScrollState);
-  });
+  createEffect(
+    () => tabs(),
+    () => queueMicrotask(updateScrollState),
+  );
 
   // Scroll active tab into view when it changes
-  createEffect(() => {
-    const id = activeTabId();
-    if (!id || !listRef) return;
-    queueMicrotask(() => {
-      const el = listRef?.querySelector(`[data-tab-id="${CSS.escape(id)}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-        queueMicrotask(updateScrollState);
-      }
-    });
-  });
+  createEffect(
+    () => activeTabId(),
+    (id) => {
+      if (!id || !listRef) return;
+      queueMicrotask(() => {
+        const el = listRef?.querySelector(`[data-tab-id="${CSS.escape(id)}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+          queueMicrotask(updateScrollState);
+        }
+      });
+    },
+  );
 
   function scrollLeft() {
     listRef?.scrollBy({ left: -SCROLL_STEP, behavior: "smooth" });
@@ -232,8 +250,9 @@ export function TabBar(props: TabBarProps) {
     <div class="tab-bar">
       <Show when={hasOverflow()}>
         <button
-          class="tab-bar-scroll tab-bar-scroll-left"
-          classList={{ "tab-bar-scroll-disabled": !canScrollLeft() }}
+          class={["tab-bar-scroll tab-bar-scroll-left", { "tab-bar-scroll-disabled": !canScrollLeft() }]}
+          aria-label={(useLocale(), m.tab_scroll_left())}
+          
           onClick={scrollLeft}
         >
           <IconChevronLeft width={14} height={14} />
@@ -244,22 +263,22 @@ export function TabBar(props: TabBarProps) {
         ref={listRef}
         onScroll={updateScrollState}
       >
-        <For each={tabs()}>
+        <For each={tabs()} keyed={(tab) => tab.id}>
           {(tab) => (
             <DraggableTab
-              tab={tab}
+              tab={tab()}
               paneIndex={props.paneIndex}
-              isActive={tab.id === activeTabId()}
-              isDirty={tab.id === activeTabId() ? (props.activeTabDirty ?? false) : tab.editorContent !== tab.savedContent}
-              displayName={displayNames().get(tab.id) ?? tab.fileName}
+              isActive={tab().id === activeTabId()}
+              isDirty={tab().id === activeTabId() ? (props.activeTabDirty ?? false) : tab().editorContent !== tab().savedContent}
+              displayName={displayNames().get(tab().id) ?? tab().fileName}
               canDrag={canDrag()}
-              onActivate={() => props.onActivateTab(tab.id)}
-              onClose={() => props.onCloseTab(tab.id)}
-              onCloseOthers={() => props.tabStore.closeOtherTabs(tab.id)}
+              onActivate={() => props.onActivateTab(tab().id)}
+              onClose={() => props.onCloseTab(tab().id)}
+              onCloseOthers={() => props.tabStore.closeOtherTabs(tab().id)}
               onCloseAll={() => props.tabStore.closeAllTabs()}
-              onCloseToRight={() => props.tabStore.closeTabsToRight(tab.id)}
-              onMove={props.onMoveToOtherPane ? () => props.onMoveToOtherPane!(tab.id) : undefined}
-              onPin={() => props.tabStore.pinTab(tab.id)}
+              onCloseToRight={() => props.tabStore.closeTabsToRight(tab().id)}
+              onMove={props.onMoveToOtherPane ? () => props.onMoveToOtherPane!(tab().id) : undefined}
+              onPin={() => props.tabStore.pinTab(tab().id)}
               moveLabel={props.moveToOtherPaneLabel}
             />
           )}
@@ -267,8 +286,9 @@ export function TabBar(props: TabBarProps) {
       </div>
       <Show when={hasOverflow()}>
         <button
-          class="tab-bar-scroll tab-bar-scroll-right"
-          classList={{ "tab-bar-scroll-disabled": !canScrollRight() }}
+          class={["tab-bar-scroll tab-bar-scroll-right", { "tab-bar-scroll-disabled": !canScrollRight() }]}
+          aria-label={(useLocale(), m.tab_scroll_right())}
+          
           onClick={scrollRight}
         >
           <IconChevronRight width={14} height={14} />
@@ -285,6 +305,7 @@ export function TabBar(props: TabBarProps) {
             });
           }}
           title="New Tab"
+          aria-label="New Tab"
         >
           <IconPlus width={14} height={14} />
         </button>

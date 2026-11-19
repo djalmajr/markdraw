@@ -6,6 +6,9 @@ export class FileWatcher {
   private unlisten: UnlistenFn | null = null;
   private watchedPaths: string[] = [];
   private running = false;
+  private generation = 0;
+  private ipcQueue = Promise.resolve();
+  private latestRequest = 0;
 
   constructor(onChange: () => void) {
     this.onChange = onChange;
@@ -28,25 +31,35 @@ export class FileWatcher {
 
     this.watchedPaths = newPaths;
 
-    // If already running and paths changed, update the backend watcher
-    if (this.running && changed) {
-      this.sendWatchPaths();
+    // A pending registration publishes the latest target once it is ready.
+    if (this.unlisten && changed) {
+      void this.sendWatchPaths();
     }
   }
 
   async start() {
     if (this.running) return;
+    const generation = ++this.generation;
     this.running = true;
 
-    this.unlisten = await listen("fs-change", () => {
-      this.onChange();
+    const unlisten = await listen("fs-change", () => {
+      if (generation === this.generation) this.onChange();
+    }).catch((error) => {
+      if (generation === this.generation) this.running = false;
+      throw error;
     });
+    if (generation !== this.generation) {
+      await unlisten();
+      return;
+    }
 
-    this.sendWatchPaths();
+    this.unlisten = unlisten;
+    void this.sendWatchPaths();
   }
 
-  async stop() {
-    if (!this.running) return;
+  stop() {
+    if (!this.running) return this.ipcQueue;
+    this.generation++;
     this.running = false;
 
     if (this.unlisten) {
@@ -54,17 +67,32 @@ export class FileWatcher {
       this.unlisten = null;
     }
 
-    await invoke("stop_watching");
+    return this.enqueue(null);
   }
 
-  private async sendWatchPaths() {
+  private sendWatchPaths() {
     if (this.watchedPaths.length > 0) {
-      await invoke("watch_paths", { paths: this.watchedPaths });
+      void this.enqueue(this.watchedPaths);
     }
   }
 
-  async destroy() {
-    await this.stop();
+  private enqueue(paths: string[] | null) {
+    const request = ++this.latestRequest;
+    const operation = this.ipcQueue.then(async () => {
+      // Skip superseded requests that have not reached the backend yet.
+      if (request !== this.latestRequest) return;
+      if (paths) {
+        await invoke("watch_paths", { paths });
+      } else {
+        await invoke("stop_watching");
+      }
+    });
+    this.ipcQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
+  destroy() {
     this.watchedPaths = [];
+    return this.running ? this.stop() : this.enqueue(null);
   }
 }

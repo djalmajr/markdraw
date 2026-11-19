@@ -23,7 +23,7 @@ describe("createPaneManager", () => {
 
   it("splitFromActive adds a second pane and focuses it", () => {
     const m = createPaneManager();
-    expect(m.splitFromActive()).toBe(true);
+    expect(m.splitFromActive()).toBe(m.panes()[1]);
     expect(m.panes()).toHaveLength(2);
     expect(m.activePaneIndex()).toBe(1);
     expect(m.activePane()).toBe(m.panes()[1]!);
@@ -33,8 +33,8 @@ describe("createPaneManager", () => {
     // Mutation captured: replacing `>= MAX_PANES` with `>` would let a
     // third pane through and the assertion below fails.
     const m = createPaneManager();
-    expect(m.splitFromActive()).toBe(true);
-    expect(m.splitFromActive()).toBe(false);
+    expect(m.splitFromActive()).toBe(m.panes()[1]);
+    expect(m.splitFromActive()).toBeUndefined();
     expect(m.panes()).toHaveLength(2);
   });
 

@@ -1,13 +1,7 @@
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  onMount,
-  type Setter,
-} from "solid-js";
+import { createEffect, createMemo, createSignal, flush, onSettled, runWithOwner, type Setter } from "solid-js";
 import type { FSEntry, QualifiedPath, WorkspaceRoot } from "@markdraw/core/types.ts";
 import { createPaneManager, type PaneManager } from "./create-pane-manager.ts";
+import type { PaneStore } from "./create-pane-store.ts";
 import { createAiChatSessions } from "./create-ai-chat-sessions.ts";
 import type { ChatTurn } from "./create-ai-chat-store.ts";
 import { createAiInlineStore } from "./create-ai-inline-store.ts";
@@ -201,6 +195,17 @@ interface AppStateConfig {
 
 export { FontFamilies, FontSizes };
 
+export function findEntryInTree(entries: FSEntry[], path: string): FSEntry | null {
+  for (const entry of entries) {
+    if (entry.path === path) return entry;
+    if (entry.children) {
+      const found = findEntryInTree(entry.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 /** One ordered right-panel strip tab (an open special pane or a chat session). */
 export interface RightPanelTabModel {
   /** "toc" | "backlinks" | chat session id. */
@@ -212,6 +217,17 @@ export interface RightPanelTabModel {
   pinned: boolean;
   /** Sort key: special.openedAt or chat.createdAt (pinned float left first). */
   orderKey: number;
+}
+
+export function effectivePaneEditorMode(pane: PaneStore): "edit" | "split" | "preview" {
+  const file = pane.selectedFile();
+  const kind = file ? fileKind(file.name) : null;
+  if (kind === "image" || kind === "pdf") return "preview";
+  const mode = kind === "other" && pane.html() !== UNSUPPORTED_CONTENT ? "edit" : pane.editorMode();
+  // Keep the preview's loading/error display available without mounting an
+  // editor on a restored tab whose working buffer has not been read yet.
+  if (mode !== "preview" && pane.tabs.getActiveTab()?.needsLoad) return "preview";
+  return mode;
 }
 
 export function createAppState(config: AppStateConfig) {
@@ -249,7 +265,7 @@ export function createAppState(config: AppStateConfig) {
     document.documentElement.classList.contains("dark"),
   );
 
-  createEffect(() => {
+  onSettled(() => {
     applyCodeTheme("github-light", false);
   });
 
@@ -259,9 +275,12 @@ export function createAppState(config: AppStateConfig) {
     getStoredFontPrefs(),
   );
 
-  createEffect(() => {
-    applyFontPrefs(fontPrefs());
-  });
+  createEffect(
+    () => fontPrefs(),
+    (prefs) => {
+      applyFontPrefs(prefs);
+    },
+  );
 
   // ── Recent files ────────────────────────────────────────────────────────
 
@@ -277,7 +296,7 @@ export function createAppState(config: AppStateConfig) {
 
   // ── Editor state ────────────────────────────────────────────────────────
 
-  const editorMode = (): "edit" | "split" | "preview" => paneManager.activePane().editorMode();
+  const editorMode = createMemo(() => effectivePaneEditorMode(paneManager.activePane()));
   const setEditorMode = ((value: unknown) =>
     (paneManager.activePane().setEditorMode as (v: unknown) => unknown)(value)) as Setter<"edit" | "split" | "preview">;
   const editorVisible = () => editorMode() !== "preview";
@@ -317,9 +336,15 @@ export function createAppState(config: AppStateConfig) {
   // Persist via effects rather than in a handler: these setters are
   // toggled from several call sites (app-shell menu, command palette,
   // __DEV__ helpers), and an effect catches every one of them.
-  createEffect(() => setStoredShowAllDirs(showAllDirs()));
-  createEffect(() => setStoredShowAllFiles(showAllFiles()));
-  createEffect(() => setStoredShowHiddenEntries(showHiddenEntries()));
+  createEffect(() => showAllDirs(), (value) => {
+    setStoredShowAllDirs(value);
+  });
+  createEffect(() => showAllFiles(), (value) => {
+    setStoredShowAllFiles(value);
+  });
+  createEffect(() => showHiddenEntries(), (value) => {
+    setStoredShowHiddenEntries(value);
+  });
   const [respectGitignore, setRespectGitignore] = createSignal(getStoredRespectGitignore());
   const [closeBehavior, setCloseBehavior] = createSignal<CloseBehavior>(getStoredCloseBehavior());
 
@@ -447,7 +472,7 @@ export function createAppState(config: AppStateConfig) {
   const isUnsupported = () => html() === UNSUPPORTED_CONTENT;
 
   const canEdit = () => {
-    if (isUnsupported()) return false;
+    if (isUnsupported() || paneManager.activePane().tabs.getActiveTab()?.needsLoad) return false;
     const k = viewerKind();
     return k === "document" || k === "html" || k === "other";
   };
@@ -457,23 +482,9 @@ export function createAppState(config: AppStateConfig) {
     return k === "document" || k === "html" || k === "image" || k === "pdf";
   };
 
-  // Force the mode that matches the file's capabilities. Media (image/pdf/
-  // svg) is preview-only — the viewer ignores editorMode, but forcing
-  // "preview" keeps the toggle's active state honest. Non-previewable text
-  // is edit-only. Documents (and unsupported binaries, which show their own
-  // notice) are left wherever the user put them.
-  createEffect(() => {
-    const k = viewerKind();
-    if ((k === "image" || k === "pdf") && editorMode() !== "preview") {
-      setEditorMode("preview");
-    } else if (k === "other" && !isUnsupported() && editorMode() !== "edit") {
-      setEditorMode("edit");
-    }
-  });
-
   // ── System theme listener ───────────────────────────────────────────────
 
-  onMount(() => {
+  onSettled(() => {
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
       if (config.getStoredTheme() === "system") {
@@ -481,7 +492,7 @@ export function createAppState(config: AppStateConfig) {
       }
     };
     mql.addEventListener("change", handler);
-    onCleanup(() => mql.removeEventListener("change", handler));
+    return () => mql.removeEventListener("change", handler);
   });
 
   // ── Handlers ────────────────────────────────────────────────────────────
@@ -568,10 +579,12 @@ export function createAppState(config: AppStateConfig) {
     if (!f || (k !== "document" && k !== "excalidraw")) return null;
     return { label: f.name, path: f.path };
   });
-  createEffect(() => {
-    selectedFile()?.path; // re-show the active-file chip on a file switch
-    setActiveFileContextDismissed(false);
-  });
+  createEffect(
+    () => selectedFile()?.path, // re-show the active-file chip on a file switch
+    () => {
+      setActiveFileContextDismissed(false);
+    },
+  );
 
   function addAiContext(item: AiContextItem): void {
     setAiContextItems((prev) => (prev.some((i) => i.id === item.id) ? prev : [...prev, item]));
@@ -839,8 +852,16 @@ export function createAppState(config: AppStateConfig) {
       : {}),
   });
   // Restore persisted chats (open tabs + active) on boot, while this owner is
-  // live so each rebuilt session store nests under it.
-  aiSessions.hydrate(getChatSessionsIndex() ?? { sessions: [], activeId: null });
+  // live so each rebuilt session store nests under it. Detaching only these
+  // init writes keeps them from being mistaken for writes from a component/
+  // computation. Solid 2 commits signal writes on the next flush, so reading aiSessions
+  // right here would still see its pre-hydrate (empty) state. hydrate reports the
+  // live tabs and active id it built, so the boot tab uses those directly instead
+  // of re-deriving the sessions manager's open/archived rule here.
+  const persistedChats = getChatSessionsIndex() ?? { sessions: [], activeId: null as string | null };
+  const { sessions: restoredChats, activeId: restoredActive } = runWithOwner(null, () =>
+    aiSessions.hydrate(persistedChats),
+  );
 
   // Inline overlay (DJA-13): floating ⌘I widget on the editor selection.
   const aiInline = createAiInlineStore({
@@ -872,40 +893,47 @@ export function createAppState(config: AppStateConfig) {
   // fall back to the orderKey sort, AFTER the manually-ordered ones.
   const [rpOrder, setRpOrder] = createSignal<string[]>(persistedRp?.order ?? []);
 
-  const restoredActive = aiSessions.activeId();
-  const [aiActiveTab, setActiveTabSig] = createSignal<string>(
-    (() => {
-      const want = persistedRp?.activeTab ?? "";
-      if (want.startsWith("chat:")) {
-        if (aiSessions.sessions().some((s) => s.id === want.slice(5))) return want;
-      } else if (want === "toc" || want === "backlinks") {
-        if (rpSpecials()[want].open) return want;
-      }
-      return restoredActive ? `chat:${restoredActive}` : "";
-    })(),
-  );
+  const initialActiveTab = (() => {
+    const want = persistedRp?.activeTab ?? "";
+    if (want.startsWith("chat:")) {
+      if (restoredChats.some((s) => s.id === want.slice(5))) return want;
+    } else if (want === "toc" || want === "backlinks") {
+      if (rpSpecials()[want].open) return want;
+    }
+    return restoredActive ? `chat:${restoredActive}` : "";
+  })();
+  const [aiActiveTab, setActiveTabSig] = createSignal<string>(initialActiveTab);
   const [aiComposerFocusTrigger, setAiComposerFocusTrigger] = createSignal(0);
 
   // AI-first default: the right panel always boots onto a usable chat. With no
   // open chats and no open specials, create one so the assistant is the first tab.
-  if (aiSessions.sessions().length === 0 && !rpSpecials().toc.open && !rpSpecials().backlinks.open) {
-    setActiveTabSig(`chat:${aiSessions.createSession()}`);
-  } else if (aiActiveTab() === "") {
-    const firstChat = aiSessions.sessions()[0];
-    setActiveTabSig(firstChat ? `chat:${firstChat.id}` : rpSpecials().toc.open ? "toc" : "backlinks");
-  }
+  // This is boot-time initialization, intentionally outside the component scope.
+  runWithOwner(null, () => {
+    if (restoredChats.length === 0 && !rpSpecials().toc.open && !rpSpecials().backlinks.open) {
+      setActiveTabSig(`chat:${aiSessions.createSession()}`);
+    } else if (initialActiveTab === "") {
+      const firstChat = restoredChats[0];
+      setActiveTabSig(firstChat ? `chat:${firstChat.id}` : rpSpecials().toc.open ? "toc" : "backlinks");
+    }
+  });
 
   // Persist the special-tab state + the encoded active tab (chats persist via
   // the sessions manager). Direct write — low frequency, localStorage is cheap.
-  createEffect(() => {
-    const specials = rpSpecials();
-    setRightPanelTabsState({
-      toc: specials.toc,
-      backlinks: specials.backlinks,
+  createEffect(
+    () => ({
+      specials: rpSpecials(),
       activeTab: aiActiveTab(),
       order: rpOrder(),
-    });
-  });
+    }),
+    ({ specials, activeTab, order }) => {
+      setRightPanelTabsState({
+        toc: specials.toc,
+        backlinks: specials.backlinks,
+        activeTab,
+        order,
+      });
+    },
+  );
 
   function patchSpecial(kind: SpecialKind, patch: Partial<SpecialTabState>): void {
     setRpSpecials((s) => ({ ...s, [kind]: { ...s[kind], ...patch } }));
@@ -1003,6 +1031,9 @@ export function createAppState(config: AppStateConfig) {
   // manager's neighbor chat, else any open chat, else an open special, else
   // none. Done imperatively so the tab updates synchronously with the action.
   function reconcileActiveTab(): void {
+    // The caller just changed sessions/specials; Solid 2 commits those writes
+    // on the next flush, so settle before deciding which tab is still present.
+    flush();
     if (tabPresent(aiActiveTab())) return;
     const next = aiSessions.activeId();
     if (next && aiSessions.sessions().some((s) => s.id === next)) {
@@ -1194,23 +1225,13 @@ export function createAppState(config: AppStateConfig) {
   // ── Tree utility ────────────────────────────────────────────────────────
 
   function findEntryByPath(targetPath: string, rootId?: string): FSEntry | null {
-    function find(entries: FSEntry[], tp: string): FSEntry | null {
-      for (const entry of entries) {
-        if (entry.path === tp) return entry;
-        if (entry.children) {
-          const found = find(entry.children, tp);
-          if (found) return found;
-        }
-      }
-      return null;
-    }
     if (rootId) {
       const root = roots().get(rootId);
-      return root ? find(root.entries, targetPath) : null;
+      return root ? findEntryInTree(root.entries, targetPath) : null;
     }
     // Search all roots
     for (const root of roots().values()) {
-      const found = find(root.entries, targetPath);
+      const found = findEntryInTree(root.entries, targetPath);
       if (found) return found;
     }
     return null;

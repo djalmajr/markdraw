@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSignal } from "solid-js";
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { createSignal, flush } from "solid-js";
+import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { Feedback } from "@dnd-kit/dom";
 
 afterEach(cleanup);
 import type { WorkspaceRoot, FSEntry } from "@markdraw/core/types.ts";
@@ -63,6 +64,26 @@ const SINGLE_ROOT: WorkspaceRoot[] = [
 ];
 
 describe("FileTree", () => {
+  it("reveals a selected descendant without untracked-read warnings and names row menus", () => {
+    const warn = vi.spyOn(console, "warn");
+    try {
+      const [selected, setSelected] = createSignal<string | null>(null);
+      const { container, getByText } = render(() => (
+        <AppProvider state={makeAppStub()}>
+          <FileTree roots={SINGLE_ROOT} selectedPath={selected()} selectedRootId="r1" onSelect={() => {}} />
+        </AppProvider>
+      ));
+      setSelected("notes/a.md");
+      flush();
+      expect(getByText("a.md")).toBeTruthy();
+      const menus = [...container.querySelectorAll("button.tree-item-more")];
+      expect(menus.length).toBeGreaterThan(0);
+      expect(menus.every((button) => !!button.getAttribute("aria-label"))).toBe(true);
+      expect(warn.mock.calls.flat().join(" ")).not.toContain("[STRICT_READ_UNTRACKED] Reactive value read directly in an effect callback");
+    } finally {
+      warn.mockRestore();
+    }
+  });
   it("renders the workspace root header and visible entries", () => {
     const { getByText } = render(() => (
       <AppProvider state={makeAppStub()}>
@@ -91,6 +112,7 @@ describe("FileTree", () => {
       </AppProvider>
     ));
     fireEvent.click(getByText("README.md"));
+    flush();
     expect(onSelect).toHaveBeenCalledTimes(1);
     const [entry, rootId] = onSelect.mock.calls[0]!;
     expect(entry.name).toBe("README.md");
@@ -110,6 +132,7 @@ describe("FileTree", () => {
     ));
     const input = getByPlaceholderText(/Filter files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "READ" } });
+    flush();
 
     // tree-item-wrapper sets display:none when invisible, so we filter
     // by visibility on the wrapper before reading the name.
@@ -152,6 +175,7 @@ describe("FileTree", () => {
     const nav = container.querySelector(".file-tree") as HTMLElement;
     nav.focus();
     fireEvent.keyDown(nav, { key: "ArrowDown" });
+    flush();
     expect(container.querySelector(".file-tree")).not.toBeNull();
   });
 
@@ -165,9 +189,11 @@ describe("FileTree", () => {
     expect(item.dataset.expanded).toBe("false");
     // Clicking the row must NOT expand (it selects/focuses the folder).
     fireEvent.click(item);
+    flush();
     expect(item.dataset.expanded).toBe("false");
     // Clicking the chevron expands.
     fireEvent.click(item.querySelector<HTMLElement>(".tree-chevron")!);
+    flush();
     expect(item.dataset.expanded).toBe("true");
   });
 
@@ -198,6 +224,7 @@ describe("FileTree", () => {
       const chevron = item.querySelector<HTMLElement>(".tree-chevron");
       if (!chevron) throw new Error(`chevron for '${name}' not found`);
       fireEvent.click(chevron);
+      flush();
     }
 
     it("renders the three-dot trigger on every row by default", () => {
@@ -225,6 +252,7 @@ describe("FileTree", () => {
       const item = row!.querySelector<HTMLElement>(".tree-item") ?? row!;
       // The row's Kobalte ContextMenu opens on a right-click (contextmenu event).
       fireEvent.contextMenu(item);
+      flush();
     }
 
     it("offers 'Add to chat' in a file's menu when onAddToChat is provided", () => {
@@ -270,8 +298,11 @@ describe("FileTree", () => {
       openFileMenu(container, "notes");
       const item = screen.getByText(/add to chat|adicionar ao chat|añadir al chat/i);
       fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.click(item);
+      flush();
       expect(onAddToChat).toHaveBeenCalledTimes(1);
       expect(onAddToChat.mock.calls[0]![0].kind).toBe("directory");
     });
@@ -306,14 +337,20 @@ describe("FileTree", () => {
       openFileMenu(container, "a.md");
       let item = screen.getByText(/add to chat|adicionar ao chat|añadir al chat/i);
       fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.click(item);
+      flush();
 
       openFileMenu(container, "deep");
       item = screen.getAllByText(/add to chat|adicionar ao chat|añadir al chat/i).at(-1)!;
       fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.click(item);
+      flush();
 
       expect(onAddToChat).toHaveBeenCalledTimes(2);
       expect(onAddToChat.mock.calls[0]![0]).toMatchObject({ kind: "file", path: "notes/a.md" });
@@ -336,12 +373,18 @@ describe("FileTree", () => {
       const trigger = container.querySelector<HTMLElement>(".workspace-root-btn");
       expect(trigger).not.toBeNull();
       fireEvent.pointerDown(trigger!, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.pointerUp(trigger!, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.click(trigger!);
+      flush();
       const item = screen.getByText(/add to chat|adicionar ao chat|añadir al chat/i);
       fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.click(item);
+      flush();
       expect(onAddToChat).toHaveBeenCalledTimes(1);
       const [entry, rootId] = onAddToChat.mock.calls[0]!;
       expect(entry).toMatchObject({ kind: "directory", path: "" });
@@ -366,6 +409,7 @@ describe("FileTree", () => {
         const nav = container.querySelector(".file-tree") as HTMLElement;
         nav.focus();
         fireEvent.keyDown(nav, { key: "A", ctrlKey: true, shiftKey: true });
+        flush();
         expect(onAddToChat).toHaveBeenCalledTimes(1);
         const [entry, rootId] = onAddToChat.mock.calls[0]!;
         expect(entry).toMatchObject({ path: "README.md" });
@@ -393,6 +437,7 @@ describe("FileTree", () => {
         const nav = container.querySelector(".file-tree") as HTMLElement;
         nav.focus();
         fireEvent.keyDown(nav, { key: "R", ctrlKey: true, shiftKey: true });
+        flush();
         expect(onRevealInFileManager).toHaveBeenCalledTimes(1);
         const [entry, rootId] = onRevealInFileManager.mock.calls[0]!;
         expect(entry).toMatchObject({ path: "README.md" });
@@ -509,6 +554,7 @@ describe("FileTree", () => {
     expect(moveClipboard()).not.toBeNull();
     const nav = container.querySelector(".file-tree") as HTMLElement;
     fireEvent.keyDown(nav, { key: "Escape" });
+    flush();
     expect(moveClipboard()).toBeNull();
   });
 
@@ -531,6 +577,49 @@ describe("FileTree", () => {
         </AppProvider>
       ));
       expect(getByText("README.md")).not.toBeNull();
+    });
+
+    it.each(["Enter", "Space"])("drags a focused file with %s and cancels with Escape", async (code) => {
+      const animationDescriptor = Object.getOwnPropertyDescriptor(document, "getAnimations");
+      Object.defineProperty(document, "getAnimations", { configurable: true, value: () => [] });
+      const assignedWhileConnected: boolean[] = [];
+      const setOverlay = Object.getOwnPropertyDescriptor(Feedback.prototype, "overlay")!.set!;
+      const overlay = vi.spyOn(Feedback.prototype, "overlay", "set").mockImplementation(function (this: Feedback, element) {
+        if (element) assignedWhileConnected.push(element.isConnected);
+        setOverlay.call(this, element);
+      });
+      const move = vi.fn();
+      const [selected, setSelected] = createSignal("");
+      const select = vi.fn((entry: FSEntry) => { setSelected(entry.path); });
+      const { container, getByTestId, unmount } = render(() => (
+        <AppProvider state={makeAppStub()}>
+          <FileTree roots={SINGLE_ROOT} selectedPath={null} selectedRootId={null} onSelect={select} onMove={move} />
+          <output data-testid="selected-file">{selected()}</output>
+        </AppProvider>
+      ));
+      try {
+        const row = container.querySelector<HTMLElement>('.tree-item[data-path="README.md"]')!;
+        row.focus();
+        expect(document.activeElement).toBe(row);
+        fireEvent.keyDown(row, { key: code === "Space" ? " " : code, code });
+        await waitFor(() => expect(container.querySelector(".workspace-root-overlay")?.textContent).toBe("README.md"));
+        await waitFor(() => expect(assignedWhileConnected).toEqual([true]));
+        expect(select).not.toHaveBeenCalled();
+
+        fireEvent.keyDown(row, { key: "Escape", code: "Escape" });
+        await waitFor(() => expect(container.querySelector(".workspace-root-overlay")).toBeNull());
+        expect(move).not.toHaveBeenCalled();
+
+        fireEvent.click(row);
+        flush();
+        expect(select).toHaveBeenCalled();
+        expect(getByTestId("selected-file").textContent).toBe("README.md");
+      } finally {
+        unmount();
+        overlay.mockRestore();
+        if (animationDescriptor) Object.defineProperty(document, "getAnimations", animationDescriptor);
+        else Reflect.deleteProperty(document, "getAnimations");
+      }
     });
   });
 

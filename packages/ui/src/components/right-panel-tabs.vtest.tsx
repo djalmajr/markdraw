@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { flush } from "solid-js";
 import {
   RightPanelTabs,
   fromRpTabDndId,
@@ -201,6 +202,7 @@ describe("RightPanelTabs — context menu", () => {
   it("a chat tab menu offers Pin, Rename, Export, Archive, the close group and Delete", () => {
     const { baseElement } = render(() => <RightPanelTabs {...baseProps()} />);
     fireEvent.contextMenu(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
+    flush();
     expect(screen.getByText("Pin")).not.toBeNull();
     expect(screen.getByText("Rename")).not.toBeNull();
     expect(screen.getByText("Export…")).not.toBeNull();
@@ -212,6 +214,7 @@ describe("RightPanelTabs — context menu", () => {
   it("a special tab menu offers Pin + the close group but no chat actions", () => {
     const { baseElement } = render(() => <RightPanelTabs {...baseProps()} />);
     fireEvent.contextMenu(baseElement.querySelector('[data-rp-tab="toc"]')!);
+    flush();
     expect(screen.getByText("Pin")).not.toBeNull();
     expect(screen.getByText("Close to the Right")).not.toBeNull();
     expect(screen.queryByText("Export…")).toBeNull();
@@ -222,17 +225,16 @@ describe("RightPanelTabs — context menu", () => {
     const onTogglePin = vi.fn();
     const onDeleteChat = vi.fn();
     const { baseElement } = render(() => <RightPanelTabs {...baseProps({ onTogglePin, onDeleteChat })} />);
-    // Kobalte menu items select on the pointer sequence, not a bare click.
     const select = (label: string): void => {
-      const item = screen.getByText(label);
-      fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
-      fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
-      fireEvent.click(item);
+      fireEvent.click(screen.getByText(label));
+      flush();
     };
     fireEvent.contextMenu(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
+    flush();
     select("Pin");
     expect(onTogglePin).toHaveBeenCalledWith("chat:s1");
     fireEvent.contextMenu(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
+    flush();
     select("Delete");
     expect(onDeleteChat).toHaveBeenCalledWith("s1");
   });
@@ -243,10 +245,13 @@ describe("RightPanelTabs — inline rename", () => {
     const onRenameChat = vi.fn();
     const { baseElement } = render(() => <RightPanelTabs {...baseProps({ onRenameChat })} />);
     fireEvent.dblClick(baseElement.querySelector('[data-rp-tab="chat:s1"]')!);
+    flush();
     const input = baseElement.querySelector(".rp-tab-rename") as HTMLInputElement;
     expect(input).not.toBeNull();
     fireEvent.input(input, { target: { value: "Renamed" } });
+    flush();
     fireEvent.keyDown(input, { key: "Enter" });
+    flush();
     expect(onRenameChat).toHaveBeenCalledWith("s1", "Renamed");
   });
 });
@@ -271,6 +276,7 @@ describe("RightPanelTabs — actions", () => {
     fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
     fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });
     fireEvent.click(trigger);
+    flush();
     expect(screen.getByText("References")).not.toBeNull();
     expect(screen.getByText("2")).not.toBeNull(); // backlinks count
   });

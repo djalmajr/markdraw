@@ -1,29 +1,33 @@
-import type { ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
+import type { JSX } from "@solidjs/web";
 
-import type { PolymorphicProps } from "@kobalte/core/polymorphic"
-import * as SeparatorPrimitive from "@kobalte/core/separator"
+import { Separator as SeparatorPrimitive } from "@ui-sdk/solid/separator";
 
-import { cn } from "@markdraw/core/utils.ts"
+import { cn } from "@markdraw/core/utils.ts";
 
-type SeparatorRootProps<T extends ValidComponent = "hr"> =
-  SeparatorPrimitive.SeparatorRootProps<T> & { class?: string | undefined }
+type SeparatorProps = {
+  orientation?: "horizontal" | "vertical";
+  decorative?: boolean;
+  class?: string | undefined;
+  children?: JSX.Element;
+};
 
-const Separator = <T extends ValidComponent = "hr">(
-  props: PolymorphicProps<T, SeparatorRootProps<T>>
-) => {
-  const [local, others] = splitProps(props as SeparatorRootProps, ["class", "orientation"])
+/** The ui-sdk part already sets `data-orientation` and the separator role
+ *  (`role="none"` when `decorative`); only the Markdraw styles are added. */
+const Separator = (props: SeparatorProps) => {
+  const orientation = () => props.orientation ?? "horizontal";
   return (
-    <SeparatorPrimitive.Root
-      orientation={local.orientation ?? "horizontal"}
+    <SeparatorPrimitive
+      orientation={orientation()}
+      decorative={props.decorative}
       class={cn(
         "shrink-0 bg-border",
-        local.orientation === "vertical" ? "h-full w-px" : "h-px w-full",
-        local.class
+        orientation() === "vertical" ? "h-full w-px" : "h-px w-full",
+        props.class
       )}
-      {...others}
-    />
-  )
-}
+    >
+      {props.children}
+    </SeparatorPrimitive>
+  );
+};
 
-export { Separator }
+export { Separator };

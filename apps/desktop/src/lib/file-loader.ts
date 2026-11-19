@@ -1,9 +1,11 @@
-import type { Accessor } from "solid-js";
+import { type Accessor } from "solid-js";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { getIncludePaths } from "@markdraw/core/asciidoc.ts";
 import { getMarkdownIncludePaths } from "@markdraw/core/markdown.ts";
 import { fileKind, isMdFile, isSupportedFile, UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
+import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
+import type { TabState } from "@markdraw/core/tabs.ts";
 import {
   readFileByPath,
   readFileContent,
@@ -24,6 +26,7 @@ interface LoadOptions {
   rootId?: string;
   /** A file-watcher refresh: the buffer may hold newer text than the disk. */
   external: boolean;
+  tab?: { pane: PaneStore; id: string };
 }
 
 export function createFileLoader(deps: FileLoaderDeps) {
@@ -34,9 +37,26 @@ export function createFileLoader(deps: FileLoaderDeps) {
   // file must not cancel this one.
   let refreshSeq = 0;
   const latestRefresh = new WeakMap<object, number>();
+  const latestLoad = new WeakMap<PaneStore, object>();
+
+  function syncWatcher(entry: FSEntry | null, rootPath?: string | null, includePaths: string[] = []) {
+    if (entry?.kind === "file" && rootPath) {
+      const kind = fileKind(entry.path);
+      if (kind !== "image" && kind !== "pdf" && kind !== "excalidraw") {
+        watcher.setTarget({ filePath: `${rootPath}/${entry.path}`, includePaths, rootPath });
+        if (state.autoRefresh()) void watcher.start();
+        return;
+      }
+    }
+    void watcher.stop();
+  }
 
   async function loadFileContent(entry: FSEntry, pushHistory = true, force = false, rootId?: string) {
     await load(entry, { pushHistory, force, rootId, external: false });
+  }
+
+  async function loadTabContent(pane: PaneStore, entry: FSEntry, tab: Pick<TabState, "id" | "rootId">, pushHistory = false) {
+    await load(entry, { pushHistory, force: true, rootId: tab.rootId, external: false, tab: { pane, id: tab.id } });
   }
 
   /** Re-read the open file after a watcher event without clobbering unsaved
@@ -49,7 +69,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
 
   /** Resolves true when a watcher refresh adopted the disk text. */
   async function load(entry: FSEntry, opts: LoadOptions): Promise<boolean | undefined> {
-    const { pushHistory, force, rootId, external } = opts;
+    const { pushHistory, force, rootId, external, tab } = opts;
     // Pin the target pane at call time. AppState's per-doc setters
     // (setHtml, setEditorContent, …) are proxies that route to
     // `paneManager.activePane()` on each call — without pinning, a
@@ -59,7 +79,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
     // pane mid-conversion). Writing directly to the captured pane
     // keeps the load atomic from the user's perspective: the file
     // they asked for lands where they asked for it.
-    const targetPane = state.paneManager.activePane();
+    const targetPane = tab?.pane ?? state.paneManager.activePane();
     const targetRootId = rootId ?? targetPane.selectedRootId();
     const root = targetRootId ? rootPaths().get(targetRootId) : null;
     if (!root || entry.kind !== "file") return;
@@ -67,16 +87,37 @@ export function createFileLoader(deps: FileLoaderDeps) {
       targetPane.selectedFile()?.path === entry.path
       && targetPane.selectedRootId() === targetRootId;
     if (!force && isSameFile) return;
+    if (external && targetPane.tabs.getActiveTab()?.needsLoad) return;
     const seq = external ? ++refreshSeq : 0;
     if (external) latestRefresh.set(targetPane, seq);
+    const request = {};
+    if (!external) latestLoad.set(targetPane, request);
     // A watcher refresh runs in the background and must drop its result once
     // a newer refresh started or the pane switched to another file (tab
     // switch) — otherwise this file's text could land in another tab.
-    const superseded = () =>
-      external
-      && (latestRefresh.get(targetPane) !== seq
+    const superseded = () => external
+      ? (latestRefresh.get(targetPane) !== seq
         || targetPane.selectedFile()?.path !== entry.path
-        || targetPane.selectedRootId() !== targetRootId);
+        || targetPane.selectedRootId() !== targetRootId
+        || targetPane.tabs.getActiveTab()?.needsLoad)
+      : latestLoad.get(targetPane) !== request
+        || (tab !== undefined && targetPane.tabs.activeTabId() !== tab.id)
+        || targetPane.selectedFile()?.path !== entry.path
+        || targetPane.selectedRootId() !== targetRootId;
+    const isFocused = () => targetPane === state.paneManager.activePane();
+    const markTabLoaded = (content: string, html: string, frontmatter: ReturnType<PaneStore["frontmatter"]>, includePaths: string[]) => {
+      if (tab) {
+        targetPane.tabs.updateTabContent(tab.id, { editorContent: content, savedContent: content, html, frontmatter, includePaths, needsLoad: false });
+      } else {
+        const activeTab = targetPane.tabs.getActiveTab();
+        if (activeTab?.filePath === entry.path && activeTab.rootId === targetRootId) {
+          targetPane.tabs.updateTabContent(activeTab.id, { includePaths });
+        }
+      }
+    };
+    const watch = (includePaths: string[]) => {
+      if (isFocused()) syncWatcher(entry, root, includePaths);
+    };
 
     targetPane.setSelectedRootId(targetRootId);
     targetPane.setSelectedFile(entry);
@@ -112,7 +153,8 @@ export function createFileLoader(deps: FileLoaderDeps) {
       targetPane.setFrontmatter(null);
       targetPane.setEditorContent("");
       targetPane.setSavedContent("");
-      void watcher.stop();
+      watch([]);
+      markTabLoaded("", "", null, []);
       if (!external) targetPane.setLoading(false);
       return;
     }
@@ -121,11 +163,13 @@ export function createFileLoader(deps: FileLoaderDeps) {
     await new Promise((r) => setTimeout(r, 0));
 
     try {
+      if (superseded()) return;
       const absolutePath = `${root}/${entry.path}`;
       let content: string;
       try {
         content = await readFileContent(absolutePath);
       } catch (readErr) {
+        if (superseded()) return;
         // read_file (read_to_string) throws on non-UTF8 input. A binary
         // that isn't an image/PDF (handled above) can be neither rendered
         // nor edited as text → mark it unsupported so PaneView shows the
@@ -136,7 +180,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
         targetPane.setFrontmatter(null);
         targetPane.setEditorContent("");
         targetPane.setSavedContent("");
-        void watcher.stop();
+        if (isFocused()) void watcher.stop();
         return;
       }
 
@@ -174,8 +218,8 @@ export function createFileLoader(deps: FileLoaderDeps) {
         targetPane.setFrontmatter(null);
         targetPane.setEditorContent(content);
         targetPane.setSavedContent(content);
-        watcher.setTarget({ filePath: absolutePath, includePaths: [], rootPath: root });
-        if (state.autoRefresh()) watcher.start();
+        markTabLoaded(content, "", null, []);
+        watch([]);
         return external;
       }
 
@@ -224,23 +268,17 @@ export function createFileLoader(deps: FileLoaderDeps) {
         ? Array.from(new Set([...scanPaths, ...includeFileCache.keys()]))
         : scanPaths;
 
-      watcher.setTarget({
-        filePath: absolutePath,
-        includePaths,
-        rootPath: root,
-      });
-
-      if (state.autoRefresh()) {
-        watcher.start();
-      }
+      markTabLoaded(content, result.html, result.frontmatter, includePaths);
+      watch(includePaths);
       return external && adoptDisk;
     } catch (e) {
+      if (superseded()) return;
       console.error("Failed to convert file:", e);
       targetPane.setHtml(`<div class="error">Error converting file: ${e}</div>`);
     } finally {
-      if (!external) targetPane.setLoading(false);
+      if (!external && latestLoad.get(targetPane) === request) targetPane.setLoading(false);
     }
   }
 
-  return { loadFileContent, refreshFromDisk };
+  return { loadFileContent, loadTabContent, refreshFromDisk, syncWatcher };
 }

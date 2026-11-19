@@ -67,8 +67,13 @@ export interface AiChatSessions {
   restoreSession: (id: string) => void;
   deleteSession: (id: string) => void;
 
-  /** Rebuild from persisted state on boot (instantiates only OPEN sessions). */
-  hydrate: (persisted: { sessions: PersistedChatSessionMeta[]; activeId: string | null }) => void;
+  /** Rebuild from persisted state on boot (instantiates only OPEN sessions).
+   *  Returns the live tabs and active id actually rebuilt, so callers need not
+   *  re-derive the open/archived rule from the input snapshot. */
+  hydrate: (persisted: {
+    sessions: PersistedChatSessionMeta[];
+    activeId: string | null;
+  }) => { sessions: PersistedChatSessionMeta[]; activeId: string | null };
   /** Current persistable state (for tests / external writers). */
   snapshot: () => { sessions: PersistedChatSessionMeta[]; activeId: string | null };
 }
@@ -204,26 +209,32 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
         });
 
         // Persist + auto-title when this session's turns change. Tracks ONLY the
-        // store signals; the metas read is untracked to avoid a write→read loop
-        // (this effect calls patchMeta, which writes metas).
-        createEffect(() => {
-          const msgs = store.messages();
-          store.streaming(); // re-run on turn finalize / cancel
-          if (hydrating) return;
-          const patch: Partial<PersistedChatSessionMeta> = { lastActiveAt: Date.now() };
-          const cur = untrack(() => metas()).find((m) => m.id === id);
-          if (cur && cur.title === "") {
-            const firstUser = msgs.find((t) => t.role === "user");
-            if (firstUser) {
-              const t = deriveTitle(firstUser.content);
-              if (t) patch.title = t;
+        // store signals in the compute half; the metas read is untracked to avoid
+        // a write→read loop (the apply half calls patchMeta, which writes metas).
+        createEffect(
+          () => {
+            const msgs = store.messages();
+            store.streaming(); // re-run on turn finalize / cancel
+            if (hydrating) return null;
+            const patch: Partial<PersistedChatSessionMeta> = { lastActiveAt: Date.now() };
+            const cur = untrack(() => metas()).find((m) => m.id === id);
+            if (cur && cur.title === "") {
+              const firstUser = msgs.find((t) => t.role === "user");
+              if (firstUser) {
+                const t = deriveTitle(firstUser.content);
+                if (t) patch.title = t;
+              }
             }
-          }
-          patchMeta(id, patch);
-          persistMessages(id, msgs);
-          schedulePersistIndex();
-          bump();
-        });
+            return { msgs, patch };
+          },
+          (change) => {
+            if (!change) return;
+            patchMeta(id, change.patch);
+            persistMessages(id, change.msgs);
+            schedulePersistIndex();
+            bump();
+          },
+        );
 
         return { store, dispose };
       });
@@ -426,19 +437,29 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     return metas();
   }
 
-  function hydrate(persisted: { sessions: PersistedChatSessionMeta[]; activeId: string | null }): void {
+  function hydrate(persisted: {
+    sessions: PersistedChatSessionMeta[];
+    activeId: string | null;
+  }): { sessions: PersistedChatSessionMeta[]; activeId: string | null } {
+    const stored = persisted.sessions.map((m) => ({ ...m }));
+    const restored: PersistedChatSessionMeta[] = [];
+    let active: string | null = null;
     hydrating = true;
     try {
-      setMetas(persisted.sessions.map((m) => ({ ...m })));
-      for (const m of persisted.sessions) {
-        if (m.isOpen && !m.isArchived) records.set(m.id, instantiate(m.id, hydrateTurns(getChatMessages(m.id))));
+      setMetas(stored);
+      for (const m of stored) {
+        if (m.isOpen && !m.isArchived) {
+          records.set(m.id, instantiate(m.id, hydrateTurns(getChatMessages(m.id))));
+          restored.push(m);
+        }
       }
-      const active = persisted.activeId !== null && records.has(persisted.activeId) ? persisted.activeId : null;
+      active = persisted.activeId !== null && records.has(persisted.activeId) ? persisted.activeId : null;
       setActiveId(active);
     } finally {
       hydrating = false;
     }
     bump();
+    return { sessions: restored, activeId: active };
   }
 
   function snapshot(): { sessions: PersistedChatSessionMeta[]; activeId: string | null } {

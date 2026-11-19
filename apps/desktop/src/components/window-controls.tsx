@@ -1,4 +1,4 @@
-import { Show, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createSignal, onSettled } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -7,15 +7,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 export function WindowControls(props: { minimize?: boolean; maximize?: boolean }) {
   const [isMax, setIsMax] = createSignal(false);
 
-  onMount(() => {
+  onSettled(() => {
     const win = getCurrentWindow();
     void invoke<boolean>("window_is_maximized").then(setIsMax);
     const unlistenPromise = win.onResized(() => {
       void invoke<boolean>("window_is_maximized").then(setIsMax);
     });
-    onCleanup(() => {
+    return () => {
       void unlistenPromise.then((fn) => fn());
-    });
+    };
   });
 
   const win = () => getCurrentWindow();

@@ -1,4 +1,5 @@
-import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, Show, createEffect } from "solid-js";
+import { Dynamic, type JSX } from "@solidjs/web";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconText from "~icons/lucide/text";
 import IconTag from "~icons/lucide/tag";
@@ -66,14 +67,16 @@ export function FrontmatterPanel(props: FrontmatterPanelProps) {
   const [collapsed, setCollapsed] = createSignal(false);
 
   // Restore collapse state when the file (storage key) changes
-  createEffect(() => {
-    const key = storageKey();
-    try {
-      setCollapsed(localStorage.getItem(key) === "1");
-    } catch {
-      setCollapsed(false);
-    }
-  });
+  createEffect(
+    () => storageKey(),
+    (key) => {
+      try {
+        setCollapsed(localStorage.getItem(key) === "1");
+      } catch {
+        setCollapsed(false);
+      }
+    },
+  );
 
   function toggle() {
     const next = !collapsed();
@@ -215,11 +218,11 @@ export function FrontmatterPanel(props: FrontmatterPanelProps) {
   }
 
   return (
-    <div class="frontmatter-panel" classList={{ "frontmatter-collapsed": collapsed() }}>
+    <div class={["frontmatter-panel", { "frontmatter-collapsed": collapsed() }]} >
       <button
         type="button"
         class="frontmatter-header"
-        aria-expanded={!collapsed()}
+        aria-expanded={!collapsed() ? "true" : "false"}
         onClick={toggle}
       >
         <IconChevronDown class="frontmatter-chevron" width={14} height={14} />
@@ -227,14 +230,14 @@ export function FrontmatterPanel(props: FrontmatterPanelProps) {
       </button>
       <Show when={!collapsed()}>
         <div class="frontmatter-body">
-          <For each={orderedEntries()}>
+          <For each={orderedEntries()} keyed={(entry) => entry.key}>
             {(entry) => (
               <div class="frontmatter-row">
                 <span class="frontmatter-key">
-                  <entry.icon width={14} height={14} />
-                  <span>{entry.label}</span>
+                  <Dynamic component={entry().icon} width={14} height={14} />
+                  <span>{entry().label}</span>
                 </span>
-                <div class="frontmatter-value">{renderValue(entry.key, entry.value)}</div>
+                <div class="frontmatter-value">{renderValue(entry().key, entry().value)}</div>
               </div>
             )}
           </For>

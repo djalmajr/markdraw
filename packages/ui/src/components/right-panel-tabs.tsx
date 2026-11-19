@@ -1,5 +1,6 @@
-import { For, Show, createEffect, createMemo, createSignal, on, type JSX } from "solid-js";
-import { useDragOperation, useDraggable, useDroppable } from "@dnd-kit/solid";
+import { For, Show, createMemo, createSignal, createEffect, untrack } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { useDragOperation, useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import IconPin from "~icons/lucide/pin";
 import IconPlus from "~icons/lucide/plus";
 import IconEllipsis from "~icons/lucide/ellipsis";
@@ -154,17 +155,18 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
   }
 
   // Re-measure when the tab set changes and scroll the active tab into view.
-  createEffect(() => {
-    props.tabs;
-    props.activeId;
-    queueMicrotask(() => {
-      if (listRef && props.activeId) {
-        const el = listRef.querySelector(`[data-rp-tab="${CSS.escape(props.activeId)}"]`);
-        el?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-      }
-      updateScrollState();
-    });
-  });
+  createEffect(
+    () => [props.tabs, props.activeId] as const,
+    () => {
+      queueMicrotask(() => {
+        if (listRef && props.activeId) {
+          const el = listRef.querySelector(`[data-rp-tab="${CSS.escape(props.activeId)}"]`);
+          el?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+        }
+        updateScrollState();
+      });
+    },
+  );
 
   const isActive = (tab: RightPanelTab): boolean => props.activeId === encode(tab);
 
@@ -224,21 +226,19 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
   }
 
   createEffect(
-    on(
-      () => props.activeId,
-      (_id, prev) => {
+    () => props.activeId,
+    (_id, prev) => {
         // Microtask: the <For> row for a freshly-created tab renders in the
         // same flush as the activeId change. Instant on mount, smooth after.
         queueMicrotask(() => scrollActiveTabIntoView(prev === undefined ? "auto" : "smooth"));
-      },
-    ),
+    },
   );
 
   function StripTab(tabProps: { tab: RightPanelTab }): JSX.Element {
     // The strip model emits fresh tab objects on every change, so <For>
     // re-creates this row whenever its tab changes — reading the prop once
     // matches the previous For-callback semantics.
-    const tab = tabProps.tab;
+    const tab = untrack(() => tabProps.tab);
     const dndId = toRpTabDndId(encode(tab));
     const draggable = useDraggable({
       id: dndId,
@@ -262,18 +262,18 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
       <ContextMenu>
         <ContextMenuTrigger
           as="div"
-          class="rp-tab"
-          classList={{
+          class={["rp-tab", {
             "rp-tab-active": isActive(tab),
             "rp-tab-dragging": draggable.isDragging(),
             "rp-tab-drop-after": indicatorSide() === "after",
             "rp-tab-drop-before": indicatorSide() === "before",
             "rp-tab-pinned": !!tab.pinned,
-          }}
+          }]}
+          
           data-rp-tab={encode(tab)}
           title={labelOf(tab)}
           role="tab"
-          aria-selected={isActive(tab)}
+          aria-selected={isActive(tab) ? "true" : "false"}
           ref={(el: HTMLElement) => {
             draggable.ref(el);
             droppable.ref(el);
@@ -381,8 +381,8 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
     <div class="rp-strip">
       <Show when={hasOverflow()}>
         <button
-          class="rp-strip-scroll"
-          classList={{ "rp-strip-scroll-disabled": !canScrollLeft() }}
+          class={["rp-strip-scroll", { "rp-strip-scroll-disabled": !canScrollLeft() }]}
+          
           onClick={() => listRef?.scrollBy({ left: -SCROLL_STEP, behavior: "smooth" })}
           aria-label="Scroll tabs left"
         >
@@ -396,8 +396,8 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
 
       <Show when={hasOverflow()}>
         <button
-          class="rp-strip-scroll"
-          classList={{ "rp-strip-scroll-disabled": !canScrollRight() }}
+          class={["rp-strip-scroll", { "rp-strip-scroll-disabled": !canScrollRight() }]}
+          
           onClick={() => listRef?.scrollBy({ left: SCROLL_STEP, behavior: "smooth" })}
           aria-label="Scroll tabs right"
         >

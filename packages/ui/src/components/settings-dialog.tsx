@@ -1,14 +1,5 @@
-import {
-  For,
-  Index,
-  Match,
-  Show,
-  Switch,
-  createMemo,
-  createSignal,
-  onCleanup,
-  type JSX,
-} from "solid-js";
+import { For, Match, Show, Switch, createMemo, createSignal, onCleanup } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import IconX from "~icons/lucide/x";
 import IconSearch from "~icons/lucide/search";
 import IconTrash from "~icons/lucide/trash-2";
@@ -334,9 +325,9 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={section() === item.id}
-                  class="settings-nav-item"
-                  classList={{ "settings-nav-item-active": section() === item.id }}
+                  aria-selected={section() === item.id ? "true" : "false"}
+                  class={["settings-nav-item", { "settings-nav-item-active": section() === item.id }]}
+                  
                   onClick={() => setSection(item.id)}
                 >
                   {item.icon()}
@@ -961,7 +952,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
             <label class="settings-label">{(useLocale(), label("settings_ai_api_key"))}</label>
             <input type="password" autocomplete="off" class="settings-input ai-composer-input" placeholder="API key" value={cpKey()} onInput={(e) => setCpKey(e.currentTarget.value)} />
             <label class="settings-label">{(useLocale(), label("settings_ai_custom_models"))}</label>
-            <Index each={cpModels()}>
+            <For each={cpModels()} keyed={false}>
               {(mdl, i) => (
                 <div class="settings-custom-model">
                   <input class="settings-input ai-composer-input" placeholder="model-id" value={mdl().id} onInput={(e) => setCpModel(i, "id", e.currentTarget.value)} />
@@ -976,7 +967,7 @@ function AiSection(props: SettingsDialogProps): JSX.Element {
                   </button>
                 </div>
               )}
-            </Index>
+            </For>
             <div class="settings-row">
               <Button size="sm" variant="outline" onClick={() => setCpModels((ms) => [...ms, { id: "", name: "" }])}>
                 {(useLocale(), label("settings_ai_custom_add_model"))}
@@ -1198,8 +1189,8 @@ function SkillDetail(props: { skill: SettingsSkill; onBack: () => void }): JSX.E
           <For each={props.skill.sources}>
             {(source) => (
               <div
-                class="settings-skill-source-row"
-                classList={{ "settings-skill-source-row-active": source === active() }}
+                class={["settings-skill-source-row", { "settings-skill-source-row-active": source === active() }]}
+                
               >
                 <span class="settings-mcp-tool-chip">
                   {capitalizeTool(source.tool)} · {scopeLabel(source.scope)}
@@ -1643,7 +1634,7 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
       <input
         class="ai-composer-input settings-input"
         autocomplete="off"
-        readOnly={editingId() !== null}
+        readonly={editingId() !== null}
         value={id()}
         onInput={(e) => setId(e.currentTarget.value)}
       />
@@ -1906,8 +1897,8 @@ function KeybindingsSection(props: { platform: Platform }): JSX.Element {
                   </Show>
                   <button
                     type="button"
-                    class="settings-kb-keys"
-                    classList={{ "settings-kb-recording": recordingId() === s.id }}
+                    class={["settings-kb-keys", { "settings-kb-recording": recordingId() === s.id }]}
+                    
                     onClick={() => startRecording(s.id)}
                     title={(useLocale(), m.settings_kb_change())}
                   >

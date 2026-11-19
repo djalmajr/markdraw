@@ -1,81 +1,96 @@
-import type { JSX, ValidComponent } from "solid-js"
-import { Match, splitProps, Switch } from "solid-js"
-import { Portal } from "solid-js/web"
+import type { ComponentProps } from "@solidjs/web";
+import { omit } from "solid-js";
 
-import type { PolymorphicProps } from "@kobalte/core/polymorphic"
-import * as ToastPrimitive from "@kobalte/core/toast"
-import type { VariantProps } from "class-variance-authority"
-import { cva } from "class-variance-authority"
+import {
+  Toast as ToastPrimitive,
+  ToastClose as ToastClosePrimitive,
+  ToastDescription as ToastDescriptionPrimitive,
+  ToastRegion,
+  ToastTitle as ToastTitlePrimitive,
+  toast,
+} from "@ui-sdk/solid/toast";
+import type { VariantProps } from "class-variance-authority";
+import { cva } from "class-variance-authority";
 
-import { cn } from "@markdraw/core/utils.ts"
+import { cn } from "@markdraw/core/utils.ts";
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between overflow-hidden rounded-md border bg-popover px-3 py-2 pr-7 text-xs text-popover-foreground shadow-none transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--kb-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--kb-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[opened]:animate-in data-[closed]:animate-out data-[swipe=end]:animate-out data-[closed]:fade-out-80 data-[closed]:slide-out-to-right-full data-[opened]:slide-in-from-top-full data-[opened]:sm:slide-in-from-bottom-full",
+  "group pointer-events-auto relative flex w-full select-none items-center justify-between overflow-hidden rounded-md border bg-popover px-3 py-2 pr-7 text-xs text-popover-foreground shadow-none transition-all data-[swiping]:translate-x-[var(--toast-swipe-x)] data-[swiping]:transition-none data-[starting-style]:animate-in data-[ending-style]:animate-out data-[ending-style]:fade-out-80 data-[ending-style]:slide-out-to-right-full data-[starting-style]:slide-in-from-top-full data-[starting-style]:sm:slide-in-from-bottom-full motion-reduce:animate-none",
   {
     variants: {
       variant: {
-        default: "",
-        destructive: "",
-        success: "",
-        warning: "",
-        error: ""
-      }
+        default: "default",
+        destructive: "destructive",
+        success: "success",
+        warning: "warning",
+        error: "error",
+      },
     },
     defaultVariants: {
-      variant: "default"
-    }
-  }
-)
-type ToastVariant = NonNullable<VariantProps<typeof toastVariants>["variant"]>
+      variant: "default",
+    },
+  },
+);
+type ToastVariant = NonNullable<VariantProps<typeof toastVariants>["variant"]>;
 
-type ToastListProps<T extends ValidComponent = "ol"> = ToastPrimitive.ToastListProps<T> & {
-  class?: string | undefined
-}
+/** The SDK names toast categories `type`; the public API keeps `variant`. */
+const variantToType: Record<ToastVariant, "default" | "success" | "warning" | "error"> = {
+  default: "default",
+  destructive: "error",
+  success: "success",
+  warning: "warning",
+  error: "error",
+};
 
-const Toaster = <T extends ValidComponent = "ol">(
-  props: PolymorphicProps<T, ToastListProps<T>>
-) => {
-  const [local, others] = splitProps(props as ToastListProps, ["class"])
+type ToasterProps = {
+  class?: string;
+};
+
+/** Mounted once in `app-shell.tsx` (where the Kobalte Toaster used to be).
+ *  The SDK renders the region in the top layer, so no Portal is needed. */
+const Toaster = (props: ToasterProps) => {
   return (
-    <Portal>
-      <ToastPrimitive.Region>
-        <ToastPrimitive.List
-          class={cn(
-            "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse gap-1.5 p-3 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[360px]",
-            local.class
-          )}
-          {...others}
-        />
-      </ToastPrimitive.Region>
-    </Portal>
-  )
-}
+    <ToastRegion
+      class={cn(
+        "z-[100] max-h-screen w-full p-3 md:max-w-[360px]",
+        props.class,
+      )}
+    >
+      {(item) => (
+        <Toast variant={(item.data as { variant?: ToastVariant } | undefined)?.variant}>
+          <div class="grid gap-1">
+            <ToastTitle />
+            <ToastDescription />
+          </div>
+          <ToastClose />
+        </Toast>
+      )}
+    </ToastRegion>
+  );
+};
 
-type ToastRootProps<T extends ValidComponent = "li"> = ToastPrimitive.ToastRootProps<T> &
-  VariantProps<typeof toastVariants> & { class?: string | undefined }
+type ToastProps = ComponentProps<typeof ToastPrimitive> &
+  VariantProps<typeof toastVariants> & { class?: string };
 
-const Toast = <T extends ValidComponent = "li">(props: PolymorphicProps<T, ToastRootProps<T>>) => {
-  const [local, others] = splitProps(props as ToastRootProps, ["class", "variant"])
+const Toast = (props: ToastProps) => {
+  const others = omit(props, "class", "variant");
   return (
-    <ToastPrimitive.Root
-      class={cn(toastVariants({ variant: local.variant }), local.class)}
+    <ToastPrimitive
+      class={cn(toastVariants({ variant: props.variant }), props.class)}
       {...others}
     />
-  )
-}
+  );
+};
 
-type ToastCloseButtonProps<T extends ValidComponent = "button"> =
-  ToastPrimitive.ToastCloseButtonProps<T> & { class?: string | undefined }
+type ToastCloseProps = ComponentProps<typeof ToastClosePrimitive> & { class?: string };
 
-const ToastClose = <T extends ValidComponent = "button">(
-  props: PolymorphicProps<T, ToastCloseButtonProps<T>>
-) => {
-  const [local, others] = splitProps(props as ToastCloseButtonProps, ["class"])
+const ToastClose = (props: ToastCloseProps) => {
+  const others = omit(props, "class");
   return (
-    <ToastPrimitive.CloseButton
+    <ToastClosePrimitive
       class={cn(
         "absolute right-1.5 top-1.5 rounded-md p-1 text-foreground/50 opacity-0 ring-inset transition-opacity focus:opacity-100 focus:outline-none focus:ring-1 focus:ring-ring group-hover:opacity-100 group-[.destructive]:text-destructive-foreground group-[.error]:text-error-foreground group-[.success]:text-success-foreground group-[.warning]:text-warning-foreground",
-        local.class
+        props.class
       )}
       {...others}
     >
@@ -92,46 +107,40 @@ const ToastClose = <T extends ValidComponent = "button">(
         <path d="M18 6l-12 12" />
         <path d="M6 6l12 12" />
       </svg>
-    </ToastPrimitive.CloseButton>
-  )
-}
+    </ToastClosePrimitive>
+  );
+};
 
-type ToastTitleProps<T extends ValidComponent = "div"> = ToastPrimitive.ToastTitleProps<T> & {
-  class?: string | undefined
-}
+type ToastTitleProps = ComponentProps<typeof ToastTitlePrimitive> & { class?: string };
 
-const ToastTitle = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, ToastTitleProps<T>>
-) => {
-  const [local, others] = splitProps(props as ToastTitleProps, ["class"])
-  return <ToastPrimitive.Title class={cn("text-xs font-semibold", local.class)} {...others} />
-}
+const ToastTitle = (props: ToastTitleProps) => {
+  const others = omit(props, "class");
+  return <ToastTitlePrimitive class={cn("text-xs font-semibold", props.class)} {...others} />;
+};
 
-type ToastDescriptionProps<T extends ValidComponent = "div"> =
-  ToastPrimitive.ToastDescriptionProps<T> & { class?: string | undefined }
+type ToastDescriptionProps = ComponentProps<typeof ToastDescriptionPrimitive> & { class?: string };
 
-const ToastDescription = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, ToastDescriptionProps<T>>
-) => {
-  const [local, others] = splitProps(props as ToastDescriptionProps, ["class"])
-  return <ToastPrimitive.Description class={cn("text-xs opacity-90", local.class)} {...others} />
-}
+const ToastDescription = (props: ToastDescriptionProps) => {
+  const others = omit(props, "class");
+  return <ToastDescriptionPrimitive class={cn("text-xs opacity-90", props.class)} {...others} />;
+};
 
+/** The SDK types toast content as JSX, but an element created outside a
+ *  component renders as an empty ToastTitle in happy-dom. The only app caller
+ *  passes strings; keep this imperative API text-only so announcements work. */
 function showToast(props: {
-  title?: JSX.Element
-  description?: JSX.Element
+  title?: string
+  description?: string
   variant?: ToastVariant
   duration?: number
 }) {
-  ToastPrimitive.toaster.show((data) => (
-    <Toast toastId={data.toastId} variant={props.variant} duration={props.duration}>
-      <div class="grid gap-1">
-        {props.title && <ToastTitle>{props.title}</ToastTitle>}
-        {props.description && <ToastDescription>{props.description}</ToastDescription>}
-      </div>
-      <ToastClose />
-    </Toast>
-  ))
+  toast({
+    title: props.title,
+    description: props.description,
+    duration: props.duration,
+    type: variantToType[props.variant ?? "default"],
+    data: { variant: props.variant },
+  });
 }
 
 export { Toaster, Toast, ToastClose, ToastTitle, ToastDescription, showToast }

@@ -1,4 +1,5 @@
-import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, untrack } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import IconCheck from "~icons/lucide/check";
@@ -282,7 +283,7 @@ function AiWaitingIndicator(): JSX.Element {
       m.ai_message_waiting_verifying(),
     ];
   };
-  const [statusIndex, setStatusIndex] = createSignal(randomWaitingStatusIndex(statuses().length));
+  const [statusIndex, setStatusIndex] = createSignal(randomWaitingStatusIndex(untrack(statuses).length));
   let statusTimer: ReturnType<typeof setTimeout> | undefined;
 
   function nextDelay(): number {
@@ -353,14 +354,14 @@ export function AiToolChips(props: AiToolChipsProps): JSX.Element {
         {(tool) => (
           <button
             type="button"
-            class="ai-tool-chip"
-            classList={{
+            class={["ai-tool-chip", {
               "ai-tool-chip-running": tool.status === "running",
               "ai-tool-chip-done": tool.status === "done",
               "ai-tool-chip-error": tool.status === "error",
               "ai-tool-chip-open": expandedId() === tool.toolCallId,
-            }}
-            aria-expanded={expandedId() === tool.toolCallId}
+            }]}
+            
+            aria-expanded={expandedId() === tool.toolCallId ? "true" : "false"}
             title={toolActivityLabel(tool)}
             onClick={() =>
               setExpandedId((cur) => (cur === tool.toolCallId ? null : tool.toolCallId))
@@ -422,21 +423,22 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
     }, AI_TYPEWRITER_INTERVAL_MS);
   }
 
-  createEffect(() => {
-    const target = props.content;
-    if (!props.streaming) {
-      stopTypewriter();
-      setVisibleContent(target);
-      return;
-    }
-    const current = visibleContent();
-    if (!target.startsWith(current)) {
-      stopTypewriter();
-      setVisibleContent(target);
-      return;
-    }
-    if (target.length > current.length) startTypewriter();
-  });
+  createEffect(
+    () => ({ target: props.content, streaming: props.streaming, current: visibleContent() }),
+    ({ target, streaming, current }) => {
+      if (!streaming) {
+        stopTypewriter();
+        setVisibleContent(target);
+        return;
+      }
+      if (!target.startsWith(current)) {
+        stopTypewriter();
+        setVisibleContent(target);
+        return;
+      }
+      if (target.length > current.length) startTypewriter();
+    },
+  );
 
   onCleanup(() => {
     clearTimeout(copiedTimer);
@@ -483,11 +485,11 @@ export function AiMessage(props: AiMessageProps): JSX.Element {
 
   return (
     <div
-      class="ai-message"
-      classList={{
+      class={["ai-message", {
         "ai-message-user": props.role === "user",
         "ai-message-assistant": props.role === "assistant",
-      }}
+      }]}
+      
     >
       <div class="ai-message-role">
         {props.role === "user"

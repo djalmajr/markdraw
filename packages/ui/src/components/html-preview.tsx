@@ -1,13 +1,5 @@
-import {
-  createEffect,
-  createResource,
-  createSignal,
-  on,
-  onCleanup,
-  Show,
-  untrack,
-  type JSX,
-} from "solid-js";
+import { Loading, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
+import type { JSX } from "@solidjs/web";
 
 /** Desktop folder-rooted preview host. When provided, a directory is served as
  *  an isolated `markdraw-preview://<token>` origin. The Rust side picks WHICH
@@ -76,30 +68,42 @@ function withBase(html: string, baseHref?: string): string {
  */
 export function HtmlPreview(props: HtmlPreviewProps): JSX.Element {
   // ── srcdoc fallback ───────────────────────────────────────────────────────
-  const [doc, setDoc] = createSignal(withBase(props.content, props.baseHref));
+  const [doc, setDoc] = createSignal(untrack(() => withBase(props.content, props.baseHref)));
   let srcdocTimer: ReturnType<typeof setTimeout> | undefined;
-  createEffect(() => {
-    if (props.folderRoot) return; // folderRoot mode drives its own iframe
-    const next = withBase(props.content, props.baseHref);
-    clearTimeout(srcdocTimer);
-    srcdocTimer = setTimeout(() => setDoc(next), OVERLAY_DEBOUNCE_MS);
-  });
-  onCleanup(() => clearTimeout(srcdocTimer));
+  createEffect(
+    () => [props.folderRoot, props.content, props.baseHref] as const,
+    ([folderRoot, content, baseHref]) => {
+      if (folderRoot) return; // folderRoot mode drives its own iframe
+      const next = withBase(content, baseHref);
+      clearTimeout(srcdocTimer);
+      srcdocTimer = setTimeout(() => setDoc(next), OVERLAY_DEBOUNCE_MS);
+      return () => clearTimeout(srcdocTimer);
+    },
+  );
 
   // ── folderRoot (SPA) mode ─────────────────────────────────────────────────
-  const [target] = createResource(
-    () => props.folderRoot ?? null,
-    (fr) => (fr ? fr.register() : Promise.resolve(null)),
-  );
+  // Solid 2: `createResource` is gone. The registration is an async
+  // computation whose first value is a promise, so every read below a
+  // <Loading> boundary shows the fallback until it lands (and again while a
+  // new registration is in flight after a file switch).
+  const target = createMemo(async () => {
+    const fr = props.folderRoot;
+    return fr ? await fr.register() : null;
+  });
   // version < 0 → not yet loaded (no src). Bumped after each overlay push so
   // the frame reloads to reflect the live buffer.
   const [version, setVersion] = createSignal(-1);
+  // Last SETTLED registration. Reading the async memo outside a <Loading>
+  // boundary while a registration is in flight is a NotReadyError, so the
+  // effects and the unmount cleanup work from this copy (the 1.x resource
+  // handed out the stale value the same way).
+  let current: { token: string; entryRel: string; ownRoot: boolean } | null = null;
   let overlayTimer: ReturnType<typeof setTimeout> | undefined;
 
   // Push the current buffer as the overlay, then reveal/reload the frame. The
   // first load waits for the overlay so it never flashes stale disk content.
   function applyOverlay(immediate: boolean) {
-    const t = target();
+    const t = current;
     const fr = props.folderRoot;
     if (!t || !fr) return;
     const content = props.content;
@@ -117,21 +121,22 @@ export function HtmlPreview(props: HtmlPreviewProps): JSX.Element {
   // flight, so without this the old preview lingers as a "ghost" through
   // the register + overlay round-trips until the new doc paints. version
   // -1 → src() undefined → the <Show> below unmounts the iframe.
-  createEffect(on(() => props.folderRoot, () => setVersion(-1), { defer: true }));
+  createEffect(() => props.folderRoot, () => {
+    setVersion(-1);
+  }, { defer: true });
 
   // First load when the file/dir (target) resolves.
-  createEffect(
-    on(target, (t) => {
-      setVersion(-1);
-      if (t) applyOverlay(true);
-    }),
-  );
+  createEffect(target, (t) => {
+    current = t;
+    setVersion(-1);
+    if (t) applyOverlay(true);
+  });
   // Live edits → debounced overlay push + reload.
-  createEffect(on(() => props.content, () => applyOverlay(false), { defer: true }));
+  createEffect(() => props.content, () => applyOverlay(false), { defer: true });
 
   onCleanup(() => {
     clearTimeout(overlayTimer);
-    const t = untrack(target);
+    const t = current;
     const fr = props.folderRoot;
     if (t && fr) void fr.clearOverlay(t.token, t.entryRel);
   });
@@ -170,11 +175,16 @@ export function HtmlPreview(props: HtmlPreviewProps): JSX.Element {
         />
       }
     >
-      {/* Mounted only while there's a loadable src — clearing the src
+      {/* Registered async: the fallback covers "registration in flight" (a
+          file switch drops the previous document right here instead of
+          ghosting it), which the resource's `loading` never could.
+          Mounted only while there's a loadable src — clearing the src
           ATTRIBUTE alone would leave the previous document rendered. */}
-      <Show when={src()}>
-        <iframe class="html-preview-frame" title="HTML preview" sandbox={SANDBOX_FOLDER} src={src()} />
-      </Show>
+      <Loading on={props.folderRoot} fallback={<div class="html-preview-frame" />}>
+        <Show when={src()}>
+          <iframe class="html-preview-frame" title="HTML preview" sandbox={SANDBOX_FOLDER} src={src()} />
+        </Show>
+      </Loading>
     </Show>
   );
 }

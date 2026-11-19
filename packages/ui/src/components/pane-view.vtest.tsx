@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { createSignal } from "solid-js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSignal, flush, untrack } from "solid-js";
 import { fireEvent, render } from "@solidjs/testing-library";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
@@ -12,12 +12,24 @@ import type { PaneStore } from "../composables/create-pane-store.ts";
 // stub them with empty divs so the render finishes synchronously
 // and the resize-handle's ancestor chain is what we actually probe.
 vi.mock("./editor.tsx", () => ({ Editor: () => <div data-testid="editor-stub" /> }));
-vi.mock("./preview.tsx", () => ({ Preview: () => <div data-testid="preview-stub" /> }));
+const previewCtl = vi.hoisted(() => ({
+  props: null as Record<string, unknown> | null,
+}));
+vi.mock("./preview.tsx", () => ({
+  Preview: (props: Record<string, unknown>) => {
+    previewCtl.props = props;
+    return <div data-testid="preview-stub" />;
+  },
+}));
+
+afterEach(() => {
+  previewCtl.props = null;
+});
 vi.mock("./editor-toolbar.tsx", () => ({ EditorToolbar: () => null }));
 vi.mock("./content-toolbar.tsx", () => ({ ContentToolbar: () => null }));
 vi.mock("./tab-bar.tsx", () => ({ TabBar: () => null }));
 vi.mock("./empty-state.tsx", () => ({ EmptyState: () => null }));
-vi.mock("@dnd-kit/solid", () => ({
+vi.mock("../lib/dnd/index.ts", () => ({
   useDroppable: () => ({ ref: () => {}, isDropTarget: () => false }),
 }));
 
@@ -55,6 +67,8 @@ function makePane(opts: { file?: FSEntry; mode?: "edit" | "split" | "preview"; h
 }
 
 function makeState(onEditorResizeStart: (...args: unknown[]) => void): AppState {
+  const [pendingFragment, setPendingFragment] = createSignal<string | null>(null);
+  const [pendingHeadingText, setPendingHeadingText] = createSignal<string | null>(null);
   return {
     editorWidth: () => 50,
     syncScroll: () => false,
@@ -75,6 +89,10 @@ function makeState(onEditorResizeStart: (...args: unknown[]) => void): AppState 
     setPreviewSearchOpen: () => {},
     previewFindTrigger: () => 0,
     triggerPreviewFind: () => {},
+    pendingFragment,
+    setPendingFragment,
+    pendingHeadingText,
+    setPendingHeadingText,
     onEditorResizeStart,
     onEditorResizeReset: () => {},
     handleIndentModeChange: () => {},
@@ -172,5 +190,50 @@ describe("PaneView content routing by file kind", () => {
     expect(notice!.textContent).toContain("archive.zip");
     expect(container.querySelector(".editor-panel")).toBeNull();
     expect(container.querySelector(".media-viewer")).toBeNull();
+  });
+});
+
+describe("PaneView pending jump discard", () => {
+  function mountWithPreview(state: AppState) {
+    render(() => (
+      <PaneView pane={makePane({ mode: "preview" })} state={state} paneIndex={0} isActive={true} />
+    ));
+    const props = previewCtl.props!;
+    return {
+      discardFragment: props.onFragmentDiscarded as (fragment: string) => void,
+      discardHeading: props.onHeadingDiscarded as (heading: string) => void,
+    };
+  }
+
+  it("clears only the discarded fragment signal", () => {
+    const state = makeState(() => {});
+    const { discardFragment } = mountWithPreview(state);
+    state.setPendingFragment("target-a");
+    flush();
+    discardFragment("target-a");
+    flush();
+    expect(untrack(state.pendingFragment)).toBeNull();
+
+    state.setPendingFragment("target-b");
+    flush();
+    discardFragment("target-a");
+    flush();
+    expect(untrack(state.pendingFragment)).toBe("target-b");
+  });
+
+  it("clears only the discarded heading signal", () => {
+    const state = makeState(() => {});
+    const { discardHeading } = mountWithPreview(state);
+    state.setPendingHeadingText("Target A");
+    flush();
+    discardHeading("Target A");
+    flush();
+    expect(untrack(state.pendingHeadingText)).toBeNull();
+
+    state.setPendingHeadingText("Target B");
+    flush();
+    discardHeading("Target A");
+    flush();
+    expect(untrack(state.pendingHeadingText)).toBe("Target B");
   });
 });

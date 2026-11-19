@@ -1,13 +1,5 @@
-import {
-  For,
-  Match,
-  Show,
-  Switch,
-  createEffect,
-  createSignal,
-  onCleanup,
-  type JSX,
-} from "solid-js";
+import { For, Match, Show, Switch, createEffect, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import IconSparkles from "~icons/lucide/sparkles";
@@ -38,17 +30,20 @@ export function AiInlineOverlay(props: AiInlineOverlayProps): JSX.Element {
   const [diagramPrompt, setDiagramPrompt] = createSignal("");
 
   // Close on Escape while open.
-  createEffect(() => {
-    if (!s.open()) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        s.close();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    onCleanup(() => window.removeEventListener("keydown", onKey, true));
-  });
+  createEffect(
+    () => s.open(),
+    (open) => {
+      if (!open) return;
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          s.close();
+        }
+      };
+      window.addEventListener("keydown", onKey, true);
+      return () => window.removeEventListener("keydown", onKey, true);
+    },
+  );
 
   const style = (): JSX.CSSProperties => {
     const a = s.anchor();

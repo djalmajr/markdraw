@@ -1,34 +1,82 @@
-import type { JSX, ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
+import type { JSX } from "@solidjs/web";
+import { createContext, createSignal, omit, useContext } from "solid-js";
 
-import type { PolymorphicProps } from "@kobalte/core"
-import * as SwitchPrimitive from "@kobalte/core/switch"
+import { FieldDescription, FieldError, useFieldControl } from "@ui-sdk/solid/field";
+import { Switch as SwitchPrimitive, SwitchThumb as SwitchThumbPrimitive } from "@ui-sdk/solid/switch";
 
-import { cn } from "@markdraw/core/utils.ts"
+import { cn } from "@markdraw/core/utils.ts";
 
-type SwitchRootProps = SwitchPrimitive.SwitchRootProps & {
+type SwitchRootProps = {
+  disabled?: boolean
+  name?: string
+  value?: string
+  checked?: boolean
+  defaultChecked?: boolean
+  /** Kobalte's callback name; the ui-sdk calls it `onCheckedChange`. */
+  onChange?: (checked: boolean) => void
+  readOnly?: boolean
+  required?: boolean
+  validationState?: "valid" | "invalid"
+  "aria-label"?: string
+  "aria-labelledby"?: string
+  "aria-describedby"?: string
+  id?: string
   class?: string | undefined
   children?: JSX.Element
 }
 
-/** Switch root. kobalte renders a visually-hidden `<input>` as
- *  `position: absolute`; without a positioned root it anchors to the nearest
- *  positioned ancestor (e.g. a `fixed` modal), so a real click on a switch in a
- *  SCROLLED list makes the browser scroll-into-view to that stale position —
- *  jumping the list and leaving a blank gap. `relative` anchors the input to the
- *  switch itself, keeping the scroll put. */
-const Switch = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, SwitchRootProps>
-) => {
-  const [local, others] = splitProps(props as SwitchRootProps, ["class", "children"])
+/** The visual track reads the same state the SDK publishes on the button. The
+ *  SDK owns the value (including uncontrolled clicks and form resets); this
+ *  context just makes it available to the plain `<span>` we render as track. */
+type SwitchStateContextValue = {
+  checked: () => boolean
+  disabled: () => boolean
+}
+
+const SwitchStateContext = createContext<SwitchStateContextValue>({
+  checked: () => false,
+  disabled: () => false,
+})
+
+/** The ui-sdk Switch is the control itself (a `role="switch"` button with a
+ *  hidden native input). `relative` keeps that absolute input anchored here,
+ *  as it was with the old wrapper, so clicking in a scrolled list doesn't
+ *  scroll the list to a stale input position. */
+const Switch = (props: SwitchRootProps) => {
+  const field = useFieldControl()
+  const [internalChecked, setInternalChecked] = createSignal(props.defaultChecked ?? false)
+  const others = omit(props, "class", "children", "onChange", "validationState")
   return (
-    <SwitchPrimitive.Root class={cn("relative", local.class)} {...others}>
-      {local.children}
-    </SwitchPrimitive.Root>
+    <SwitchStateContext
+      value={{
+        checked: () => props.checked ?? internalChecked(),
+        disabled: () => props.disabled || field?.disabled() || false,
+      }}
+    >
+      <SwitchPrimitive
+        class={cn("relative group", props.class)}
+        onCheckedChange={(checked) => {
+          setInternalChecked(checked)
+          props.onChange?.(checked)
+        }}
+        aria-invalid={props.validationState === "invalid" ? "true" : undefined}
+        {...others}
+      >
+        {props.children}
+      </SwitchPrimitive>
+    </SwitchStateContext>
   )
 }
-const SwitchDescription = SwitchPrimitive.Description
-const SwitchErrorMessage = SwitchPrimitive.ErrorMessage
+
+const SwitchDescription = (props: { class?: string; children?: JSX.Element }) => (
+  <FieldDescription class={cn("text-xs font-normal text-muted-foreground", props.class)}>
+    {props.children}
+  </FieldDescription>
+)
+
+const SwitchErrorMessage = (props: { class?: string; children?: JSX.Element }) => (
+  <FieldError class={cn("text-xs text-destructive", props.class)}>{props.children}</FieldError>
+)
 
 /** Switch size variants — the compact squared switch is the default DS shape. */
 type SwitchSize = "default" | "sm"
@@ -41,73 +89,63 @@ const THUMB_SIZE: Record<SwitchSize, string> = {
   sm: "size-3 data-[checked]:translate-x-[13px]",
 }
 
-type SwitchControlProps = SwitchPrimitive.SwitchControlProps & {
+type SwitchControlProps = {
   class?: string | undefined
   children?: JSX.Element
   size?: SwitchSize
 }
 
-const SwitchControl = <T extends ValidComponent = "input">(
-  props: PolymorphicProps<T, SwitchControlProps>
-) => {
-  const [local, others] = splitProps(props as SwitchControlProps, ["class", "children", "size"])
+/** The visual track. The interactive element is the root Switch, so this is
+ *  only the box around the thumb; the SDK supplies the hidden input. The state
+ *  attributes are mirrored onto this span so its `data-*` Tailwind variants
+ *  keep working; the `group-*` classes also follow the root's own SDK state. */
+const SwitchControl = (props: SwitchControlProps) => {
+  const state = useContext(SwitchStateContext)
   return (
-    <>
-      <SwitchPrimitive.Input
-        class={cn(
-          "[&:focus-visible+div]:outline-none [&:focus-visible+div]:ring-2 [&:focus-visible+div]:ring-ring [&:focus-visible+div]:ring-offset-2 [&:focus-visible+div]:ring-offset-background"
-        )}
-      />
-      <SwitchPrimitive.Control
-        class={cn(
-          "inline-flex shrink-0 cursor-pointer items-center rounded-[2px] border border-input bg-input p-[1px] transition-[color,background-color,border-color,box-shadow] data-[disabled]:cursor-not-allowed data-[checked]:border-primary data-[checked]:bg-primary data-[disabled]:opacity-50",
-          CONTROL_SIZE[local.size ?? "default"],
-          local.class
-        )}
-        {...others}
-      >
-        {local.children}
-      </SwitchPrimitive.Control>
-    </>
+    <span
+      data-checked={state.checked() ? "" : undefined}
+      data-unchecked={state.checked() ? undefined : ""}
+      data-disabled={state.disabled() ? "" : undefined}
+      class={cn(
+        "inline-flex shrink-0 cursor-pointer items-center rounded-[2px] border border-input bg-input p-[1px] transition-[color,background-color,border-color,box-shadow] data-[disabled]:cursor-not-allowed data-[checked]:border-primary data-[checked]:bg-primary data-[disabled]:opacity-50 group-data-[checked]:border-primary group-data-[checked]:bg-primary group-data-[disabled]:opacity-50",
+        CONTROL_SIZE[props.size ?? "default"],
+        props.class
+      )}
+    >
+      {props.children}
+    </span>
   )
 }
 
-type SwitchThumbProps = SwitchPrimitive.SwitchThumbProps & {
+type SwitchThumbProps = {
   class?: string | undefined
   size?: SwitchSize
 }
 
-const SwitchThumb = <T extends ValidComponent = "div">(
-  props: PolymorphicProps<T, SwitchThumbProps>
-) => {
-  const [local, others] = splitProps(props as SwitchThumbProps, ["class", "size"])
-  return (
-    <SwitchPrimitive.Thumb
-      class={cn(
-        "pointer-events-none block translate-x-0 rounded-[2px] bg-background shadow-none ring-0 transition-transform",
-        THUMB_SIZE[local.size ?? "default"],
-        local.class
-      )}
-      {...others}
-    />
-  )
+const SwitchThumb = (props: SwitchThumbProps) => (
+  <SwitchThumbPrimitive
+    class={cn(
+      "pointer-events-none block translate-x-0 rounded-[2px] bg-background shadow-none ring-0 transition-transform",
+      THUMB_SIZE[props.size ?? "default"],
+      props.class
+    )}
+  />
+)
+
+type SwitchLabelProps = {
+  class?: string | undefined
+  children?: JSX.Element
 }
 
-type SwitchLabelProps = SwitchPrimitive.SwitchLabelProps & { class?: string | undefined }
-
-const SwitchLabel = <T extends ValidComponent = "label">(
-  props: PolymorphicProps<T, SwitchLabelProps>
-) => {
-  const [local, others] = splitProps(props as SwitchLabelProps, ["class"])
-  return (
-    <SwitchPrimitive.Label
-      class={cn(
-        "text-xs font-medium leading-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-70",
-        local.class
-      )}
-      {...others}
-    />
-  )
-}
+const SwitchLabel = (props: SwitchLabelProps) => (
+  <label
+    class={cn(
+      "text-xs font-medium leading-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-70",
+      props.class
+    )}
+  >
+    {props.children}
+  </label>
+)
 
 export { Switch, SwitchControl, SwitchThumb, SwitchLabel, SwitchDescription, SwitchErrorMessage }

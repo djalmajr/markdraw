@@ -1,4 +1,5 @@
-import { Show, type JSX } from "solid-js";
+import { Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import IconSparkles from "~icons/lucide/sparkles";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";

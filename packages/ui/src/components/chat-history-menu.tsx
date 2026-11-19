@@ -1,4 +1,5 @@
-import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import IconCopy from "~icons/lucide/copy";
 import IconHistory from "~icons/lucide/history";
 import IconSearch from "~icons/lucide/search";
@@ -68,8 +69,8 @@ export function ChatHistoryMenu(props: ChatHistoryMenuProps): JSX.Element {
 
   const Row = (p: { s: AiChatSessionMeta }): JSX.Element => (
     <div
-      class="rp-history-row"
-      classList={{ "rp-history-row-active": p.s.id === props.activeId }}
+      class={["rp-history-row", { "rp-history-row-active": p.s.id === props.activeId }]}
+      
       onClick={() => activate(p.s.id)}
     >
       <span class="rp-history-row-title">{label(p.s)}</span>

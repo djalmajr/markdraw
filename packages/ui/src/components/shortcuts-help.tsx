@@ -1,5 +1,5 @@
-import { For, Show, createMemo, onCleanup, onMount } from "solid-js";
-import { Portal } from "solid-js/web";
+import { For, Show, createMemo, onSettled } from "solid-js";
+import { Portal } from "@solidjs/web";
 import {
   SHORTCUTS,
   detectPlatform,
@@ -50,7 +50,7 @@ export function ShortcutsHelp(props: ShortcutsHelpProps) {
 
   // Esc closes from anywhere — input focus is irrelevant here, the modal
   // has no input. Capture phase so the editor / file tree don't swallow it.
-  onMount(() => {
+  onSettled(() => {
     function global(event: KeyboardEvent) {
       if (props.open && event.key === "Escape") {
         event.preventDefault();
@@ -58,7 +58,7 @@ export function ShortcutsHelp(props: ShortcutsHelpProps) {
       }
     }
     document.addEventListener("keydown", global, true);
-    onCleanup(() => document.removeEventListener("keydown", global, true));
+    return () => document.removeEventListener("keydown", global, true);
   });
 
   return (

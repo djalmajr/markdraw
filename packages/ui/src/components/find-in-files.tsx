@@ -1,5 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { Portal } from "solid-js/web";
+import { For, Show, createMemo, createSignal, onSettled, createEffect } from "solid-js";
+import { Portal } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 
@@ -70,78 +70,91 @@ export function FindInFiles(props: FindInFilesProps) {
   // query and result list so the user can dismiss and come back to
   // their work.
   let lastRootId: string | null = null;
-  createEffect(() => {
-    if (props.open) {
-      const currentRoot = props.rootId;
-      if (currentRoot !== lastRootId) {
-        // Workspace changed — clear stale results from the previous root.
-        setQuery("");
-        setResults([]);
-        setActiveIndex(0);
-        setError(null);
-        lastRootId = currentRoot;
+  createEffect(
+    () => ({ open: props.open, root: props.rootId }),
+    ({ open, root: currentRoot }) => {
+      if (open) {
+        if (currentRoot !== lastRootId) {
+          // Workspace changed — clear stale results from the previous root.
+          setQuery("");
+          setResults([]);
+          setActiveIndex(0);
+          setError(null);
+          lastRootId = currentRoot;
+        }
+        // On every open, focus + select-all so the user can either type a
+        // fresh query (just type — replaces selection) or refine the
+        // previous one (press End / arrow keys to deselect first).
+        queueMicrotask(() => {
+          inputRef?.focus();
+          inputRef?.select();
+        });
+      } else {
+        // Cancel any in-flight debounce so a stale result doesn't land
+        // after the modal closes.
+        clearTimeout(debounceTimer);
+        searchToken += 1;
       }
-      // On every open, focus + select-all so the user can either type a
-      // fresh query (just type — replaces selection) or refine the
-      // previous one (press End / arrow keys to deselect first).
-      queueMicrotask(() => {
-        inputRef?.focus();
-        inputRef?.select();
-      });
-    } else {
-      // Cancel any in-flight debounce so a stale result doesn't land
-      // after the modal closes.
-      clearTimeout(debounceTimer);
-      searchToken += 1;
-    }
-  });
+    },
+  );
 
   // Keep activeIndex in range when results shrink.
-  createEffect(() => {
-    const length = results().length;
-    if (activeIndex() >= length) setActiveIndex(Math.max(0, length - 1));
-  });
+  createEffect(
+    () => {
+      const length = results().length;
+      const active = activeIndex();
+      return active >= length ? Math.max(0, length - 1) : null;
+    },
+    (clamped) => {
+      if (clamped !== null) setActiveIndex(clamped);
+    },
+  );
 
   // Trigger a (debounced) search whenever the query, options, or root change
   // while the modal is open.
-  createEffect(() => {
-    const current = query();
-    const opts = { caseSensitive: caseSensitive() };
-    const root = props.rootId;
-    if (!props.open) return;
+  createEffect(
+    () => ({
+      open: props.open,
+      query: query(),
+      caseSensitive: caseSensitive(),
+      root: props.rootId,
+    }),
+    ({ open, query: current, caseSensitive: ignoreCase, root }) => {
+      if (!open) return;
 
-    clearTimeout(debounceTimer);
-    if (current.length === 0) {
-      setResults([]);
-      setSearching(false);
-      setError(null);
-      return;
-    }
-    if (!root) {
-      setResults([]);
-      setSearching(false);
-      setError("No workspace open");
-      return;
-    }
-
-    const token = ++searchToken;
-    setSearching(true);
-    debounceTimer = setTimeout(async () => {
-      try {
-        const matches = await props.search(root, current, opts);
-        // Discard stale results (the user kept typing).
-        if (token !== searchToken) return;
-        setResults(matches);
-        setError(null);
-      } catch (err) {
-        if (token !== searchToken) return;
+      clearTimeout(debounceTimer);
+      if (current.length === 0) {
         setResults([]);
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (token === searchToken) setSearching(false);
+        setSearching(false);
+        setError(null);
+        return;
       }
-    }, SEARCH_DEBOUNCE_MS);
-  });
+      if (!root) {
+        setResults([]);
+        setSearching(false);
+        setError("No workspace open");
+        return;
+      }
+
+      const token = ++searchToken;
+      setSearching(true);
+      debounceTimer = setTimeout(async () => {
+        try {
+          const matches = await props.search(root, current, { caseSensitive: ignoreCase });
+          // Discard stale results (the user kept typing).
+          if (token !== searchToken) return;
+          setResults(matches);
+          setError(null);
+        } catch (err) {
+          if (token !== searchToken) return;
+          setResults([]);
+          setError(err instanceof Error ? err.message : String(err));
+        } finally {
+          if (token === searchToken) setSearching(false);
+        }
+      }, SEARCH_DEBOUNCE_MS);
+    },
+  );
 
   function handleKeyDown(event: KeyboardEvent) {
     const length = results().length;
@@ -175,7 +188,7 @@ export function FindInFiles(props: FindInFilesProps) {
   }
 
   // Document-level Esc capture (mirror of the palette pattern).
-  onMount(() => {
+  onSettled(() => {
     function global(event: KeyboardEvent) {
       if (props.open && event.key === "Escape" && event.target !== inputRef) {
         event.preventDefault();
@@ -183,7 +196,7 @@ export function FindInFiles(props: FindInFilesProps) {
       }
     }
     document.addEventListener("keydown", global, true);
-    onCleanup(() => document.removeEventListener("keydown", global, true));
+    return () => document.removeEventListener("keydown", global, true);
   });
 
   return (
@@ -261,9 +274,9 @@ export function FindInFiles(props: FindInFilesProps) {
                             return (
                               <li
                                 role="option"
-                                aria-selected={isActive()}
-                                class="find-in-files-line"
-                                classList={{ "find-in-files-line-active": isActive() }}
+                                aria-selected={isActive() ? "true" : "false"}
+                                class={["find-in-files-line", { "find-in-files-line-active": isActive() }]}
+                                
                                 onMouseDown={(event) => {
                                   event.preventDefault();
                                   const root = props.rootId;
