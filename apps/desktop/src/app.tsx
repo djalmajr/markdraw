@@ -2654,6 +2654,17 @@ export function App() {
     return true;
   }
 
+  /** Attach whatever is selected to the chat: the Excalidraw diagram
+   *  selection over an `.excalidraw`, else the editor text selection, else a
+   *  DOM selection in the rendered preview (`.doc-body`). Resolves true when
+   *  something was attached. Shared by ⌘I, ⌘L and the command palette.
+   *  `editor: false` skips the editor selection (CodeMirror keeps its last
+   *  range after it loses focus). */
+  async function attachSelectionToChat({ editor = true } = {}): Promise<boolean> {
+    if (await addExcalidrawSelectionToChat()) return true;
+    return (editor && addSelectionToChat()) || addPreviewSelectionToChat();
+  }
+
   // Quick Open (Cmd/Ctrl+P) — recents set keyed by `${rootId}::${path}` so
   // the fuzzy ranker can boost recently-opened files. In desktop the rootId
   // equals the absolute root path (set by `folder.openFolderPath`), so the
@@ -2898,10 +2909,8 @@ export function App() {
         group: "AI",
         title: (useLocale(), m.command_add_selection_to_chat()),
         run: () => {
-          void addExcalidrawSelectionToChat().then((attached) => {
-            if (attached || addSelectionToChat() || addPreviewSelectionToChat()) {
-              state.focusAiComposer();
-            }
+          void attachSelectionToChat().then((attached) => {
+            if (attached) state.focusAiComposer();
           });
         },
       },
@@ -3284,19 +3293,27 @@ export function App() {
           state.setReaderMode((v) => !v);
         },
         "ai.openChat": (ev) => {
+          // ⌘L fronts the chat and, like ⌘I (and Ctrl+L in other editors),
+          // brings a live selection along: the editor's only when the keystroke
+          // comes from the editor, since CodeMirror keeps its last range after
+          // blur and ⌘L is also the everyday "open chat" key. Pressed from
+          // inside the chat it only refocuses the composer, so repeating it
+          // there doesn't attach a lingering selection again.
           ev.preventDefault();
-          state.focusAiComposer();
+          const target = ev.target instanceof Element ? ev.target : null;
+          if (target?.closest(".ai-panel")) {
+            state.focusAiComposer();
+            return;
+          }
+          const fromEditor = !!target?.closest(".cm-editor");
+          void attachSelectionToChat({ editor: fromEditor }).then(() => state.focusAiComposer());
         },
         "ai.inlineAction": (ev) => {
-          // ⌘I attaches the current selection to the chat as a chip — the
-          // Excalidraw diagram selection over an `.excalidraw`, else the editor
-          // text selection, else a DOM selection in the rendered preview
-          // (`.doc-body`). No-op when there's nothing selected.
+          // ⌘I attaches the current selection to the chat as a chip. No-op
+          // when there's nothing selected.
           ev.preventDefault();
-          void addExcalidrawSelectionToChat().then((attached) => {
-            if (attached || addSelectionToChat() || addPreviewSelectionToChat()) {
-              state.focusAiComposer();
-            }
+          void attachSelectionToChat().then((attached) => {
+            if (attached) state.focusAiComposer();
           });
         },
         "app.settings": (ev) => {
