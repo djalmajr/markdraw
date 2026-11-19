@@ -37,7 +37,12 @@ const CAP_MINIMIZE: u32 = 4;
 /// Per the protocol, an action missing from the array is unsupported.
 #[cfg(any(target_os = "linux", test))]
 pub fn from_wm_capabilities(raw: &[u8]) -> WindowCapabilities {
-    let caps: Vec<u32> = raw.as_chunks::<4>().0.iter().map(|c| u32::from_ne_bytes(*c)).collect();
+    let caps: Vec<u32> = raw
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_ne_bytes(*c))
+        .collect();
     WindowCapabilities {
         minimize: caps.contains(&CAP_MINIMIZE),
         maximize: caps.contains(&CAP_MAXIMIZE),
@@ -201,7 +206,13 @@ mod tests {
         // Mutation captured: treating "absent" as "supported" brings back a
         // minimize button that does nothing.
         let caps = from_wm_capabilities(&raw(&[3, 2]));
-        assert_eq!(caps, WindowCapabilities { minimize: false, maximize: true });
+        assert_eq!(
+            caps,
+            WindowCapabilities {
+                minimize: false,
+                maximize: true
+            }
+        );
     }
 
     #[test]
@@ -226,11 +237,17 @@ mod tests {
         // Mutation captured: swapping the 2/4 constants flips these fields.
         assert_eq!(
             from_wm_capabilities(&raw(&[4])),
-            WindowCapabilities { minimize: true, maximize: false }
+            WindowCapabilities {
+                minimize: true,
+                maximize: false
+            }
         );
         assert_eq!(
             from_wm_capabilities(&[]),
-            WindowCapabilities { minimize: false, maximize: false }
+            WindowCapabilities {
+                minimize: false,
+                maximize: false
+            }
         );
     }
 }
