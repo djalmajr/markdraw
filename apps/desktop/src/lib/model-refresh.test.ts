@@ -485,6 +485,34 @@ describe("model-refresh — rodada 2: F1, F2 e connect", () => {
     expect(failed).toEqual({ ok: false, refreshed: [], error: MODEL_REFRESH_FAILURE });
     expect(h.storage.raw).toBe(before);
   });
+
+  it("connect: conectar o grupo OpenCode Go faz uma busca e grava os dois", async () => {
+    const h = harness({
+      "https://opencode.ai/zen/go/v1/models": {
+        data: [
+          { id: "claude-haiku-5-5", name: "Haiku", recommended_api: "messages" },
+          { id: "glm-5.3", name: "GLM", api: { "chat-completions": {} } },
+        ],
+      },
+    });
+    h.ctx.providers = {
+      "opencode-go": openAiProvider("https://opencode.ai/zen/go/v1", "anthropic"),
+      "opencode-go-chat": openAiProvider("https://opencode.ai/zen/go/v1"),
+    };
+    // O fluxo de conexão chama o hook uma vez por id do grupo.
+    const refreshed: string[] = [];
+    for (const id of ["opencode-go", "opencode-go-chat"]) {
+      expect(canRefreshProvider(id, h.ctx.providers[id])).toBe(true);
+      const result = await refreshModelsOnConnect(id, h.ctx);
+      expect(result.ok).toBe(true);
+      refreshed.push(...result.refreshed);
+    }
+    expect(h.calls.http).toHaveLength(1); // uma busca para o grupo
+    expect(refreshed).toEqual(["opencode-go", "opencode-go-chat"]);
+    expect(Object.keys(models(h.cache()["opencode-go"]))).toEqual(["claude-haiku-5-5"]);
+    expect(Object.keys(models(h.cache()["opencode-go-chat"]))).toEqual(["glm-5.3"]);
+    expect(h.cache()["opencode-go-chat"]?.source).toBe("opencode-go:/models");
+  });
 });
 
 const MODELS_DEV = "https://models.dev/api.json";

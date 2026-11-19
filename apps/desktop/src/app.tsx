@@ -66,6 +66,7 @@ import {
 } from "./lib/ai-index.ts";
 import { fetchModels, isOpenAiChatModelId } from "@markdraw/ai/model-catalog.ts";
 import { loadAIConfig, loadUserAIConfig, saveAIConfig } from "./lib/ai-config.ts";
+import { withProviderSelection } from "./lib/ai-provider-merge.ts";
 import { readModelCache } from "./lib/model-cache.ts";
 import {
   canRefreshProvider,
@@ -906,18 +907,11 @@ export function App() {
     if (apiKey) await setApiKey(providerId, apiKey); // key → OS keychain only
     const modelRef = `${providerId}/${modelId}`;
     // Read-modify-write so sibling sections (mcp servers, other providers)
-    // survive instead of being clobbered. Keys never touch ai.json.
+    // survive instead of being clobbered; inside the provider entry only the
+    // selected model is merged in, so a custom provider's kind/name/options and
+    // hand-added sibling models stay. Keys never touch ai.json.
     const user = await loadUserAIConfig();
-    await saveAIConfig(
-      JSON.stringify({
-        ...user,
-        model: modelRef,
-        provider: {
-          ...(user.provider ?? {}),
-          [providerId]: { models: { [modelId]: { name: modelId } } },
-        },
-      }),
-    );
+    await saveAIConfig(JSON.stringify(withProviderSelection(user, providerId, modelId)));
     setStoredAiModel(modelRef);
     await reloadAiConfigAndProviders();
   }
@@ -960,7 +954,11 @@ export function App() {
   /** First model fetch on connect: the same orchestrator as Refresh, with the
    *  just-typed key. A failed source never fails the connection — the embedded
    *  list stays usable — and a successful one already writes the enriched
-   *  cache (names/limits), not just bare ids. */
+   *  cache (names/limits), not just bare ids.
+   *
+   *  The settings Connect flow calls this once per id of the group; the
+   *  orchestrator fetches once for ids that share a source (OpenCode Go's two
+   *  API shapes), so one search updates both. */
   async function fetchModelsOnConnect(providerId: string, apiKey: string): Promise<void> {
     if (canRefreshProvider(providerId, aiConfig().provider[providerId])) {
       try {
