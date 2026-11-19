@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { PointerSensor } from "@dnd-kit/dom";
 import { useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import type { TabStore } from "../composables/create-tab-store.ts";
 import type { TabState } from "@markdraw/core/tabs.ts";
@@ -79,6 +80,7 @@ function DraggableTab(props: {
   const draggable = useDraggable({
     get id() { return dndId(); },
     get disabled() { return !props.canDrag; },
+    sensors: [PointerSensor],
   });
   const droppable = useDroppable({
     get id() { return dndId(); },

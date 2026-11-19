@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal, flush } from "solid-js";
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { Feedback } from "@dnd-kit/dom";
 
 afterEach(cleanup);
 import type { WorkspaceRoot, FSEntry } from "@markdraw/core/types.ts";
@@ -576,6 +577,49 @@ describe("FileTree", () => {
         </AppProvider>
       ));
       expect(getByText("README.md")).not.toBeNull();
+    });
+
+    it.each(["Enter", "Space"])("drags a focused file with %s and cancels with Escape", async (code) => {
+      const animationDescriptor = Object.getOwnPropertyDescriptor(document, "getAnimations");
+      Object.defineProperty(document, "getAnimations", { configurable: true, value: () => [] });
+      const assignedWhileConnected: boolean[] = [];
+      const setOverlay = Object.getOwnPropertyDescriptor(Feedback.prototype, "overlay")!.set!;
+      const overlay = vi.spyOn(Feedback.prototype, "overlay", "set").mockImplementation(function (this: Feedback, element) {
+        if (element) assignedWhileConnected.push(element.isConnected);
+        setOverlay.call(this, element);
+      });
+      const move = vi.fn();
+      const [selected, setSelected] = createSignal("");
+      const select = vi.fn((entry: FSEntry) => { setSelected(entry.path); });
+      const { container, getByTestId, unmount } = render(() => (
+        <AppProvider state={makeAppStub()}>
+          <FileTree roots={SINGLE_ROOT} selectedPath={null} selectedRootId={null} onSelect={select} onMove={move} />
+          <output data-testid="selected-file">{selected()}</output>
+        </AppProvider>
+      ));
+      try {
+        const row = container.querySelector<HTMLElement>('.tree-item[data-path="README.md"]')!;
+        row.focus();
+        expect(document.activeElement).toBe(row);
+        fireEvent.keyDown(row, { key: code === "Space" ? " " : code, code });
+        await waitFor(() => expect(container.querySelector(".workspace-root-overlay")?.textContent).toBe("README.md"));
+        await waitFor(() => expect(assignedWhileConnected).toEqual([true]));
+        expect(select).not.toHaveBeenCalled();
+
+        fireEvent.keyDown(row, { key: "Escape", code: "Escape" });
+        await waitFor(() => expect(container.querySelector(".workspace-root-overlay")).toBeNull());
+        expect(move).not.toHaveBeenCalled();
+
+        fireEvent.click(row);
+        flush();
+        expect(select).toHaveBeenCalled();
+        expect(getByTestId("selected-file").textContent).toBe("README.md");
+      } finally {
+        unmount();
+        overlay.mockRestore();
+        if (animationDescriptor) Object.defineProperty(document, "getAnimations", animationDescriptor);
+        else Reflect.deleteProperty(document, "getAnimations");
+      }
     });
   });
 

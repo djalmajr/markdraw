@@ -1,10 +1,26 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { flush } from "solid-js";
+import type { BeforeDragStartEvent } from "@dnd-kit/dom";
 import { createPaneStore } from "../composables/create-pane-store.ts";
+import { DragDropProvider } from "../lib/dnd/index.ts";
 import { TabBar } from "./tab-bar.tsx";
 
-afterEach(cleanup);
+const animations = Object.getOwnPropertyDescriptor(document, "getAnimations");
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  Object.defineProperty(document, "getAnimations", { configurable: true, value: () => [] });
+});
+afterEach(() => {
+  try {
+    cleanup();
+    vi.runOnlyPendingTimers();
+  } finally {
+    vi.useRealTimers();
+    if (animations) Object.defineProperty(document, "getAnimations", animations);
+    else Reflect.deleteProperty(document, "getAnimations");
+  }
+});
 
 function setupPaneWithTabs(filenames: string[]) {
   const pane = createPaneStore("test-pane");
@@ -15,20 +31,52 @@ function setupPaneWithTabs(filenames: string[]) {
 }
 
 describe("TabBar — keyboard activation", () => {
-  it.each(["Enter", " "])("activates a focused tab with %j", (key) => {
+  it.each(["Enter", "Space"])("activates a focused tab with %s without starting a drag", (code) => {
     const pane = setupPaneWithTabs(["a.md", "b.md"]);
     flush();
     expect(pane.tabs.activeTabId()).toBe("root::b.md");
     const activate = vi.fn(pane.tabs.activateTab);
+    const beforeDrag = vi.fn((event: BeforeDragStartEvent) => event.preventDefault());
     const { getByRole } = render(() => (
-      <TabBar tabStore={pane.tabs} onActivateTab={activate} onCloseTab={() => {}} />
+      <DragDropProvider onBeforeDragStart={beforeDrag}>
+        <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={activate} onCloseTab={() => {}} />
+      </DragDropProvider>
     ));
     const tab = getByRole("button", { name: "a.md" });
     expect(tab.tabIndex).toBe(0);
-    expect(fireEvent.keyDown(tab, { key })).toBe(false);
+    tab.focus();
+    expect(document.activeElement).toBe(tab);
+    expect(fireEvent.keyDown(tab, { key: code === "Space" ? " " : code, code })).toBe(false);
     flush();
+    expect(beforeDrag).not.toHaveBeenCalled();
     expect(activate).toHaveBeenCalledExactlyOnceWith("root::a.md");
     expect(pane.tabs.activeTabId()).toBe("root::a.md");
+  });
+
+  it("still starts and finishes a tab drag with the pointer", async () => {
+    const pane = setupPaneWithTabs(["a.md"]);
+    flush();
+    const start = vi.fn();
+    const end = vi.fn();
+    const { getByRole, unmount } = render(() => (
+      <DragDropProvider onDragStart={start} onDragEnd={end}>
+        <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={() => {}} onCloseTab={() => {}} />
+      </DragDropProvider>
+    ));
+    const pointer = { pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0 };
+    try {
+      const tab = getByRole("button", { name: "a.md" });
+      fireEvent.pointerDown(tab, { ...pointer, buttons: 1, clientX: 10, clientY: 10 });
+      fireEvent.pointerMove(tab, { ...pointer, buttons: 1, clientX: 22, clientY: 10 });
+      await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(tab.classList.contains("tab-bar-item-dragging")).toBe(true));
+
+      fireEvent.pointerUp(tab, { ...pointer, buttons: 0, clientX: 22, clientY: 10 });
+      await vi.waitFor(() => expect(end).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(tab.classList.contains("tab-bar-item-dragging")).toBe(false));
+    } finally {
+      unmount();
+    }
   });
 
   it("leaves the close button and keyboard context menu in control of their keys", () => {

@@ -83,8 +83,13 @@ export function DragOverlay(props: DragOverlayProps): JSX.Element {
           style={props.style}
           data-dnd-overlay=""
           ref={(element: HTMLDivElement) => {
-            const plugin = feedback();
-            if (plugin) plugin.overlay = element;
+            // Before insertion a Solid template clone can belong to an inert
+            // document without a head. Feedback injects styles synchronously.
+            queueMicrotask(() => {
+              if (!element.isConnected) return;
+              const plugin = feedback();
+              if (plugin) plugin.overlay = element;
+            });
           }}
         >
           {typeof props.children === "function" ? props.children(source()) : props.children}
