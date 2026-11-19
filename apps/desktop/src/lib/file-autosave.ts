@@ -1,5 +1,5 @@
 import { createEffect, onCleanup } from "solid-js";
-import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
+import { effectivePaneEditorMode, type AppState } from "@markdraw/ui/composables/create-app-state.ts";
 
 export function createFileAutosave(
   state: Pick<AppState, "paneManager">,
@@ -15,7 +15,9 @@ export function createFileAutosave(
       return {
         pane,
         content: pane.editorContent(),
-        mode: pane.editorMode(),
+        // The mode the editor shows: plain text without a preview edits even
+        // while the pane's stored mode is still "preview".
+        mode: effectivePaneEditorMode(pane),
         file: pane.selectedFile(),
         rootId: pane.selectedRootId(),
         tab: pane.tabs.getActiveTab(),
