@@ -4,7 +4,11 @@
 
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "@ui-sdk/core/web.css" layer(components);
+/* `@ui-sdk/core/web.css` is deliberately not imported: it is ui-sdk's optional
+   default look (borders and fills on buttons, toggles, triggers), and our
+   primitives are fully styled with Tailwind. The behavioral CSS ui-sdk needs
+   (hidden closed popups, backdrops) is injected at runtime into the ui-sdk
+   layer declared above. */
 /* Class-based dark mode — the app toggles `.dark` on <html>. v4 defaults
    to prefers-color-scheme, so register the variant explicitly. */
 @custom-variant dark (&:where(.dark, .dark *));
