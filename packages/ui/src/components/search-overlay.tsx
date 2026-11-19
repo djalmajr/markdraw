@@ -281,6 +281,36 @@ export function SearchOverlay(props: SearchOverlayProps) {
     if (visible) queueMicrotask(() => inputRef?.focus());
   });
 
+  let observedHost: HTMLElement | undefined;
+  let pendingSelection: { start: number; end: number } | null = null;
+
+  // Read during Show's `when` evaluation, i.e. before the old DOM is replaced.
+  function portalTarget(): HTMLElement | undefined {
+    const host = props.portalHost;
+    if (host !== observedHost) {
+      if (inputRef && document.activeElement === inputRef) {
+        pendingSelection = {
+          start: inputRef.selectionStart ?? inputRef.value.length,
+          end: inputRef.selectionEnd ?? inputRef.value.length,
+        };
+      }
+      observedHost = host;
+    }
+    return host;
+  }
+
+  createEffect(() => props.portalHost, () => {
+    const selection = pendingSelection;
+    if (!selection) return;
+    pendingSelection = null;
+    queueMicrotask(() => {
+      const input = inputRef;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(selection.start, selection.end);
+    });
+  });
+
   createEffect(
     () => ({ count: props.matchCount ?? 0, index: props.currentIndex ?? 0 }),
     ({ count, index }) => {
@@ -367,7 +397,7 @@ export function SearchOverlay(props: SearchOverlayProps) {
   );
 
   return (
-    <Show when={props.portalHost} fallback={overlay()}>
+    <Show when={portalTarget()} fallback={overlay()}>
       {(host) => <Portal mount={host()}>{overlay()}</Portal>}
     </Show>
   );
