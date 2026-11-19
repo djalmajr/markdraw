@@ -70,10 +70,10 @@ fn registry_is_atomic_and_ids_are_session_local() {
 
 #[cfg(unix)]
 fn fixture() -> tempfile::TempDir {
-    // Explicit destination: no test endpoint ever lands under /tmp.
+    // Honors TMPDIR when set, else the system temp dir (CI).
     use std::os::unix::fs::PermissionsExt;
     let fixture = tempfile::tempdir_in(
-        std::env::var_os("TMPDIR").expect("run with TMPDIR=$HOME/.cache/md-tmp"),
+        std::env::temp_dir(),
     )
     .unwrap();
     std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -718,7 +718,7 @@ fn round2_concurrent_replace_preserves_complete_snapshots() {
 
 #[test]
 fn round2_manifest_keeps_existing_read_dir_callable() {
-    let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+    let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
     let app = tauri::test::mock_builder()
         .invoke_handler(tauri::generate_handler![crate::read_dir])
         .build(tauri::generate_context!())

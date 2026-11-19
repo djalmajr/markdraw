@@ -268,7 +268,7 @@ mod tests {
         let fixture = tempfile::Builder::new()
             .prefix("")
             .rand_bytes(2)
-            .tempdir_in(std::env::var_os("TMPDIR").unwrap())
+            .tempdir_in(std::env::temp_dir())
             .unwrap();
         fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let prefix = fixture.path().as_os_str().as_encoded_bytes().len() + 1;
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn staging_cleans_failed_publication() {
-        let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+        let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
         fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let build = fixture.path().join("build");
         fs::create_dir(&build).unwrap();
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn planted_staging_entries_are_never_followed_or_removed() {
         use std::os::unix::fs::symlink;
-        let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+        let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
         fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let build = fixture.path().join("build");
         fs::create_dir(&build).unwrap();
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn final_socket_first_publication_is_private_rename() {
         use std::ffi::CString;
-        let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+        let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
         fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let build = fixture.path().join("build");
         fs::create_dir(&build).unwrap();

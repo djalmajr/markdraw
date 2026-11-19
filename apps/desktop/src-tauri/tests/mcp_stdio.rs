@@ -6,7 +6,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[tokio::test]
 async fn stdio_cli_closed_app_does_not_open_a_window() {
-    let directory = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+    let directory = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
     let output = tokio::time::timeout(
         Duration::from_secs(5),
         tokio::process::Command::new(env!("CARGO_BIN_EXE_markdraw"))
@@ -37,7 +37,7 @@ async fn stdio_cli_closed_app_does_not_open_a_window() {
 
 #[tokio::test]
 async fn stdio_cli_real_client_fake_app_eof_and_app_shutdown() {
-    let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+    let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
     std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let parent = fixture.path().join("markdraw");
     std::fs::create_dir(&parent).unwrap();
@@ -166,7 +166,7 @@ impl Drop for FakeApp {
 }
 impl FakeApp {
     fn new() -> Self {
-        let fixture = tempfile::tempdir_in(std::env::var_os("TMPDIR").unwrap()).unwrap();
+        let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
         let directory = fixture
             .path()
             .join("markdraw")
