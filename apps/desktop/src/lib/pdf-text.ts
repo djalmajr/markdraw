@@ -28,9 +28,12 @@ export async function extractPdfText(data: Uint8Array, maxPages = DEFAULT_MAX_PA
   const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
   // pdf.js may transfer the buffer to its worker (detaching the caller's
-  // view) — hand it a private copy.
-  const doc = await pdfjs.getDocument({ data: data.slice() }).promise;
+  // view) — hand it a private copy. pdf.js 6 removed
+  // `PDFDocumentProxy.destroy`: the loading task is what owns the worker, so
+  // it is also what releases it.
+  const task = pdfjs.getDocument({ data: data.slice() });
   try {
+    const doc = await task.promise;
     const totalPages = doc.numPages;
     const limit = Math.min(totalPages, Math.max(1, Math.trunc(maxPages)));
     const blocks: string[] = [];
@@ -51,6 +54,6 @@ export async function extractPdfText(data: Uint8Array, maxPages = DEFAULT_MAX_PA
     }
     return blocks.join("\n\f\n");
   } finally {
-    void doc.destroy();
+    void task.destroy();
   }
 }

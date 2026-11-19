@@ -17,6 +17,7 @@ let getDocumentArgs: unknown[] = [];
 let getPageCalls: number[] = [];
 let pageItems: FakeTextItem[][] = [];
 let pageTextError: Error | null = null;
+let loadError: Error | null = null;
 // Mutated (never reassigned): the mock factory runs once and caches this
 // object, so resets must keep the reference alive.
 const workerOptions = { workerSrc: "" };
@@ -26,22 +27,26 @@ mock.module("pdfjs-dist", () => ({
   GlobalWorkerOptions: workerOptions,
   getDocument: (arg: unknown) => {
     getDocumentArgs.push(arg);
+    // pdf.js 6 shape: the loading task owns (and releases) the worker, and
+    // `PDFDocumentProxy` no longer exposes `destroy`.
     return {
-      promise: Promise.resolve({
-        numPages: pageItems.length,
-        destroy: async () => {
-          destroyCount += 1;
-        },
-        getPage: async (n: number) => {
-          getPageCalls.push(n);
-          return {
-            getTextContent: async () => {
-              if (pageTextError) throw pageTextError;
-              return { items: pageItems[n - 1] ?? [] };
+      promise: loadError
+        ? Promise.reject(loadError)
+        : Promise.resolve({
+            numPages: pageItems.length,
+            getPage: async (n: number) => {
+              getPageCalls.push(n);
+              return {
+                getTextContent: async () => {
+                  if (pageTextError) throw pageTextError;
+                  return { items: pageItems[n - 1] ?? [] };
+                },
+              };
             },
-          };
-        },
-      }),
+          }),
+      destroy: async () => {
+        destroyCount += 1;
+      },
     };
   },
 }));
@@ -54,6 +59,7 @@ beforeEach(() => {
   getPageCalls = [];
   pageItems = [];
   pageTextError = null;
+  loadError = null;
   workerOptions.workerSrc = "";
 });
 
@@ -105,10 +111,20 @@ describe("extractPdfText", () => {
     expect(arg.data).not.toBe(data);
   });
 
-  it("destroys the document even when text extraction throws", async () => {
+  it("destroys the loading task even when text extraction throws", async () => {
     pageItems = [[{ str: "x" }]];
     pageTextError = new Error("boom");
     await expect(extractPdfText(new Uint8Array([1]))).rejects.toThrow("boom");
     expect(destroyCount).toBe(1);
+  });
+
+  it("destroys the loading task when the document itself fails to load", async () => {
+    // The worker is already spawned once `getDocument` returns, so a corrupt
+    // PDF must still release it — the release is around the load, not only
+    // around the page loop.
+    loadError = new Error("InvalidPDFException");
+    await expect(extractPdfText(new Uint8Array([1]))).rejects.toThrow("InvalidPDFException");
+    expect(destroyCount).toBe(1);
+    expect(getPageCalls).toEqual([]);
   });
 });
