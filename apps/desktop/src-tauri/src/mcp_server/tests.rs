@@ -284,6 +284,32 @@ async fn real_rmcp_client_lists_calls_observes_close_and_eof() {
 // rmcp 3.x dropped `CallToolRequestParams::task` (the server used to reject
 // task-augmented calls) and added the MRTR retry fields. This server never
 // issues an input-required result, so a call carrying them is invalid.
+// F5 (declined): rmcp decodes `"requestState": null` / `"inputResponses": null`
+// into `None`, the same value as an absent key, so the guard below cannot tell
+// them apart. This pins that premise: if the SDK ever keeps the distinction
+// (e.g. a tri-state field), this test fails and the guard must be revisited.
+#[test]
+fn mrtr_null_fields_decode_exactly_like_absent_ones() {
+    use rmcp::model::CallToolRequestParams;
+    let with_null: CallToolRequestParams = serde_json::from_value(serde_json::json!({
+        "name": "list_workspaces",
+        "requestState": null,
+        "inputResponses": null,
+    }))
+    .unwrap();
+    let absent: CallToolRequestParams =
+        serde_json::from_value(serde_json::json!({ "name": "list_workspaces" })).unwrap();
+    assert_eq!(with_null, absent);
+    assert!(with_null.request_state.is_none() && with_null.input_responses.is_none());
+    // Control: a present, non-null value IS visible to the guard.
+    let present: CallToolRequestParams = serde_json::from_value(serde_json::json!({
+        "name": "list_workspaces",
+        "requestState": "opaque",
+    }))
+    .unwrap();
+    assert!(present.request_state.is_some());
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn mrtr_retry_fields_are_rejected_as_invalid_params() {
