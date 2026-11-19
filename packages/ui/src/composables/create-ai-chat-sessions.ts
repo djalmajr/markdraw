@@ -13,7 +13,7 @@
 // each session an isolated disposal scope nested under the app (no detached-root
 // warning; freed exactly when the session closes).
 
-import { createRoot, createSignal, getOwner, runWithOwner, untrack, type Owner, createTrackedEffect } from "solid-js";
+import { createEffect, createRoot, createSignal, getOwner, runWithOwner, untrack, type Owner } from "solid-js";
 import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
 import {
   type PersistedChatMessage,
@@ -204,26 +204,32 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
         });
 
         // Persist + auto-title when this session's turns change. Tracks ONLY the
-        // store signals; the metas read is untracked to avoid a write→read loop
-        // (this effect calls patchMeta, which writes metas).
-        createTrackedEffect(() => {
-          const msgs = store.messages();
-          store.streaming(); // re-run on turn finalize / cancel
-          if (hydrating) return;
-          const patch: Partial<PersistedChatSessionMeta> = { lastActiveAt: Date.now() };
-          const cur = untrack(() => metas()).find((m) => m.id === id);
-          if (cur && cur.title === "") {
-            const firstUser = msgs.find((t) => t.role === "user");
-            if (firstUser) {
-              const t = deriveTitle(firstUser.content);
-              if (t) patch.title = t;
+        // store signals in the compute half; the metas read is untracked to avoid
+        // a write→read loop (the apply half calls patchMeta, which writes metas).
+        createEffect(
+          () => {
+            const msgs = store.messages();
+            store.streaming(); // re-run on turn finalize / cancel
+            if (hydrating) return null;
+            const patch: Partial<PersistedChatSessionMeta> = { lastActiveAt: Date.now() };
+            const cur = untrack(() => metas()).find((m) => m.id === id);
+            if (cur && cur.title === "") {
+              const firstUser = msgs.find((t) => t.role === "user");
+              if (firstUser) {
+                const t = deriveTitle(firstUser.content);
+                if (t) patch.title = t;
+              }
             }
-          }
-          patchMeta(id, patch);
-          persistMessages(id, msgs);
-          schedulePersistIndex();
-          bump();
-        });
+            return { msgs, patch };
+          },
+          (change) => {
+            if (!change) return;
+            patchMeta(id, change.patch);
+            persistMessages(id, change.msgs);
+            schedulePersistIndex();
+            bump();
+          },
+        );
 
         return { store, dispose };
       });
