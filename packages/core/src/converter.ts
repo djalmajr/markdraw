@@ -98,13 +98,13 @@ export function createConverter(w: Worker) {
   setupWorker(w);
 
   async function convertAdoc(opts: ConvertOptions): Promise<ConvertResult> {
-    const { filePath, fileContent, readFile } = opts;
+    const { filePath, fileContent, readFile, readFiles } = opts;
     const baseDirPath = dirOf(filePath);
 
     // Extract frontmatter on the main thread so the worker keeps a string→string API
     const { frontmatter, body } = extractFrontmatter(fileContent);
 
-    const includeCache = await collectIncludes(body, baseDirPath, readFile);
+    const includeCache = await collectIncludes(body, baseDirPath, readFile, new Set(), readFiles);
     const includeCacheObj: Record<string, string> = {};
     for (const [k, v] of includeCache) {
       includeCacheObj[k] = v;

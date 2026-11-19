@@ -1,8 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+/** Absolute paths a `fs-change` event names; empty when the payload has none. */
+export function eventPaths(payload: unknown): string[] {
+  const paths = (payload as { paths?: unknown } | null | undefined)?.paths;
+  return Array.isArray(paths) ? paths.filter((p): p is string => typeof p === "string") : [];
+}
+
 export class FileWatcher {
-  private onChange: () => void;
+  private onChange: (paths: string[]) => void;
   private unlisten: UnlistenFn | null = null;
   private watchedPaths: string[] = [];
   private running = false;
@@ -10,7 +16,7 @@ export class FileWatcher {
   private ipcQueue = Promise.resolve();
   private latestRequest = 0;
 
-  constructor(onChange: () => void) {
+  constructor(onChange: (paths: string[]) => void) {
     this.onChange = onChange;
   }
 
@@ -42,8 +48,8 @@ export class FileWatcher {
     const generation = ++this.generation;
     this.running = true;
 
-    const unlisten = await listen("fs-change", () => {
-      if (generation === this.generation) this.onChange();
+    const unlisten = await listen("fs-change", (event) => {
+      if (generation === this.generation) this.onChange(eventPaths(event.payload));
     }).catch((error) => {
       if (generation === this.generation) this.running = false;
       throw error;

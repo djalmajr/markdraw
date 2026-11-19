@@ -27,6 +27,7 @@ let resolveRead: ((value: string) => void) | undefined;
 let rejectRead: ((err: Error) => void) | undefined;
 // Every pending read, in call order (overlapping refreshes need their own).
 let readResolvers: Array<(value: string) => void> = [];
+let readRejecters: Array<(err: Error) => void> = [];
 let readFileByPathMock: (
   rootPath: string,
   relativePath: string,
@@ -42,6 +43,7 @@ mock.module("./fs.ts", () => ({
       resolveRead = resolve;
       rejectRead = reject;
       readResolvers.push(resolve);
+      readRejecters.push(reject);
     }),
   readFileByPath: (rootPath: string, relativePath: string) =>
     readFileByPathMock(rootPath, relativePath),
@@ -105,7 +107,7 @@ describe("createFileLoader / loadFileContent — pane race regression", () => {
     const pane1 = paneManager.panes()[1]!;
 
     let pushedNav = false;
-    let _readFile: unknown = null;
+    let registered: { pane: unknown; rootId: unknown; path: unknown; reader: unknown } | null = null;
 
     const state = {
       paneManager,
@@ -126,7 +128,10 @@ describe("createFileLoader / loadFileContent — pane race regression", () => {
         toc: null,
         meta: {},
       }),
-      set _readFile(v: unknown) { _readFile = v; },
+      registerReader: (pane: unknown, rootId: unknown, path: unknown, reader: unknown) => { registered = { pane, rootId, path, reader }; },
+      previewReflects: async () => true,
+      notePreviewed: () => {},
+      notePreviewFailed: () => {},
     } as unknown as AppState;
 
     const watcher = {
@@ -178,7 +183,15 @@ describe("createFileLoader / loadFileContent — pane race regression", () => {
     expect(pane1.selectedFile()).toBeNull();
 
     expect(pushedNav).toBe(false); // pushHistory=false in this call
-    expect(_readFile).toBeTypeOf("function");
+    // The load hands its reader to the app state keyed by pane, root and file,
+    // instead of overwriting one global reader.
+    expect(registered).not.toBeNull();
+    const reg = registered!;
+    expect(reg.pane).toBe(pane0);
+    expect(reg.rootId).toBe("root-0");
+    expect(reg.path).toBe("intro.adoc");
+    expect((reg.reader as { readFile: unknown }).readFile).toBeTypeOf("function");
+    expect((reg.reader as { readFiles: unknown }).readFiles).toBeTypeOf("function");
   });
 
   it("falls back to direct reads for nested includes missing from the initial batch cache", async () => {
@@ -214,8 +227,11 @@ describe("createFileLoader / loadFileContent — pane race regression", () => {
         _filePath: string,
         _content: string,
         readFile: (path: string) => Promise<string | null>,
+        readFiles?: (paths: string[]) => Promise<Map<string, string | null>>,
       ) => {
-        const topLevel = await readFile("business/_index.adoc");
+        // The converter reads the first layer in one batch (AsciiDoc: no
+        // pre-scan batch of the loader), then asks for the nested file.
+        const topLevel = (await readFiles!(["business/_index.adoc"])).get("business/_index.adoc");
         const nested = await readFile("business/01-visao-geral.adoc");
         return {
           html: `${topLevel ?? "missing top"}\n${nested ?? "missing nested"}`,
@@ -224,7 +240,10 @@ describe("createFileLoader / loadFileContent — pane race regression", () => {
           meta: {},
         };
       },
-      set _readFile(_v: unknown) {},
+      registerReader: () => {},
+      previewReflects: async () => true,
+      notePreviewed: () => {},
+      notePreviewFailed: () => {},
     } as unknown as AppState;
 
     const watcher = {
@@ -278,7 +297,10 @@ describe("createFileLoader / loadFileContent — pane race regression", () => {
       convert: async () => {
         throw new Error("boom");
       },
-      set _readFile(_v: unknown) {},
+      registerReader: () => {},
+      previewReflects: async () => true,
+      notePreviewed: () => {},
+      notePreviewFailed: () => {},
     } as unknown as AppState;
 
     const watcher = {
@@ -335,7 +357,10 @@ describe("createFileLoader / loadFileContent — watcher survives a conversion e
       convert: async () => {
         throw new Error("boom");
       },
-      set _readFile(_v: unknown) {},
+      registerReader: () => {},
+      previewReflects: async () => true,
+      notePreviewed: () => {},
+      notePreviewFailed: () => {},
     } as unknown as AppState;
     const watcher = {
       setTarget: (params: { filePath: string; includePaths: string[]; rootPath: string }) => {
@@ -405,7 +430,10 @@ describe("createFileLoader / loadFileContent — image & PDF skip the text pipel
           convertCalled = true;
           return { html: "", frontmatter: null, toc: null, meta: {} };
         },
-        set _readFile(_v: unknown) {},
+        registerReader: () => {},
+        previewReflects: async () => true,
+        notePreviewed: () => {},
+      notePreviewFailed: () => {},
       } as unknown as AppState;
 
       const watcher = {
@@ -471,7 +499,10 @@ describe("createFileLoader / loadFileContent — binary non-text marks the pane 
         convertCalled = true;
         return { html: "", frontmatter: null, toc: null, meta: {} };
       },
-      set _readFile(_v: unknown) {},
+      registerReader: () => {},
+      previewReflects: async () => true,
+      notePreviewed: () => {},
+      notePreviewFailed: () => {},
     } as unknown as AppState;
 
     const watcher = {
@@ -521,6 +552,7 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
 
   async function setup(saved: string, current: string, path = "README.md") {
     readResolvers = [];
+    readRejecters = [];
     const paneManager = createPaneManager();
     const pane = paneManager.activePane();
     const entry = { kind: "file" as const, name: path, path };
@@ -539,7 +571,10 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
         if (holdConvert) await new Promise<void>((r) => { convertReleases.push(r); });
         return { html: `<p>${content}</p>`, frontmatter: null, toc: null, meta: {} };
       },
-      set _readFile(_v: unknown) {},
+      registerReader: () => {},
+      previewReflects: async () => true,
+      notePreviewed: () => {},
+      notePreviewFailed: () => {},
     } as unknown as AppState;
     const watcher = {
       setTarget: () => {},
@@ -659,6 +694,58 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     expect(pane.html()).toBe("<p>v2</p>");
   });
 
+  it("drops an older event whose disk read finishes after a newer event already converted", async () => {
+    // Event 1 reads the disk, event 2 arrives later and its read returns first.
+    // Mutation captured: without the claim order, event 1 claims after event 2
+    // and its older text (v1) replaces v2 on screen.
+    const { pane, refresh, holdConvert, releaseConvert } = await setup("a", "a");
+    holdConvert();
+    const first = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    const second = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    readResolvers[1]!("v2");
+    await new Promise((r) => setTimeout(r, 0));
+    readResolvers[0]!("v1");
+    await new Promise((r) => setTimeout(r, 0));
+    releaseConvert(0);
+    await second;
+    releaseConvert(1);
+    await first;
+
+    expect(pane.editorContent()).toBe("v2");
+    expect(pane.html()).toBe("<p>v2</p>");
+  });
+
+  it("drops the failure of an older event whose read rejects after a newer event converted", async () => {
+    // Event 1 is still reading when event 2 reads, converts and publishes v2.
+    // Mutation captured: without the claim order in `superseded`, the late
+    // rejection of event 1 replaces the preview of v2 with an error.
+    const { pane, refresh } = await setup("a", "a");
+    const first = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    const second = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    readResolvers[1]!("v2");
+    await second;
+    expect(pane.html()).toBe("<p>v2</p>");
+    readRejecters[0]!(new Error("old read failed"));
+    await first;
+
+    expect(pane.html()).toBe("<p>v2</p>");
+    expect(pane.editorContent()).toBe("v2");
+  });
+
+  it("still reports the failure of a read that no newer event outdated", async () => {
+    const { pane, refresh } = await setup("a", "a");
+    const first = refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    readRejecters[0]!(new Error("only read failed"));
+    await first;
+
+    expect(pane.html()).toContain("only read failed");
+  });
+
   it("never puts the file's text into another tab opened during the disk read", async () => {
     // Mutation captured: without the selected-file check, the refresh compares
     // against the new tab's (clean) buffer and adopts README.md's disk text
@@ -728,5 +815,435 @@ describe("createFileLoader / refreshFromDisk — autosave vs. watcher race", () 
     expect(pane0.editorContent()).toBe("a changed elsewhere");
     expect(pane0.savedContent()).toBe("a changed elsewhere");
     expect(pane1.editorContent()).toBe("b");
+  });
+});
+
+describe("createFileLoader / refreshFromDisk — echo of our own autosave", () => {
+  // Each autosave fires a watcher event whose refresh converted the whole
+  // document again. The autosave now records path + content hash of what it
+  // wrote; an event that names only that path, with the disk still holding
+  // that text, is skipped. Anything else keeps converting.
+  const ROOT = "/tmp/ws";
+  const FILE = "/tmp/ws/doc.adoc";
+
+  beforeEach(() => {
+    resolveRead = undefined;
+    rejectRead = undefined;
+    readFileByPathMock = async () => null;
+    readFilesRelativeMock = async () => new Map<string, string>();
+    localStorage.clear();
+  });
+
+  async function setup(saved: string, current: string, name = "doc.adoc") {
+    readResolvers = [];
+    readRejecters = [];
+    const { createOwnWrites } = await import("./external-reload.ts");
+    const ownWrites = createOwnWrites();
+    const paneManager = createPaneManager();
+    const pane = paneManager.activePane();
+    const entry = { kind: "file" as const, name, path: name };
+    pane.setSelectedRootId("root-0");
+    pane.setSelectedFile(entry);
+    pane.setSavedContent(saved);
+    pane.setEditorContent(current);
+    pane.setHtml("<p>already rendered</p>");
+    let conversions = 0;
+    const reflects = { value: true };
+    // The check of the preview can be held open to let another event publish.
+    const gate = { wait: Promise.resolve() as Promise<void> };
+    const asked: string[] = [];
+    const noted: string[] = [];
+    const failed: Array<{ path: string; tabId: unknown }> = [];
+    const state = {
+      paneManager,
+      pushNavHistory: () => {},
+      autoRefresh: () => false,
+      convert: async (_path: string, content: string) => {
+        conversions++;
+        return { html: `<p>${content}</p>`, frontmatter: null, toc: null, meta: {} };
+      },
+      registerReader: () => {},
+      previewReflects: async (_pane: unknown, _root: unknown, _path: string, content: string) => {
+        asked.push(content);
+        await gate.wait;
+        return reflects.value;
+      },
+      notePreviewed: (_pane: unknown, _root: unknown, _path: string, content: string) => { noted.push(content); },
+      notePreviewFailed: (_pane: unknown, _root: unknown, path: string, tabId?: unknown) => { failed.push({ path, tabId }); },
+    } as unknown as AppState;
+    const watcher = {
+      setTarget: () => {},
+      start: () => {},
+      stop: () => {},
+      destroy: () => {},
+    } as unknown as Parameters<typeof import("./file-loader.ts").createFileLoader>[0]["watcher"];
+    const rootPaths = () => new Map<string, string>([["root-0", ROOT]]);
+    const { createFileLoader } = await import("./file-loader.ts");
+    const loader = createFileLoader({ rootPaths, state, watcher, ownWrites });
+    return {
+      pane,
+      entry,
+      loader,
+      ownWrites,
+      reflects,
+      gate,
+      asked,
+      noted,
+      failed,
+      conversions: () => conversions,
+      refresh: async (disk: string, eventPaths?: string[]) => {
+        const done = loader.refreshFromDisk(entry, "root-0", eventPaths);
+        await new Promise((r) => setTimeout(r, 0));
+        resolveRead!(disk);
+        return await done;
+      },
+    };
+  }
+
+  it("skips the conversion when the event is only our own write and the disk holds it", async () => {
+    // Mutation captured: removing the ownWrites branch in load() converts here.
+    const { pane, ownWrites, conversions, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "saved text");
+    expect(await refresh("saved text", [FILE])).toBe(false);
+    expect(conversions()).toBe(0);
+    expect(pane.html()).toBe("<p>already rendered</p>");
+  });
+
+  it("converts the echo when the preview of that text is not on screen (the edit conversion failed)", async () => {
+    // Mutation captured: skipping on the hash alone leaves the preview on older text.
+    const { pane, ownWrites, reflects, asked, noted, conversions, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "saved text");
+    reflects.value = false;
+    expect(await refresh("saved text", [FILE])).toBe(false);
+    expect(asked).toEqual(["saved text"]);
+    expect(conversions()).toBe(1);
+    expect(pane.html()).toBe("<p>saved text</p>");
+    expect(noted).toEqual(["saved text"]);
+  });
+
+  it("drops the failure of an older event once the echo confirmed the saved text", async () => {
+    // An include event is still reading when the echo of our own save confirms
+    // the preview of the saved text. Mutation captured: without
+    // `latestConfirmed` in `failureStale`, the late rejection replaces the
+    // preview with an error.
+    const { pane, entry, loader, ownWrites, conversions, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "saved text");
+    const older = loader.refreshFromDisk(entry, "root-0", [`${ROOT}/partials/inc.adoc`]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await refresh("saved text", [FILE])).toBe(false);
+    expect(conversions()).toBe(0);
+    readRejecters[0]!(new Error("old include read failed"));
+    await older;
+    expect(pane.html()).toBe("<p>already rendered</p>");
+  });
+
+  it("drops the failure of an older read of a plain-text file once the echo confirmed its text", async () => {
+    // Same rule at the unsupported-file branch of the read error: that branch
+    // would blank the pane and show the notice over the confirmed text.
+    const { pane, entry, loader, ownWrites, refresh } = await setup("saved text", "saved text", "doc.bin");
+    ownWrites.mark(`${ROOT}/doc.bin`, "saved text");
+    const older = loader.refreshFromDisk(entry, "root-0", [`${ROOT}/partials/inc.adoc`]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await refresh("saved text", [`${ROOT}/doc.bin`])).toBe(false);
+    readRejecters[0]!(new Error("old read failed"));
+    await older;
+    expect(pane.html()).toBe("<p>already rendered</p>");
+    expect(pane.editorContent()).toBe("saved text");
+  });
+
+  it("still reports the failure of an event that started after the confirmed echo", async () => {
+    // Control: the confirmation outdates only work that began before it.
+    const { pane, entry, loader, ownWrites, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "saved text");
+    expect(await refresh("saved text", [FILE])).toBe(false);
+    const newer = loader.refreshFromDisk(entry, "root-0", [`${ROOT}/partials/inc.adoc`]);
+    await new Promise((r) => setTimeout(r, 0));
+    readRejecters[1]!(new Error("newer include read failed"));
+    await newer;
+    expect(pane.html()).toContain("newer include read failed");
+  });
+
+  it("an echo that did not confirm the preview (edit conversion failed) does not mute an older failure", async () => {
+    // Control: the echo converted again instead of confirming; the older
+    // event's failure is dropped by the claim of that conversion, not by the
+    // confirmation, so the confirmation must stay unset here.
+    const { pane, entry, loader, ownWrites, reflects, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "saved text");
+    reflects.value = false;
+    const older = loader.refreshFromDisk(entry, "root-0", [`${ROOT}/partials/inc.adoc`]);
+    await new Promise((r) => setTimeout(r, 0));
+    await refresh("saved text", [FILE]);
+    expect(pane.html()).toBe("<p>saved text</p>");
+    readRejecters[0]!(new Error("old include read failed"));
+    await older;
+    expect(pane.html()).toBe("<p>saved text</p>");
+  });
+
+  it("records the error it publishes, so the next echo of that text converts again", async () => {
+    // The state skips an echo only for a preview of the saved text on screen:
+    // an error published by the loader must say so. Mutation captured: a
+    // publication that does not call `notePreviewFailed`.
+    const { pane, entry, loader, failed } = await setup("saved text", "saved text");
+    const older = loader.refreshFromDisk(entry, "root-0", [`${ROOT}/partials/inc.adoc`]);
+    await new Promise((r) => setTimeout(r, 0));
+    readRejecters[0]!(new Error("include read failed"));
+    await older;
+    expect(pane.html()).toContain("include read failed");
+    expect(failed).toEqual([{ path: "doc.adoc", tabId: undefined }]);
+  });
+
+  it("records that the screen was cleared, under the tab's own id, when a tab loads another file", async () => {
+    // The tab just opened is not the active one yet: the record names it.
+    // Mutation captured: a load that blanks the preview without telling the
+    // state leaves the record of the previous HTML for that document.
+    const { pane, loader, failed } = await setup("saved text", "saved text");
+    const other = { kind: "file" as const, name: "other.adoc", path: "other.adoc" };
+    const load = loader.loadTabContent(pane, other, { id: "tab-x", rootId: "root-0" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pane.html()).toBe("");
+    expect(failed).toEqual([{ path: "other.adoc", tabId: "tab-x" }]);
+    await load; // the tab is not the active one: the load drops itself before reading
+  });
+
+  it("records the unsupported notice it publishes for a file that cannot be read as text", async () => {
+    const { pane, entry, loader, failed } = await setup("saved text", "saved text", "doc.bin");
+    const refresh = loader.refreshFromDisk(entry, "root-0", [`${ROOT}/doc.bin`]);
+    await new Promise((r) => setTimeout(r, 0));
+    readRejecters[0]!(new Error("stream did not contain valid UTF-8"));
+    await refresh;
+    expect(pane.html()).not.toBe("<p>already rendered</p>");
+    expect(failed).toEqual([{ path: "doc.bin", tabId: undefined }]);
+  });
+
+  it("does not confirm an echo when an error was published while its preview was being checked", async () => {
+    // The older event fails inside the window between the echo's check of the
+    // preview and its confirmation: the error is on screen, so the echo
+    // converts again. Mutation captured: confirming without the comparison of
+    // `errorsPublished` leaves the error on screen.
+    const { pane, entry, loader, ownWrites, gate, asked, conversions } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "saved text");
+    let release!: () => void;
+    gate.wait = new Promise<void>((resolve) => { release = resolve; });
+    const older = loader.refreshFromDisk(entry, "root-0", [`${ROOT}/partials/inc.adoc`]);
+    await new Promise((r) => setTimeout(r, 0));
+    const echo = loader.refreshFromDisk(entry, "root-0", [FILE]);
+    await new Promise((r) => setTimeout(r, 0));
+    readResolvers[1]!("saved text");
+    while (asked.length === 0) await new Promise((r) => setTimeout(r, 0)); // the check is open
+    readRejecters[0]!(new Error("old include read failed"));
+    await older;
+    expect(pane.html()).toContain("old include read failed");
+    release();
+    await echo;
+    expect(conversions()).toBe(1);
+    expect(pane.html()).toBe("<p>saved text</p>");
+  });
+
+  it("asks about the text the preview was rendered from, not a text typed after the save", async () => {
+    const { ownWrites, asked, conversions, refresh } = await setup("saved text", "saved text and more");
+    ownWrites.mark(FILE, "saved text");
+    await refresh("saved text", [FILE]);
+    expect(asked).toEqual(["saved text and more"]);
+    expect(conversions()).toBe(0);
+  });
+
+  it("still skips when the user typed after the save (the edit has its own conversion)", async () => {
+    const { pane, ownWrites, conversions, refresh } = await setup("saved text", "saved text and more");
+    ownWrites.mark(FILE, "saved text");
+    expect(await refresh("saved text", [FILE])).toBe(false);
+    expect(conversions()).toBe(0);
+    expect(pane.editorContent()).toBe("saved text and more");
+  });
+
+  it("converts when the event also names an include", async () => {
+    // Mutation captured: checking only that the main path is present (some
+    // instead of every) skips a refresh that an include change needs.
+    const { ownWrites, conversions, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "saved text");
+    await refresh("saved text", [FILE, `${ROOT}/partials/inc.adoc`]);
+    expect(conversions()).toBe(1);
+  });
+
+  it("converts when the event names only an include", async () => {
+    const { ownWrites, conversions, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "saved text");
+    await refresh("saved text", [`${ROOT}/partials/inc.adoc`]);
+    expect(conversions()).toBe(1);
+  });
+
+  it.each([
+    ["no paths in the event", undefined],
+    ["an empty path list", [] as string[]],
+  ])("converts with %s", async (_label, paths) => {
+    const { ownWrites, conversions, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "saved text");
+    await refresh("saved text", paths);
+    expect(conversions()).toBe(1);
+  });
+
+  it("converts when the disk text is not the one we wrote", async () => {
+    // Mutation captured: comparing paths only (no content hash) skips a
+    // rewrite by another program that happens to land on the same path.
+    const { ownWrites, conversions, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "text we wrote earlier");
+    await refresh("saved text", [FILE]);
+    expect(conversions()).toBe(1);
+  });
+
+  it("converts when nothing was recorded for the path (autosave off, manual edit elsewhere)", async () => {
+    const { conversions, refresh } = await setup("saved text", "saved text");
+    await refresh("saved text", [FILE]);
+    expect(conversions()).toBe(1);
+  });
+
+  it("converts when the mark is for another file", async () => {
+    const { ownWrites, conversions, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark("/tmp/ws/other.adoc", "saved text");
+    await refresh("saved text", [FILE]);
+    expect(conversions()).toBe(1);
+  });
+
+  it("an external change is adopted and converted even when the event names only this path", async () => {
+    const { pane, ownWrites, conversions, refresh } = await setup("saved text", "saved text");
+    ownWrites.mark(FILE, "saved text");
+    expect(await refresh("changed elsewhere", [FILE])).toBe(true);
+    expect(conversions()).toBe(1);
+    expect(pane.editorContent()).toBe("changed elsewhere");
+  });
+
+  it("a loader without ownWrites (autosave not wired) keeps converting every event", async () => {
+    // Control for the mark: same event, same disk, no store.
+    const paneManager = createPaneManager();
+    const pane = paneManager.activePane();
+    const entry = { kind: "file" as const, name: "doc.adoc", path: "doc.adoc" };
+    pane.setSelectedRootId("root-0");
+    pane.setSelectedFile(entry);
+    pane.setSavedContent("same");
+    pane.setEditorContent("same");
+    let conversions = 0;
+    const state = {
+      paneManager, pushNavHistory: () => {}, autoRefresh: () => false,
+      convert: async () => { conversions++; return { html: "", frontmatter: null, toc: null, meta: {} }; },
+      registerReader: () => {},
+      previewReflects: async () => true,
+      notePreviewed: () => {},
+      notePreviewFailed: () => {},
+    } as unknown as AppState;
+    const watcher = { setTarget: () => {}, start: () => {}, stop: () => {}, destroy: () => {} } as unknown as Parameters<typeof import("./file-loader.ts").createFileLoader>[0]["watcher"];
+    const { createFileLoader } = await import("./file-loader.ts");
+    const loader = createFileLoader({ rootPaths: () => new Map([["root-0", ROOT]]), state, watcher });
+    readResolvers = [];
+    readRejecters = [];
+    const done = loader.refreshFromDisk(entry, "root-0", [FILE]);
+    await new Promise((r) => setTimeout(r, 0));
+    resolveRead!("same");
+    await done;
+    expect(conversions).toBe(1);
+  });
+});
+
+describe("createFileLoader / nested include reads", () => {
+  beforeEach(() => {
+    resolveRead = undefined;
+    rejectRead = undefined;
+    readFileByPathMock = async () => null;
+    readFilesRelativeMock = async () => new Map<string, string>();
+    localStorage.clear();
+  });
+
+  // main -> p0..p3 (direct), each p<i> -> n<i> (nested), n2 is missing on disk.
+  const disk: Record<string, string> = {};
+  for (let i = 0; i < 4; i++) {
+    disk[`p${i}.adoc`] = `include::n${i}.adoc[]`;
+    if (i !== 2) disk[`n${i}.adoc`] = `leaf ${i}`;
+  }
+  const MAIN = "include::p0.adoc[]\ninclude::p1.adoc[]\ninclude::p2.adoc[]\ninclude::p3.adoc[]\n";
+
+  async function load(opts: { failBatchAfter?: number } = {}) {
+    readResolvers = [];
+    readRejecters = [];
+    const { collectIncludes } = await import("@markdraw/core/asciidoc.ts");
+    const batches: string[][] = [];
+    const singles: string[] = [];
+    let batchCalls = 0;
+    readFilesRelativeMock = async (_root, paths) => {
+      batchCalls++;
+      if (opts.failBatchAfter !== undefined && batchCalls > opts.failBatchAfter) throw new Error("ipc down");
+      batches.push([...paths]);
+      return new Map(paths.filter((p) => p in disk).map((p) => [p, disk[p]!]));
+    };
+    readFileByPathMock = async (_root, rel) => {
+      singles.push(rel);
+      return disk[rel] ?? null;
+    };
+    const paneManager = createPaneManager();
+    const pane = paneManager.activePane();
+    let included: string[] = [];
+    const registered: Array<{ readFile: (p: string) => Promise<string | null>; readFiles: (p: string[]) => Promise<ReadonlyMap<string, string | null>> }> = [];
+    const state = {
+      paneManager,
+      pushNavHistory: () => {},
+      autoRefresh: () => false,
+      convert: async (_path: string, content: string, readFile: (p: string) => Promise<string | null>, readFiles?: never) => {
+        included = [...(await collectIncludes(content, "", readFile, new Set(), readFiles)).keys()];
+        return { html: "<p>ok</p>", frontmatter: null, toc: null, meta: {} };
+      },
+      registerReader: (_pane: unknown, _root: unknown, _path: unknown, reader: never) => { registered.push(reader); },
+      previewReflects: async () => true,
+      notePreviewed: () => {},
+      notePreviewFailed: () => {},
+    } as unknown as AppState;
+    const targets: Array<{ includePaths: string[] }> = [];
+    const watcher = {
+      setTarget: (t: { includePaths: string[] }) => { targets.push(t); },
+      start: () => {}, stop: () => {}, destroy: () => {},
+    } as unknown as Parameters<typeof import("./file-loader.ts").createFileLoader>[0]["watcher"];
+    const { createFileLoader } = await import("./file-loader.ts");
+    const loader = createFileLoader({ rootPaths: () => new Map([["root-0", "/ws"]]), state, watcher });
+    const done = loader.loadFileContent({ kind: "file", name: "main.adoc", path: "main.adoc" }, false, false, "root-0");
+    await new Promise((r) => setTimeout(r, 0));
+    resolveRead!(MAIN);
+    await done;
+    return { batches, singles, included: () => included, targets, pane, registered };
+  }
+
+  it("reads the nested layer in one batch, never file by file", async () => {
+    // Mutation captured: a readFiles that loops readFile (or no readFiles
+    // handed to convert) turns the second layer back into 3 single reads.
+    const { batches, singles, included, targets } = await load();
+    expect(batches).toEqual([
+      ["p0.adoc", "p1.adoc", "p2.adoc", "p3.adoc"], // the loader's pre-scan
+      ["n0.adoc", "n1.adoc", "n2.adoc", "n3.adoc"], // layer 1, one IPC
+    ]);
+    expect(singles).toEqual([]);
+    // n2 is gone: p2 stays included, its missing child does not
+    expect(included().sort()).toEqual(["n0.adoc", "n1.adoc", "n3.adoc", "p0.adoc", "p1.adoc", "p2.adoc", "p3.adoc"]);
+    // the nested files the batch found are watched too
+    expect(targets.at(-1)!.includePaths).toContain("n3.adoc");
+    expect(targets.at(-1)!.includePaths).not.toContain("n2.adoc");
+  });
+
+  it("falls back to reading one by one when the batch IPC fails, and says why", async () => {
+    const warn = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...a: unknown[]) => { warnings.push(a); };
+    try {
+      const { singles, included } = await load({ failBatchAfter: 1 });
+      expect(singles.sort()).toEqual(["n0.adoc", "n1.adoc", "n2.adoc", "n3.adoc"]);
+      expect(included().sort()).toEqual(["n0.adoc", "n1.adoc", "n3.adoc", "p0.adoc", "p1.adoc", "p2.adoc", "p3.adoc"]);
+      expect(String(warnings[0]?.[0])).toContain("Batch include read failed");
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  it("serves cached files from the registered reader without another IPC", async () => {
+    const { batches, singles, registered } = await load();
+    const reader = registered.at(-1)!;
+    const again = await reader.readFiles(["p0.adoc", "n1.adoc"]);
+    expect([...again.entries()]).toEqual([["p0.adoc", "include::n0.adoc[]"], ["n1.adoc", "leaf 1"]]);
+    expect(await reader.readFile("n3.adoc")).toBe("leaf 3");
+    expect(batches).toHaveLength(2);
+    expect(singles).toEqual([]);
   });
 });

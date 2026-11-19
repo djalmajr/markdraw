@@ -23,6 +23,7 @@ import { getStoredAiMode, setStoredAiMode, type AIChatMode } from "@markdraw/cor
 import { formatChatTranscript } from "../lib/chat-export.ts";
 import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
 import type { CustomInstructions } from "@markdraw/ai/slash-commands.ts";
+import type { ReadFiles } from "@markdraw/core/asciidoc.ts";
 import type { ConvertOptions, ConvertResult } from "@markdraw/core/converter.ts";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
 import {
@@ -137,6 +138,27 @@ export interface AiMentionContext {
   rootId?: string;
   rootPath?: string;
   absolutePath?: string;
+}
+
+/** The document an edit conversion belongs to, as it is named when the edit
+ *  runs (after a rename that is the new path, not the one it loaded under). */
+export interface ConvertedDoc {
+  filePath: string;
+  rootId: string | null;
+  tabId: string | null;
+}
+
+/** How one open document reads its includes: its workspace root and cache. */
+export interface DocReader {
+  readFile: (path: string) => Promise<string | null>;
+  /** Batched read, one call per layer of nested includes. */
+  readFiles?: ReadFiles;
+  /** Called after an edit conversion of this document was published (to the
+   *  pane, or to the snapshot of its background tab): the loader refreshes what
+   *  the document depends on (watched includes). `consulted` is every path that
+   *  accepted conversion asked the reader for, missing files included, and
+   *  nothing the reader's cache holds from older versions of the text. */
+  converted?: (pane: PaneStore, content: string, doc: ConvertedDoc, consulted: ReadonlySet<string>) => void;
 }
 
 /** One checklist entry of the live AI plan (model-maintained, user-steered). */
@@ -1332,6 +1354,13 @@ export function createAppState(config: AppStateConfig) {
           ? getMarkdownIncludePaths(source, base)
           : getIncludePaths(source, base);
         const updated = pane.tabs.updateTabFile(tab.id, rewritten, rewritten.slice(rewritten.lastIndexOf("/") + 1), rootId, { includePaths });
+        if (updated) {
+          rekeyReader(pane, rootId, tab.filePath, rewritten);
+          carryEdit(
+            { pane, tabId: tab.id, rootId, filePath: tab.filePath },
+            { pane, tabId: updated.id, rootId, filePath: rewritten },
+          );
+        }
         const selected = pane.selectedFile();
         if (updated && active && selected?.path === tab.filePath && pane.selectedRootId() === rootId) {
           pane.setSelectedFile({ ...selected, path: rewritten, name: updated.fileName });
@@ -1630,38 +1659,313 @@ export function createAppState(config: AppStateConfig) {
 
   // ── Conversion ─────────────────────────────────────────────────────────
 
-  let editorConvertTimer: ReturnType<typeof setTimeout> | undefined;
+  // Include reader (root and cache) per open document. Each load builds its own
+  // reader; the preview conversion of an edit must use the one of the tab and
+  // pane it converts, not whichever file loaded last (a single global reader
+  // sent a second pane's edits through the first pane's root and cache).
+  const docReaders = new WeakMap<PaneStore, Map<string, DocReader>>();
+  const docKey = (rootId: string | null, filePath: string) => `${rootId ?? ""}\0${filePath}`;
+
+  function registerReader(pane: PaneStore, rootId: string | null, filePath: string, reader: DocReader) {
+    let readers = docReaders.get(pane);
+    if (!readers) docReaders.set(pane, (readers = new Map()));
+    const key = docKey(rootId, filePath);
+    readers.delete(key); // re-insert: the last entry is the most recent
+    readers.set(key, reader);
+    // A closed tab must not keep its include cache alive.
+    const shown = new Set(pane.tabs.tabs().map((tab) => docKey(tab.rootId, tab.filePath)));
+    shown.add(key);
+    for (const k of readers.keys()) if (!shown.has(k)) readers.delete(k);
+  }
+
+  function readerFor(pane: PaneStore, rootId: string | null, filePath: string): DocReader | undefined {
+    const readers = docReaders.get(pane);
+    if (!readers) return undefined;
+    const exact = readers.get(docKey(rootId, filePath));
+    if (exact) return exact;
+    // The tab's file was renamed or moved after it loaded: the cache is keyed
+    // by include path, so the last reader of the same root still resolves it.
+    const prefix = `${rootId ?? ""}\0`;
+    let sameRoot: DocReader | undefined;
+    for (const [k, reader] of readers) if (k.startsWith(prefix)) sameRoot = reader;
+    return sameRoot;
+  }
+
+  /** A tab moved to another pane keeps its reader (root and include cache):
+   *  without it the first edit there would convert with no includes. */
+  function transferReader(from: PaneStore, to: PaneStore, rootId: string | null, filePath: string) {
+    const reader = readerFor(from, rootId, filePath);
+    if (!reader || from === to) return;
+    registerReader(to, rootId, filePath, reader);
+    docReaders.get(from)?.delete(docKey(rootId, filePath));
+  }
+
+  /** A loaded file changed path inside its workspace: its reader follows, so
+   *  edits keep the include cache and the lookup is by the path now in use. */
+  function rekeyReader(pane: PaneStore, rootId: string | null, oldPath: string, newPath: string) {
+    const readers = docReaders.get(pane);
+    const reader = readers?.get(docKey(rootId, oldPath));
+    if (!readers || !reader || oldPath === newPath) return;
+    readers.delete(docKey(rootId, oldPath));
+    registerReader(pane, rootId, newPath, reader);
+  }
+
+  function convertWith(filePath: string, content: string, reader: DocReader): Promise<ConvertResult> {
+    const convertOpts = { filePath, fileContent: content, readFile: reader.readFile, readFiles: reader.readFiles };
+    return isMdFile(filePath) ? config.convertMarkdown(convertOpts) : config.convertAdoc(convertOpts);
+  }
+
+  // Edit conversions: per pane and document at most one conversion runs and one
+  // waits (the newest). Every edit takes a generation; only a result of the
+  // newest generation, for the document the pane still shows, is published.
+  interface EditJob {
+    gen: number;
+    content: string;
+    filePath: string;
+    rootId: string | null;
+    tabId: string | null;
+    fallback: (p: string) => Promise<string | null>;
+  }
+  interface EditConvert {
+    gen: number;
+    timer: ReturnType<typeof setTimeout> | undefined;
+    running: boolean;
+    queued: EditJob | null;
+    /** The newest edit, until its conversion was published, failed or dropped:
+     *  what a rename or a pane move has to take along to the new identity. */
+    pending: EditJob | null;
+    /** The text of the newest edit. */
+    last: string;
+    /** Settles when the document has no conversion running or waiting. */
+    idle: Promise<void> | null;
+    settle: (() => void) | null;
+  }
+  const editConverts = new WeakMap<PaneStore, Map<string, EditConvert>>();
+  // What each document's preview shows right now, per pane: the text its HTML
+  // was converted from, or null when the screen holds an error (or nothing).
+  // Every publication to the preview records itself here (an edit conversion,
+  // the loader's refresh, the loader's error), and a rename or a pane move
+  // carries the record along. The echo of an autosave is skipped only when the
+  // record says the saved text is on screen: any other state converts again.
+  const published = new WeakMap<PaneStore, Map<string, string | null>>();
+  const editKey = (tabId: string | null, rootId: string | null, filePath: string) =>
+    `${tabId ?? ""}\0${docKey(rootId, filePath)}`;
+  const publishedMap = (pane: PaneStore) => {
+    let shown = published.get(pane);
+    if (!shown) published.set(pane, (shown = new Map()));
+    return shown;
+  };
+  // The record of a document that has no tab any more (closed, evicted from
+  // the closed-tabs history, renamed away) is dropped with it: the text it keeps
+  // is a whole document. A rename moves the entry first (`carryEdit`).
+  const tabOfKey = (key: string) => key.slice(0, key.indexOf("\0"));
+  const prunePublished = (pane: PaneStore, liveTabs: ReadonlySet<string>) => {
+    const shown = published.get(pane);
+    if (!shown) return;
+    for (const key of Array.from(shown.keys())) {
+      const tabId = tabOfKey(key);
+      if (tabId !== "" && !liveTabs.has(tabId)) shown.delete(key);
+    }
+  };
+  createEffect(
+    () => paneManager.panes().map((pane) => [pane, new Set(pane.tabs.tabs().map((tab) => tab.id))] as const),
+    (panes) => {
+      for (const [pane, liveTabs] of panes) prunePublished(pane, liveTabs);
+    },
+  );
+
+  const stillShown = (pane: PaneStore, job: EditJob) =>
+    pane.tabs.activeTabId() === job.tabId
+    && pane.selectedFile()?.path === job.filePath
+    && pane.selectedRootId() === job.rootId;
+
+  // The tab of a job that is no longer the one on screen but still exists as a
+  // loaded background tab: its snapshot holds the text the job converted.
+  const backgroundTab = (pane: PaneStore, job: EditJob) => {
+    if (job.tabId === null || pane.tabs.activeTabId() === job.tabId) return undefined;
+    const tab = pane.tabs.getTab(job.tabId);
+    return tab && !tab.needsLoad && tab.filePath === job.filePath && tab.rootId === job.rootId
+      ? tab
+      : undefined;
+  };
+
+  async function runEditConverts(pane: PaneStore, key: string, doc: EditConvert, first: EditJob) {
+    doc.running = true;
+    let job: EditJob | null = first;
+    while (job) {
+      const current: EditJob = job;
+      // The tab closed or the pane moved to another file while this waited: a
+      // tab that is still open in the background converts too, and its
+      // snapshot (not the pane) takes the result, so coming back shows it.
+      if (stillShown(pane, current) || backgroundTab(pane, current)) {
+        try {
+          const shared = readerFor(pane, current.rootId, current.filePath) ?? { readFile: current.fallback };
+          // What this conversion asks the reader for (the cache behind it also
+          // holds what older versions of the text read).
+          const consulted = new Set<string>();
+          const reader: DocReader = {
+            readFile: (path) => {
+              consulted.add(path);
+              return shared.readFile(path);
+            },
+            readFiles: shared.readFiles
+              ? (paths) => {
+                  for (const path of paths) consulted.add(path);
+                  return shared.readFiles!(paths);
+                }
+              : undefined,
+            converted: shared.converted,
+          };
+          const result = await convertWith(current.filePath, current.content, reader);
+          if (current.gen === doc.gen) {
+            const converted: ConvertedDoc = { filePath: current.filePath, rootId: current.rootId, tabId: current.tabId };
+            if (stillShown(pane, current)) {
+              if (pane.editorContent() === current.content) {
+                pane.setHtml(result.html);
+                pane.setFrontmatter(result.frontmatter);
+                publishedMap(pane).set(key, current.content);
+                reader.converted?.(pane, current.content, converted, consulted);
+              }
+            } else {
+              const tab = backgroundTab(pane, current);
+              if (tab && tab.editorContent === current.content) {
+                pane.tabs.updateTabContent(tab.id, { html: result.html, frontmatter: result.frontmatter });
+                publishedMap(pane).set(key, current.content);
+                reader.converted?.(pane, current.content, converted, consulted);
+              }
+            }
+          }
+        } catch (e) {
+          // The screen keeps what it showed: the record keeps saying so, and the
+          // text that failed is not in it.
+          console.error("Failed to convert editor content:", e);
+        }
+      }
+      if (current.gen === doc.gen) doc.pending = null;
+      job = doc.queued;
+      doc.queued = null;
+    }
+    doc.running = false;
+    if (doc.timer === undefined) {
+      editConverts.get(pane)?.delete(key);
+      doc.settle?.();
+    }
+  }
+
+  function scheduleEdit(
+    pane: PaneStore,
+    rootId: string | null,
+    tabId: string | null,
+    filePath: string,
+    content: string,
+    readFile: (p: string) => Promise<string | null>,
+  ) {
+    const key = editKey(tabId, rootId, filePath);
+    let docs = editConverts.get(pane);
+    if (!docs) editConverts.set(pane, (docs = new Map()));
+    let doc = docs.get(key);
+    if (!doc) {
+      docs.set(key, (doc = { gen: 0, timer: undefined, running: false, queued: null, pending: null, last: "", idle: null, settle: null }));
+    }
+    const job: EditJob = { gen: ++doc.gen, content, filePath, rootId, tabId, fallback: readFile };
+    doc.pending = job;
+    doc.last = content;
+    if (!doc.idle) doc.idle = new Promise<void>((resolve) => { doc.settle = resolve; });
+    clearTimeout(doc.timer);
+    // The waiting job is already outdated: drop it now, or it would start (and
+    // hold the queue for a whole conversion) inside the newest debounce window.
+    doc.queued = null;
+    const target = doc;
+    target.timer = setTimeout(() => {
+      target.timer = undefined;
+      if (target.running) target.queued = job; // replaces an older waiting job
+      else void runEditConverts(pane, key, target, job);
+    }, 300);
+  }
 
   function debouncedConvert(
     newContent: string,
     filePath: string,
     readFile: (p: string) => Promise<string | null>,
   ) {
-    setEditorContent(newContent);
-    clearTimeout(editorConvertTimer);
-    editorConvertTimer = setTimeout(async () => {
-      try {
-        const convertOpts = { filePath, fileContent: newContent, readFile };
-        const result = isMdFile(filePath)
-          ? await config.convertMarkdown(convertOpts)
-          : await config.convertAdoc(convertOpts);
-        setHtml(result.html);
-        setFrontmatter(result.frontmatter);
-      } catch (e) {
-        console.error("Failed to convert editor content:", e);
-      }
-    }, 300);
+    const pane = paneManager.activePane();
+    pane.setEditorContent(newContent);
+    scheduleEdit(pane, pane.selectedRootId(), pane.tabs.activeTabId(), filePath, newContent, readFile);
+  }
+
+  interface EditSite {
+    pane: PaneStore;
+    tabId: string | null;
+    rootId: string | null;
+    filePath: string;
+  }
+
+  /** The document was renamed or its tab moved to another pane while an edit
+   *  still waited for its conversion (or ran): the job is bound to the old
+   *  identity and would be dropped, leaving the preview on older text. Retire
+   *  it and convert the same text again under the new identity, after the usual
+   *  debounce, so the preview follows what the user typed. */
+  function carryEdit(from: EditSite, to: EditSite) {
+    const oldKey = editKey(from.tabId, from.rootId, from.filePath);
+    const newKey = editKey(to.tabId, to.rootId, to.filePath);
+    if (from.pane === to.pane && oldKey === newKey) return;
+    // The screen shows the same thing under the new identity.
+    const shown = publishedMap(from.pane);
+    if (shown.has(oldKey)) {
+      const record = shown.get(oldKey)!;
+      shown.delete(oldKey);
+      publishedMap(to.pane).set(newKey, record);
+    }
+    const doc = editConverts.get(from.pane)?.get(oldKey);
+    const job = doc?.pending;
+    if (!doc || !job) return;
+    doc.gen++; // a conversion still running for the old identity is dropped
+    clearTimeout(doc.timer);
+    doc.timer = undefined;
+    doc.queued = null;
+    doc.pending = null;
+    if (!doc.running) {
+      editConverts.get(from.pane)?.delete(oldKey);
+      doc.settle?.();
+    }
+    scheduleEdit(to.pane, to.rootId, to.tabId, to.filePath, job.content, job.fallback);
+  }
+
+  /** True when the HTML on screen was converted from exactly `content`; an
+   *  edit conversion of that text still running or waiting is waited for first
+   *  (it is not converted twice). False for anything else (an error on screen,
+   *  the HTML of another text, nothing published): the caller converts again. */
+  async function previewReflects(pane: PaneStore, rootId: string | null, filePath: string, content: string): Promise<boolean> {
+    const key = editKey(pane.tabs.activeTabId(), rootId, filePath);
+    const doc = editConverts.get(pane)?.get(key);
+    if (doc?.idle && doc.last === content) await doc.idle;
+    return publishedMap(pane).get(key) === content;
+  }
+
+  /** How many documents of the pane have a record of what their preview shows. */
+  const publishedPreviews = (pane: PaneStore) => published.get(pane)?.size ?? 0;
+
+  /** The HTML converted from `content` reached the screen outside the edit
+   *  path (the loader's refresh). */
+  function notePreviewed(pane: PaneStore, rootId: string | null, filePath: string, content: string) {
+    publishedMap(pane).set(editKey(pane.tabs.activeTabId(), rootId, filePath), content);
+  }
+
+  /** The screen now holds an error, or nothing, instead of a preview (the
+   *  loader published an error or cleared the pane for another file). A tab
+   *  that was just opened is not the active one yet when the loader starts:
+   *  the loader names it. */
+  function notePreviewFailed(pane: PaneStore, rootId: string | null, filePath: string, tabId: string | null = pane.tabs.activeTabId()) {
+    publishedMap(pane).set(editKey(tabId, rootId, filePath), null);
   }
 
   async function convert(
     filePath: string,
     content: string,
     readFile: (p: string) => Promise<string | null>,
+    readFiles?: ReadFiles,
   ): Promise<ConvertResult> {
-    const convertOpts = { filePath, fileContent: content, readFile };
-    return isMdFile(filePath)
-      ? await config.convertMarkdown(convertOpts)
-      : await config.convertAdoc(convertOpts);
+    return await convertWith(filePath, content, { readFile, readFiles });
   }
 
   // ── State reset ────────────────────────────────────────────────────────
@@ -1871,6 +2175,14 @@ export function createAppState(config: AppStateConfig) {
     clearToc,
     convert,
     debouncedConvert,
+    registerReader,
+    transferReader,
+    rekeyReader,
+    carryEdit,
+    previewReflects,
+    notePreviewed,
+    notePreviewFailed,
+    publishedPreviews,
     findEntryByPath,
     handleClearRecentFiles,
     handleClearRecentFolders,
@@ -1911,7 +2223,9 @@ export function createAppState(config: AppStateConfig) {
     FontFamilies,
     FontSizes,
 
-    // Platform-assigned readFile for editor re-conversion
+    // Fallback reader for editor re-conversion when no document registered its
+    // own (`registerReader`); the loader no longer assigns it, because one
+    // global reader served whichever file loaded last, in whatever pane.
     _readFile: null as ((path: string) => Promise<string | null>) | null,
   };
 }

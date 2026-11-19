@@ -150,7 +150,7 @@ describe("watcher recovery and rename regressions", () => {
       return { html: "<p>corrected</p>", frontmatter: null, toc: null, meta: {} };
     });
     const callbacks: (() => void)[] = [];
-    let live: (() => void) | undefined;
+    let live: ((event: { payload: unknown }) => void) | undefined;
     vi.stubGlobal("__TAURI_INTERNALS__", { invoke, transformCallback: (callback: () => void) => {
       callbacks.push(callback);
       return callbacks.length;
@@ -192,7 +192,7 @@ describe("watcher recovery and rename regressions", () => {
     expect(pane.tabs.getActiveTab()?.needsLoad).toBe(false);
     expect(live).toBeDefined();
     disk = "corrected";
-    live?.();
+    live?.({ payload: { paths: [`${workspace}/broken.adoc`] } });
     await vi.advanceTimersByTimeAsync(10);
     await observed;
     expect(pane.html()).toBe("<p>corrected</p>");
@@ -3108,6 +3108,31 @@ describe("rename and move re-aim the shared watcher", () => {
     });
     expect(pane.editorContent()).toBe("Alpha buffer");
     expect(calls("watch_paths").at(-1)).toEqual({ paths: [`${other}/sub/alpha.md`] });
+  });
+
+  it("a pending preview edit follows a file moved to another workspace", async () => {
+    const { state, folder, paneManager } = fixture();
+    const other = "/other";
+    const moved = { ...alpha, path: "sub/alpha.md" };
+    const sub: FSEntry = { kind: "directory", path: "sub", name: "sub", children: [moved] };
+    let didMove = false;
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return args.path === other ? [sub] : didMove ? [beta] : [alpha, beta];
+      if (command === "move_path") { didMove = true; return; }
+      if (command === "plugin:event|listen") return 1;
+    });
+    await folder.openFolderPath(other);
+    await folder.openFolderPath(workspace);
+    const pane = paneManager.activePane();
+    openDocument(pane, alpha, "Alpha saved");
+    state.debouncedConvert("Alpha typed before the move", "alpha.md", async () => null);
+    flush();
+    await folder.handleMove(alpha, "sub", workspace, other);
+    flush();
+    expect(pane.tabs.getActiveTab()).toMatchObject({ filePath: "sub/alpha.md", rootId: other });
+    await vi.advanceTimersByTimeAsync(300);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pane.html()).toBe("<p>Alpha typed before the move</p>");
   });
 
   it("repoints every descendant tab of a renamed folder in every pane and keeps the open file watched", async () => {

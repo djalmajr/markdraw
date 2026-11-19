@@ -48,40 +48,67 @@ function resolvePath(baseDirPath: string, target: string): string {
   return parts.join("/");
 }
 
+/** Reads several workspace-relative files at once (one IPC on the desktop).
+ *  A path that is missing or unreadable maps to null/undefined or is absent. */
+export type ReadFiles = (
+  paths: string[],
+) => Promise<ReadonlyMap<string, string | null | undefined>>;
+
 /**
- * Recursively collect all includes (including nested) from content.
+ * Collect all includes (including nested) from content, layer by layer.
  * Returns a Map of resolvedPath -> content.
+ *
+ * Layer 0 is the includes of `content`; layer N+1 is the includes found in the
+ * files layer N returned. With `readFiles` each layer is one batched read
+ * (a document with 10 direct and 10 nested includes costs 2 reads instead of
+ * 11); without it the files of a layer are read one by one with `readFile`.
+ * Same rules as the former depth-first walk: `visited` is marked when a path
+ * is first seen (cycles and repeats are read once), an unreadable file is not
+ * expanded, and every target resolves against the directory of the file that
+ * names it.
  */
 export async function collectIncludes(
   content: string,
   baseDirPath: string,
   readFile: (path: string) => Promise<string | null>,
   visited = new Set<string>(),
+  readFiles?: ReadFiles,
 ): Promise<Map<string, string>> {
   const result = new Map<string, string>();
-  const targets = scanIncludes(content);
+  let layer: { content: string; dir: string }[] = [{ content, dir: baseDirPath }];
 
-  for (const target of targets) {
-    const resolved = resolvePath(baseDirPath, target);
-    if (visited.has(resolved)) continue;
-    visited.add(resolved);
-
-    const fileContent = await readFile(resolved);
-    if (fileContent !== null) {
-      result.set(resolved, fileContent);
-      // Recursively scan for nested includes
-      const nestedDir = resolved.includes("/")
-        ? resolved.substring(0, resolved.lastIndexOf("/"))
-        : "";
-      const nested = await collectIncludes(
-        fileContent,
-        nestedDir,
-        readFile,
-        visited,
-      );
-      for (const [k, v] of nested) {
-        result.set(k, v);
+  while (layer.length > 0) {
+    const wanted: string[] = [];
+    for (const { content: source, dir } of layer) {
+      for (const target of scanIncludes(source)) {
+        const resolved = resolvePath(dir, target);
+        if (visited.has(resolved)) continue;
+        visited.add(resolved);
+        wanted.push(resolved);
       }
+    }
+    if (wanted.length === 0) break;
+
+    const loaded = new Map<string, string>();
+    if (readFiles) {
+      const batch = await readFiles(wanted);
+      for (const path of wanted) {
+        const fileContent = batch.get(path);
+        if (fileContent !== null && fileContent !== undefined) loaded.set(path, fileContent);
+      }
+    } else {
+      for (const path of wanted) {
+        const fileContent = await readFile(path);
+        if (fileContent !== null) loaded.set(path, fileContent);
+      }
+    }
+
+    layer = [];
+    for (const path of wanted) {
+      const fileContent = loaded.get(path);
+      if (fileContent === undefined) continue;
+      result.set(path, fileContent);
+      layer.push({ content: fileContent, dir: dirOf(path) });
     }
   }
 
@@ -147,6 +174,8 @@ export interface ConvertOptions {
   filePath: string;
   fileContent: string;
   readFile: (path: string) => Promise<string | null>;
+  /** Optional batched reader: nested includes are collected one layer per call. */
+  readFiles?: ReadFiles;
 }
 
 /**
@@ -164,7 +193,7 @@ function dirOf(path: string): string {
  * directory stack to track the current file context during processing.
  */
 export async function convertAdoc(opts: ConvertOptions): Promise<ConvertResult> {
-  const { filePath, fileContent, readFile } = opts;
+  const { filePath, fileContent, readFile, readFiles } = opts;
 
   // Strip YAML frontmatter (if any) before any other processing
   const { frontmatter, body } = extractFrontmatter(fileContent);
@@ -177,6 +206,8 @@ export async function convertAdoc(opts: ConvertOptions): Promise<ConvertResult> 
     body,
     baseDirPath,
     readFile,
+    new Set(),
+    readFiles,
   );
 
   // Directory stack: tracks the base dir of the file currently being processed.

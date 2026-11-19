@@ -155,6 +155,7 @@ import { createFileLoader } from "./lib/file-loader.ts";
 import { createNavigation } from "./lib/navigation.ts";
 import { createFolder, runColdStart } from "./lib/folder.ts";
 import { createFileAutosave } from "./lib/file-autosave.ts";
+import { createOwnWrites } from "./lib/external-reload.ts";
 import { createTabActions } from "./lib/tab-actions.ts";
 import {
   ExcalidrawFrame,
@@ -1586,14 +1587,15 @@ export function App() {
 
   // File watcher (watches current file + includes for content changes).
   // Also fires for our own autosave writes, so the refresh keeps unsaved edits.
-  const watcher = new FileWatcher(async () => {
+  const ownWrites = createOwnWrites();
+  const watcher = new FileWatcher(async (eventPaths) => {
     const pane = state.paneManager.activePane();
     const tab = pane.tabs.getActiveTab();
     const file = pane.selectedFile();
     if (!file || tab?.needsLoad) return;
 
     try {
-      const changedElsewhere = await loader.refreshFromDisk(file);
+      const changedElsewhere = await loader.refreshFromDisk(file, undefined, eventPaths);
       // Re-index only for an outside edit: autosave no longer writes back
       // after a reload, which used to re-index as a side effect. Not on every
       // event — each autosave fires one, and re-indexing re-chunks (and, on
@@ -1607,7 +1609,7 @@ export function App() {
   });
 
   // Create modules: loader -> navigation -> folder -> dnd
-  const loader = createFileLoader({ rootPaths, state, watcher });
+  const loader = createFileLoader({ rootPaths, state, watcher, ownWrites });
 
   const navigation = createNavigation({
     loadFileContent: loader.loadFileContent,
@@ -1758,7 +1760,10 @@ export function App() {
     };
   });
 
-  createFileAutosave(state, folder.handleEditorSave, reindexActiveFile);
+  createFileAutosave(state, folder.handleEditorSave, reindexActiveFile, {
+    writes: ownWrites,
+    rootPath: (rootId) => (rootId ? rootPaths().get(rootId) : undefined),
+  });
   onCleanup(() => { void watcher.destroy(); });
 
   // Hyprland: the toolbar and the welcome screen move the window only once

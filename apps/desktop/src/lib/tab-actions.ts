@@ -11,7 +11,7 @@ import type { createFileLoader } from "./file-loader.ts";
 import { SCRATCH_ROOT_ID, scratchPath } from "./scratch.ts";
 
 interface TabActionDeps {
-  state: Pick<AppState, "paneManager" | "findEntryByPath" | "roots">;
+  state: Pick<AppState, "paneManager" | "findEntryByPath" | "roots" | "transferReader" | "rekeyReader" | "carryEdit">;
   rootPaths: () => ReadonlyMap<string, string>;
   syncWatcher: ReturnType<typeof createFileLoader>["syncWatcher"];
   loadTabContent: ReturnType<typeof createFileLoader>["loadTabContent"];
@@ -231,10 +231,17 @@ export function createTabActions({
     if (newRootId === rootId) {
       const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, rootId, { includePaths }, displacedAsDraft);
       if (!renamedTab) return;
+      // The loaded document keeps its include reader under the new path.
+      if (!tab.needsLoad) state.rekeyReader(pane, rootId, oldPath, entry.path);
       if (active) {
         pane.setSelectedFile(entry);
         pane.setSelectedRootId(rootId);
       }
+      // An edit still waiting for its preview follows the new identity.
+      state.carryEdit(
+        { pane, tabId: tab.id, rootId, filePath: oldPath },
+        { pane, tabId: renamedTab.id, rootId, filePath: entry.path },
+      );
       if (active && renamedTab.needsLoad) {
         void loadTabContent(pane, entry, renamedTab);
         return;
@@ -260,7 +267,12 @@ export function createTabActions({
           editorMode: tab.editorMode,
         };
     const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, newRootId, { ...carried, includePaths }, displacedAsDraft);
-    if (!renamedTab || !active) return;
+    if (!renamedTab) return;
+    state.carryEdit(
+      { pane, tabId: tab.id, rootId, filePath: oldPath },
+      { pane, tabId: renamedTab.id, rootId: newRootId, filePath: entry.path },
+    );
+    if (!active) return;
     const id = renamedTab.id;
     pane.setSelectedFile(entry);
     pane.setSelectedRootId(newRootId);
@@ -317,6 +329,13 @@ export function createTabActions({
     target.setHtml(moved.html);
     target.setFrontmatter(moved.frontmatter);
     target.setEditorMode(moved.editorMode);
+    // The include reader (root and cache) goes with a loaded tab; an unloaded
+    // one builds its own when it loads.
+    if (!tab.needsLoad) state.transferReader(source, target, tab.rootId, tab.filePath);
+    state.carryEdit(
+      { pane: source, tabId, rootId: tab.rootId, filePath: tab.filePath },
+      { pane: target, tabId: targetId, rootId: tab.rootId, filePath: tab.filePath },
+    );
     source.tabs.closeTab(tabId);
     void selectTab(target, { ...tab, id: targetId }, true);
   }

@@ -1,10 +1,14 @@
 import { createEffect, onCleanup } from "solid-js";
 import { effectivePaneEditorMode, type AppState } from "@markdraw/ui/composables/create-app-state.ts";
+import type { OwnWrites } from "./external-reload.ts";
 
 export function createFileAutosave(
   state: Pick<AppState, "paneManager">,
   save: () => Promise<void>,
   reindex: () => void,
+  /** Records what each save writes (absolute path + content hash), so the
+   *  watcher event that echoes it does not convert the document again. */
+  echo?: { writes: OwnWrites; rootPath: (rootId: string | null) => string | undefined },
 ) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const cancel = () => clearTimeout(timer);
@@ -33,6 +37,10 @@ export function createFileAutosave(
         // Watcher reloads and undo can leave the working buffer equal to the
         // last save. Rewriting it could overwrite a newer external change.
         if (pane.editorContent() === pane.savedContent()) return;
+        // What this save writes: `save` reads the buffer synchronously, in this
+        // same tick, so the content captured here is the one that reaches disk.
+        const rootPath = echo?.rootPath(rootId);
+        if (echo && rootPath) echo.writes.mark(`${rootPath}/${file.path}`, pane.editorContent());
         void save().then(reindex);
       }, 1000);
     },
