@@ -1,4 +1,4 @@
-import { Show, createSignal, onSettled, onCleanup, createEffect } from "solid-js";
+import { Show, createSignal, onSettled, onCleanup, createEffect, untrack } from "solid-js";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import mermaid from "mermaid";
@@ -1421,6 +1421,19 @@ export function Preview(props: PreviewProps) {
       }
     },
   );
+
+  // A host can destroy this Preview before the path-change effect above
+  // runs — switching from a Markdown file to an HTML file replaces the
+  // component with HtmlPreview. If a request still belongs to this
+  // instance, hand it back as discarded from teardown so it cannot jump
+  // when the Markdown file is reopened. The host clears only when the
+  // value still matches, so a newer request survives; a handled request
+  // already made `requestOwner` null and is never reported here.
+  onCleanup(() => {
+    if (untrack(requestOwner) === null) return;
+    if (lastFragment) props.onFragmentDiscarded?.(lastFragment);
+    if (lastHeading) props.onHeadingDiscarded?.(lastHeading);
+  });
 
   // Navigation requests can arrive while the document is already on
   // screen — choosing a symbol in the current file writes

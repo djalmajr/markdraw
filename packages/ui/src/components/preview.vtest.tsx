@@ -61,7 +61,19 @@ vi.mock("@markdraw/core/kroki.ts", () => ({
   },
 }));
 
+// PaneView's other children pull in CodeMirror / dnd-kit; the host-signal
+// lifecycle tests below only need PaneView, Preview and HtmlPreview itself.
+vi.mock("./editor.tsx", () => ({ Editor: () => <div data-testid="editor-stub" /> }));
+vi.mock("./editor-toolbar.tsx", () => ({ EditorToolbar: () => null }));
+vi.mock("./content-toolbar.tsx", () => ({ ContentToolbar: () => null }));
+vi.mock("./tab-bar.tsx", () => ({ TabBar: () => null }));
+vi.mock("./empty-state.tsx", () => ({ EmptyState: () => null }));
+vi.mock("../lib/dnd/index.ts", () => ({
+  useDroppable: () => ({ ref: () => {}, isDropTarget: () => false }),
+}));
+
 import { Preview, setupTocScrollTracking } from "./preview.tsx";
+import { PaneView } from "./pane-view.tsx";
 import { FrontmatterPanel } from "./frontmatter-panel.tsx";
 import { ImageLightbox } from "./image-lightbox.tsx";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
@@ -1134,6 +1146,133 @@ describe("Preview — a jump request belongs to its own document", () => {
         await waitFor(() => expect(completions).toEqual(["b.md"]));
         expect(scroll).toHaveBeenCalledTimes(1);
         expect(untrack(request)).toBeNull();
+      });
+    }
+  }
+});
+
+describe("PaneView + Preview — host jump signal lifecycle", () => {
+  // The reviewer's eight-case probe, kept as a permanent regression.
+  // PaneView, Preview and HtmlPreview are the real components; only the
+  // renderer and PaneView's unrelated children are stubbed. Host signals
+  // live outside Preview, like create-app-state, and renderer promises are
+  // controlled so the request stays pending across the file switch.
+  type Order = "discard-only" | "path-first" | "request-first" | "html-then-reopen";
+  const READY_SVG = '<svg viewBox="0 0 10 400"><text>Ready</text></svg>';
+  const A_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="target-a">Target A</h1>';
+  const B_HTML = '<h1 id="target-b">Target B</h1><p>FILE B</p>';
+  const A_HTML = '<h1 id="target-a">Target A</h1><p>FILE A</p>';
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    diagramCtl.reset();
+  });
+
+  for (const kind of ["fragment", "heading"] as const) {
+    for (const order of ["discard-only", "path-first", "request-first", "html-then-reopen"] as const) {
+      it(`real PaneView/Preview ${kind}: ${order}`, async () => {
+        diagramCtl.mode.mermaid = "pending";
+        const oldValue = kind === "fragment" ? "target-a" : "Target A";
+        const newValue = kind === "fragment" ? "target-b" : "Target B";
+        const [request, setRequest] = createSignal<string | null>(oldValue);
+        const [file, setFile] = createSignal({ kind: "file", name: "a.md", path: "a.md" });
+        const [html, setHtml] = createSignal(A_DIAGRAM_HTML);
+        const [editorContent] = createSignal("<p>HTML B</p>");
+        let phase = "initial";
+        const writes: Array<{ value: string | null; committed: string | null; phase: string }> = [];
+        const write = (value: string | null) => {
+          writes.push({ value, committed: untrack(request), phase });
+          setRequest(value);
+        };
+        const pane = {
+          paneId: "p0",
+          editorMode: () => "preview",
+          selectedFile: file,
+          selectedRootId: () => "root",
+          html,
+          editorContent,
+          frontmatter: () => null,
+          loading: () => false,
+          tableWrap: () => false,
+          tabs: { tabs: () => [] },
+        } as any;
+        const state = {
+          pendingFragment: kind === "fragment" ? request : () => null,
+          pendingHeadingText: kind === "heading" ? request : () => null,
+          setPendingFragment: kind === "fragment" ? write : () => {},
+          setPendingHeadingText: kind === "heading" ? write : () => {},
+          editorWidth: () => 50,
+          syncScroll: () => false,
+          previewFindTrigger: () => 0,
+          previewSearchOpen: () => false,
+          tocVisible: () => false,
+          setHasToc: () => {},
+          setPreviewSearchOpen: () => {},
+        } as any;
+        const scroll = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(() => {});
+        const mount = () => render(() => (
+          <PaneView pane={pane} state={state} paneIndex={0} isActive={true} />
+        ));
+        const first = mount();
+        await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
+        expect(scroll).not.toHaveBeenCalled();
+
+        phase = "before-flush";
+        setHtml(B_HTML);
+        const path = order === "html-then-reopen" ? "b.html" : "b.md";
+        const changePath = () => setFile({ kind: "file", name: path, path });
+        if (order === "request-first") {
+          write(newValue);
+          changePath();
+        } else {
+          changePath();
+          if (order === "path-first") write(newValue);
+        }
+        // Solid publishes writes in the effect phase, not at setter time.
+        expect(untrack(request)).toBe(oldValue);
+
+        phase = "inside-flush";
+        flush();
+        diagramCtl.pending.mermaid?.({ svg: READY_SVG });
+        phase = "after-flush";
+        await tick();
+        await tick();
+
+        if (order === "html-then-reopen") {
+          // b.html destroys Preview before its path-change effect can run.
+          // Teardown must hand the still-pending A request back to the host.
+          expect(untrack(request)).toBeNull();
+          expect(writes.some((w) => w.value === null && w.committed === oldValue)).toBe(true);
+          expect(scroll).not.toHaveBeenCalled();
+
+          setFile({ kind: "file", name: "a.md", path: "a.md" });
+          setHtml(A_HTML);
+          flush();
+          await tick();
+          await tick();
+          expect(untrack(request)).toBeNull();
+          expect(scroll).not.toHaveBeenCalled();
+        } else if (order === "discard-only") {
+          expect(untrack(request)).toBeNull();
+          expect(scroll).not.toHaveBeenCalled();
+          first.unmount();
+          setFile({ kind: "file", name: "a.md", path: "a.md" });
+          setHtml(A_HTML);
+          flush();
+          mount();
+          await tick();
+          expect(untrack(request)).toBeNull();
+          expect(scroll).not.toHaveBeenCalled();
+        } else {
+          // A request written for B in the same batch survives A's discard.
+          expect(untrack(request)).toBeNull();
+          expect(scroll).toHaveBeenCalledTimes(1);
+          expect(writes.filter((w) => w.value === null)).toEqual([
+            { value: null, committed: newValue, phase: "after-flush" },
+          ]);
+        }
       });
     }
   }
