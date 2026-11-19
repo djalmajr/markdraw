@@ -34,6 +34,7 @@ import IconExpand from "~icons/lucide/expand";
 import { Portal } from "@solidjs/web";
 import { FrontmatterPanel } from "./frontmatter-panel.tsx";
 import { renderKroki } from "@markdraw/core/kroki.ts";
+import { mermaidCache } from "../lib/mermaid-cache.ts";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
 import "katex/dist/katex.min.css";
 import "@mdit/plugin-alert/style";
@@ -107,25 +108,62 @@ function sanitizeHtmlFragment(input: string): string {
   return doc.body.innerHTML;
 }
 
-let mermaidInitialized = false;
+let mermaidTheme: "dark" | "default" | null = null;
+let mermaidQueue: Promise<void> = Promise.resolve();
 let mermaidWarmPromise: Promise<void> | null = null;
+let mermaidId = 0;
+const MERMAID_CONFIG = { look: "classic", layout: "dagre", securityLevel: "strict", fontFamily: "inherit" } as const;
 
-function initMermaid(force = false) {
-  if (mermaidInitialized && !force) return;
+function uniqueMermaidIds(svg: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = svg;
+  const ids = new Map<string, string>();
+  const suffix = `-cached-${++mermaidId}`;
+  for (const el of template.content.querySelectorAll("[id]")) {
+    const id = el.id;
+    ids.set(id, `${id}${suffix}`);
+    el.id = `${id}${suffix}`;
+  }
+  const replaceReferences = (value: string) => {
+    for (const [id, replacement] of ids) {
+      const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      value = value.replace(new RegExp(`#${escaped}(?![\\w-])`, "g"), `#${replacement}`);
+    }
+    return value;
+  };
+  for (const el of template.content.querySelectorAll("*")) {
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name === "id") continue;
+      if (attr.name === "aria-labelledby" || attr.name === "aria-describedby") {
+        el.setAttribute(attr.name, attr.value.split(/\s+/).map((id) => ids.get(id) ?? id).join(" "));
+      } else if (/^(?:href|xlink:href|style|fill|stroke|filter|clip-path|mask|marker-start|marker-mid|marker-end)$/.test(attr.name)) {
+        el.setAttribute(attr.name, replaceReferences(attr.value));
+      }
+    }
+    if (el.localName === "style") el.textContent = replaceReferences(el.textContent ?? "");
+  }
+  return template.innerHTML;
+}
+
+function initMermaid(theme: "dark" | "default") {
+  if (mermaidTheme === theme) return;
   mermaid.initialize({
     startOnLoad: false,
-    theme: document.documentElement.classList.contains("dark") ? "dark" : "default",
+    theme,
     // Pin the mermaid 11 appearance. Mermaid 12 defaults to the `neo` look and
     // to ELK as the layout engine, which recolours and re-routes every existing
     // diagram (the upstream 12.0.0 notes name exactly these two options: "add
     // `layout: dagre`, `theme: default` and `look: classic` to your config to
     // keep the old look"). The new look is a separate, later product decision.
-    look: "classic",
-    layout: "dagre",
-    securityLevel: "strict",
-    fontFamily: "inherit",
+    ...MERMAID_CONFIG,
   });
-  mermaidInitialized = true;
+  mermaidTheme = theme;
+}
+
+function withMermaidLock<T>(work: () => Promise<T>): Promise<T> {
+  const result = mermaidQueue.then(work);
+  mermaidQueue = result.then(() => {}, () => {});
+  return result;
 }
 
 /**
@@ -145,7 +183,6 @@ function initMermaid(force = false) {
 function ensureMermaidWarm(): Promise<void> {
   if (mermaidWarmPromise) return mermaidWarmPromise;
   mermaidWarmPromise = (async () => {
-    initMermaid();
     // Wait for fonts before measurement-heavy rendering — mermaid
     // sizes nodes against text width and a missing font can give
     // a 0-width SVG that trips internal `firstChild` walks.
@@ -158,15 +195,20 @@ function ensureMermaidWarm(): Promise<void> {
     // trivial `A-->B` warm-up wasn't enough because the FIRST real
     // render with new shapes still tripped the firstChild race.
     try {
-      await mermaid.render(
-        "mermaid-prewarm",
-        "graph LR\nA[box] --> B(rounded)\nB --> C{diamond}\nC -->|label| D[(cylinder)]\nD --> E([stadium])",
-      );
+      await withMermaidLock(async () => {
+        initMermaid(document.documentElement.classList.contains("dark") ? "dark" : "default");
+        try {
+          await mermaid.render(
+            "mermaid-prewarm",
+            "graph LR\nA[box] --> B(rounded)\nB --> C{diamond}\nC -->|label| D[(cylinder)]\nD --> E([stadium])",
+          );
+        } finally {
+          document.querySelectorAll('div[id^="dmermaid-"]').forEach((el) => el.remove());
+        }
+      });
     } catch (e) {
       console.warn("[mermaid] pre-warm failed", e);
     }
-    // Clean up any temp dmermaid- divs the warm-up may have left.
-    document.querySelectorAll('div[id^="dmermaid-"]').forEach((el) => el.remove());
   })();
   return mermaidWarmPromise;
 }
@@ -250,6 +292,7 @@ async function renderMermaidBlocks(
   container: HTMLElement,
   gen: number,
   isStale: IsStaleFn,
+  onDiagram: () => void,
 ): Promise<void> {
   const blocks = container.querySelectorAll<HTMLElement>("div.mermaid");
   if (blocks.length === 0) return;
@@ -259,14 +302,6 @@ async function renderMermaidBlocks(
   // no-op (memoized promise).
   await ensureMermaidWarm();
   if (isStale(gen)) return;
-  // Theme refresh — re-init only if the dark/light theme switched
-  // since the last warm-up (the MutationObserver in onMount flips
-  // `mermaidInitialized` back to false on theme change). A
-  // force-init on every render was throwing away the warm state
-  // and reintroducing the firstChild race on block 0.
-  initMermaid();
-
-  let idx = 0;
   for (const block of blocks) {
     // Bail out if a newer render has started (navigation happened mid-render)
     if (isStale(gen)) return;
@@ -295,14 +330,25 @@ async function renderMermaidBlocks(
       // of frames. Three attempts with growing delays cover both
       // observed flake patterns without slowing valid renders
       // (success on attempt 1 short-circuits).
-      const baseId = `mermaid-${gen}-${idx++}`;
-      let svg: string | undefined;
+      const baseId = `mermaid-${++mermaidId}`;
+      const theme = document.documentElement.classList.contains("dark") ? "dark" : "default";
+      const key = JSON.stringify([source, theme, MERMAID_CONFIG]);
+      let svg: string | undefined = mermaidCache.get(key);
       let lastErr: unknown;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; !svg && attempt < 3; attempt++) {
         if (isStale(gen)) return;
         const attemptId = attempt === 0 ? baseId : `${baseId}-retry-${attempt}`;
         try {
-          const result = await mermaid.render(attemptId, source);
+          const result = await withMermaidLock(async () => {
+            if (isStale(gen)) return null;
+            initMermaid(theme);
+            try {
+              return await mermaid.render(attemptId, source);
+            } finally {
+              document.querySelectorAll('div[id^="dmermaid-"]').forEach((el) => el.remove());
+            }
+          });
+          if (isStale(gen)) return;
           if (result?.svg && mermaidSvgLooksRenderable(result.svg)) {
             svg = result.svg;
             break;
@@ -318,8 +364,9 @@ async function renderMermaidBlocks(
       if (!svg) throw lastErr ?? new Error("mermaid render produced no output");
       // Check again after await — DOM may have been replaced
       if (isStale(gen)) return;
-      // mermaid.render returns sanitized SVG — safe to inject
-      block.innerHTML = svg;
+      mermaidCache.set(key, svg);
+      // Mermaid's strict output is safe to inject; IDs must not collide across copies.
+      block.innerHTML = uniqueMermaidIds(svg);
       block.style.color = "";
       block.style.fontStyle = "";
     } catch (e: any) {
@@ -335,9 +382,7 @@ async function renderMermaidBlocks(
     // Always mark as processed to prevent re-processing on effect re-runs
     block.removeAttribute("data-processing");
     block.setAttribute("data-processed", "true");
-
-    // Clean up temporary render containers mermaid leaves in the body
-    document.querySelectorAll('div[id^="dmermaid-"]').forEach((el) => el.remove());
+    onDiagram();
 
     await yieldToMain();
   }
@@ -419,23 +464,25 @@ async function renderKrokiBlocks(
   container: HTMLElement,
   gen: number,
   isStale: IsStaleFn,
+  signal: AbortSignal,
+  onDiagram: () => void,
 ): Promise<void> {
   const blocks = container.querySelectorAll<HTMLElement>("div.kroki");
-  for (const block of blocks) {
+  await Promise.all(Array.from(blocks, async (block) => {
     if (isStale(gen)) return;
-    if (block.getAttribute("data-processed") === "true") continue;
+    if (block.getAttribute("data-processed") === "true") return;
     block.setAttribute("data-processed", "true");
 
     const type = block.getAttribute("data-type") || "plantuml";
       const source = block.textContent || "";
-      if (!source.trim()) continue;
+      if (!source.trim()) return;
 
     block.textContent = "Rendering diagram...";
     block.style.color = "hsl(var(--muted-foreground))";
     block.style.fontStyle = "italic";
 
     try {
-      const svg = await renderKroki(type, source);
+      const svg = await renderKroki(type, source, signal);
       if (isStale(gen)) return;
       block.style.color = "";
       block.style.fontStyle = "";
@@ -450,8 +497,8 @@ async function renderKrokiBlocks(
       block.style.fontStyle = "";
     }
 
-    await yieldToMain();
-  }
+    onDiagram();
+  }));
 }
 
 /** Add collapse/expand toggles to TOC items that have children */
@@ -515,6 +562,8 @@ function setupTocCollapse(tocEl: HTMLElement): () => void {
     for (const { el, handler, keyHandler } of toggleHandlers) {
       el.removeEventListener("click", handler);
       el.removeEventListener("keydown", keyHandler);
+      el.parentElement?.classList.remove("toc-collapsible", "toc-expanded", "toc-collapsed");
+      el.remove();
     }
   };
 }
@@ -782,9 +831,7 @@ export function Preview(props: PreviewProps) {
   const [overlayHost, setOverlayHost] = createSignal<HTMLElement | undefined>(undefined);
   const [viewerSvg, setViewerSvg] = createSignal<string | null>(null);
   const [viewerImage, setViewerImage] = createSignal<string | null>(null);
-  // Html whose post-swap work (TOC, highlight/mermaid/kroki) has finished.
-  // Navigation requests are applied against this rendered document, never
-  // against the raw `html` prop, so they never jump into stale content.
+  // HTML currently attached to the article, not the previous document.
   const [renderedHtml, setRenderedHtml] = createSignal<string | null>(null);
 
   // Per-image display menu for inline preview images. Opened by CLICKING the
@@ -857,14 +904,22 @@ export function Preview(props: PreviewProps) {
   let renderGen = 0;
   const isStale: IsStaleFn = (gen) => gen !== renderGen;
 
-  // Navigation readiness is tied to a generation, not just to the html
-  // string: a request that arrives while highlight/mermaid/kroki are
-  // still running must wait for the final layout. Post-processing is
-  // best-effort (a diagram error must not strand navigation), but a
-  // superseded generation must never publish readiness.
+  let stopAnchorTracking: (() => void) | undefined;
+  let repositionAnchor: (() => void) | undefined;
+  let processingGen: number | null = null;
+  const [settledGen, setSettledGen] = createSignal(-1);
+
+  function stopTrackingAnchor() {
+    stopAnchorTracking?.();
+    stopAnchorTracking = undefined;
+    repositionAnchor = undefined;
+  }
+
+  onCleanup(stopTrackingAnchor);
+
+  // A superseded generation must not mutate the live article.
   async function finishPostProcessing(
     gen: number,
-    html: string,
     steps: Array<() => Promise<void>>,
   ) {
     try {
@@ -877,7 +932,11 @@ export function Preview(props: PreviewProps) {
         }
       }
     } finally {
-      if (!isStale(gen)) setRenderedHtml(html);
+      if (!isStale(gen)) {
+        processingGen = null;
+        setSettledGen(gen);
+        stopTrackingAnchor();
+      }
     }
   }
 
@@ -1031,18 +1090,6 @@ export function Preview(props: PreviewProps) {
     { defer: true },
   );
 
-  // Listen for theme changes to re-init mermaid
-  onSettled(() => {
-    const observer = new MutationObserver(() => {
-      mermaidInitialized = false;
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    return () => observer.disconnect();
-  });
-
   onCleanup(() => cleanupToc?.());
 
   /**
@@ -1050,37 +1097,55 @@ export function Preview(props: PreviewProps) {
    * - #anchor links: scroll manually within .content container (prevent hash corruption)
    * - .adoc file links: navigate via SPA routing
    */
-  function scrollToFragment(fragmentId: string) {
-    if (!articleRef) return;
-    const target = articleRef.querySelector(`[id="${CSS.escape(fragmentId)}"]`) as HTMLElement | null;
-    if (!target) return;
-    const contentEl = articleRef.closest(".content");
-    if (contentEl) {
-      const targetRect = target.getBoundingClientRect();
-      const contentRect = contentEl.getBoundingClientRect();
-      const offset = targetRect.top - contentRect.top + contentEl.scrollTop - 16;
-      contentEl.scrollTo({ top: offset, behavior: "smooth" });
-    } else {
-      target.scrollIntoView({ behavior: "smooth" });
-    }
+  function scrollToTarget(target: HTMLElement, track = false) {
+    stopTrackingAnchor();
+    const contentEl = articleRef?.closest<HTMLElement>(".content");
+    let expectedTop = contentEl?.scrollTop ?? 0;
+    const scroll = () => {
+      if (!target.isConnected) return;
+      if (contentEl) {
+        const offset = target.getBoundingClientRect().top - contentEl.getBoundingClientRect().top + contentEl.scrollTop - 16;
+        contentEl.scrollTo({ top: offset, behavior: "instant" });
+        expectedTop = contentEl.scrollTop;
+      } else {
+        target.scrollIntoView({ behavior: "instant" });
+      }
+    };
+    scroll();
+    if (!track || processingGen === null || !contentEl) return;
+    const cancelOnScroll = () => {
+      if (Math.abs(contentEl.scrollTop - expectedTop) > 1) stopTrackingAnchor();
+    };
+    const cancelOnInput = () => stopTrackingAnchor();
+    const cancelOnKey = (event: KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) stopTrackingAnchor();
+    };
+    contentEl.addEventListener("scroll", cancelOnScroll, { passive: true });
+    contentEl.addEventListener("wheel", cancelOnInput, { passive: true });
+    contentEl.addEventListener("touchmove", cancelOnInput, { passive: true });
+    window.addEventListener("keydown", cancelOnKey);
+    repositionAnchor = scroll;
+    stopAnchorTracking = () => {
+      contentEl.removeEventListener("scroll", cancelOnScroll);
+      contentEl.removeEventListener("wheel", cancelOnInput);
+      contentEl.removeEventListener("touchmove", cancelOnInput);
+      window.removeEventListener("keydown", cancelOnKey);
+    };
   }
 
-  function scrollToHeading(headingText: string) {
-    if (!articleRef) return;
-    const hs = articleRef.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6");
-    const target = Array.from(hs).find(
-      (h) => h.textContent?.trim() === headingText,
-    );
-    if (!target) return;
-    const contentEl = articleRef.closest(".content");
-    if (contentEl) {
-      const targetRect = target.getBoundingClientRect();
-      const contentRect = contentEl.getBoundingClientRect();
-      const offset = targetRect.top - contentRect.top + contentEl.scrollTop - 16;
-      contentEl.scrollTo({ top: offset, behavior: "smooth" });
-    } else {
-      target.scrollIntoView({ behavior: "smooth" });
-    }
+  function scrollToFragment(fragmentId: string, track = false): boolean {
+    const target = articleRef?.querySelector<HTMLElement>(`[id="${CSS.escape(fragmentId)}"]`);
+    if (!target) return false;
+    scrollToTarget(target, track);
+    return true;
+  }
+
+  function scrollToHeading(headingText: string, track = false): boolean {
+    const hs = articleRef?.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6") ?? [];
+    const target = Array.from(hs).find((h) => h.textContent?.trim() === headingText);
+    if (!target) return false;
+    scrollToTarget(target, track);
+    return true;
   }
 
   function handleClick(e: MouseEvent) {
@@ -1172,10 +1237,8 @@ export function Preview(props: PreviewProps) {
     props.onNavigate(targetPath, fragment);
   }
 
-  // Post-process and render HTML into the article element.
-  // Uses double-buffering to prevent FOUC: HTML is processed in a detached
-  // element (highlight, mermaid, kroki), then swapped into the visible article
-  // only after processing completes. Raw/unprocessed HTML never appears on screen.
+  // Highlight new documents in a detached buffer, then attach them before
+  // diagram rendering so Mermaid can measure the live layout.
   //
   // When html becomes empty (file switch), old content stays hidden (opacity:0)
   // to preserve layout dimensions and prevent content shrink/grow shift.
@@ -1231,9 +1294,11 @@ export function Preview(props: PreviewProps) {
   );
 
   createEffect(
-    () => ({ html: props.html, tocVis: props.tocVisible }),
-    ({ html: _html, tocVis }) => {
+    () => props.html,
+    (_html) => {
     if (!articleRef) return;
+    stopTrackingAnchor();
+    processingGen = null;
 
     // Empty HTML (file switch): hide old content but keep it for layout stability.
     // Cancel any in-flight pipeline so stale renders don't swap in.
@@ -1261,6 +1326,8 @@ export function Preview(props: PreviewProps) {
     }
 
     const gen = ++renderGen;
+    const krokiController = new AbortController();
+    processingGen = gen;
     // Invalidate the previous generation immediately: a request arriving
     // during this render must not consume against an article that is about
     // to be swapped, nor against the half-processed new one.
@@ -1270,7 +1337,7 @@ export function Preview(props: PreviewProps) {
     const sanitizedHtml = sanitizeHtmlFragment(_html);
 
     // Shared post-swap logic: TOC handling, collapse toggles, reveal, fragment scroll
-    function afterSwap(container: HTMLElement, scrollToTop: boolean, tocVis: boolean) {
+    function afterSwap(container: HTMLElement, scrollToTop: boolean) {
       const scrollContainer = articleRef!.closest(".content");
       if (scrollToTop && scrollContainer) {
         scrollContainer.scrollTop = 0;
@@ -1303,7 +1370,7 @@ export function Preview(props: PreviewProps) {
 
       // Set up collapse toggles and scroll tracking
       cleanupToc?.();
-      if (tocVis) {
+      if (untrack(() => props.tocVisible)) {
         const tocEl = tocContainer?.querySelector<HTMLElement>("#toc") ?? undefined;
         if (tocEl) {
           const cleanupCollapse = setupTocCollapse(tocEl);
@@ -1320,10 +1387,10 @@ export function Preview(props: PreviewProps) {
       }
 
       articleRef!.style.opacity = "";
+      setRenderedHtml(_html);
     }
 
-    // New document (file switch): double-buffer to avoid FOUC — process in
-    // detached element, then swap only after highlight/mermaid/kroki finish.
+    // New documents are highlighted in a detached buffer before the swap.
     // Editing (live preview): swap immediately for instant feedback, then
     // run highlight/mermaid/kroki in-place progressively.
     if (isNewDocument) {
@@ -1334,7 +1401,7 @@ export function Preview(props: PreviewProps) {
       if (props.resolveImageSrc) rewriteImageSources(buffer, props.resolveImageSrc);
 
       queueMicrotask(() =>
-        finishPostProcessing(gen, _html, [
+        finishPostProcessing(gen, [
           // Syntax highlighting can run against the detached buffer —
           // it's pure DOM mutation with no document-level
           // dependencies, and finishing it before the swap eliminates
@@ -1352,14 +1419,14 @@ export function Preview(props: PreviewProps) {
             const prevScrollTop = scrollContainer?.scrollTop ?? 0;
             articleRef!.replaceChildren(...Array.from(buffer.childNodes));
             if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
-            afterSwap(articleRef!, true, tocVis);
+            afterSwap(articleRef!, true);
           },
           // Wait one paint frame so the freshly-attached article has
           // been laid out before mermaid measures. Without this, the
           // first block races with layout and throws `firstChild`.
           () => nextPaintFrame(),
-          () => renderMermaidBlocks(articleRef!, gen, isStale),
-          () => renderKrokiBlocks(articleRef!, gen, isStale),
+          () => renderMermaidBlocks(articleRef!, gen, isStale, () => repositionAnchor?.()),
+          () => renderKrokiBlocks(articleRef!, gen, isStale, krokiController.signal, () => repositionAnchor?.()),
         ]),
       );
     } else {
@@ -1371,18 +1438,19 @@ export function Preview(props: PreviewProps) {
       wrapImagesForScroll(articleRef!);
       if (props.resolveImageSrc) rewriteImageSources(articleRef!, props.resolveImageSrc);
 
-      afterSwap(articleRef!, false, tocVis);
+      afterSwap(articleRef!, false);
 
       queueMicrotask(() =>
-        finishPostProcessing(gen, _html, [
+        finishPostProcessing(gen, [
           () => highlightCodeBlocks(articleRef!, gen, isStale),
-          () => renderMermaidBlocks(articleRef!, gen, isStale),
-          () => renderKrokiBlocks(articleRef!, gen, isStale),
+          () => renderMermaidBlocks(articleRef!, gen, isStale, () => repositionAnchor?.()),
+          () => renderKrokiBlocks(articleRef!, gen, isStale, krokiController.signal, () => repositionAnchor?.()),
         ]),
       );
     }
     return () => {
       ++renderGen;
+      krokiController.abort();
     };
     },
   );
@@ -1399,6 +1467,8 @@ export function Preview(props: PreviewProps) {
   let lastRequestPath: string | null = null;
   let lastFragment: string | null = null;
   let lastHeading: string | null = null;
+  let completedFragment: string | null = null;
+  let completedHeading: string | null = null;
   createEffect(
     () => ({
       path: props.currentFilePath ?? null,
@@ -1410,6 +1480,8 @@ export function Preview(props: PreviewProps) {
       const droppedHeading = lastHeading;
       const requestChanged = fragment !== droppedFragment || heading !== droppedHeading;
       const pathChanged = path !== lastRequestPath;
+      if (pathChanged || fragment !== droppedFragment) completedFragment = null;
+      if (pathChanged || heading !== droppedHeading) completedHeading = null;
       lastFragment = fragment;
       lastHeading = heading;
       lastRequestPath = path;
@@ -1454,26 +1526,36 @@ export function Preview(props: PreviewProps) {
     () => ({
       fragment: props.pendingFragment,
       heading: props.pendingHeadingText,
-      // `renderedHtml` is published only after the current generation's
-      // post-processing finishes. Waiting for it prevents a jump into a
-      // half-processed article and a double jump when the file and the
-      // request arrive in the same update.
+      // Only the attached generation can receive a request.
       ready: !!props.html && renderedHtml() === props.html,
+      settled: settledGen() === renderGen,
       owner: requestOwner(),
     }),
-    ({ fragment, heading, ready, owner }) => {
+    ({ fragment, heading, ready, settled, owner }) => {
       if (!ready || !articleRef) return;
       // A request left over from another file must never be consumed
       // against this article, even when its fragment/heading also exists
       // here (homonymous targets). Ownership is null once dropped.
       if (owner === null || owner !== (props.currentFilePath ?? null)) return;
-      if (fragment) {
-        scrollToFragment(fragment);
-        props.onFragmentHandled();
+      if (fragment && completedFragment !== fragment) {
+        if (scrollToFragment(fragment, true)) {
+          completedFragment = fragment;
+          props.onFragmentHandled();
+        } else if (settled) {
+          completedFragment = fragment;
+          if (props.onFragmentDiscarded) props.onFragmentDiscarded(fragment);
+          else props.onFragmentHandled();
+        }
       }
-      if (heading) {
-        scrollToHeading(heading);
-        props.onHeadingHandled?.();
+      if (heading && completedHeading !== heading) {
+        if (scrollToHeading(heading, true)) {
+          completedHeading = heading;
+          props.onHeadingHandled?.();
+        } else if (settled) {
+          completedHeading = heading;
+          if (props.onHeadingDiscarded) props.onHeadingDiscarded(heading);
+          else props.onHeadingHandled?.();
+        }
       }
     },
   );
