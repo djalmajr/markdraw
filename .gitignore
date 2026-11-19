@@ -108,6 +108,7 @@ apps/desktop/src-tauri/playwright/
 !.claude/hooks/
 !.claude/rules/
 !.claude/settings.json
+!.claude/skills/
 # .claude/plans/ and .claude/worktrees/ stay ignored (operator-local scratch).
 
 .opencode/*
