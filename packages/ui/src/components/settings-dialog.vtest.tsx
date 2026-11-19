@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { SettingsDialog } from "./settings-dialog.tsx";
@@ -46,6 +47,7 @@ describe("SettingsDialog", () => {
 
   function openCatalog(baseElement: HTMLElement): void {
     fireEvent.click(baseElement.querySelector(".settings-models-search .ai-mp-icon-btn") as HTMLElement);
+    flush();
   }
 
   it("switches sections via the nav rail", () => {
@@ -54,6 +56,7 @@ describe("SettingsDialog", () => {
       /indexing/i.test(t.textContent ?? ""),
     );
     fireEvent.click(indexingTab!);
+    flush();
     expect(baseElement.querySelector(".settings-tiers")).not.toBeNull();
   });
 
@@ -66,13 +69,16 @@ describe("SettingsDialog", () => {
       /Anthropic/.test(r.textContent ?? ""),
     )!;
     fireEvent.click(row);
+    flush();
     // The per-provider sub-page has a single API-key field + Continue.
     const keyInput = baseElement.querySelector('input[type="password"]') as HTMLInputElement;
     fireEvent.input(keyInput, { target: { value: "sk-x" } });
+    flush();
     const cont = [...baseElement.querySelectorAll("button")].find(
       (b) => (b.textContent ?? "").trim() === "Continue",
     )!;
     fireEvent.click(cont);
+    flush();
     expect(onConnectProvider).toHaveBeenCalledWith({ providerId: "anthropic", apiKey: "sk-x" });
   });
 
@@ -81,6 +87,7 @@ describe("SettingsDialog", () => {
     openCatalog(baseElement);
     expect(baseElement.querySelector(".settings-catalog")).not.toBeNull();
     fireEvent.click(baseElement.querySelector(".settings-back") as HTMLElement);
+    flush();
     expect(baseElement.querySelector(".settings-models-search")).not.toBeNull();
   });
 
@@ -99,6 +106,7 @@ describe("SettingsDialog", () => {
     expect(row).not.toBeUndefined();
     const sw = row!.querySelector('[role="switch"]') as HTMLElement;
     fireEvent.click(sw);
+    flush();
     expect(onToggleModel).toHaveBeenCalledWith("openai/gpt-4o");
   });
 
@@ -122,6 +130,7 @@ describe("SettingsDialog", () => {
       /OpenAI/i.test(g.textContent ?? ""),
     )!;
     fireEvent.click(group.querySelector('[role="switch"]') as HTMLElement);
+    flush();
     // All visible → the group toggle hides every model.
     expect(onToggleModel).toHaveBeenCalledWith("openai/a");
     expect(onToggleModel).toHaveBeenCalledWith("openai/b");
@@ -160,6 +169,7 @@ describe("SettingsDialog", () => {
       ...baseElement.querySelectorAll("button.ai-mp-icon-btn"),
     ].find((b) => /Edit provider: OpenCode Go/i.test(b.getAttribute("aria-label") ?? "")) as HTMLElement;
     fireEvent.click(editBtn);
+    flush();
     // Navigating via the pencil must not flip the group toggle.
     expect(onToggleModel).not.toHaveBeenCalled();
     // Provider sub-page: connect controls + the separated destructive action.
@@ -169,6 +179,7 @@ describe("SettingsDialog", () => {
     ) as HTMLElement;
     expect(removeBtn).not.toBeUndefined();
     fireEvent.click(removeBtn);
+    flush();
     // The real ConfirmDialog (mounted by setup) opens in the DOM; confirm it.
     const confirmBtn = await waitFor(() => {
       const found = [...baseElement.querySelectorAll("button")].find(
@@ -178,6 +189,7 @@ describe("SettingsDialog", () => {
       return found as HTMLElement;
     });
     fireEvent.click(confirmBtn);
+    flush();
     await waitFor(() => {
       expect(onRemoveProvider).toHaveBeenCalledWith(["opencode-go", "opencode-go-chat"]);
     });
@@ -204,6 +216,7 @@ describe("SettingsDialog", () => {
     });
     const search = baseElement.querySelector(".settings-models-search input") as HTMLInputElement;
     fireEvent.input(search, { target: { value: "gpt" } });
+    flush();
     const rows = [...baseElement.querySelectorAll(".settings-models-row")].map((r) => r.textContent ?? "");
     expect(rows.some((t) => /GPT-4o/.test(t))).toBe(true);
     expect(rows.some((t) => /o1/.test(t))).toBe(false);
@@ -217,17 +230,23 @@ describe("SettingsDialog", () => {
       /custom provider/i.test(r.textContent ?? ""),
     )!;
     fireEvent.click(customRow);
+    flush();
     const custom = baseElement.querySelector(".settings-custom") as HTMLElement;
     expect(custom).not.toBeNull();
     const inputs = custom.querySelectorAll("input");
     fireEvent.input(inputs[0]!, { target: { value: "myprov" } }); // id
+    flush();
     fireEvent.input(inputs[2]!, { target: { value: "https://api.x/v1" } }); // baseURL
+    flush();
     fireEvent.input(inputs[4]!, { target: { value: "m1" } }); // model id
+    flush();
     fireEvent.input(inputs[5]!, { target: { value: "Model One" } }); // model name
+    flush();
     const submit = [...custom.querySelectorAll("button")].find(
       (b) => (b.textContent ?? "").trim() === "Add provider",
     )!;
     fireEvent.click(submit);
+    flush();
     expect(onSaveCustomProvider).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "myprov",
@@ -243,10 +262,12 @@ describe("SettingsDialog", () => {
       /indexing/i.test(t.textContent ?? ""),
     );
     fireEvent.click(indexingTab!);
+    flush();
     const offCard = [...baseElement.querySelectorAll('[role="radio"]')].find((c) =>
       /^Off/.test(c.textContent ?? ""),
     );
     fireEvent.click(offCard!);
+    flush();
     expect(onTierChange).toHaveBeenCalledWith("off");
   });
 
@@ -257,6 +278,7 @@ describe("SettingsDialog", () => {
       /^Editor/.test(t.textContent ?? ""),
     );
     fireEvent.click(editorTab!);
+    flush();
     // The placeholder is gone — the section now carries the mirrored toolbar
     // toggles. Find the "Wrap text" row and flip its switch (currently on) →
     // the handler fires with false.
@@ -266,6 +288,7 @@ describe("SettingsDialog", () => {
     expect(wrapRow).not.toBeUndefined();
     const wrapSwitch = wrapRow!.querySelector('[role="switch"]') as HTMLElement;
     fireEvent.click(wrapSwitch);
+    flush();
     expect(onWrapTextChange).toHaveBeenCalledWith(false);
   });
 
@@ -274,6 +297,7 @@ describe("SettingsDialog", () => {
       /MCP/i.test(t.textContent ?? ""),
     );
     fireEvent.click(mcpTab!);
+    flush();
   }
 
   function openSkillsSection(baseElement: HTMLElement) {
@@ -281,6 +305,7 @@ describe("SettingsDialog", () => {
       /Skills/i.test(t.textContent ?? ""),
     );
     fireEvent.click(skillsTab!);
+    flush();
   }
 
   it("renders discovered skills and opens a detail sub-page", () => {
@@ -323,17 +348,20 @@ describe("SettingsDialog", () => {
     expect(card.tagName).toBe("BUTTON");
 
     fireEvent.click(card);
+    flush();
     expect(baseElement.textContent).toContain(longDescription);
     expect(baseElement.textContent).toContain("Slash commands");
     expect(baseElement.textContent).toContain("/work-review");
     expect(baseElement.textContent).toContain("/repo/.codex/skills/review/SKILL.md");
 
     fireEvent.click(baseElement.querySelector(".settings-back") as HTMLElement);
+    flush();
     expect(baseElement.textContent).toContain("Agent skills");
   });
 
   function openAddForm(baseElement: HTMLElement) {
     fireEvent.click(baseElement.querySelector(".settings-mcp-new-row") as HTMLElement);
+    flush();
   }
 
   it("renders the MCP add-server form (id field + transport select)", () => {
@@ -353,6 +381,7 @@ describe("SettingsDialog", () => {
     const newRow = baseElement.querySelector(".settings-mcp-new-row") as HTMLElement;
     expect(newRow.textContent).toContain("New MCP Server");
     fireEvent.click(newRow);
+    flush();
     expect(baseElement.querySelector(".settings-input.ai-composer-input")).not.toBeNull();
   });
 
@@ -366,7 +395,9 @@ describe("SettingsDialog", () => {
       ".settings-input.ai-composer-input",
     ) as HTMLInputElement;
     fireEvent.input(idInput, { target: { value: "draft-id" } });
+    flush();
     fireEvent.click(baseElement.querySelector(".settings-back") as HTMLElement);
+    flush();
     // Back on the list view; reopening shows a clean form (draft discarded).
     expect(baseElement.querySelector(".settings-mcp-new-row")).not.toBeNull();
     openAddForm(baseElement);
@@ -385,9 +416,11 @@ describe("SettingsDialog", () => {
       ".settings-input.ai-composer-input",
     ) as HTMLInputElement;
     fireEvent.input(idInput, { target: { value: "search" } });
+    flush();
     // open the transport Select and pick "http" (pointerdown drives Kobalte)
     const trigger = baseElement.querySelector('[aria-haspopup="listbox"]') as HTMLElement;
     fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 });
+    flush();
     const httpOption = await waitFor(() => {
       const found = [...baseElement.querySelectorAll('[role="option"]')].find(
         (o) => (o.textContent ?? "").trim() === "http",
@@ -396,8 +429,11 @@ describe("SettingsDialog", () => {
       return found as HTMLElement;
     });
     fireEvent.pointerDown(httpOption, { pointerType: "mouse", button: 0 });
+    flush();
     fireEvent.pointerUp(httpOption, { pointerType: "mouse", button: 0 });
+    flush();
     fireEvent.click(httpOption);
+    flush();
     // url field appears for http transport
     const urlInput = await waitFor(() => {
       const inputs = [
@@ -408,10 +444,12 @@ describe("SettingsDialog", () => {
       return found as HTMLInputElement;
     });
     fireEvent.input(urlInput, { target: { value: "https://mcp.example.com" } });
+    flush();
     const addBtn = [...baseElement.querySelectorAll("button")].find(
       (b) => (b.textContent ?? "").trim() === "Add server",
     );
     fireEvent.click(addBtn!);
+    flush();
     await waitFor(() => {
       expect(onSaveMcpServer).toHaveBeenCalledWith({
         id: "search",
@@ -442,6 +480,7 @@ describe("SettingsDialog", () => {
       '.settings-mcp-card button[aria-label="Remove"]',
     ) as HTMLElement;
     fireEvent.click(removeBtn);
+    flush();
     expect(onRemoveMcpServer).toHaveBeenCalledWith("memory");
   });
 
@@ -467,6 +506,7 @@ describe("SettingsDialog", () => {
       /Authorize/.test(button.textContent ?? ""),
     ) as HTMLElement;
     fireEvent.click(authorize);
+    flush();
     expect(onAuthorizeMcpServer).toHaveBeenCalledWith("discovered:memory");
   });
 
@@ -517,9 +557,11 @@ describe("SettingsDialog", () => {
     const toggle = baseElement.querySelector(".settings-mcp-show-toggle") as HTMLElement;
     expect(toggle.textContent).toContain("Show more (2)");
     fireEvent.click(toggle);
+    flush();
     expect(baseElement.querySelectorAll(".settings-mcp-tool-chip").length).toBe(8);
     expect(toggle.textContent).toContain("Show less");
     fireEvent.click(toggle);
+    flush();
     expect(baseElement.querySelectorAll(".settings-mcp-tool-chip").length).toBe(6);
   });
 });

@@ -1,4 +1,4 @@
-import { createSignal, createMemo, For, Show, createTrackedEffect } from "solid-js";
+import { createSignal, createMemo, For, Show, createEffect } from "solid-js";
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -203,33 +203,34 @@ export function FileTree(props: FileTreeProps) {
   // selectedPath actually changes, so manual collapse isn't undone.
   let lastRevealedPath: string | null = null;
   let lastRevealedRootId: string | null = null;
-  createTrackedEffect(() => {
-    const sel = props.selectedPath;
-    const rootId = props.selectedRootId;
-    if (!sel || !rootId) {
+  createEffect(
+    () => ({ path: props.selectedPath, root: props.selectedRootId }),
+    ({ path: sel, root: rootId }) => {
+      if (!sel || !rootId) {
+        lastRevealedPath = sel;
+        lastRevealedRootId = rootId;
+        return;
+      }
+      if (sel === lastRevealedPath && rootId === lastRevealedRootId) return;
       lastRevealedPath = sel;
       lastRevealedRootId = rootId;
-      return;
-    }
-    if (sel === lastRevealedPath && rootId === lastRevealedRootId) return;
-    lastRevealedPath = sel;
-    lastRevealedRootId = rootId;
 
-    if (sel.includes("/")) {
-      const parts = sel.split("/");
-      const ancestors: string[] = [];
-      for (let i = 1; i < parts.length; i++) {
-        ancestors.push(parts.slice(0, i).join("/"));
+      if (sel.includes("/")) {
+        const parts = sel.split("/");
+        const ancestors: string[] = [];
+        for (let i = 1; i < parts.length; i++) {
+          ancestors.push(parts.slice(0, i).join("/"));
+        }
+        expandPaths(rootId, ancestors);
       }
-      expandPaths(rootId, ancestors);
-    }
 
-    queueMicrotask(() => {
-      if (!navRef) return;
-      const el = navRef.querySelector<HTMLElement>(`.tree-item[data-path="${CSS.escape(sel)}"]`);
-      el?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-    });
-  });
+      queueMicrotask(() => {
+        if (!navRef) return;
+        const el = navRef.querySelector<HTMLElement>(`.tree-item[data-path="${CSS.escape(sel)}"]`);
+        el?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      });
+    },
+  );
 
   let suppressRootClickUntil = 0;
   let navRef: HTMLDivElement | undefined;
@@ -367,10 +368,16 @@ export function FileTree(props: FileTreeProps) {
   function RootHeader(propsRoot: RootHeaderProps) {
     const rootId = propsRoot.rootId;
     const dndId = toRootDndId(rootId);
+    function dragDisabled(): boolean {
+      return !canReorderRoots();
+    }
+    function dropDisabled(): boolean {
+      return !canReorderRoots() && !props.onMove;
+    }
     const draggable = useDraggable({
       id: dndId,
       get disabled() {
-        return !canReorderRoots();
+        return dragDisabled();
       },
     });
     // Droppable for BOTH root reordering and as a destination for entries
@@ -378,7 +385,7 @@ export function FileTree(props: FileTreeProps) {
     const droppable = useDroppable({
       id: dndId,
       get disabled() {
-        return !canReorderRoots() && !props.onMove;
+        return dropDisabled();
       },
     });
 
@@ -655,11 +662,12 @@ export function FileTree(props: FileTreeProps) {
   // ── Focus / keyboard ───────────────────────────────────────────────────
 
   // Sync the active node when the open file changes (e.g. opened elsewhere).
-  createTrackedEffect(() => {
-    const sel = props.selectedPath;
-    const root = props.selectedRootId;
-    if (sel) selectNode(sel, root ?? activeRootId());
-  });
+  createEffect(
+    () => ({ path: props.selectedPath, root: props.selectedRootId }),
+    ({ path: sel, root }) => {
+      if (sel) selectNode(sel, root ?? activeRootId());
+    },
+  );
 
   const rootIds = createMemo(() => props.roots.map((r) => r.id));
 

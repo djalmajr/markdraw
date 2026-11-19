@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { flush } from "solid-js";
 import { PaneSplitter } from "./pane-splitter.tsx";
 
 afterEach(cleanup);
@@ -75,9 +76,24 @@ describe("PaneSplitter", () => {
     const handle = container.querySelector(".pane-splitter")!;
     expect(handle.classList.contains("pane-splitter-dragging")).toBe(false);
     fireEvent.mouseDown(handle, { clientX: 500 });
+    flush();
     expect(handle.classList.contains("pane-splitter-dragging")).toBe(true);
     fireEvent.mouseUp(document);
+    flush();
     expect(handle.classList.contains("pane-splitter-dragging")).toBe(false);
+  });
+
+  it("removes document drag listeners when unmounted mid-drag", () => {
+    const { ref } = makeContainer(1000);
+    const onResize = vi.fn();
+    const { container, unmount } = render(() => (
+      <PaneSplitter ratio={0.5} container={ref} onResize={onResize} />
+    ));
+    const handle = container.querySelector(".pane-splitter")!;
+    fireEvent.mouseDown(handle, { clientX: 500 });
+    unmount();
+    fireEvent.mouseMove(document, { clientX: 700 });
+    expect(onResize).not.toHaveBeenCalled();
   });
 
   it("double-click resets the ratio to 0.5", () => {

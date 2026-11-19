@@ -1,4 +1,4 @@
-import { createEffect, type Accessor } from "solid-js";
+import { createEffect, untrack, type Accessor } from "solid-js";
 import { Draggable } from "@dnd-kit/dom";
 import type { DraggableInput } from "@dnd-kit/dom";
 import type { Data } from "@dnd-kit/abstract";
@@ -42,10 +42,13 @@ export function useDraggable<T extends Data = Data>(
   input: UseDraggableInput<T>,
 ): DraggableHandle<T> {
   const manager = useDragDropManager();
-  const draggable = new Draggable<T>({ ...input, register: false }, manager ?? undefined);
+  // The spread reads the input's accessors once, as the initial snapshot; it
+  // runs untracked so callers can pass plain getters. The effect below tracks
+  // the same accessors and re-applies the live values whenever they change.
+  const draggable = untrack(
+    () => new Draggable<T>({ ...input, register: false }, manager ?? undefined),
+  );
 
-  // The spread above reads the input's accessors once (and so does the entity
-  // constructor), so the live values are re-applied whenever they change.
   createEffect(
     () => ({
       id: input.id,

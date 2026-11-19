@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createRoot } from "solid-js";
+import { createRoot, flush, getOwner, runWithOwner, type Owner } from "solid-js";
 import type { AIProvider } from "@markdraw/ai/types.ts";
 import { getChatMessages, setChatMessages } from "@markdraw/core/ai-chat-sessions.ts";
 import { createAiChatSessions, deriveAiChatTitle } from "./create-ai-chat-sessions.ts";
@@ -49,23 +49,30 @@ function gatedProvider(): { provider: AIProvider; release: () => void } {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-/** Run a test body inside a disposable reactive root (so the manager's signals +
- *  per-session effects have an owner, matching how createAppState builds it). */
-function withRoot<T>(fn: () => Promise<T> | T): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    createRoot((dispose) => {
-      Promise.resolve(fn()).then(
-        (v) => {
-          dispose();
-          resolve(v);
-        },
-        (e) => {
-          dispose();
-          reject(e);
-        },
-      );
-    });
+/** Keep a disposable owner for the manager's signals and per-session effects,
+ *  but run the test body (where the lifecycle methods write state) outside that
+ *  owned scope — Solid 2 forbids writes from a component/computation body.
+ *  `create` is the only callback that runs under the owner. */
+function withRoot<T>(fn: (create: <R>(init: () => R) => R) => Promise<T> | T): Promise<T> {
+  let owner!: Owner;
+  let dispose!: () => void;
+  createRoot((d) => {
+    dispose = d;
+    owner = getOwner()!;
   });
+  const create = <R>(init: () => R): R => runWithOwner(owner, init);
+  return Promise.resolve()
+    .then(() => fn(create))
+    .then(
+      (v) => {
+        dispose();
+        return v;
+      },
+      (e) => {
+        dispose();
+        throw e;
+      },
+    );
 }
 
 beforeEach(() => {
@@ -82,9 +89,10 @@ describe("deriveAiChatTitle", () => {
 
 describe("createAiChatSessions — lifecycle", () => {
   it("createSession adds an open session and activates it", async () => {
-    await withRoot(() => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
+    await withRoot((create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
       const id = mgr.createSession();
+      flush();
       expect(mgr.activeId()).toBe(id);
       expect(mgr.sessions().map((s) => s.id)).toEqual([id]);
       expect(mgr.activeStore()).toBe(mgr.storeFor(id));
@@ -92,13 +100,16 @@ describe("createAiChatSessions — lifecycle", () => {
   });
 
   it("closing the active chat activates the nearest neighbor", async () => {
-    await withRoot(() => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
+    await withRoot((create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
       const a = mgr.createSession();
       const b = mgr.createSession();
       const c = mgr.createSession();
+      flush();
       mgr.activateSession(b);
+      flush();
       mgr.closeSession(b);
+      flush();
       // Neighbor at clamped index → c (the one that took b's slot).
       expect(mgr.activeId()).toBe(c);
       expect(mgr.sessions().map((s) => s.id)).toEqual([a, c]);
@@ -108,10 +119,12 @@ describe("createAiChatSessions — lifecycle", () => {
   });
 
   it("closing the last chat clears active and yields the empty store", async () => {
-    await withRoot(() => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
+    await withRoot((create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
       const a = mgr.createSession();
+      flush();
       mgr.closeSession(a);
+      flush();
       expect(mgr.activeId()).toBeNull();
       expect(mgr.sessions()).toEqual([]);
       // activeStore() must not throw and must be a usable store.
@@ -121,10 +134,12 @@ describe("createAiChatSessions — lifecycle", () => {
   });
 
   it("archive removes from the strip but keeps the session in history", async () => {
-    await withRoot(() => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
+    await withRoot((create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
       const a = mgr.createSession();
+      flush();
       mgr.archiveSession(a);
+      flush();
       expect(mgr.sessions()).toEqual([]);
       expect(mgr.allSessions().find((s) => s.id === a)?.isArchived).toBe(true);
       expect(mgr.storeFor(a)).toBeUndefined(); // live store disposed
@@ -132,30 +147,34 @@ describe("createAiChatSessions — lifecycle", () => {
   });
 
   it("openFromHistory reopens a closed chat with its persisted messages", async () => {
-    await withRoot(async () => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
+    await withRoot(async (create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
       // Seed a closed session's messages directly in storage.
       setChatMessages("old", [{ role: "user", content: "remember me" }]);
       mgr.hydrate({
         sessions: [{ id: "old", title: "Old", createdAt: 1, lastActiveAt: 1, isArchived: false, isOpen: false }],
         activeId: null,
       });
+      flush();
       expect(mgr.sessions()).toEqual([]); // closed → not in strip
       mgr.openFromHistory("old");
+      flush();
       expect(mgr.activeId()).toBe("old");
       expect(mgr.storeFor("old")!.messages()).toEqual([{ role: "user", content: "remember me" }]);
     });
   });
 
   it("deleteSession aborts, removes the session and its messages", async () => {
-    await withRoot(async () => {
+    await withRoot(async (create) => {
       const { provider, release } = gatedProvider();
-      const mgr = createAiChatSessions({ getProvider: () => provider });
+      const mgr = create(() => createAiChatSessions({ getProvider: () => provider }));
       const a = mgr.createSession();
+      flush();
       const pending = mgr.storeFor(a)!.sendMessage("hi");
       await tick();
       expect(mgr.storeFor(a)!.streaming()).toBe(true);
       mgr.deleteSession(a);
+      flush();
       release();
       await pending.catch(() => {});
       expect(mgr.allSessions().find((s) => s.id === a)).toBeUndefined();
@@ -166,11 +185,14 @@ describe("createAiChatSessions — lifecycle", () => {
 
 describe("createAiChatSessions — fork", () => {
   it("forkSession copies the messages into a new active session that evolves separately", async () => {
-    await withRoot(async () => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider("ok") });
+    await withRoot(async (create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider("ok") }));
       const a = mgr.createSession();
+      flush();
       await mgr.storeFor(a)!.sendMessage("hello");
+      flush();
       const fork = mgr.forkSession(a);
+      flush();
       expect(fork).not.toBeNull();
       expect(fork).not.toBe(a);
       // The fork opens active with the source's turns copied over…
@@ -198,8 +220,8 @@ describe("createAiChatSessions — fork", () => {
   });
 
   it("forkSession returns null for an unknown id", async () => {
-    await withRoot(() => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
+    await withRoot((create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
       expect(mgr.forkSession("nope")).toBeNull();
       expect(mgr.allSessions()).toEqual([]);
     });
@@ -208,16 +230,18 @@ describe("createAiChatSessions — fork", () => {
 
 describe("createAiChatSessions — streaming isolation", () => {
   it("a background chat keeps streaming after switching away", async () => {
-    await withRoot(async () => {
+    await withRoot(async (create) => {
       const { provider, release } = gatedProvider();
-      const mgr = createAiChatSessions({ getProvider: () => provider });
+      const mgr = create(() => createAiChatSessions({ getProvider: () => provider }));
       const a = mgr.createSession();
+      flush();
       const pendingA = mgr.storeFor(a)!.sendMessage("hi");
       await tick();
       expect(mgr.storeFor(a)!.streaming()).toBe(true);
 
       // Switch to a fresh chat — must NOT abort A.
       const b = mgr.createSession();
+      flush();
       expect(mgr.activeId()).toBe(b);
       expect(mgr.storeFor(a)!.streaming()).toBe(true);
 
@@ -231,14 +255,18 @@ describe("createAiChatSessions — streaming isolation", () => {
 
 describe("createAiChatSessions — titles", () => {
   it("derives the title from the first user message, once; rename wins", async () => {
-    await withRoot(async () => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
+    await withRoot(async (create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
       const a = mgr.createSession();
+      flush();
       expect(mgr.allSessions()[0]!.title).toBe(""); // untitled
       await mgr.storeFor(a)!.sendMessage("Plan the release");
+      flush();
       expect(mgr.allSessions()[0]!.title).toBe("Plan the release");
       mgr.renameSession(a, "Release notes");
+      flush();
       await mgr.storeFor(a)!.sendMessage("another message");
+      flush();
       expect(mgr.allSessions()[0]!.title).toBe("Release notes"); // not overwritten
     });
   });
@@ -246,16 +274,19 @@ describe("createAiChatSessions — titles", () => {
 
 describe("createAiChatSessions — hydrate", () => {
   it("rebuilds only open sessions and restores the active id", async () => {
-    await withRoot(() => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
+    await withRoot((create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
       setChatMessages("open1", [{ role: "user", content: "x" }]);
-      mgr.hydrate({
+      const restored = mgr.hydrate({
         sessions: [
           { id: "open1", title: "Open", createdAt: 1, lastActiveAt: 5, isArchived: false, isOpen: true },
           { id: "arch1", title: "Arch", createdAt: 1, lastActiveAt: 2, isArchived: true, isOpen: false },
         ],
         activeId: "open1",
       });
+      flush();
+      expect(restored.sessions.map((s) => s.id)).toEqual(["open1"]);
+      expect(restored.activeId).toBe("open1");
       expect(mgr.sessions().map((s) => s.id)).toEqual(["open1"]);
       expect(mgr.allSessions()).toHaveLength(2);
       expect(mgr.activeId()).toBe("open1");
@@ -265,13 +296,37 @@ describe("createAiChatSessions — hydrate", () => {
   });
 
   it("drops a dangling activeId that is not open", async () => {
-    await withRoot(() => {
-      const mgr = createAiChatSessions({ getProvider: () => stubProvider() });
+    await withRoot((create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
       mgr.hydrate({
         sessions: [{ id: "c", title: "Closed", createdAt: 1, lastActiveAt: 1, isArchived: false, isOpen: false }],
         activeId: "c",
       });
+      flush();
       expect(mgr.activeId()).toBeNull();
+    });
+  });
+
+  it("returns exactly the rebuilt open sessions and nulls a non-live active id", async () => {
+    await withRoot((create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
+      const restored = mgr.hydrate({
+        sessions: [
+          { id: "open2", title: "Open 2", createdAt: 1, lastActiveAt: 6, isArchived: false, isOpen: true },
+          { id: "closed", title: "Closed", createdAt: 1, lastActiveAt: 5, isArchived: false, isOpen: false },
+          { id: "archived", title: "Archived", createdAt: 1, lastActiveAt: 4, isArchived: true, isOpen: true },
+          { id: "open1", title: "Open 1", createdAt: 1, lastActiveAt: 3, isArchived: false, isOpen: true },
+        ],
+        activeId: "closed", // persisted, but no record was built for it
+      });
+      flush();
+      expect(restored.sessions.map((s) => s.id)).toEqual(["open2", "open1"]);
+      expect(restored.activeId).toBeNull();
+      expect(restored.sessions).toEqual(mgr.sessions());
+      expect(restored.activeId).toBe(mgr.activeId());
+      expect(restored.sessions.every((s) => mgr.storeFor(s.id) !== undefined)).toBe(true);
+      expect(mgr.storeFor("closed")).toBeUndefined();
+      expect(mgr.storeFor("archived")).toBeUndefined();
     });
   });
 });

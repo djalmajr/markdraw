@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, onCleanup, onSettled, Show, untrack, createTrackedEffect } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onSettled, Show, untrack } from "solid-js";
 import { createConverter } from "@markdraw/core/converter.ts";
 import ConvertWorker from "@markdraw/core/convert-worker.ts?worker";
 import type { IndexedFile } from "@markdraw/core/file-index.ts";
@@ -625,16 +625,17 @@ export function App() {
   // doesn't offer the current level — including when it exposes NO picker (empty
   // levels) — snap to "default" so a stale effort isn't sent to a model that
   // doesn't support it; otherwise keep the current level.
-  createTrackedEffect(() => {
-    const levels = aiReasoningLevels();
-    const current = untrack(aiReasoning);
-    if (levels.includes(current)) return;
-    const next: AIReasoningEffort =
-      levels.length === 0 || levels.includes("default") ? "default" : levels[0]!;
-    if (next === current) return;
-    setAiReasoning(next);
-    setStoredAiReasoning(next);
-  });
+  createEffect(
+    () => ({ levels: aiReasoningLevels(), current: untrack(aiReasoning) }),
+    ({ levels, current }) => {
+      if (levels.includes(current)) return;
+      const next: AIReasoningEffort =
+        levels.length === 0 || levels.includes("default") ? "default" : levels[0]!;
+      if (next === current) return;
+      setAiReasoning(next);
+      setStoredAiReasoning(next);
+    },
+  );
   // Every CONNECTED provider's models grouped by provider (drives Settings →
   // Manage models and the chat picker). Providers whose display name shares a base — e.g.
   // "OpenCode Go" (kind: anthropic) and "OpenCode Go (chat)" (kind:
@@ -1228,12 +1229,15 @@ export function App() {
   // Re-discover whenever the open roots, provider connectivity, or the OpenCode
   // toggle change. Fires once on mount too (empty connectivity → no-op until the
   // keychain probe lands), and is latest-wins via the guard inside.
-  createTrackedEffect(() => {
-    rootPaths();
-    connectedProviders();
-    importOpenCode();
-    void refreshDiscoveredMcp();
-  });
+  createEffect(
+    () => {
+      rootPaths();
+      aiConfig();
+      connectedProviders();
+      return importOpenCode();
+    },
+    () => { void refreshDiscoveredMcp(); },
+  );
 
   /** Persist the MCP server list into ai.json, preserving sibling sections. */
   async function persistMcpServers(servers: MCPServerConfig[]): Promise<void> {
@@ -1447,12 +1451,16 @@ export function App() {
       if (isLatest()) setAiMemoryScopes(scopes);
     });
   }
-  // reloadAiCommands reads rootPaths() synchronously, so the effect tracks it.
-  createTrackedEffect(() => reloadAiCommands());
-  createTrackedEffect(() => {
-    rootPaths();
-    void refreshDiscoveredSkills();
-  });
+  // The compute phase reads rootPaths() (as reloadAiCommands does synchronously),
+  // the effect phase starts the reload.
+  createEffect(
+    () => rootPaths(),
+    () => reloadAiCommands(),
+  );
+  createEffect(
+    () => rootPaths(),
+    () => { void refreshDiscoveredSkills(); },
+  );
 
   // Quick Open (Cmd/Ctrl+P) overlay visibility — owned here so the keyboard
   // handler can toggle it without round-tripping through AppShell.
@@ -1586,24 +1594,29 @@ export function App() {
   }
 
   // Toggle auto-refresh (only when roots are open)
-  createTrackedEffect(() => {
-    if (rootPaths().size === 0) return;
-    if (state.autoRefresh()) {
-      watcher.start();
-    } else {
-      watcher.stop();
-    }
-  });
+  createEffect(
+    () => ({ hasRoots: rootPaths().size > 0, autoRefresh: state.autoRefresh() }),
+    ({ hasRoots, autoRefresh }) => {
+      if (!hasRoots) return;
+      if (autoRefresh) {
+        watcher.start();
+      } else {
+        watcher.stop();
+      }
+    },
+  );
 
   // Watch workspace directories for file tree changes (rename/delete/create)
-  createTrackedEffect(() => {
-    const paths = rootPaths();
-    if (paths.size === 0) {
-      void invoke("stop_watching_dirs");
-      return;
-    }
-    void invoke("watch_dirs", { paths: Array.from(paths.values()) });
-  });
+  createEffect(
+    () => Array.from(rootPaths().values()),
+    (paths) => {
+      if (paths.length === 0) {
+        void invoke("stop_watching_dirs");
+        return;
+      }
+      void invoke("watch_dirs", { paths });
+    },
+  );
 
   onSettled(() => {
     const pendingRoots = new Set<string>();
@@ -1628,30 +1641,36 @@ export function App() {
         pendingRoots.clear();
       }, 300);
     });
-    onCleanup(() => {
+    return () => {
       clearTimeout(refreshTimer);
       void unlisten.then((fn) => fn());
-    });
+    };
   });
 
   // Auto-save: debounce 1s after editor content changes
   let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
-  createTrackedEffect(() => {
-    const content = state.editorContent();
-    if (isTabSwitching) return;
-    if (state.editorMode() === "preview") return;
-    if (!state.selectedFile()) return;
-    clearTimeout(autoSaveTimer);
-    autoSaveTimer = setTimeout(() => {
-      // Nothing to write when the buffer equals the last save (a watcher
-      // reload or an undo back to it). Writing it anyway would overwrite an
-      // external change made since, and wake the watcher for nothing.
-      if (state.editorContent() === state.savedContent()) return;
-      // Save, then re-index the saved file (the Rust staleness diff makes this
-      // cheap — only the changed doc is re-chunked/embedded).
-      void Promise.resolve(folder.handleEditorSave()).then(() => reindexActiveFile());
-    }, 1000);
-  });
+  createEffect(
+    () => ({
+      content: state.editorContent(),
+      mode: state.editorMode(),
+      file: state.selectedFile(),
+    }),
+    ({ mode, file }) => {
+      if (isTabSwitching) return;
+      if (mode === "preview") return;
+      if (!file) return;
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = setTimeout(() => {
+        // Nothing to write when the buffer equals the last save (a watcher
+        // reload or an undo back to it). Writing it anyway would overwrite an
+        // external change made since, and wake the watcher for nothing.
+        if (state.editorContent() === state.savedContent()) return;
+        // Save, then re-index the saved file (the Rust staleness diff makes this
+        // cheap — only the changed doc is re-chunked/embedded).
+        void Promise.resolve(folder.handleEditorSave()).then(() => reindexActiveFile());
+      }, 1000);
+    },
+  );
 
   onCleanup(() => {
     clearTimeout(autoSaveTimer);
@@ -1670,7 +1689,7 @@ export function App() {
       hyprlandTitleBar = true;
       remove = installHyprlandMaximize(window, invoke, startDragging);
     });
-    onCleanup(() => { disposed = true; remove(); });
+    return () => { disposed = true; remove(); };
   });
 
   // Caption buttons the compositor acts on (custom-frame platforms only).
@@ -1819,7 +1838,7 @@ export function App() {
     const unlisten = listen<string>("open-file", (event) => {
       if (event.payload) void openFileByAbsolutePath(event.payload);
     });
-    onCleanup(() => { void unlisten.then((fn) => fn()); });
+    return () => { void unlisten.then((fn) => fn()); };
   });
 
   // Hydrate the About dialog's version string. Pulled from
@@ -1843,7 +1862,7 @@ export function App() {
     if (!import.meta.env.PROD) return;
     const handler = (e: Event) => { if (!e.defaultPrevented) e.preventDefault(); };
     document.addEventListener("contextmenu", handler);
-    onCleanup(() => document.removeEventListener("contextmenu", handler));
+    return () => document.removeEventListener("contextmenu", handler);
   });
 
   // Check for app updates a few seconds after boot — silent so any network
@@ -1853,7 +1872,7 @@ export function App() {
     const updateTimer = window.setTimeout(() => {
       void checkForAppUpdates(true);
     }, 3000);
-    onCleanup(() => window.clearTimeout(updateTimer));
+    return () => window.clearTimeout(updateTimer);
   });
 
   async function handleWindowDragStart(event?: MouseEvent) {
@@ -2271,45 +2290,46 @@ export function App() {
   // I/O for every workspace event.
   const [workspaceSymbols, setWorkspaceSymbols] = createSignal<readonly WorkspaceSymbol[]>([]);
   let workspaceBuildToken = 0;
-  createTrackedEffect(() => {
-    const roots = state.rootsList();
-    const paths = rootPaths();
-    if (roots.length === 0 || paths.size === 0) {
-      state.setBacklinkIndex(new Map());
-      setWorkspaceSymbols([]);
-      return;
-    }
-    const token = ++workspaceBuildToken;
-    void (async () => {
-      const indexed = flattenWorkspace(roots).filter((f) => isSupportedFile(f.path));
-      const filesForBacklinks: { path: string; content: string }[] = [];
-      const filesForSymbols: {
-        rootId: string;
-        rootName: string;
-        path: string;
-        content: string;
-      }[] = [];
-      for (const file of indexed) {
-        const root = paths.get(file.rootId);
-        if (!root) continue;
-        try {
-          const content = await readFileContent(`${root}/${file.path}`);
-          filesForBacklinks.push({ path: file.path, content });
-          filesForSymbols.push({
-            rootId: file.rootId,
-            rootName: file.rootName,
-            path: file.path,
-            content,
-          });
-        } catch {
-          // Permission / deleted between scan and read — skip silently.
-        }
+  createEffect(
+    () => ({ roots: state.rootsList(), paths: rootPaths() }),
+    ({ roots, paths }) => {
+      if (roots.length === 0 || paths.size === 0) {
+        state.setBacklinkIndex(new Map());
+        setWorkspaceSymbols([]);
+        return;
       }
-      if (token !== workspaceBuildToken) return; // newer build started
-      state.setBacklinkIndex(buildBacklinkIndex(filesForBacklinks));
-      setWorkspaceSymbols(buildWorkspaceSymbols(filesForSymbols));
-    })();
-  });
+      const token = ++workspaceBuildToken;
+      void (async () => {
+        const indexed = flattenWorkspace(roots).filter((f) => isSupportedFile(f.path));
+        const filesForBacklinks: { path: string; content: string }[] = [];
+        const filesForSymbols: {
+          rootId: string;
+          rootName: string;
+          path: string;
+          content: string;
+        }[] = [];
+        for (const file of indexed) {
+          const root = paths.get(file.rootId);
+          if (!root) continue;
+          try {
+            const content = await readFileContent(`${root}/${file.path}`);
+            filesForBacklinks.push({ path: file.path, content });
+            filesForSymbols.push({
+              rootId: file.rootId,
+              rootName: file.rootName,
+              path: file.path,
+              content,
+            });
+          } catch {
+            // Permission / deleted between scan and read — skip silently.
+          }
+        }
+        if (token !== workspaceBuildToken) return; // newer build started
+        state.setBacklinkIndex(buildBacklinkIndex(filesForBacklinks));
+        setWorkspaceSymbols(buildWorkspaceSymbols(filesForSymbols));
+      })();
+    },
+  );
 
   // ── Workspace index (Fast/Complete tiers, DJA-15) ─────────────────────────
   // Enumerate → sha-diff → chunk → embed (Complete) → push to the per-root Rust
@@ -2334,12 +2354,18 @@ export function App() {
     getTier: () => indexingTier(),
     getEmbedding: () => buildEmbeddingProvider(),
   });
-  createTrackedEffect(() => {
-    const tier = indexingTier();
-    rootPaths(); // re-index when the open roots change
-    if (tier === "off") return;
-    void workspaceIndexer.reindexAll();
-  });
+  createEffect(
+    () => {
+      const tier = indexingTier();
+      rootPaths(); // re-index when the open roots change
+      state.rootsList(); // ...and when their trees change (watcher adds a file)
+      return tier;
+    },
+    (tier) => {
+      if (tier === "off") return;
+      void workspaceIndexer.reindexAll();
+    },
+  );
   /** Re-index the active document after it's saved (called from the autosave
    *  debounce). Cheap — the staleness diff re-embeds only the changed file.
    *  Skips scratch docs, unsupported files, and the Off tier. */
@@ -2360,64 +2386,66 @@ export function App() {
   // Restore tabs when roots become available after startup.
   let sessionRestored = false;
 
-  createTrackedEffect(() => {
+  createEffect(
     // React to rootPaths changing (roots being opened)
-    const paths = rootPaths();
-    if (paths.size === 0 || sessionRestored) return;
+    () => rootPaths(),
+    (paths) => {
+      if (paths.size === 0 || sessionRestored) return;
 
-    const session = tabStore().getPersistedSession();
-    if (!session || session.tabs.length === 0) {
-      sessionRestored = true;
-      return;
-    }
-
-    // Try to restore tabs whose roots are now available
-    const restorable = session.tabs.filter((t) => paths.has(t.rootId));
-    if (restorable.length === 0) return;
-
-    sessionRestored = true;
-
-    // Restore all tabs synchronously (no file loading), mark as needsLoad.
-    // Only the active tab gets its content loaded immediately.
-    let activeEntry: import("@markdraw/core/types.ts").FSEntry | null = null;
-    let activeRootId: string | null = null;
-
-    for (const persisted of restorable) {
-      const entry = state.findEntryByPath(persisted.filePath, persisted.rootId);
-      if (!entry || entry.kind !== "file") continue;
-
-      const isActive = persisted.id === session.activeTabId;
-      tabStore().openTab(entry, persisted.rootId, { background: true });
-
-      // Mark all restored tabs as needing content load
-      const tabId = tabStore().tabs().find((t) => t.filePath === persisted.filePath && t.rootId === persisted.rootId)?.id;
-      if (tabId) tabStore().markTabNeedsLoad(tabId);
-
-      if (isActive) {
-        activeEntry = entry;
-        activeRootId = persisted.rootId;
+      const session = tabStore().getPersistedSession();
+      if (!session || session.tabs.length === 0) {
+        sessionRestored = true;
+        return;
       }
-    }
 
-    // Load only the active tab
-    if (activeEntry && activeRootId) {
-      void (async () => {
-        await loader.loadFileContent(activeEntry!, false, false, activeRootId!);
-        tabStore().updateActiveTabContent({
-          editorContent: state.editorContent(),
-          savedContent: state.savedContent(),
-          html: state.html(),
-          frontmatter: state.frontmatter(),
-        });
-        // Activate after content is loaded
-        const tabId = tabStore().tabs().find((t) => t.filePath === activeEntry!.path && t.rootId === activeRootId)?.id;
-        if (tabId) handleActivateTab(tabId);
-      })();
-    } else if (tabStore().tabs().length > 0) {
-      // No active tab from session — activate the first
-      void handleActivateTab(tabStore().tabs()[0]!.id);
-    }
-  });
+      // Try to restore tabs whose roots are now available
+      const restorable = session.tabs.filter((t) => paths.has(t.rootId));
+      if (restorable.length === 0) return;
+
+      sessionRestored = true;
+
+      // Restore all tabs synchronously (no file loading), mark as needsLoad.
+      // Only the active tab gets its content loaded immediately.
+      let activeEntry: import("@markdraw/core/types.ts").FSEntry | null = null;
+      let activeRootId: string | null = null;
+
+      for (const persisted of restorable) {
+        const entry = state.findEntryByPath(persisted.filePath, persisted.rootId);
+        if (!entry || entry.kind !== "file") continue;
+
+        const isActive = persisted.id === session.activeTabId;
+        tabStore().openTab(entry, persisted.rootId, { background: true });
+
+        // Mark all restored tabs as needing content load
+        const tabId = tabStore().tabs().find((t) => t.filePath === persisted.filePath && t.rootId === persisted.rootId)?.id;
+        if (tabId) tabStore().markTabNeedsLoad(tabId);
+
+        if (isActive) {
+          activeEntry = entry;
+          activeRootId = persisted.rootId;
+        }
+      }
+
+      // Load only the active tab
+      if (activeEntry && activeRootId) {
+        void (async () => {
+          await loader.loadFileContent(activeEntry!, false, false, activeRootId!);
+          tabStore().updateActiveTabContent({
+            editorContent: state.editorContent(),
+            savedContent: state.savedContent(),
+            html: state.html(),
+            frontmatter: state.frontmatter(),
+          });
+          // Activate after content is loaded
+          const tabId = tabStore().tabs().find((t) => t.filePath === activeEntry!.path && t.rootId === activeRootId)?.id;
+          if (tabId) handleActivateTab(tabId);
+        })();
+      } else if (tabStore().tabs().length > 0) {
+        // No active tab from session — activate the first
+        void handleActivateTab(tabStore().tabs()[0]!.id);
+      }
+    },
+  );
 
   // Snapshot active tab before app hides (close-to-tray)
   onSettled(() => {
@@ -2428,7 +2456,7 @@ export function App() {
         tabStore().persistSession();
       }
     });
-    onCleanup(() => { void unlisten.then((fn) => fn()); });
+    return () => { void unlisten.then((fn) => fn()); };
   });
 
   // ── Tab handlers ────────────────────────────────────────────────────────
@@ -3545,7 +3573,7 @@ export function App() {
     }
 
     window.addEventListener("keydown", handleKeyDown);
-    onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
+    return () => window.removeEventListener("keydown", handleKeyDown);
   });
 
   const customWindowFrame = usesCustomWindowFrame(navigator.platform);

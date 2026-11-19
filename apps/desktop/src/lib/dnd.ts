@@ -1,4 +1,4 @@
-import { onCleanup, onSettled } from "solid-js";
+import { onSettled } from "solid-js";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { isSupportedFile } from "@markdraw/core/utils.ts";
@@ -57,8 +57,8 @@ export function setupTauriDnd(deps: TauriDndDeps) {
       }
     });
 
-    onCleanup(() => {
-      unlisten.then((fn) => fn());
-    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
   });
 }

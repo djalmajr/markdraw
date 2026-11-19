@@ -1,4 +1,4 @@
-import { createEffect, type Accessor } from "solid-js";
+import { createEffect, untrack, type Accessor } from "solid-js";
 import { Droppable } from "@dnd-kit/dom";
 import type { DroppableInput } from "@dnd-kit/dom";
 import type { Data } from "@dnd-kit/abstract";
@@ -26,7 +26,10 @@ export function useDroppable<T extends Data = Data>(
   input: UseDroppableInput<T>,
 ): DroppableHandle<T> {
   const manager = useDragDropManager();
-  const droppable = new Droppable<T>({ ...input, register: false }, manager ?? undefined);
+  // Initial snapshot, untracked; the effect below tracks the live values.
+  const droppable = untrack(
+    () => new Droppable<T>({ ...input, register: false }, manager ?? undefined),
+  );
 
   createEffect(
     () => ({

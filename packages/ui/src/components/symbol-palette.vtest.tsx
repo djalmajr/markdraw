@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { Heading } from "@markdraw/core/headings.ts";
@@ -33,6 +34,7 @@ describe("SymbolPalette", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a heading/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "EDGE" } });
+    flush();
     const options = screen.getAllByRole("option");
     expect(options.length).toBe(1);
     expect(options[0]?.textContent).toContain("Edge cases");
@@ -45,7 +47,9 @@ describe("SymbolPalette", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a heading/i) as HTMLInputElement;
     fireEvent.keyDown(input, { key: "ArrowDown" });
+    flush();
     fireEvent.keyDown(input, { key: "Enter" });
+    flush();
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect.mock.calls[0]![0]).toEqual(HEADINGS[1]);
@@ -59,6 +63,7 @@ describe("SymbolPalette", () => {
     ));
     const input = screen.getByPlaceholderText(/Type a heading/i) as HTMLInputElement;
     fireEvent.keyDown(input, { key: "Escape" });
+    flush();
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSelect).not.toHaveBeenCalled();

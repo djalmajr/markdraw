@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onSettled, createTrackedEffect } from "solid-js";
+import { createSignal, onSettled, createEffect, Show } from "solid-js";
 import { Portal } from "@solidjs/web";
 import IconCaseSensitive from "~icons/lucide/case-sensitive";
 import IconLanguages from "~icons/lucide/languages";
@@ -277,46 +277,74 @@ export function SearchOverlay(props: SearchOverlayProps) {
     setOptions((prev) => ({ ...prev, ignoreDiacritics: !prev.ignoreDiacritics }));
   }
 
-  onSettled(() => {
-    if (props.visible) {
-      inputRef?.focus();
+  createEffect(() => props.visible, (visible) => {
+    if (visible) queueMicrotask(() => inputRef?.focus());
+  });
+
+  let observedHost: HTMLElement | undefined;
+  let pendingSelection: { start: number; end: number } | null = null;
+
+  // Read during Show's `when` evaluation, i.e. before the old DOM is replaced.
+  function portalTarget(): HTMLElement | undefined {
+    const host = props.portalHost;
+    if (host !== observedHost) {
+      if (inputRef && document.activeElement === inputRef) {
+        pendingSelection = {
+          start: inputRef.selectionStart ?? inputRef.value.length,
+          end: inputRef.selectionEnd ?? inputRef.value.length,
+        };
+      }
+      observedHost = host;
     }
+    return host;
+  }
+
+  createEffect(() => props.portalHost, () => {
+    const selection = pendingSelection;
+    if (!selection) return;
+    pendingSelection = null;
+    queueMicrotask(() => {
+      const input = inputRef;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(selection.start, selection.end);
+    });
   });
 
-  createTrackedEffect(() => {
-    if (props.visible) {
-      queueMicrotask(() => inputRef?.focus());
-    }
-  });
+  createEffect(
+    () => ({ count: props.matchCount ?? 0, index: props.currentIndex ?? 0 }),
+    ({ count, index }) => {
+      setExternalMatchCount(count);
+      setExternalCurrentIndex(index);
+    },
+  );
 
-  createTrackedEffect(() => {
-    setExternalMatchCount(props.matchCount ?? 0);
-    setExternalCurrentIndex(props.currentIndex ?? 0);
-  });
-
-  createTrackedEffect(() => {
-    const visible = props.visible;
-    const currentQuery = query();
-    const currentOptions = options();
-
-    if (!visible) {
+  createEffect(
+    () => ({
+      visible: props.visible,
+      query: query(),
+      options: options(),
+      external: useExternalEngine(),
+    }),
+    ({ visible, query: currentQuery, options: currentOptions, external }) => {
       clearTimeout(debounceTimer);
-      clearHighlights();
-      return;
-    }
+      if (!visible) {
+        clearHighlights();
+        return;
+      }
 
-    if (useExternalEngine()) {
-      props.onSearchChange?.(currentQuery, currentOptions);
-      return;
-    }
+      if (external) {
+        props.onSearchChange?.(currentQuery, currentOptions);
+        return;
+      }
 
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      highlightMatches(currentQuery, currentOptions);
-    }, 120);
-  });
+      debounceTimer = setTimeout(() => {
+        highlightMatches(currentQuery, currentOptions);
+      }, 120);
+    },
+  );
 
-  onCleanup(() => {
+  onSettled(() => () => {
     clearTimeout(debounceTimer);
     clearHighlights();
   });
@@ -324,7 +352,7 @@ export function SearchOverlay(props: SearchOverlayProps) {
   const displayMatchCount = () => (useExternalEngine() ? externalMatchCount() : internalMatchCount());
   const displayCurrentIndex = () => (useExternalEngine() ? externalCurrentIndex() : internalCurrentIndex());
 
-  const overlay = (
+  const overlay = () => (
     <div class={`search-overlay search-overlay-inline ${props.class ?? ""} ${props.visible ? "" : "search-overlay-hidden"}`}>
       <input
         class="search-input"
@@ -368,9 +396,9 @@ export function SearchOverlay(props: SearchOverlayProps) {
     </div>
   );
 
-  if (props.portalHost) {
-    return <Portal mount={props.portalHost}>{overlay}</Portal>;
-  }
-
-  return overlay;
+  return (
+    <Show when={portalTarget()} fallback={overlay()}>
+      {(host) => <Portal mount={host()}>{overlay()}</Portal>}
+    </Show>
+  );
 }

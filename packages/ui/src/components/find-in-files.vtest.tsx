@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { FindInFiles, type FileMatch } from "./find-in-files.tsx";
@@ -38,6 +39,7 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "needle" } });
+    flush();
 
     await waitFor(() => expect(search).toHaveBeenCalledTimes(1));
     expect(search).toHaveBeenCalledWith("r1", "needle", { caseSensitive: false });
@@ -49,6 +51,7 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "needle" } });
+    flush();
 
     await waitFor(() => expect(screen.getByText("src/a.ts")).not.toBeNull());
     expect(screen.getByText("src/b.ts")).not.toBeNull();
@@ -63,9 +66,11 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "needle" } });
+    flush();
 
     await waitFor(() => expect(screen.getAllByRole("option").length).toBeGreaterThan(0));
     fireEvent.keyDown(input, { key: "Enter" });
+    flush();
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect.mock.calls[0]![0]).toEqual({
@@ -82,12 +87,16 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "needle" } });
+    flush();
     await waitFor(() => expect(screen.getAllByRole("option").length).toBe(3));
 
     fireEvent.keyDown(input, { key: "ArrowDown" });
+    flush();
     fireEvent.keyDown(input, { key: "ArrowDown" });
+    flush();
     // We're now on the third match — which is in src/b.ts.
     fireEvent.keyDown(input, { key: "Enter" });
+    flush();
     expect(onSelect.mock.calls[0]![0]).toEqual({
       rootId: "r1",
       path: "src/b.ts",
@@ -103,6 +112,7 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.keyDown(input, { key: "Escape" });
+    flush();
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSelect).not.toHaveBeenCalled();
   });
@@ -116,9 +126,11 @@ describe("FindInFiles", () => {
       ".find-in-files-option input[type='checkbox']",
     )!;
     fireEvent.click(checkbox);
+    flush();
 
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "needle" } });
+    flush();
 
     await waitFor(() =>
       expect(search).toHaveBeenCalledWith("r1", "needle", { caseSensitive: true }),
@@ -131,6 +143,7 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "needle" } });
+    flush();
     await waitFor(() =>
       expect(baseElement.querySelectorAll("mark.quick-open-hit").length).toBe(3),
     );
@@ -143,6 +156,7 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "needle" } });
+    flush();
     await waitFor(() => expect(screen.getByText(/No matches/i)).not.toBeNull());
   });
 
@@ -153,6 +167,7 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "needle" } });
+    flush();
     await waitFor(() => expect(screen.getByText(/workspace gone/i)).not.toBeNull());
   });
 
@@ -167,6 +182,7 @@ describe("FindInFiles", () => {
     ));
     const input1 = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input1, { target: { value: "needle" } });
+    flush();
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(3));
 
     // Re-mount the same component (Solid recreates state on remount, so
@@ -183,13 +199,16 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "another" } });
+    flush();
     await waitFor(() =>
       expect(search).toHaveBeenCalledWith("r1", "another", { caseSensitive: false }),
     );
 
     // Close and reopen.
     setOpen(false);
+    flush();
     setOpen(true);
+    flush();
 
     // Query and results must still be there.
     const inputAgain = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
@@ -209,9 +228,11 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "needle" } });
+    flush();
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(3));
 
     setRootId("r2");
+    flush();
 
     // Switching root resets the input and the result list.
     expect((screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement).value).toBe("");
@@ -225,11 +246,13 @@ describe("FindInFiles", () => {
     ));
     const input = screen.getByPlaceholderText(/Search in files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "needle" } });
+    flush();
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(3));
 
     const clearBtn = baseElement.querySelector<HTMLButtonElement>(".find-in-files-clear");
     expect(clearBtn).not.toBeNull();
     fireEvent.mouseDown(clearBtn!);
+    flush();
 
     expect(input.value).toBe("");
     expect(screen.queryAllByRole("option")).toHaveLength(0);

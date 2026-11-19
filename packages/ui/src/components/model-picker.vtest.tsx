@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@solidjs/testing-library";
 import { ModelPicker, type ModelGroup } from "./model-picker.tsx";
@@ -22,6 +23,7 @@ const GROUPS: ModelGroup[] = [
 
 function open(baseElement: HTMLElement): void {
   fireEvent.click(baseElement.querySelector(".ai-mp-trigger") as HTMLElement);
+  flush();
 }
 
 describe("ModelPicker", () => {
@@ -55,6 +57,7 @@ describe("ModelPicker", () => {
     open(baseElement);
     const search = baseElement.querySelector(".ai-mp-search input") as HTMLInputElement;
     fireEvent.input(search, { target: { value: "gpt" } });
+    flush();
     const list = baseElement.querySelector(".ai-mp-list") as HTMLElement;
     expect(within(list).getByText("GPT-5.4")).not.toBeNull();
     expect(within(list).queryByText("MiniMax M3")).toBeNull();
@@ -68,6 +71,7 @@ describe("ModelPicker", () => {
     ));
     open(baseElement);
     fireEvent.click(screen.getByText("GPT-5.4"));
+    flush();
     expect(onSelect).toHaveBeenCalledWith("openai/gpt-5");
   });
 
@@ -86,6 +90,7 @@ describe("ModelPicker", () => {
     // The "+" connect button is gone — manage (Settings) is the single entry.
     expect(screen.queryByLabelText("Connect provider")).toBeNull();
     fireEvent.click(screen.getByLabelText("Manage models"));
+    flush();
     expect(onManage).toHaveBeenCalledTimes(1);
   });
 
@@ -96,6 +101,7 @@ describe("ModelPicker", () => {
     open(baseElement);
     const search = baseElement.querySelector(".ai-mp-search input") as HTMLInputElement;
     fireEvent.input(search, { target: { value: "zzzzz" } });
+    flush();
     expect(baseElement.querySelector(".ai-mp-empty")).not.toBeNull();
   });
 });

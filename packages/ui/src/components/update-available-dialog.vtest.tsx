@@ -1,3 +1,4 @@
+import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { UpdateAvailableDialog } from "./update-available-dialog.tsx";
@@ -37,6 +38,7 @@ describe("UpdateAvailableDialog — pre-install state", () => {
       />
     ));
     fireEvent.click(screen.getByRole("button", { name: /Install and restart/i }));
+    flush();
     expect(onInstall).toHaveBeenCalledTimes(1);
   });
 });

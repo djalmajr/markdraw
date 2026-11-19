@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSignal } from "solid-js";
+import { createSignal, flush } from "solid-js";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 
 afterEach(cleanup);
@@ -91,6 +91,7 @@ describe("FileTree", () => {
       </AppProvider>
     ));
     fireEvent.click(getByText("README.md"));
+    flush();
     expect(onSelect).toHaveBeenCalledTimes(1);
     const [entry, rootId] = onSelect.mock.calls[0]!;
     expect(entry.name).toBe("README.md");
@@ -110,6 +111,7 @@ describe("FileTree", () => {
     ));
     const input = getByPlaceholderText(/Filter files/i) as HTMLInputElement;
     fireEvent.input(input, { target: { value: "READ" } });
+    flush();
 
     // tree-item-wrapper sets display:none when invisible, so we filter
     // by visibility on the wrapper before reading the name.
@@ -152,6 +154,7 @@ describe("FileTree", () => {
     const nav = container.querySelector(".file-tree") as HTMLElement;
     nav.focus();
     fireEvent.keyDown(nav, { key: "ArrowDown" });
+    flush();
     expect(container.querySelector(".file-tree")).not.toBeNull();
   });
 
@@ -165,9 +168,11 @@ describe("FileTree", () => {
     expect(item.dataset.expanded).toBe("false");
     // Clicking the row must NOT expand (it selects/focuses the folder).
     fireEvent.click(item);
+    flush();
     expect(item.dataset.expanded).toBe("false");
     // Clicking the chevron expands.
     fireEvent.click(item.querySelector<HTMLElement>(".tree-chevron")!);
+    flush();
     expect(item.dataset.expanded).toBe("true");
   });
 
@@ -198,6 +203,7 @@ describe("FileTree", () => {
       const chevron = item.querySelector<HTMLElement>(".tree-chevron");
       if (!chevron) throw new Error(`chevron for '${name}' not found`);
       fireEvent.click(chevron);
+      flush();
     }
 
     it("renders the three-dot trigger on every row by default", () => {
@@ -225,6 +231,7 @@ describe("FileTree", () => {
       const item = row!.querySelector<HTMLElement>(".tree-item") ?? row!;
       // The row's Kobalte ContextMenu opens on a right-click (contextmenu event).
       fireEvent.contextMenu(item);
+      flush();
     }
 
     it("offers 'Add to chat' in a file's menu when onAddToChat is provided", () => {
@@ -270,8 +277,11 @@ describe("FileTree", () => {
       openFileMenu(container, "notes");
       const item = screen.getByText(/add to chat|adicionar ao chat|añadir al chat/i);
       fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.click(item);
+      flush();
       expect(onAddToChat).toHaveBeenCalledTimes(1);
       expect(onAddToChat.mock.calls[0]![0].kind).toBe("directory");
     });
@@ -306,14 +316,20 @@ describe("FileTree", () => {
       openFileMenu(container, "a.md");
       let item = screen.getByText(/add to chat|adicionar ao chat|añadir al chat/i);
       fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.click(item);
+      flush();
 
       openFileMenu(container, "deep");
       item = screen.getAllByText(/add to chat|adicionar ao chat|añadir al chat/i).at(-1)!;
       fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.click(item);
+      flush();
 
       expect(onAddToChat).toHaveBeenCalledTimes(2);
       expect(onAddToChat.mock.calls[0]![0]).toMatchObject({ kind: "file", path: "notes/a.md" });
@@ -336,12 +352,18 @@ describe("FileTree", () => {
       const trigger = container.querySelector<HTMLElement>(".workspace-root-btn");
       expect(trigger).not.toBeNull();
       fireEvent.pointerDown(trigger!, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.pointerUp(trigger!, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.click(trigger!);
+      flush();
       const item = screen.getByText(/add to chat|adicionar ao chat|añadir al chat/i);
       fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
+      flush();
       fireEvent.click(item);
+      flush();
       expect(onAddToChat).toHaveBeenCalledTimes(1);
       const [entry, rootId] = onAddToChat.mock.calls[0]!;
       expect(entry).toMatchObject({ kind: "directory", path: "" });
@@ -366,6 +388,7 @@ describe("FileTree", () => {
         const nav = container.querySelector(".file-tree") as HTMLElement;
         nav.focus();
         fireEvent.keyDown(nav, { key: "A", ctrlKey: true, shiftKey: true });
+        flush();
         expect(onAddToChat).toHaveBeenCalledTimes(1);
         const [entry, rootId] = onAddToChat.mock.calls[0]!;
         expect(entry).toMatchObject({ path: "README.md" });
@@ -393,6 +416,7 @@ describe("FileTree", () => {
         const nav = container.querySelector(".file-tree") as HTMLElement;
         nav.focus();
         fireEvent.keyDown(nav, { key: "R", ctrlKey: true, shiftKey: true });
+        flush();
         expect(onRevealInFileManager).toHaveBeenCalledTimes(1);
         const [entry, rootId] = onRevealInFileManager.mock.calls[0]!;
         expect(entry).toMatchObject({ path: "README.md" });
@@ -509,6 +533,7 @@ describe("FileTree", () => {
     expect(moveClipboard()).not.toBeNull();
     const nav = container.querySelector(".file-tree") as HTMLElement;
     fireEvent.keyDown(nav, { key: "Escape" });
+    flush();
     expect(moveClipboard()).toBeNull();
   });
 
