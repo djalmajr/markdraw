@@ -475,7 +475,8 @@ export function App() {
   onSettled(() => {
     void (async () => {
       try {
-        const cfg = await loadAIConfig();
+        const selected = getStoredAiModel();
+        const cfg = await loadAIConfig(undefined, selected ? [selected] : []);
         setAiConfig(cfg);
         await connectEnabledServers(cfg.mcp);
         await refreshMcpStatuses();
@@ -1269,7 +1270,8 @@ export function App() {
   async function persistMcpServers(servers: MCPServerConfig[]): Promise<void> {
     const user = await loadUserAIConfig();
     await saveAIConfig(JSON.stringify({ ...user, mcp: servers }));
-    setAiConfig(await loadAIConfig());
+    const selected = getStoredAiModel();
+    setAiConfig(await loadAIConfig(aiConfig(), selected ? [selected] : []));
   }
 
   async function saveMcpServer(input: {
