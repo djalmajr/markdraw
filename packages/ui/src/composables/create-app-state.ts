@@ -852,16 +852,13 @@ export function createAppState(config: AppStateConfig) {
   // live so each rebuilt session store nests under it. Detaching only these
   // init writes keeps them from being mistaken for writes from a component/
   // computation. Solid 2 commits signal writes on the next flush, so reading aiSessions
-  // right here would still see its pre-hydrate (empty) state. Decide the boot
-  // tab from the snapshot passed to hydrate instead, mirroring the manager's
-  // rule that only open, non-archived sessions are live tabs.
+  // right here would still see its pre-hydrate (empty) state. hydrate reports the
+  // live tabs and active id it built, so the boot tab uses those directly instead
+  // of re-deriving the sessions manager's open/archived rule here.
   const persistedChats = getChatSessionsIndex() ?? { sessions: [], activeId: null as string | null };
-  const restoredChats = persistedChats.sessions.filter((m) => m.isOpen && !m.isArchived);
-  const restoredActive =
-    persistedChats.activeId !== null && restoredChats.some((m) => m.id === persistedChats.activeId)
-      ? persistedChats.activeId
-      : null;
-  runWithOwner(null, () => aiSessions.hydrate(persistedChats));
+  const { sessions: restoredChats, activeId: restoredActive } = runWithOwner(null, () =>
+    aiSessions.hydrate(persistedChats),
+  );
 
   // Inline overlay (DJA-13): floating ⌘I widget on the editor selection.
   const aiInline = createAiInlineStore({
