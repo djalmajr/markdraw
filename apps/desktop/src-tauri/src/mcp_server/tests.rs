@@ -891,7 +891,7 @@ fn security_fix_root_command_yields_until_read_releases() {
         .unwrap();
     let app = tauri::test::mock_builder()
         .manage(registry.clone())
-        .build(tauri::generate_context!())
+        .build(crate::tauri_context())
         .unwrap();
     let _main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
@@ -961,7 +961,7 @@ fn security_fix_root_command_during_36_mib_disk_read() {
     let id = registry.list().unwrap()["roots"][0]["id"].clone();
     let app = tauri::test::mock_builder()
         .manage(registry.clone())
-        .build(tauri::generate_context!())
+        .build(crate::tauri_context())
         .unwrap();
     let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
