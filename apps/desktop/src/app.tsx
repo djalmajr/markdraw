@@ -3316,9 +3316,9 @@ export function App() {
 
   // Close tabs when a root is closed
   const originalCloseRoot = folder.handleCloseRoot;
-  folder.handleCloseRoot = (rootId: string) => {
-    tabStore().closeTabsByRoot(rootId);
-    originalCloseRoot(rootId);
+  folder.handleCloseRoot = async (rootId: string) => {
+    await originalCloseRoot(rootId);
+    if (!rootPaths().has(rootId)) tabStore().closeTabsByRoot(rootId);
   };
 
   // Update tab when a file is renamed
