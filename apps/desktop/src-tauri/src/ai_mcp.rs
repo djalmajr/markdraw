@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
-use rmcp::model::{CallToolRequestParams, CallToolResult, Content, TaskSupport};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use rmcp::service::{RoleClient, RunningService};
 use rmcp::transport::auth::AuthClient;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -287,17 +287,9 @@ fn is_auth_error<E: std::error::Error>(err: &E) -> bool {
         || s.contains("unauthorized")
 }
 
-/// Whether a tool can be surfaced to the model. Tools that *require* task-based
-/// invocation can't be called via the plain `call_tool` path, so offering them
-/// would only produce a guaranteed call-time failure — drop them at list time.
-fn keep_tool(task_support: TaskSupport) -> bool {
-    !matches!(task_support, TaskSupport::Required)
-}
-
 fn tool_infos(server: &str, tools: Vec<rmcp::model::Tool>) -> Vec<McpToolInfo> {
     tools
         .into_iter()
-        .filter(|t| keep_tool(t.task_support()))
         .map(|t| McpToolInfo {
             server: server.to_string(),
             name: t.name.to_string(),
@@ -322,7 +314,7 @@ fn parse_text_or_json(text: &str) -> serde_json::Value {
 /// becomes a string (or parsed JSON); multiple text blocks join with newlines;
 /// anything with non-text blocks (images/resources) keeps the raw envelope so
 /// nothing is lost.
-fn flatten_content(content: &[Content]) -> serde_json::Value {
+fn flatten_content(content: &[ContentBlock]) -> serde_json::Value {
     let texts: Vec<String> = content
         .iter()
         .filter_map(|c| c.as_text().map(|t| t.text.clone()))
@@ -603,13 +595,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn keep_tool_drops_only_task_required() {
-        assert!(keep_tool(TaskSupport::Forbidden));
-        assert!(keep_tool(TaskSupport::Optional));
-        assert!(!keep_tool(TaskSupport::Required));
-    }
-
-    #[test]
     fn find_in_path_resolves_a_cmd_shim() {
         use std::path::{Path, PathBuf};
         let dirs = vec![PathBuf::from("C:/util"), PathBuf::from("C:/nodejs")];
@@ -645,25 +630,44 @@ mod tests {
 
     #[test]
     fn normalize_single_text_block_parses_json() {
-        let result = CallToolResult::success(vec![Content::text("{\"a\":1}")]);
+        let result = CallToolResult::success(vec![ContentBlock::text("{\"a\":1}")]);
         assert_eq!(normalize_call_result(result, false), json!({ "a": 1 }));
     }
 
     #[test]
     fn normalize_single_plain_text_stays_a_string() {
-        let result = CallToolResult::success(vec![Content::text("hello world")]);
+        let result = CallToolResult::success(vec![ContentBlock::text("hello world")]);
         assert_eq!(normalize_call_result(result, false), json!("hello world"));
     }
 
     #[test]
     fn normalize_multiple_text_blocks_join_with_newlines() {
-        let result = CallToolResult::success(vec![Content::text("a"), Content::text("b")]);
+        let result =
+            CallToolResult::success(vec![ContentBlock::text("a"), ContentBlock::text("b")]);
         assert_eq!(normalize_call_result(result, false), json!("a\nb"));
     }
 
     #[test]
+    fn normalize_non_text_blocks_keep_the_raw_envelope() {
+        // rmcp 2.x renamed `Content` to `ContentBlock`; the model-facing value
+        // for a result carrying a non-text block is the serialized block list,
+        // so its wire shape (`type`, camelCase `mimeType`) is pinned here.
+        let result = CallToolResult::success(vec![
+            ContentBlock::text("caption"),
+            ContentBlock::image("aGk=", "image/png"),
+        ]);
+        assert_eq!(
+            normalize_call_result(result, false),
+            json!([
+                { "type": "text", "text": "caption" },
+                { "type": "image", "data": "aGk=", "mimeType": "image/png" },
+            ]),
+        );
+    }
+
+    #[test]
     fn normalize_error_surfaces_is_error_and_message() {
-        let result = CallToolResult::error(vec![Content::text("boom")]);
+        let result = CallToolResult::error(vec![ContentBlock::text("boom")]);
         assert_eq!(
             normalize_call_result(result, false),
             json!({ "isError": true, "error": "boom" }),

@@ -94,7 +94,7 @@ pub async fn manager_with_store(
 /// that is simply unreachable or genuinely needs no auth.
 pub async fn server_advertises_oauth(url: &str) -> bool {
     match AuthorizationManager::new(url).await {
-        Ok(manager) => manager.discover_metadata().await.is_ok(),
+        Ok(manager) => manager.resolve_metadata().await.is_ok(),
         Err(_) => false,
     }
 }
@@ -127,11 +127,11 @@ pub async fn authorize<R: Runtime>(
     manager.set_state_store(InMemoryStateStore::new());
 
     // Discovery must precede registration — register/configure both read metadata.
-    let metadata = manager
-        .discover_metadata()
+    let resolution = manager
+        .resolve_metadata()
         .await
         .map_err(|e| format!("OAuth discovery: {e}"))?;
-    manager.set_metadata(metadata);
+    manager.set_metadata(resolution.metadata);
 
     // SEP-835 scope selection (resource metadata → AS metadata; + offline_access
     // so the AS issues a refresh token), then a fresh public-client DCR bound to

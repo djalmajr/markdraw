@@ -3,8 +3,8 @@
 //! workspace contents and never starts Tauri.
 use rmcp::{
     model::{
-        CallToolRequestParams, CallToolResult, ListToolsResult, PaginatedRequestParams,
-        ServerCapabilities, ServerInfo, Tool,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ListToolsResult,
+        PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
     },
     service::{RequestContext, RoleServer},
     ErrorData, ServerHandler, ServiceExt,
@@ -393,8 +393,8 @@ impl Proxy {
     }
 }
 impl ServerHandler for Proxy {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_instructions("Read-only access to workspaces open in Markdraw.")
     }
     async fn list_tools(
@@ -444,7 +444,7 @@ impl ServerHandler for Proxy {
         &self,
         request: CallToolRequestParams,
         _: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         if ![
             "list_workspaces",
             "list_files",
@@ -457,7 +457,8 @@ impl ServerHandler for Proxy {
                     .arguments
                     .as_ref()
                     .is_some_and(|args| !args.is_empty()))
-            || request.task.is_some()
+            || request.input_responses.is_some()
+            || request.request_state.is_some()
         {
             return Err(ErrorData::invalid_params(
                 "Unknown tool or invalid arguments",
@@ -473,11 +474,13 @@ impl ServerHandler for Proxy {
         )
         .await
         .map(|result| {
-            if let Some(message) = result.get("mcp_error").and_then(Value::as_str) {
-                CallToolResult::error(vec![rmcp::model::Content::text(message)])
-            } else {
-                CallToolResult::structured(result)
-            }
+            CallToolResponse::Complete(
+                if let Some(message) = result.get("mcp_error").and_then(Value::as_str) {
+                    CallToolResult::error(vec![rmcp::model::ContentBlock::text(message)])
+                } else {
+                    CallToolResult::structured(result)
+                },
+            )
         })
         .map_err(|error| {
             let message = match error.kind() {
