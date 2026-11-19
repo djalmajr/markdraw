@@ -63,10 +63,15 @@ fn boundaries_errors_and_identity() {
         f.call("list_files", json!({"path":""})).unwrap_err(),
         "not allowed"
     );
-    assert_eq!(
-        f.call("read_file", json!({"path":"missing"})).unwrap_err(),
-        "not found"
-    );
+    for path in ["missing", "missing/child.md"] {
+        for method in ["read_file", "list_files"] {
+            assert_eq!(
+                f.call(method, json!({"path":path})).unwrap_err(),
+                "not found",
+                "{method}({path:?})"
+            );
+        }
+    }
     assert_eq!(
         f.call("read_file", json!({"path":"a.md","start_line":0}))
             .unwrap_err(),
@@ -265,8 +270,23 @@ fn symlinks_special_files_and_directory_swap_are_confined() {
     symlink(outside.path(), f.dir.path().join("link")).unwrap();
     symlink(f.dir.path(), f.dir.path().join("inside")).unwrap();
     symlink("/dev/zero", f.dir.path().join("zero")).unwrap();
-    for path in ["link/secret", "inside/secret", "zero"] {
-        assert!(f.call("read_file", json!({"path":path})).is_err());
+    symlink(
+        outside.path().join("missing"),
+        f.dir.path().join("dangling"),
+    )
+    .unwrap();
+    for path in [
+        "link/secret",
+        "inside/secret",
+        "zero",
+        "dangling",
+        "dangling/child.md",
+    ] {
+        assert_eq!(
+            f.call("read_file", json!({"path":path})).unwrap_err(),
+            "not allowed",
+            "{path:?}"
+        );
     }
     let fifo = CString::new(f.dir.path().join("fifo").as_os_str().as_encoded_bytes()).unwrap();
     assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);

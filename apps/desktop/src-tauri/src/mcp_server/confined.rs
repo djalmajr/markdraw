@@ -147,6 +147,18 @@ mod native {
     }
 }
 
+#[cfg(any(windows, test))]
+fn ntstatus_error_kind(code: i32) -> io::ErrorKind {
+    // Match the windows-sys Win32::Foundation values so Unix tests can run
+    // without compiling the Windows-only dependency.
+    match code as u32 {
+        0xC000_000F // STATUS_NO_SUCH_FILE
+        | 0xC000_0034 // STATUS_OBJECT_NAME_NOT_FOUND
+        | 0xC000_003A => io::ErrorKind::NotFound, // STATUS_OBJECT_PATH_NOT_FOUND
+        _ => io::ErrorKind::PermissionDenied,
+    }
+}
+
 #[cfg(windows)]
 mod native {
     use super::*;
@@ -314,7 +326,7 @@ mod native {
             )
         };
         if code < 0 {
-            return Err(io::ErrorKind::PermissionDenied.into());
+            return Err(ntstatus_error_kind(code).into());
         }
         checked(unsafe { File::from_raw_handle(handle) })
     }
@@ -406,6 +418,27 @@ pub(in crate::mcp_server) fn open(root: &File, parts: &[&str]) -> io::Result<Fil
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_missing_statuses_are_distinct_from_refusals() {
+        use io::ErrorKind::{NotFound, PermissionDenied};
+
+        for (status, expected) in [
+            (0xC000_000F_u32, NotFound),     // STATUS_NO_SUCH_FILE
+            (0xC000_0034, NotFound),         // STATUS_OBJECT_NAME_NOT_FOUND
+            (0xC000_003A, NotFound),         // STATUS_OBJECT_PATH_NOT_FOUND
+            (0xC000_0022, PermissionDenied), // STATUS_ACCESS_DENIED
+            (0xC000_0279, PermissionDenied), // STATUS_IO_REPARSE_TAG_NOT_HANDLED
+            (0xC000_050B, PermissionDenied), // STATUS_REPARSE_POINT_ENCOUNTERED
+        ] {
+            assert_eq!(
+                ntstatus_error_kind(status as i32),
+                expected,
+                "NTSTATUS {status:#010X}"
+            );
+        }
+    }
+
     #[test]
     fn unc_root_classification_is_platform_independent() {
         for path in [
