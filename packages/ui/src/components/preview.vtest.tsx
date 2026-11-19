@@ -21,11 +21,13 @@ interface BaseProps {
   findTrigger?: number;
   currentFilePath?: string | null;
   pendingFragment?: string | null;
+  pendingHeadingText?: string | null;
   onNavigate?: (path: string, frag?: string | null) => void;
   onScrollRatioChange?: (n: number) => void;
   onSearchOpenChange?: (b: boolean) => void;
   onTocChange?: (b: boolean) => void;
   onFragmentHandled?: () => void;
+  onHeadingHandled?: () => void;
 }
 
 function withDefaults(p: BaseProps = {}) {
@@ -43,11 +45,13 @@ function withDefaults(p: BaseProps = {}) {
     findTrigger: p.findTrigger ?? 0,
     currentFilePath: p.currentFilePath ?? null,
     pendingFragment: p.pendingFragment ?? null,
+    pendingHeadingText: p.pendingHeadingText ?? null,
     onNavigate: p.onNavigate ?? (() => {}),
     onScrollRatioChange: p.onScrollRatioChange ?? (() => {}),
     onSearchOpenChange: p.onSearchOpenChange ?? (() => {}),
     onTocChange: p.onTocChange ?? (() => {}),
     onFragmentHandled: p.onFragmentHandled ?? (() => {}),
+    onHeadingHandled: p.onHeadingHandled ?? (() => {}),
   };
 }
 
@@ -422,6 +426,133 @@ describe("Preview", () => {
       // same way as a real browser, we just verify the handler shape.
       expect(typeof onNavigate).toBe("function");
     }
+  });
+});
+
+describe("Preview — navigation requests on an already-rendered document", () => {
+  const NAV_HTML = '<h1 id="target">Target</h1><p>Body</p>';
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
+
+  it("handles a fragment arriving after the same file has rendered", async () => {
+    const [fragment, setFragment] = createSignal<string | null>(null);
+    const handled = vi.fn();
+    const { container } = render(() => (
+      <div class="content">
+        <Preview
+          {...withDefaults({ html: NAV_HTML, currentFilePath: "a.md" })}
+          pendingFragment={fragment()}
+          onFragmentHandled={handled}
+        />
+      </div>
+    ));
+    await tick();
+    const scroller = container.querySelector(".content") as HTMLElement;
+    const scroll = vi.spyOn(scroller, "scrollTo");
+
+    setFragment("target");
+    flush();
+    await tick();
+    expect(handled).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenCalled();
+  });
+
+  it("handles a heading search arriving after the same file has rendered", async () => {
+    const [heading, setHeading] = createSignal<string | null>(null);
+    const handled = vi.fn();
+    const { container } = render(() => (
+      <div class="content">
+        <Preview
+          {...withDefaults({ html: NAV_HTML, currentFilePath: "a.md" })}
+          pendingHeadingText={heading()}
+          onHeadingHandled={handled}
+        />
+      </div>
+    ));
+    await tick();
+    const scroller = container.querySelector(".content") as HTMLElement;
+    const scroll = vi.spyOn(scroller, "scrollTo");
+
+    setHeading("Target");
+    flush();
+    await tick();
+    expect(handled).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenCalled();
+  });
+
+  it("handles a fragment already present on mount exactly once", async () => {
+    const handled = vi.fn();
+    const scroller = document.createElement("div");
+    scroller.className = "content";
+    document.body.appendChild(scroller);
+    // Spy before render: the mount jump happens in the same flush as the
+    // initial html render.
+    const scroll = vi.spyOn(scroller, "scrollTo");
+    try {
+      render(() => (
+        <Preview
+          {...withDefaults({ html: NAV_HTML, currentFilePath: "a.md" })}
+          pendingFragment="target"
+          onFragmentHandled={handled}
+        />
+      ), { container: scroller });
+      await tick();
+      expect(handled).toHaveBeenCalledTimes(1);
+      expect(scroll).toHaveBeenCalledTimes(1);
+    } finally {
+      scroller.remove();
+    }
+  });
+
+  it("preserves saved scroll on mount and syncs only when version changes", async () => {
+    const [version, setVersion] = createSignal(7);
+    const scroller = document.createElement("div");
+    scroller.className = "content";
+    scroller.scrollTop = 123;
+    Object.defineProperty(scroller, "scrollHeight", { value: 1000 });
+    Object.defineProperty(scroller, "clientHeight", { value: 200 });
+    document.body.appendChild(scroller);
+    try {
+      render(() => (
+        <Preview
+          {...withDefaults({
+            html: NAV_HTML,
+            syncScrollActive: true,
+            syncScrollTargetRatio: 0.5,
+            syncScrollTargetVersion: version(),
+          })}
+        />
+      ), { container: scroller });
+      await tick();
+      expect(scroller.scrollTop).toBe(123);
+
+      setVersion(8);
+      flush();
+      expect(scroller.scrollTop).toBe(400);
+    } finally {
+      scroller.remove();
+    }
+  });
+
+  it("keeps search already open and responds to a new find trigger", async () => {
+    const [trigger, setTrigger] = createSignal(7);
+    const opened = vi.fn();
+    const { container } = render(() => (
+      <Preview
+        {...withDefaults({
+          html: NAV_HTML,
+          searchOpen: true,
+          findTrigger: trigger(),
+        })}
+        onSearchOpenChange={opened}
+      />
+    ));
+    await tick();
+    expect(container.querySelector(".search-overlay")).not.toBeNull();
+    expect(opened).not.toHaveBeenCalled();
+
+    setTrigger(8);
+    flush();
+    expect(opened).toHaveBeenCalledWith(true);
   });
 });
 

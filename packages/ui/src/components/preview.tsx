@@ -767,6 +767,10 @@ export function Preview(props: PreviewProps) {
   const [overlayHost, setOverlayHost] = createSignal<HTMLElement | undefined>(undefined);
   const [viewerSvg, setViewerSvg] = createSignal<string | null>(null);
   const [viewerImage, setViewerImage] = createSignal<string | null>(null);
+  // Html whose post-swap work (TOC, highlight/mermaid/kroki) has finished.
+  // Navigation requests are applied against this rendered document, never
+  // against the raw `html` prop, so they never jump into stale content.
+  const [renderedHtml, setRenderedHtml] = createSignal<string | null>(null);
 
   // Per-image display menu for inline preview images. Opened by CLICKING the
   // image (hover put the menu too far to reach before it dismissed); it floats at
@@ -1022,6 +1026,24 @@ export function Preview(props: PreviewProps) {
     }
   }
 
+  function scrollToHeading(headingText: string) {
+    if (!articleRef) return;
+    const hs = articleRef.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6");
+    const target = Array.from(hs).find(
+      (h) => h.textContent?.trim() === headingText,
+    );
+    if (!target) return;
+    const contentEl = articleRef.closest(".content");
+    if (contentEl) {
+      const targetRect = target.getBoundingClientRect();
+      const contentRect = contentEl.getBoundingClientRect();
+      const offset = targetRect.top - contentRect.top + contentEl.scrollTop - 16;
+      contentEl.scrollTo({ top: offset, behavior: "smooth" });
+    } else {
+      target.scrollIntoView({ behavior: "smooth" });
+    }
+  }
+
   function handleClick(e: MouseEvent) {
     // Open the diagram viewer when clicking a rendered Mermaid or Kroki block.
     const diagram = (e.target as HTMLElement).closest<HTMLElement>(
@@ -1178,6 +1200,7 @@ export function Preview(props: PreviewProps) {
     // Cancel any in-flight pipeline so stale renders don't swap in.
     if (!_html) {
       ++renderGen;
+      setRenderedHtml(null);
       articleRef.style.opacity = "0";
       // Drop the cached toc handle: the next render will produce a
       // fresh one. Holding on to the old one across a file switch
@@ -1255,38 +1278,11 @@ export function Preview(props: PreviewProps) {
 
       articleRef!.style.opacity = "";
 
-      const frag = props.pendingFragment;
-      if (frag) {
-        scrollToFragment(frag);
-        props.onFragmentHandled();
-      }
-
-      // Heading-text jump (Workspace Symbol search / programmatic
-      // navigation that doesn't know the rendered fragment id). Walk
-      // the visible article for h1-h6 nodes, match by trimmed
-      // textContent, scroll into view. Falling back to text rather
-      // than computing a slug ahead of time keeps the matcher
-      // resilient to renderer differences (asciidoctor vs markdown-it
-      // produce different id schemes).
-      const headingText = props.pendingHeadingText;
-      if (headingText && articleRef) {
-        const hs = articleRef.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6");
-        const target = Array.from(hs).find(
-          (h) => h.textContent?.trim() === headingText,
-        );
-        if (target) {
-          const contentEl = articleRef.closest(".content");
-          if (contentEl) {
-            const targetRect = target.getBoundingClientRect();
-            const contentRect = contentEl.getBoundingClientRect();
-            const offset = targetRect.top - contentRect.top + contentEl.scrollTop - 16;
-            contentEl.scrollTo({ top: offset, behavior: "smooth" });
-          } else {
-            target.scrollIntoView({ behavior: "smooth" });
-          }
-        }
-        props.onHeadingHandled?.();
-      }
+      // Publish the rendered document to the navigation effect below.
+      // Doing it here (after the swap) keeps a request that arrived with
+      // the file change from jumping against the old article, and makes
+      // that request execute exactly once.
+      setRenderedHtml(_html);
     }
 
     // New document (file switch): double-buffer to avoid FOUC — process in
@@ -1357,6 +1353,36 @@ export function Preview(props: PreviewProps) {
     return () => {
       ++renderGen;
     };
+    },
+  );
+
+  // Navigation requests can arrive while the document is already on
+  // screen — choosing a symbol in the current file writes
+  // `pendingHeadingText`, and a #fragment on the current file writes
+  // `pendingFragment` without changing `html`. Both must be tracked in
+  // the compute; reading them from the html effect's apply phase missed
+  // those requests entirely. This effect only performs the jump: html
+  // still renders in its own effect, so a request change never re-renders
+  // the document.
+  createEffect(
+    () => ({
+      fragment: props.pendingFragment,
+      heading: props.pendingHeadingText,
+      // `renderedHtml` is updated by afterSwap, once the new content is
+      // in the DOM. Waiting for it also prevents a double jump when the
+      // file and the request arrive in the same update.
+      ready: !!props.html && renderedHtml() === props.html,
+    }),
+    ({ fragment, heading, ready }) => {
+      if (!ready || !articleRef) return;
+      if (fragment) {
+        scrollToFragment(fragment);
+        props.onFragmentHandled();
+      }
+      if (heading) {
+        scrollToHeading(heading);
+        props.onHeadingHandled?.();
+      }
     },
   );
 
