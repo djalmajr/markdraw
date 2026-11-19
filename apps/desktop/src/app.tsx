@@ -69,6 +69,7 @@ import { loadAIConfig, loadUserAIConfig, saveAIConfig } from "./lib/ai-config.ts
 import { readModelCache } from "./lib/model-cache.ts";
 import {
   canRefreshProvider,
+  publicJsonFetcher,
   refreshModelsFromUi,
   refreshModelsOnConnect,
   refreshStaleProviders,
@@ -659,6 +660,9 @@ export function App() {
       apiKeyFor: apiKeyFor ?? ((id) => getApiKey(id)),
       selectedModel: getStoredAiModel(),
       modelDefinition: (id, modelId) => aiConfig().provider[id]?.models[modelId],
+      // models.dev's api.json (~6.7 MB) goes through the plugin's own client: the
+      // native `ai_http_get_json` caps the body at 4 MiB and answers `too_large`.
+      sources: { fetchPublicJson: publicJsonFetcher(tauriFetch) },
     };
   }
 

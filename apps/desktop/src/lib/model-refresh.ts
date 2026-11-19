@@ -50,8 +50,37 @@ export interface RefreshableProvider {
   };
 }
 
+/** A public JSON body fetched WHOLE, with no size cap. */
+export type PublicJsonFetch = (url: string) => Promise<unknown>;
+
+/** A minimal fetch: global `fetch` and the Tauri HTTP plugin's `fetch` (which
+ *  carries extra client options) both satisfy it. */
+type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+/** Adapt a fetch into a {@link PublicJsonFetch}: a non-2xx status is a failure
+ *  and the body is parsed whole — nothing here caps its size. Thrown errors
+ *  carry no URL, header or upstream text. */
+export function publicJsonFetcher(fetchImpl: FetchLike): PublicJsonFetch {
+  return async (url: string) => {
+    const res = await fetchImpl(url);
+    if (!res.ok) throw new Error("model list request failed");
+    return (await res.json()) as unknown;
+  };
+}
+
+/** Default source for callers that inject nothing (the app always injects the
+ *  plugin's `fetch`): the plugin is loaded lazily so this module stays
+ *  importable in tests and outside a Tauri webview. */
+const pluginJsonFetch: PublicJsonFetch = async (url: string) => {
+  const { fetch: pluginFetch } = await import("@tauri-apps/plugin-http");
+  return publicJsonFetcher(pluginFetch)(url);
+};
+
 export interface ModelRefreshSources {
   httpGetJson: typeof httpGetJson;
+  /** models.dev's catalog only: the Tauri HTTP plugin, which has no 4 MiB body
+   *  cap (the native `ai_http_get_json` command rejects api.json as `too_large`). */
+  fetchPublicJson: PublicJsonFetch;
   listCliModels: typeof listCliModels;
   codexModelsCache: typeof codexModelsCache;
 }
@@ -331,7 +360,10 @@ function codexCached(models: CodexCachedModel[]): Record<string, CachedModel> {
 }
 
 async function claudeSubscriptionWrite(sources: ModelRefreshSources): Promise<RefreshWrite> {
-  const raw = await getJson(sources, MODELS_DEV_URL);
+  // The one source fetched through the plugin: models.dev's api.json is ~6.7 MB
+  // and the native command answers `too_large` above 4 MiB, so the subscription
+  // list could never refresh through it.
+  const raw = await sources.fetchPublicJson(MODELS_DEV_URL);
   const catalog = parseModelsDevCatalog(raw);
   const selected = selectClaudeSubscriptionModels(catalog.anthropic ?? []);
   const cached = toCached(selected);
@@ -382,6 +414,7 @@ export async function refreshProviderModels(
 ): Promise<ModelRefreshResult> {
   const sources: ModelRefreshSources = {
     httpGetJson: ctx.sources?.httpGetJson ?? httpGetJson,
+    fetchPublicJson: ctx.sources?.fetchPublicJson ?? pluginJsonFetch,
     listCliModels: ctx.sources?.listCliModels ?? listCliModels,
     codexModelsCache: ctx.sources?.codexModelsCache ?? codexModelsCache,
   };

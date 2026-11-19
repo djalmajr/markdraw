@@ -12,6 +12,7 @@ import {
 import {
   canRefreshProvider,
   MODEL_REFRESH_FAILURE,
+  publicJsonFetcher,
   refreshModelsFromUi,
   refreshModelsOnConnect,
   refreshProviderModels,
@@ -39,17 +40,24 @@ function fakeStorage(seed?: string) {
 
 interface Calls {
   http: Array<{ url: string; headers?: Record<string, string> }>;
+  /** models.dev only: the plugin HTTP source, no 4 MiB cap. */
+  publicJson: string[];
   cli: string[];
   codex: number;
 }
 
 function harness(responses: Record<string, unknown> = {}, options: { cli?: string; codex?: unknown } = {}) {
-  const calls: Calls = { http: [], cli: [], codex: 0 };
+  const calls: Calls = { http: [], publicJson: [], cli: [], codex: 0 };
   const sources: ModelRefreshSources = {
     httpGetJson: async (url, headers) => {
       calls.http.push({ url, headers });
       if (!(url in responses)) throw new Error(`unexpected ${url}`);
       return { status: 200, body: JSON.stringify(responses[url]) };
+    },
+    fetchPublicJson: async (url) => {
+      calls.publicJson.push(url);
+      if (!(url in responses)) throw new Error(`unexpected ${url}`);
+      return responses[url];
     },
     listCliModels: async (provider) => {
       calls.cli.push(provider);
@@ -476,5 +484,128 @@ describe("model-refresh — rodada 2: F1, F2 e connect", () => {
     const failed = await refreshModelsOnConnect("anthropic", h.ctx);
     expect(failed).toEqual({ ok: false, refreshed: [], error: MODEL_REFRESH_FAILURE });
     expect(h.storage.raw).toBe(before);
+  });
+});
+
+const MODELS_DEV = "https://models.dev/api.json";
+
+/** A models.dev-shaped body at the real catalog's scale: ~6 MB, far above the
+ *  4 MiB ceiling the native `ai_http_get_json` command answers `too_large` for. */
+function modelsDevBody(): string {
+  const models: Record<string, unknown> = Object.create(null);
+  for (let i = 0; i < 60_000; i++) {
+    models[`filler-${i}`] = {
+      id: `filler-${i}`,
+      name: `Filler model ${i}`,
+      limit: { context: 128000 },
+    };
+  }
+  return JSON.stringify({
+    anthropic: {
+      models: {
+        "claude-opus-5-5": { id: "claude-opus-5-5", name: "Opus 5.5" },
+        "claude-sonnet-4-6": { id: "claude-sonnet-4-6", status: "deprecated" },
+        "claude-sonnet-5-5": { id: "claude-sonnet-5-5", name: "Sonnet 5.5" },
+      },
+    },
+    filler: { models },
+  });
+}
+
+describe("model-refresh — rodada 3: models.dev pelo plugin HTTP", () => {
+  it("claude-sub busca o models.dev pela fonte do plugin, nunca pelo comando nativo capado", async () => {
+    const h = harness({
+      [MODELS_DEV]: {
+        anthropic: { models: { "claude-opus-5-5": { id: "claude-opus-5-5", name: "Opus 5.5" } } },
+      },
+    });
+    h.ctx.providers = { "claude-sub": { kind: "claude-cli", name: "Claude" } };
+    const result = await refreshProviderModels(["claude-sub"], h.ctx);
+    expect(result).toEqual({ ok: true, refreshed: ["claude-sub"] });
+    expect(h.calls.publicJson).toEqual([MODELS_DEV]);
+    expect(h.calls.http).toEqual([]);
+    expect(h.calls.cli).toEqual([]);
+    expect(models(h.cache()["claude-sub"])).toEqual({
+      "claude-opus-5-5": { name: "Opus 5.5" },
+    });
+    expect(h.cache()["claude-sub"]?.source).toBe("models.dev:anthropic");
+  });
+
+  it("catálogo maior que 4 MiB atualiza o claude-sub pela fonte do plugin", async () => {
+    const body = modelsDevBody();
+    // O teto que derrubava o botão no app real; a fonte do plugin não o tem.
+    expect(body.length).toBeGreaterThan(4 * 1024 * 1024);
+    const h = harness();
+    h.ctx.sources!.fetchPublicJson = publicJsonFetcher(async (url) => {
+      expect(url).toBe(MODELS_DEV);
+      return new Response(body, { status: 200 });
+    });
+    h.ctx.providers = { "claude-sub": { kind: "claude-cli", name: "Claude" } };
+    const result = await refreshProviderModels(["claude-sub"], h.ctx);
+    expect(result).toEqual({ ok: true, refreshed: ["claude-sub"] });
+    expect(models(h.cache()["claude-sub"])).toEqual({
+      "claude-opus-5-5": { name: "Opus 5.5" },
+      "claude-sonnet-5-5": { name: "Sonnet 5.5" },
+    });
+  });
+
+  it("falha da fonte do plugin não apaga o cache do claude-sub", async () => {
+    const h = harness();
+    h.storage.setItem(
+      MODEL_CACHE_KEY,
+      JSON.stringify({
+        "claude-sub": {
+          source: "models.dev:anthropic",
+          fetchedAt: "2026-11-01T12:00:00.000Z",
+          models: { "claude-opus-4-8": { name: "Opus 4.8" } },
+        },
+      }),
+    );
+    const before = h.storage.raw;
+    h.ctx.providers = { "claude-sub": { kind: "claude-cli", name: "Claude" } };
+    h.ctx.sources!.fetchPublicJson = async () => {
+      throw new Error("plugin request failed");
+    };
+    const result = await refreshProviderModels(["claude-sub"], h.ctx);
+    expect(result).toEqual({ ok: false, refreshed: [], error: MODEL_REFRESH_FAILURE });
+    expect(h.storage.raw).toBe(before);
+    expect(models(h.cache()["claude-sub"])).toEqual({ "claude-opus-4-8": { name: "Opus 4.8" } });
+    expect(h.cache()["claude-sub"]?.fetchedAt).toBe("2026-11-01T12:00:00.000Z");
+  });
+
+  it("publicJsonFetcher: corpo 2xx volta parseado e não-2xx é falha que preserva o cache", async () => {
+    // Controle: o adaptador devolve o JSON inteiro do corpo.
+    const okFetch = async () =>
+      new Response(JSON.stringify({ anthropic: { models: {} } }), { status: 200 });
+    expect(await publicJsonFetcher(okFetch)(MODELS_DEV)).toEqual({ anthropic: { models: {} } });
+
+    // Invariante herdada do consumidor: status não-2xx é falha, não lista vazia.
+    const h = harness();
+    h.storage.setItem(
+      MODEL_CACHE_KEY,
+      JSON.stringify({
+        "claude-sub": {
+          source: "models.dev:anthropic",
+          fetchedAt: "2026-11-01T12:00:00.000Z",
+          models: { "claude-opus-4-8": { name: "Opus 4.8" } },
+        },
+      }),
+    );
+    const before = h.storage.raw;
+    h.ctx.providers = { "claude-sub": { kind: "claude-cli", name: "Claude" } };
+    h.ctx.sources!.fetchPublicJson = publicJsonFetcher(async () =>
+      // O corpo é um catálogo VÁLIDO e não-vazio: só o status distingue o erro
+      // de uma lista boa, então sem a checagem de `ok` isso gravaria um modelo.
+      new Response(
+        JSON.stringify({
+          anthropic: { models: { "claude-opus-5-5": { id: "claude-opus-5-5", name: "Opus 5.5" } } },
+        }),
+        { status: 503 },
+      ),
+    );
+    const result = await refreshProviderModels(["claude-sub"], h.ctx);
+    expect(result).toEqual({ ok: false, refreshed: [], error: MODEL_REFRESH_FAILURE });
+    expect(h.storage.raw).toBe(before);
+    expect(models(h.cache()["claude-sub"])).toEqual({ "claude-opus-4-8": { name: "Opus 4.8" } });
   });
 });
