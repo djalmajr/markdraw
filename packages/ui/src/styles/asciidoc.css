@@ -857,6 +857,80 @@
   margin-bottom: 1em;
 }
 
+/* Box edge spacing: the box's padding must be the only space at its edges.
+   Asciidoctor wraps content in .paragraph/.listingblock/.content, so trim the
+   first/last element at each wrapper level (up to four deep). Margins between
+   sibling elements and the box's own padding are untouched. */
+.doc-body .admonitionblock td.content > :first-child,
+.doc-body .exampleblock > :first-child,
+.doc-body .sidebarblock > :first-child,
+.doc-body .quoteblock > :first-child,
+.doc-body > blockquote > :first-child,
+.doc-body .paragraph + blockquote > :first-child,
+.doc-body details > :first-child,
+.doc-body div:not(.admonitionblock):is(.warning, .note, .tip, .caution, .important, .info) > :first-child,
+.doc-body .admonitionblock td.content > :first-child > :first-child,
+.doc-body .exampleblock > :first-child > :first-child,
+.doc-body .sidebarblock > :first-child > :first-child,
+.doc-body .quoteblock > :first-child > :first-child,
+.doc-body > blockquote > :first-child > :first-child,
+.doc-body .paragraph + blockquote > :first-child > :first-child,
+.doc-body details > :first-child > :first-child,
+.doc-body div:not(.admonitionblock):is(.warning, .note, .tip, .caution, .important, .info) > :first-child > :first-child,
+.doc-body .admonitionblock td.content > :first-child > :first-child > :first-child,
+.doc-body .exampleblock > :first-child > :first-child > :first-child,
+.doc-body .sidebarblock > :first-child > :first-child > :first-child,
+.doc-body .quoteblock > :first-child > :first-child > :first-child,
+.doc-body > blockquote > :first-child > :first-child > :first-child,
+.doc-body .paragraph + blockquote > :first-child > :first-child > :first-child,
+.doc-body details > :first-child > :first-child > :first-child,
+.doc-body div:not(.admonitionblock):is(.warning, .note, .tip, .caution, .important, .info) > :first-child > :first-child > :first-child,
+.doc-body .admonitionblock td.content > :first-child > :first-child > :first-child > :first-child,
+.doc-body .exampleblock > :first-child > :first-child > :first-child > :first-child,
+.doc-body .sidebarblock > :first-child > :first-child > :first-child > :first-child,
+.doc-body .quoteblock > :first-child > :first-child > :first-child > :first-child,
+.doc-body > blockquote > :first-child > :first-child > :first-child > :first-child,
+.doc-body .paragraph + blockquote > :first-child > :first-child > :first-child > :first-child,
+.doc-body details > :first-child > :first-child > :first-child > :first-child,
+.doc-body div:not(.admonitionblock):is(.warning, .note, .tip, .caution, .important, .info) > :first-child > :first-child > :first-child > :first-child {
+  margin-top: 0;
+}
+
+.doc-body .admonitionblock td.content > :last-child,
+.doc-body .exampleblock > :last-child,
+.doc-body .sidebarblock > :last-child,
+.doc-body .quoteblock > :last-child,
+.doc-body > blockquote > :last-child,
+.doc-body .paragraph + blockquote > :last-child,
+.doc-body details > :last-child,
+.doc-body div:not(.admonitionblock):is(.warning, .note, .tip, .caution, .important, .info) > :last-child,
+.doc-body .admonitionblock td.content > :last-child > :last-child,
+.doc-body .exampleblock > :last-child > :last-child,
+.doc-body .sidebarblock > :last-child > :last-child,
+.doc-body .quoteblock > :last-child > :last-child,
+.doc-body > blockquote > :last-child > :last-child,
+.doc-body .paragraph + blockquote > :last-child > :last-child,
+.doc-body details > :last-child > :last-child,
+.doc-body div:not(.admonitionblock):is(.warning, .note, .tip, .caution, .important, .info) > :last-child > :last-child,
+.doc-body .admonitionblock td.content > :last-child > :last-child > :last-child,
+.doc-body .exampleblock > :last-child > :last-child > :last-child,
+.doc-body .sidebarblock > :last-child > :last-child > :last-child,
+.doc-body .quoteblock > :last-child > :last-child > :last-child,
+.doc-body > blockquote > :last-child > :last-child > :last-child,
+.doc-body .paragraph + blockquote > :last-child > :last-child > :last-child,
+.doc-body details > :last-child > :last-child > :last-child,
+.doc-body div:not(.admonitionblock):is(.warning, .note, .tip, .caution, .important, .info) > :last-child > :last-child > :last-child,
+.doc-body .admonitionblock td.content > :last-child > :last-child > :last-child > :last-child,
+.doc-body .exampleblock > :last-child > :last-child > :last-child > :last-child,
+.doc-body .sidebarblock > :last-child > :last-child > :last-child > :last-child,
+.doc-body .quoteblock > :last-child > :last-child > :last-child > :last-child,
+.doc-body > blockquote > :last-child > :last-child > :last-child > :last-child,
+.doc-body .paragraph + blockquote > :last-child > :last-child > :last-child > :last-child,
+.doc-body details > :last-child > :last-child > :last-child > :last-child,
+.doc-body div:not(.admonitionblock):is(.warning, .note, .tip, .caution, .important, .info) > :last-child > :last-child > :last-child > :last-child {
+  margin-bottom: 0;
+}
+
 /* Details/summary container */
 .doc-body details {
   margin: 1em 0;
