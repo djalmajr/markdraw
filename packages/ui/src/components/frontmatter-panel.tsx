@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, Show, createEffect } from "solid-js";
-import type { JSX } from "@solidjs/web";
+import { Dynamic, type JSX } from "@solidjs/web";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconText from "~icons/lucide/text";
 import IconTag from "~icons/lucide/tag";
@@ -230,14 +230,14 @@ export function FrontmatterPanel(props: FrontmatterPanelProps) {
       </button>
       <Show when={!collapsed()}>
         <div class="frontmatter-body">
-          <For each={orderedEntries()}>
+          <For each={orderedEntries()} keyed={(entry) => entry.key}>
             {(entry) => (
               <div class="frontmatter-row">
                 <span class="frontmatter-key">
-                  <entry.icon width={14} height={14} />
-                  <span>{entry.label}</span>
+                  <Dynamic component={entry().icon} width={14} height={14} />
+                  <span>{entry().label}</span>
                 </span>
-                <div class="frontmatter-value">{renderValue(entry.key, entry.value)}</div>
+                <div class="frontmatter-value">{renderValue(entry().key, entry().value)}</div>
               </div>
             )}
           </For>

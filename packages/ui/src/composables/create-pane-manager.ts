@@ -33,10 +33,8 @@ export interface PaneManager {
   splitRatio: () => number;
   setSplitRatio: (value: number) => void;
 
-  /** Cmd/Ctrl+\ — open a second pane next to the active one. The new
-   *  pane starts with no tabs; the host wires `splitFromActive` to
-   *  hand the active tab a copy. No-op when already at MAX_PANES. */
-  splitFromActive: () => boolean;
+  /** Open and focus the second pane. Returns the new pane when created. */
+  splitFromActive: () => PaneStore | undefined;
 
   /** Close the right pane and re-collapse to single-pane. Caller is
    *  responsible for closing the right pane's tabs first (or
@@ -90,7 +88,7 @@ export function createPaneManager(config: PaneManagerConfig = {}): PaneManager {
     const list = paneList();
     if (index < 0 || index >= list.length) return;
     setActiveIndex(index);
-    persistLayout();
+    persistLayout(list.length, index);
   }
 
   function setSplitRatio(value: number) {
@@ -99,26 +97,27 @@ export function createPaneManager(config: PaneManagerConfig = {}): PaneManager {
     writeStoredSplitRatio(next);
   }
 
-  function splitFromActive(): boolean {
+  function splitFromActive(): PaneStore | undefined {
     const list = paneList();
-    if (list.length >= MAX_PANES) return false;
+    if (list.length >= MAX_PANES) return;
 
     const newPane = createPaneStore(`pane-${list.length}`);
-    setPaneList([...list, newPane]);
+    const next = [...list, newPane];
+    setPaneList(next);
     // The newly opened pane becomes active so subsequent file-tree
     // clicks land there, matching VS Code's split-and-focus behavior.
     setActiveIndex(list.length);
-    persistLayout();
-    return true;
+    persistLayout(next.length, list.length);
+    return newPane;
   }
 
   function collapseRightPane(): void {
     const list = paneList();
     if (list.length <= 1) return;
-    setPaneList(list.slice(0, list.length - 1));
-    // Active index is clamped on next access via `activePane()`, but
-    // also reset explicitly so the focus class flips immediately.
-    if (activeIndex() >= list.length - 1) setActiveIndex(list.length - 2);
+    const next = list.slice(0, -1);
+    const index = Math.min(activeIndex(), next.length - 1);
+    setPaneList(next);
+    setActiveIndex(index);
     // Drop the now-orphaned pane's tab session so it doesn't haunt the
     // next reload as a phantom pane.
     try {
@@ -128,16 +127,13 @@ export function createPaneManager(config: PaneManagerConfig = {}): PaneManager {
     } catch {
       // ignore — non-essential
     }
-    persistLayout();
+    persistLayout(next.length, index);
   }
 
-  function persistLayout(): void {
+  function persistLayout(paneCount: number, activePaneIndex: number): void {
     try {
       if (typeof localStorage === "undefined") return;
-      const layout: PersistedPaneLayout = {
-        paneCount: paneList().length,
-        activePaneIndex: activeIndex(),
-      };
+      const layout: PersistedPaneLayout = { paneCount, activePaneIndex };
       localStorage.setItem(PANE_LAYOUT_STORAGE_KEY, JSON.stringify(layout));
     } catch {
       // ignore

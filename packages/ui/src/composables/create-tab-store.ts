@@ -10,6 +10,8 @@ import {
 } from "@markdraw/core/tabs.ts";
 import type { PaneViewSlice } from "./create-pane-store.ts";
 
+type TabContent = Partial<Pick<TabState, "editorContent" | "savedContent" | "html" | "frontmatter" | "includePaths">>;
+
 export interface TabStore {
   tabs: () => TabState[];
   activeTabId: () => TabId | null;
@@ -23,11 +25,14 @@ export interface TabStore {
   openTab(entry: FSEntry, rootId: string, opts?: { background?: boolean; append?: boolean; preview?: boolean }): TabId;
   /** Replace the active tab's file (used by single-click in file tree). Creates a tab if none exist. */
   loadInActiveTab(entry: FSEntry, rootId: string): TabId;
-  closeTab(tabId: TabId): boolean;
+  /** Returns the replacement active tab, null when the pane becomes empty,
+   * or undefined when the active tab is unchanged. */
+  closeTab(tabId: TabId): TabState | null | undefined;
+  closeTabs(tabIds: readonly TabId[]): TabState | null | undefined;
   closeOtherTabs(tabId: TabId): void;
   closeAllTabs(): void;
   closeTabsToRight(tabId: TabId): void;
-  closeTabsByRoot(rootId: string): void;
+  closeTabsByRoot(rootId: string): TabState | null | undefined;
   activateTab(tabId: TabId): void;
   reorderTabs(newOrder: TabId[]): void;
   /** Reopen the most recently closed tab. Returns the tab or undefined if stack is empty. */
@@ -39,7 +44,8 @@ export interface TabStore {
 
   snapshotActiveTab(scrollPositions?: { editorScrollTop: number; previewScrollTop: number }): void;
   restoreActiveTab(): void;
-  updateActiveTabContent(content: Partial<Pick<TabState, "editorContent" | "savedContent" | "html" | "frontmatter" | "includePaths">>): void;
+  updateActiveTabContent(content: TabContent): void;
+  updateTabContent(tabId: TabId, content: TabContent & Partial<Pick<TabState, "editorMode" | "needsLoad">>): void;
   updateTabFile(tabId: TabId, newFilePath: string, newFileName: string): void;
   markTabNeedsLoad(tabId: TabId): void;
 
@@ -228,34 +234,26 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     const background = opts?.background ?? false;
     const append = opts?.append ?? false;
     const preview = opts?.preview ?? false;
-    let tabId = makeTabId(rootId, entry.path);
+    const baseId = makeTabId(rootId, entry.path);
+    let tabId = baseId;
+    const currentId = activeId();
 
-    // If already open, generate a unique ID for the duplicate
-    if (getTab(tabId)) {
-      tabCounter++;
-      tabId = `${tabId}#${tabCounter}`;
-    }
-
-    const newTab = { ...createTabState(entry, rootId), id: tabId, isPinned: !preview };
-
-    if (!background && activeId()) {
+    if (!background && currentId) {
       snapshotActiveTab();
     }
 
-    if (append) {
-      setTabList((prev) => [...prev, newTab]);
-    } else {
-      // Add new tab after the active tab (or at end)
-      setTabList((prev) => {
-        const activeIdx = prev.findIndex((t) => t.id === activeId());
-        if (activeIdx >= 0) {
-          const next = [...prev];
-          next.splice(activeIdx + 1, 0, newTab);
-          return next;
-        }
-        return [...prev, newTab];
-      });
-    }
+    setTabList((prev) => {
+      // The updater includes tabs already opened in this turn (session restore).
+      while (prev.some((tab) => tab.id === tabId)) {
+        tabId = `${baseId}#${++tabCounter}`;
+      }
+      const newTab = { ...createTabState(entry, rootId), id: tabId, isPinned: !preview };
+      const activeIdx = append ? -1 : prev.findIndex((tab) => tab.id === currentId);
+      if (activeIdx < 0) return [...prev, newTab];
+      const next = [...prev];
+      next.splice(activeIdx + 1, 0, newTab);
+      return next;
+    });
 
     if (!background) {
       setActiveId(tabId);
@@ -265,55 +263,54 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     return tabId;
   }
 
-  function closeTab(tabId: TabId): boolean {
-    const tab = getTab(tabId);
-    if (!tab) return true;
+  function closeTab(tabId: TabId): TabState | null | undefined {
+    return closeTabs([tabId]);
+  }
 
-    // Push to closed tabs stack for reopen
-    closedTabsStack.push({ ...tab, needsLoad: true });
-    if (closedTabsStack.length > MAX_CLOSED_TABS) closedTabsStack.shift();
-
-    const tabs = tabList();
-    const idx = tabs.findIndex((t) => t.id === tabId);
-
-    setTabList((prev) => prev.filter((t) => t.id !== tabId));
-
-    // If closing the active tab, activate the nearest tab
-    if (activeId() === tabId) {
-      const remaining = tabs.filter((t) => t.id !== tabId);
-      if (remaining.length === 0) {
-        setActiveId(null);
-        pane.setSelectedFile(null);
-        pane.setSelectedRootId(null);
-        pane.setHtml("");
-        pane.setFrontmatter(null);
-        pane.setEditorContent("");
-        pane.setSavedContent("");
-        pane.setEditorMode("preview");
-      } else {
-        const nextIdx = Math.min(idx, remaining.length - 1);
-        const next = remaining[nextIdx]!;
-        setActiveId(next.id);
-        restoreTab(next);
-      }
+  function closeTabs(tabIds: readonly TabId[]): TabState | null | undefined {
+    const currentId = activeId();
+    let nextId = currentId;
+    const remaining = [...tabList()];
+    for (const id of tabIds) {
+      const index = remaining.findIndex((tab) => tab.id === id);
+      if (index < 0) continue;
+      const [closed] = remaining.splice(index, 1);
+      closedTabsStack.push({ ...closed!, needsLoad: true });
+      if (closedTabsStack.length > MAX_CLOSED_TABS) closedTabsStack.shift();
+      if (nextId === id) nextId = (remaining[index] ?? remaining.at(-1))?.id ?? null;
     }
-
+    if (remaining.length === tabList().length) return;
+    const closedIds = new Set(tabIds);
+    setTabList((prev) => prev.filter((tab) => !closedIds.has(tab.id)));
     persistSession();
-    return true;
+    if (nextId === currentId) return;
+
+    const next = remaining.find((tab) => tab.id === nextId) ?? null;
+    setActiveId(nextId);
+    if (next) {
+      // Bulk tab actions call the store directly. Keep the buffer and its
+      // file identity paired even when the host has no close callback.
+      pane.setSelectedFile(next.filePath ? { path: next.filePath, name: next.fileName, kind: "file" } : null);
+      pane.setSelectedRootId(next.rootId || null);
+      restoreTab(next);
+    } else {
+      clearPane();
+    }
+    return next;
   }
 
   function closeOtherTabs(tabId: TabId): void {
-    const tabs = tabList();
-    for (const t of tabs) {
-      if (t.id !== tabId) {
-        closeTab(t.id);
-      }
-    }
+    closeTabs(tabList().filter((tab) => tab.id !== tabId).map((tab) => tab.id));
   }
 
   function closeAllTabs(): void {
     setTabList([]);
     setActiveId(null);
+    clearPane();
+    persistSession();
+  }
+
+  function clearPane(): void {
     pane.setSelectedFile(null);
     pane.setSelectedRootId(null);
     pane.setHtml("");
@@ -321,24 +318,17 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     pane.setEditorContent("");
     pane.setSavedContent("");
     pane.setEditorMode("preview");
-    persistSession();
   }
 
   function closeTabsToRight(tabId: TabId): void {
     const tabs = tabList();
     const idx = tabs.findIndex((t) => t.id === tabId);
     if (idx < 0) return;
-    const toClose = tabs.slice(idx + 1);
-    for (const t of toClose) {
-      closeTab(t.id);
-    }
+    closeTabs(tabs.slice(idx + 1).map((tab) => tab.id));
   }
 
-  function closeTabsByRoot(rootId: string): void {
-    const tabs = tabList().filter((t) => t.rootId === rootId);
-    for (const t of tabs) {
-      closeTab(t.id);
-    }
+  function closeTabsByRoot(rootId: string): TabState | null | undefined {
+    return closeTabs(tabList().filter((tab) => tab.rootId === rootId).map((tab) => tab.id));
   }
 
   function reopenClosedTab(): TabState | undefined {
@@ -381,11 +371,14 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     persistSession();
   }
 
-  function updateActiveTabContent(content: Partial<Pick<TabState, "editorContent" | "savedContent" | "html" | "frontmatter" | "includePaths">>): void {
+  function updateActiveTabContent(content: TabContent): void {
     const id = activeId();
-    if (!id) return;
+    if (id) updateTabContent(id, content);
+  }
+
+  function updateTabContent(tabId: TabId, content: Parameters<TabStore["updateTabContent"]>[1]): void {
     setTabList((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, ...content, needsLoad: false } : t)),
+      prev.map((t) => (t.id === tabId ? { ...t, needsLoad: false, ...content } : t)),
     );
   }
 
@@ -468,6 +461,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     openTab,
     loadInActiveTab,
     closeTab,
+    closeTabs,
     closeOtherTabs,
     closeAllTabs,
     closeTabsToRight,
@@ -480,6 +474,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     snapshotActiveTab,
     restoreActiveTab,
     updateActiveTabContent,
+    updateTabContent,
     updateTabFile,
     markTabNeedsLoad,
 

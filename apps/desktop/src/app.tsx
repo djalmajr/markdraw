@@ -129,6 +129,8 @@ import { FileWatcher } from "./lib/watcher.ts";
 import { createFileLoader } from "./lib/file-loader.ts";
 import { createNavigation } from "./lib/navigation.ts";
 import { createFolder } from "./lib/folder.ts";
+import { createFileAutosave } from "./lib/file-autosave.ts";
+import { createTabActions } from "./lib/tab-actions.ts";
 import {
   ExcalidrawFrame,
   type ExcalidrawFrameApi,
@@ -560,10 +562,10 @@ export function App() {
     if (key.length <= 10) return "•".repeat(8);
     return `${key.slice(0, 6)}…${key.slice(-4)}`;
   }
-  async function refreshConnectedProviders(): Promise<void> {
+  async function refreshConnectedProviders(config = aiConfig()): Promise<void> {
     const next: Record<string, boolean> = {};
     const masked: Record<string, string> = {};
-    for (const [id, p] of Object.entries(aiConfig().provider)) {
+    for (const [id, p] of Object.entries(config.provider)) {
       try {
         if (isCliProviderKind(p.kind)) {
           // No startup probe: a subscription is connected only if the user
@@ -590,6 +592,12 @@ export function App() {
     }
     setConnectedProviders(next);
     setMaskedApiKeys(masked);
+  }
+
+  async function reloadAiConfigAndProviders(): Promise<void> {
+    const config = await loadAIConfig();
+    setAiConfig(config);
+    await refreshConnectedProviders(config);
   }
 
   // Model picker shown in the chat composer footer. Reads `aiConfig()` so it
@@ -841,8 +849,7 @@ export function App() {
       }),
     );
     setStoredAiModel(modelRef);
-    setAiConfig(await loadAIConfig());
-    await refreshConnectedProviders();
+    await reloadAiConfigAndProviders();
   }
 
   /** Add a custom OpenAI-compatible provider to ai.json (+ key → keychain).
@@ -877,8 +884,7 @@ export function App() {
         },
       }),
     );
-    setAiConfig(await loadAIConfig());
-    await refreshConnectedProviders();
+    await reloadAiConfigAndProviders();
   }
 
   /** Connect a built-in provider: store its key (keychain) and, when it lists no
@@ -893,8 +899,7 @@ export function App() {
         throw new Error(probe.error ?? "CLI subscription not available");
       }
       persistConnectedSubscription(providerId, true); // remember across launches
-      setAiConfig(await loadAIConfig());
-      await refreshConnectedProviders();
+      await reloadAiConfigAndProviders();
       return;
     }
     if (apiKey) await setApiKey(providerId, apiKey);
@@ -919,8 +924,7 @@ export function App() {
         );
       }
     }
-    setAiConfig(await loadAIConfig());
-    await refreshConnectedProviders();
+    await reloadAiConfigAndProviders();
   }
 
   /** Disconnect a provider group ("Remove provider" in Manage models). Receives
@@ -979,8 +983,7 @@ export function App() {
       ? selected.slice(0, selected.indexOf("/"))
       : null;
     if (selectedProvider && ids.includes(selectedProvider)) setStoredAiModel(null);
-    setAiConfig(await loadAIConfig());
-    await refreshConnectedProviders();
+    await reloadAiConfigAndProviders();
   }
 
   // ── MCP servers + in-process tools (chat tool-calling) ─────────────────
@@ -1520,12 +1523,20 @@ export function App() {
     onActivateTab: (tabId) => handleActivateTab(tabId),
   });
 
+  const tabActions = createTabActions({ rootPaths, state, watcher });
   const folder = createFolder({
     rootPaths,
     setRootPaths,
     state,
     watcher,
+    onRootClosed: tabActions.closeRootTabs,
   });
+
+  function toggleShowHiddenEntries() {
+    const includeHiddenEntries = !state.showHiddenEntries();
+    state.setShowHiddenEntries(includeHiddenEntries);
+    return folder.refreshAllRoots({ includeHiddenEntries });
+  }
 
   setupTauriDnd({
     addRoot: folder.openFolderPath,
@@ -1542,10 +1553,7 @@ export function App() {
         state.setCreatingAt({ parentPath, rootId, kind }),
       toggleShowAllFiles: () => state.setShowAllFiles((v) => !v),
       toggleShowAllDirs: () => state.setShowAllDirs((v) => !v),
-      toggleShowHidden: () => {
-        state.setShowHiddenEntries((v) => !v);
-        return folder.refreshAllRoots();
-      },
+      toggleShowHidden: toggleShowHiddenEntries,
       getState: () => ({
         showAllFiles: state.showAllFiles(),
         showAllDirs: state.showAllDirs(),
@@ -1554,7 +1562,7 @@ export function App() {
       }),
       // Drive the move-tab handler directly. Useful for E2E that
       // can't reliably synthesize a Kobalte ContextMenu click.
-      moveTab: (tabId: string, fromPaneIndex: number) => handleMoveTab(tabId, fromPaneIndex),
+      moveTab: tabActions.moveTab,
       simulatePendingUpdate: (version: string, currentVersion: string, notes: string) =>
         _devSetPendingUpdate({
           version,
@@ -1647,35 +1655,13 @@ export function App() {
     };
   });
 
-  // Auto-save: debounce 1s after editor content changes
-  let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
-  createEffect(
-    () => ({
-      content: state.editorContent(),
-      mode: state.editorMode(),
-      file: state.selectedFile(),
-    }),
-    ({ mode, file }) => {
-      if (isTabSwitching) return;
-      if (mode === "preview") return;
-      if (!file) return;
-      clearTimeout(autoSaveTimer);
-      autoSaveTimer = setTimeout(() => {
-        // Nothing to write when the buffer equals the last save (a watcher
-        // reload or an undo back to it). Writing it anyway would overwrite an
-        // external change made since, and wake the watcher for nothing.
-        if (state.editorContent() === state.savedContent()) return;
-        // Save, then re-index the saved file (the Rust staleness diff makes this
-        // cheap — only the changed doc is re-chunked/embedded).
-        void Promise.resolve(folder.handleEditorSave()).then(() => reindexActiveFile());
-      }, 1000);
-    },
+  const cancelAutosave = createFileAutosave(
+    state,
+    folder.handleEditorSave,
+    reindexActiveFile,
+    () => isTabSwitching,
   );
-
-  onCleanup(() => {
-    clearTimeout(autoSaveTimer);
-    watcher.destroy();
-  });
+  onCleanup(() => { void watcher.destroy(); });
 
   // Hyprland: the toolbar and the welcome screen move the window only once
   // the pointer moves (see `dragOnceMoved`).
@@ -2404,45 +2390,27 @@ export function App() {
 
       sessionRestored = true;
 
-      // Restore all tabs synchronously (no file loading), mark as needsLoad.
-      // Only the active tab gets its content loaded immediately.
-      let activeEntry: import("@markdraw/core/types.ts").FSEntry | null = null;
-      let activeRootId: string | null = null;
-
+      // The IDs returned by openTab also cover tabs still pending publication.
+      const store = tabStore();
+      let firstTabId: string | undefined;
+      let activeTabId: string | undefined;
       for (const persisted of restorable) {
         const entry = state.findEntryByPath(persisted.filePath, persisted.rootId);
         if (!entry || entry.kind !== "file") continue;
 
-        const isActive = persisted.id === session.activeTabId;
-        tabStore().openTab(entry, persisted.rootId, { background: true });
-
-        // Mark all restored tabs as needing content load
-        const tabId = tabStore().tabs().find((t) => t.filePath === persisted.filePath && t.rootId === persisted.rootId)?.id;
-        if (tabId) tabStore().markTabNeedsLoad(tabId);
-
-        if (isActive) {
-          activeEntry = entry;
-          activeRootId = persisted.rootId;
-        }
+        const id = store.openTab(entry, persisted.rootId, { background: true });
+        store.markTabNeedsLoad(id);
+        firstTabId ??= id;
+        if (persisted.id === session.activeTabId) activeTabId = id;
       }
 
-      // Load only the active tab
-      if (activeEntry && activeRootId) {
-        void (async () => {
-          await loader.loadFileContent(activeEntry!, false, false, activeRootId!);
-          tabStore().updateActiveTabContent({
-            editorContent: state.editorContent(),
-            savedContent: state.savedContent(),
-            html: state.html(),
-            frontmatter: state.frontmatter(),
-          });
-          // Activate after content is loaded
-          const tabId = tabStore().tabs().find((t) => t.filePath === activeEntry!.path && t.rootId === activeRootId)?.id;
-          if (tabId) handleActivateTab(tabId);
-        })();
-      } else if (tabStore().tabs().length > 0) {
-        // No active tab from session — activate the first
-        void handleActivateTab(tabStore().tabs()[0]!.id);
+      const id = activeTabId ?? firstTabId;
+      if (id) {
+        // Let the session batch publish before the regular activation handler
+        // resolves the tab and loads the selected file.
+        queueMicrotask(() => {
+          if (tabStore() === store) void handleActivateTab(id);
+        });
       }
     }),
   );
@@ -2716,89 +2684,6 @@ export function App() {
     return new Set(getRecentFiles().map((f) => `${f.rootPath}::${f.path}`));
   });
 
-  /**
-   * Move a tab from `fromPaneIndex` to the other pane. Opens the file
-   * in the destination pane (creates the pane via `splitFromActive`
-   * when there's only one) and closes the original. Same `editorMode`
-   * is preserved so a split-side preview stays a preview.
-   *
-   * Mutation-survival contracts (locked in by the host-level domain
-   * test in app.test.ts):
-   *   - skipping `closeTab` on the origin → tab is duplicated.
-   *   - skipping the `openTab` on the target → tab vanishes.
-   *   - reading `fromPaneIndex` from the wrong end → tab moved from
-   *     wrong pane.
-   */
-  function handleMoveTab(tabId: string, fromPaneIndex: number) {
-    const panes = state.paneManager.panes();
-    const sourcePane = panes[fromPaneIndex];
-    if (!sourcePane) return;
-    const tab = sourcePane.tabs.getTab(tabId);
-    if (!tab) return;
-
-    if (panes.length < 2) {
-      state.paneManager.splitFromActive();
-    }
-    const updatedPanes = state.paneManager.panes();
-    const targetIndex = fromPaneIndex === 0 ? 1 : 0;
-    const targetPane = updatedPanes[targetIndex];
-    if (!targetPane) return;
-
-    const entry = state.findEntryByPath(tab.filePath, tab.rootId);
-    if (!entry || entry.kind !== "file") return;
-
-    // The TabState carries everything the editor/preview need to
-    // render the moved file without reloading from disk. Snapshot
-    // off the source tab itself (NOT the source pane's live signals
-    // — those reflect whichever tab is currently active in the
-    // source pane, which may not be the one being moved).
-    const snapshot = {
-      editorContent: tab.editorContent,
-      savedContent: tab.savedContent,
-      html: tab.html,
-      frontmatter: tab.frontmatter,
-      editorMode: tab.editorMode,
-    };
-
-    // Activate the target pane BEFORE writing through the AppState
-    // proxy, so `state.setHtml` etc. land in the target pane's
-    // signals. Without this, the proxy still points at the source
-    // pane and the moved file would render in the wrong column.
-    state.paneManager.setActivePane(targetIndex);
-
-    // Open the file in the target pane's tab list. `openTab` (non-
-    // background) sets the new tab active inside the target pane.
-    targetPane.tabs.openTab(entry, tab.rootId);
-
-    // Push the source's content into the new tab's TabState so
-    // future tab-switches inside the target pane snapshot/restore
-    // the correct content (otherwise the new tab is empty until the
-    // user reloads from disk and tab-switches show stale content).
-    targetPane.tabs.updateActiveTabContent({
-      editorContent: snapshot.editorContent,
-      savedContent: snapshot.savedContent,
-      html: snapshot.html,
-      frontmatter: snapshot.frontmatter,
-    });
-
-    // Mirror the snapshot through the AppState proxy so the editor
-    // and preview update immediately for the user — restoreActiveTab
-    // already runs inside `openTab` but reads from the freshly-empty
-    // TabState (we hadn't written the content yet at that point).
-    state.setEditorContent(snapshot.editorContent);
-    state.setSavedContent(snapshot.savedContent);
-    state.setHtml(snapshot.html);
-    state.setFrontmatter(snapshot.frontmatter);
-    state.setEditorMode(snapshot.editorMode);
-    state.setSelectedFile(entry);
-    state.setSelectedRootId(tab.rootId);
-
-    // Finally remove the tab from the source pane. closeTab handles
-    // the case where this was the last tab (clears source signals)
-    // or activates a sibling (restores its content into source).
-    sourcePane.tabs.closeTab(tabId);
-  }
-
   async function handleQuickOpenSelect(file: IndexedFile) {
     setQuickOpenVisible(false);
     const entry = state.findEntryByPath(file.path, file.rootId);
@@ -2869,8 +2754,7 @@ export function App() {
         title: m.command_toggle_hidden_files(),
         when: () => hasRoot,
         run: () => {
-          state.setShowHiddenEntries((v) => !v);
-          void folder.refreshAllRoots();
+          void toggleShowHiddenEntries();
         },
       },
       {
@@ -3226,13 +3110,14 @@ export function App() {
   }
 
   async function handleActivateTab(tabId: string) {
-    const tab = tabStore().getTab(tabId);
+    const pane = state.paneManager.activePane();
+    const tab = pane.tabs.getTab(tabId);
     if (!tab) return;
 
     isTabSwitching = true;
-    clearTimeout(autoSaveTimer);
+    cancelAutosave();
 
-    tabStore().activateTab(tabId);
+    pane.tabs.activateTab(tabId);
 
     // Scratch tab: it has no entry in any workspace tree, so reconstruct the
     // sentinel selectedFile directly. activateTab already restored the buffer
@@ -3257,13 +3142,15 @@ export function App() {
 
     // If the tab needs content loaded (restored from session or reopened)
     if (tab.needsLoad && entry) {
-      await loader.loadFileContent(entry, false, false, tab.rootId);
-      tabStore().updateActiveTabContent({
-        editorContent: state.editorContent(),
-        savedContent: state.savedContent(),
-        html: state.html(),
-        frontmatter: state.frontmatter(),
-      });
+      await loader.loadFileContent(entry, false, true, tab.rootId);
+      if (pane.tabs.activeTabId() === tabId) {
+        pane.tabs.updateTabContent(tabId, {
+          editorContent: pane.editorContent(),
+          savedContent: pane.savedContent(),
+          html: pane.html(),
+          frontmatter: pane.frontmatter(),
+        });
+      }
     }
 
     // Re-arm file watcher for the new active tab
@@ -3283,7 +3170,8 @@ export function App() {
   }
 
   async function handleCloseTab(tabId: string) {
-    const tab = tabStore().getTab(tabId);
+    const pane = state.paneManager.activePane();
+    const tab = pane.tabs.getTab(tabId);
     if (!tab) return;
 
     const isScratch = tab.rootId === SCRATCH_ROOT_ID || isScratchPath(tab.filePath);
@@ -3308,8 +3196,8 @@ export function App() {
       scratchScenes.delete(tab.filePath);
     } else {
       // For the active tab, check live dirty state; for others, check cached
-      const isDirty = tabId === tabStore().activeTabId()
-        ? state.isDirty()
+      const isDirty = tabId === pane.tabs.activeTabId()
+        ? pane.editorContent() !== pane.savedContent()
         : tab.editorContent !== tab.savedContent;
 
       if (isDirty) {
@@ -3322,34 +3210,8 @@ export function App() {
       }
     }
 
-    tabStore().closeTab(tabId);
-
-    // After close, activate the new active tab
-    const newActive = tabStore().getActiveTab();
-    if (newActive) {
-      const entry = state.findEntryByPath(newActive.filePath, newActive.rootId);
-      if (entry) {
-        state.setSelectedFile(entry);
-        state.setSelectedRootId(newActive.rootId);
-      }
-      const rootPath = rootPaths().get(newActive.rootId);
-      if (rootPath) {
-        watcher.setTarget({
-          filePath: `${rootPath}/${newActive.filePath}`,
-          includePaths: newActive.includePaths,
-          rootPath,
-        });
-        if (state.autoRefresh()) watcher.start();
-      }
-    }
+    tabActions.closeTabs(pane, [tabId]);
   }
-
-  // Close tabs when a root is closed
-  const originalCloseRoot = folder.handleCloseRoot;
-  folder.handleCloseRoot = async (rootId: string) => {
-    await originalCloseRoot(rootId);
-    if (!rootPaths().has(rootId)) tabStore().closeTabsByRoot(rootId);
-  };
 
   // Update tab when a file is renamed
   const originalRename = folder.handleRename;
@@ -3671,7 +3533,7 @@ export function App() {
       onActivateTab={handleActivateTab}
       onCloseTab={handleCloseTab}
       onNewTab={handleNewTab}
-      onMoveTab={handleMoveTab}
+      onMoveTab={tabActions.moveTab}
       quickOpenOpen={quickOpenVisible()}
       quickOpenRecents={quickOpenRecents()}
       onQuickOpenSelect={handleQuickOpenSelect}
@@ -3725,7 +3587,8 @@ export function App() {
         });
         if (confirmed) {
           // Close ALL tabs for deleted files (including duplicates)
-          const tabsToClose = tabStore().tabs().filter((t) =>
+          const pane = state.paneManager.activePane();
+          const tabsToClose = pane.tabs.tabs().filter((t) =>
             t.rootId === rootId && (
               t.filePath === entry.path ||
               (entry.kind === "directory" && t.filePath.startsWith(entry.path + "/"))
@@ -3741,9 +3604,7 @@ export function App() {
           setExcalidrawSavesSuppressed(excalidrawPathsToSuppress, true);
           try {
             await folder.handleDelete(entry, rootId);
-            for (const tab of tabsToClose) {
-              tabStore().closeTab(tab.id);
-            }
+            tabActions.closeTabs(pane, tabsToClose.map((tab) => tab.id));
           } finally {
             setExcalidrawSavesSuppressed(excalidrawPathsToSuppress, false);
           }
@@ -3778,8 +3639,8 @@ export function App() {
           />
         ) : null;
       }}
-      onToggleShowHiddenEntries={() => folder.refreshAllRoots()}
-      onToggleRespectGitignore={() => folder.refreshAllRoots()}
+      onToggleShowHiddenEntries={(includeHiddenEntries) => folder.refreshAllRoots({ includeHiddenEntries })}
+      onToggleRespectGitignore={(respectGitignore) => folder.refreshAllRoots({ respectGitignore })}
       onReorderRoots={(newOrder) => state.reorderRoots(newOrder)}
     />
     <UpdateAvailableDialog

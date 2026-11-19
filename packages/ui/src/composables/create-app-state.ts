@@ -195,6 +195,17 @@ interface AppStateConfig {
 
 export { FontFamilies, FontSizes };
 
+export function findEntryInTree(entries: FSEntry[], path: string): FSEntry | null {
+  for (const entry of entries) {
+    if (entry.path === path) return entry;
+    if (entry.children) {
+      const found = findEntryInTree(entry.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 /** One ordered right-panel strip tab (an open special pane or a chat session). */
 export interface RightPanelTabModel {
   /** "toc" | "backlinks" | chat session id. */
@@ -1211,23 +1222,13 @@ export function createAppState(config: AppStateConfig) {
   // ── Tree utility ────────────────────────────────────────────────────────
 
   function findEntryByPath(targetPath: string, rootId?: string): FSEntry | null {
-    function find(entries: FSEntry[], tp: string): FSEntry | null {
-      for (const entry of entries) {
-        if (entry.path === tp) return entry;
-        if (entry.children) {
-          const found = find(entry.children, tp);
-          if (found) return found;
-        }
-      }
-      return null;
-    }
     if (rootId) {
       const root = roots().get(rootId);
-      return root ? find(root.entries, targetPath) : null;
+      return root ? findEntryInTree(root.entries, targetPath) : null;
     }
     // Search all roots
     for (const root of roots().values()) {
-      const found = find(root.entries, targetPath);
+      const found = findEntryInTree(root.entries, targetPath);
       if (found) return found;
     }
     return null;
