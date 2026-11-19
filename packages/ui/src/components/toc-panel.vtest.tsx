@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createSignal, flush } from "solid-js";
 import { TocPanel } from "./toc-panel.tsx";
 
 afterEach(cleanup);
@@ -165,8 +165,10 @@ describe("TocPanel — empty state placeholder", () => {
     ));
     expect(baseElement.querySelector(".toc-panel-empty")).toBeNull();
     setHasToc(false);
+    flush();
     expect(baseElement.querySelector(".toc-panel-empty")).not.toBeNull();
     setHasToc(true);
+    flush();
     expect(baseElement.querySelector(".toc-panel-empty")).toBeNull();
   });
 });
@@ -218,6 +220,7 @@ describe("TocPanel — References via overflow + mounted panes", () => {
     fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
     fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });
     fireEvent.click(trigger);
+    flush();
   }
 
   it("hides both special panes by default; fronts Outline when its tab is active", () => {

@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, createTrackedEffect, createEffect } from "solid-js";
+import { For, Show, createMemo, createSignal, createEffect, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { useDragOperation, useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import IconPin from "~icons/lucide/pin";
@@ -155,17 +155,18 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
   }
 
   // Re-measure when the tab set changes and scroll the active tab into view.
-  createTrackedEffect(() => {
-    props.tabs;
-    props.activeId;
-    queueMicrotask(() => {
-      if (listRef && props.activeId) {
-        const el = listRef.querySelector(`[data-rp-tab="${CSS.escape(props.activeId)}"]`);
-        el?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-      }
-      updateScrollState();
-    });
-  });
+  createEffect(
+    () => [props.tabs, props.activeId] as const,
+    () => {
+      queueMicrotask(() => {
+        if (listRef && props.activeId) {
+          const el = listRef.querySelector(`[data-rp-tab="${CSS.escape(props.activeId)}"]`);
+          el?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+        }
+        updateScrollState();
+      });
+    },
+  );
 
   const isActive = (tab: RightPanelTab): boolean => props.activeId === encode(tab);
 
@@ -237,7 +238,7 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
     // The strip model emits fresh tab objects on every change, so <For>
     // re-creates this row whenever its tab changes — reading the prop once
     // matches the previous For-callback semantics.
-    const tab = tabProps.tab;
+    const tab = untrack(() => tabProps.tab);
     const dndId = toRpTabDndId(encode(tab));
     const draggable = useDraggable({
       id: dndId,

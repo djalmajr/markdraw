@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
+import { flush } from "solid-js";
 import { render } from "@solidjs/testing-library";
 import { Preview, setupTocScrollTracking } from "./preview.tsx";
+import { FrontmatterPanel } from "./frontmatter-panel.tsx";
+import { ImageLightbox } from "./image-lightbox.tsx";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
 
 interface BaseProps {
@@ -419,6 +422,41 @@ describe("Preview", () => {
       // same way as a real browser, we just verify the handler shape.
       expect(typeof onNavigate).toBe("function");
     }
+  });
+});
+
+describe("FrontmatterPanel — collapse state follows the file", () => {
+  it("restores the stored collapse state when currentFilePath changes", () => {
+    localStorage.setItem("frontmatter-collapsed:a.md", "1");
+    localStorage.setItem("frontmatter-collapsed:b.md", "0");
+    const [path, setPath] = createSignal("a.md");
+    const { container } = render(() => (
+      <FrontmatterPanel
+        frontmatter={{ title: "My Doc" }}
+        currentFilePath={path()}
+        onNavigate={() => {}}
+      />
+    ));
+    expect(container.querySelector(".frontmatter-panel")?.classList.contains("frontmatter-collapsed")).toBe(true);
+
+    setPath("b.md");
+    flush();
+    expect(container.querySelector(".frontmatter-panel")?.classList.contains("frontmatter-collapsed")).toBe(false);
+
+    localStorage.removeItem("frontmatter-collapsed:a.md");
+    localStorage.removeItem("frontmatter-collapsed:b.md");
+  });
+});
+
+describe("ImageLightbox — scroll lock cleanup", () => {
+  it("restores body overflow when the lightbox unmounts", () => {
+    const previous = document.body.style.overflow;
+    const { unmount } = render(() => (
+      <ImageLightbox src="asset://photo.png" onClose={() => {}} />
+    ));
+    expect(document.body.style.overflow).toBe("hidden");
+    unmount();
+    expect(document.body.style.overflow).toBe(previous);
   });
 });
 

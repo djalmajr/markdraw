@@ -1,4 +1,4 @@
-import { onCleanup, Show, createTrackedEffect } from "solid-js";
+import { Show, createEffect } from "solid-js";
 import { Portal } from "@solidjs/web";
 import { createPanZoom } from "../composables/create-pan-zoom.ts";
 import { ZoomControls } from "./zoom-controls.tsx";
@@ -37,23 +37,29 @@ export function ImageLightbox(props: ImageLightboxProps) {
   }
 
   // Reset zoom/pan and move focus into the modal when a new image opens.
-  createTrackedEffect(() => {
-    if (!props.src) return;
-    pz.reset();
-    queueMicrotask(() => canvasRef?.focus());
-  });
+  createEffect(
+    () => props.src,
+    (src) => {
+      if (!src) return;
+      pz.reset();
+      queueMicrotask(() => canvasRef?.focus());
+    },
+  );
 
   // Lock body scroll + global keyboard shortcuts while open.
-  createTrackedEffect(() => {
-    if (!props.src) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKeyDown);
-    onCleanup(() => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKeyDown);
-    });
-  });
+  createEffect(
+    () => props.src,
+    (src) => {
+      if (!src) return;
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      window.addEventListener("keydown", onKeyDown);
+      return () => {
+        document.body.style.overflow = prev;
+        window.removeEventListener("keydown", onKeyDown);
+      };
+    },
+  );
 
   function handleBackdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) props.onClose();

@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show, createTrackedEffect } from "solid-js";
+import { createMemo, createSignal, For, Show, createEffect } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconText from "~icons/lucide/text";
@@ -67,14 +67,16 @@ export function FrontmatterPanel(props: FrontmatterPanelProps) {
   const [collapsed, setCollapsed] = createSignal(false);
 
   // Restore collapse state when the file (storage key) changes
-  createTrackedEffect(() => {
-    const key = storageKey();
-    try {
-      setCollapsed(localStorage.getItem(key) === "1");
-    } catch {
-      setCollapsed(false);
-    }
-  });
+  createEffect(
+    () => storageKey(),
+    (key) => {
+      try {
+        setCollapsed(localStorage.getItem(key) === "1");
+      } catch {
+        setCollapsed(false);
+      }
+    },
+  );
 
   function toggle() {
     const next = !collapsed();

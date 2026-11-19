@@ -1,4 +1,4 @@
-import { Loading, Show, createEffect, createMemo, createSignal, createTrackedEffect, onCleanup } from "solid-js";
+import { Loading, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
 
 /** Desktop folder-rooted preview host. When provided, a directory is served as
@@ -68,15 +68,18 @@ function withBase(html: string, baseHref?: string): string {
  */
 export function HtmlPreview(props: HtmlPreviewProps): JSX.Element {
   // ── srcdoc fallback ───────────────────────────────────────────────────────
-  const [doc, setDoc] = createSignal(withBase(props.content, props.baseHref));
+  const [doc, setDoc] = createSignal(untrack(() => withBase(props.content, props.baseHref)));
   let srcdocTimer: ReturnType<typeof setTimeout> | undefined;
-  createTrackedEffect(() => {
-    if (props.folderRoot) return; // folderRoot mode drives its own iframe
-    const next = withBase(props.content, props.baseHref);
-    clearTimeout(srcdocTimer);
-    srcdocTimer = setTimeout(() => setDoc(next), OVERLAY_DEBOUNCE_MS);
-  });
-  onCleanup(() => clearTimeout(srcdocTimer));
+  createEffect(
+    () => [props.folderRoot, props.content, props.baseHref] as const,
+    ([folderRoot, content, baseHref]) => {
+      if (folderRoot) return; // folderRoot mode drives its own iframe
+      const next = withBase(content, baseHref);
+      clearTimeout(srcdocTimer);
+      srcdocTimer = setTimeout(() => setDoc(next), OVERLAY_DEBOUNCE_MS);
+      return () => clearTimeout(srcdocTimer);
+    },
+  );
 
   // ── folderRoot (SPA) mode ─────────────────────────────────────────────────
   // Solid 2: `createResource` is gone. The registration is an async
@@ -177,7 +180,7 @@ export function HtmlPreview(props: HtmlPreviewProps): JSX.Element {
           ghosting it), which the resource's `loading` never could.
           Mounted only while there's a loadable src — clearing the src
           ATTRIBUTE alone would leave the previous document rendered. */}
-      <Loading on={() => props.folderRoot} fallback={<div class="html-preview-frame" />}>
+      <Loading on={props.folderRoot} fallback={<div class="html-preview-frame" />}>
         <Show when={src()}>
           <iframe class="html-preview-frame" title="HTML preview" sandbox={SANDBOX_FOLDER} src={src()} />
         </Show>

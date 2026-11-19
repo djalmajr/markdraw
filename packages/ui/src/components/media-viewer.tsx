@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onCleanup, createTrackedEffect } from "solid-js";
+import { For, Show, createSignal, onCleanup, createEffect } from "solid-js";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
@@ -84,8 +84,9 @@ export function MediaViewer(props: MediaViewerProps) {
 
   // Load (or tear down) the PDF whenever the source or kind changes —
   // covers reusing the same pane for a different file.
-  createTrackedEffect(() => {
-    const [kind, src] = [props.kind, props.src] as const;
+  createEffect(
+    () => ({ kind: props.kind, src: props.src }),
+    ({ kind, src }) => {
     void (async () => {
         cancelRenders();
         if (pdfDoc) {
@@ -94,7 +95,7 @@ export function MediaViewer(props: MediaViewerProps) {
         }
         setScale(1);
         imageZoom.reset();
-        setFit(props.kind === "image");
+        setFit(kind === "image");
         setImageError(false);
         setPdfError(null);
         setPageCount(0);
@@ -127,13 +128,15 @@ export function MediaViewer(props: MediaViewerProps) {
           setPdfLoading(false);
         }
     })();
-  });
+    },
+  );
 
   // Render every page into its canvas on load and on zoom change. Pages are
   // drawn sequentially; a generation counter + task cancellation bail out
   // when a newer render (zoom or file switch) supersedes this pass.
-  createTrackedEffect(() => {
-    const [count] = [pageCount(), scale()] as const;
+  createEffect(
+    () => ({ count: pageCount(), scale: scale() }),
+    ({ count }) => {
     void (async () => {
         if (props.kind !== "pdf" || !pdfDoc || count === 0) return;
         const gen = ++renderGen;
@@ -160,7 +163,8 @@ export function MediaViewer(props: MediaViewerProps) {
           }
         }
     })();
-  });
+    },
+  );
 
   onCleanup(() => {
     cancelRenders();

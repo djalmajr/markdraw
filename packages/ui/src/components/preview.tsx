@@ -1,4 +1,4 @@
-import { Show, createSignal, onSettled, onCleanup, createTrackedEffect } from "solid-js";
+import { Show, createSignal, onSettled, onCleanup, createEffect } from "solid-js";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import mermaid from "mermaid";
@@ -790,29 +790,32 @@ export function Preview(props: PreviewProps) {
 
   // Dismiss the image menu on outside-click / Escape / scroll. Deferred so the
   // click that opened it doesn't immediately close it.
-  createTrackedEffect(() => {
-    if (!sizeMenuImg()) return;
-    const close = () => setSizeMenuImg(null);
-    const onDown = (ev: MouseEvent) => {
-      if (!(ev.target as HTMLElement).closest(".img-size-menu")) close();
-    };
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") close();
-    };
-    const t = setTimeout(() => {
-      document.addEventListener("mousedown", onDown, true);
-      document.addEventListener("keydown", onKey);
-      window.addEventListener("scroll", close, { capture: true, passive: true });
-    }, 0);
-    onCleanup(() => {
-      clearTimeout(t);
-      document.removeEventListener("mousedown", onDown, true);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, { capture: true } as EventListenerOptions);
-    });
-  });
-  let lastFindTrigger = props.findTrigger;
-  let lastSyncScrollTargetVersion = props.syncScrollTargetVersion;
+  createEffect(
+    () => !!sizeMenuImg(),
+    (isOpen) => {
+      if (!isOpen) return;
+      const close = () => setSizeMenuImg(null);
+      const onDown = (ev: MouseEvent) => {
+        if (!(ev.target as HTMLElement).closest(".img-size-menu")) close();
+      };
+      const onKey = (ev: KeyboardEvent) => {
+        if (ev.key === "Escape") close();
+      };
+      const t = setTimeout(() => {
+        document.addEventListener("mousedown", onDown, true);
+        document.addEventListener("keydown", onKey);
+        window.addEventListener("scroll", close, { capture: true, passive: true });
+      }, 0);
+      return () => {
+        clearTimeout(t);
+        document.removeEventListener("mousedown", onDown, true);
+        document.removeEventListener("keydown", onKey);
+        window.removeEventListener("scroll", close, { capture: true } as EventListenerOptions);
+      };
+    },
+  );
+  let lastFindTrigger: number | undefined;
+  let lastSyncScrollTargetVersion: number | undefined;
   let articleRef: HTMLElement | undefined;
   let cleanupToc: (() => void) | undefined;
   let suppressScrollCallback = false;
@@ -905,57 +908,67 @@ export function Preview(props: PreviewProps) {
 
     document.addEventListener("mouseup", handleMouseUp);
     document.addEventListener("selectionchange", handleSelectionChange);
-    onCleanup(() => {
+    return () => {
       document.removeEventListener("mouseup", handleMouseUp);
       document.removeEventListener("selectionchange", handleSelectionChange);
       if (popoverShown) props.onSelectionPopover?.(null);
-    });
-  });
-
-  createTrackedEffect(() => {
-    const findTrigger = props.findTrigger;
-    if (findTrigger === lastFindTrigger) return;
-    lastFindTrigger = findTrigger;
-    props.onSearchOpenChange(true);
-  });
-
-  createTrackedEffect(() => {
-    if (!hasArticle()) return;
-    setOverlayHost(articleRef?.closest(".preview-panel") as HTMLElement | undefined);
-  });
-
-  createTrackedEffect(() => {
-    if (!articleRef) return;
-
-    const scrollContainer = articleRef.closest(".content") as HTMLElement | null;
-    if (!scrollContainer) return;
-
-    let scrollRaf = 0;
-    const onScroll = () => {
-      if (suppressScrollCallback || !props.syncScrollActive) return;
-      cancelAnimationFrame(scrollRaf);
-      scrollRaf = requestAnimationFrame(() => {
-        props.onScrollRatioChange(computeScrollRatio(
-          scrollContainer.scrollTop,
-          scrollContainer.scrollHeight,
-          scrollContainer.clientHeight,
-        ));
-      });
     };
-
-    scrollContainer.addEventListener("scroll", onScroll, { passive: true });
-    onCleanup(() => {
-      cancelAnimationFrame(scrollRaf);
-      scrollContainer.removeEventListener("scroll", onScroll);
-    });
   });
 
-  createTrackedEffect(() => {
-    const targetVersion = props.syncScrollTargetVersion;
-    if (targetVersion === lastSyncScrollTargetVersion) return;
-    lastSyncScrollTargetVersion = targetVersion;
+  createEffect(
+    () => props.findTrigger,
+    (findTrigger) => {
+      if (findTrigger === lastFindTrigger) return;
+      lastFindTrigger = findTrigger;
+      props.onSearchOpenChange(true);
+    },
+    { defer: true },
+  );
 
-    if (!props.syncScrollActive || !articleRef) return;
+  createEffect(
+    () => hasArticle(),
+    (has) => {
+      if (!has) return;
+      setOverlayHost(articleRef?.closest(".preview-panel") as HTMLElement | undefined);
+    },
+  );
+
+  createEffect(
+    () => hasArticle(),
+    (has) => {
+      if (!has || !articleRef) return;
+
+      const scrollContainer = articleRef.closest(".content") as HTMLElement | null;
+      if (!scrollContainer) return;
+
+      let scrollRaf = 0;
+      const onScroll = () => {
+        if (suppressScrollCallback || !props.syncScrollActive) return;
+        cancelAnimationFrame(scrollRaf);
+        scrollRaf = requestAnimationFrame(() => {
+          props.onScrollRatioChange(computeScrollRatio(
+            scrollContainer.scrollTop,
+            scrollContainer.scrollHeight,
+            scrollContainer.clientHeight,
+          ));
+        });
+      };
+
+      scrollContainer.addEventListener("scroll", onScroll, { passive: true });
+      return () => {
+        cancelAnimationFrame(scrollRaf);
+        scrollContainer.removeEventListener("scroll", onScroll);
+      };
+    },
+  );
+
+  createEffect(
+    () => props.syncScrollTargetVersion,
+    (targetVersion) => {
+      if (targetVersion === lastSyncScrollTargetVersion) return;
+      lastSyncScrollTargetVersion = targetVersion;
+
+      if (!props.syncScrollActive || !articleRef) return;
 
     const targetRatio = props.syncScrollTargetRatio;
     if (targetRatio === null) return;
@@ -971,7 +984,9 @@ export function Preview(props: PreviewProps) {
     requestAnimationFrame(() => {
       suppressScrollCallback = false;
     });
-  });
+    },
+    { defer: true },
+  );
 
   // Listen for theme changes to re-init mermaid
   onSettled(() => {
@@ -982,7 +997,7 @@ export function Preview(props: PreviewProps) {
       attributes: true,
       attributeFilter: ["class"],
     });
-    onCleanup(() => observer.disconnect());
+    return () => observer.disconnect();
   });
 
   onCleanup(() => cleanupToc?.());
@@ -1122,8 +1137,9 @@ export function Preview(props: PreviewProps) {
   // `textContent = ""` on that shared container — detaching our toc
   // from the DOM but leaving the node alive in `tocNode`. So we re-use
   // the cached node to put it back into the (now emptied) container.
-  createTrackedEffect(() => {
-    const container = props.tocContainer;
+  createEffect(
+    () => ({ container: props.tocContainer, tocVis: props.tocVisible }),
+    ({ container, tocVis }) => {
     // Always cleanup first — this also covers the deactivation path,
     // where `container` becomes undefined. Without this, the previous
     // session's scroll listener would keep firing against `articleRef`
@@ -1132,7 +1148,6 @@ export function Preview(props: PreviewProps) {
     cleanupToc?.();
     cleanupToc = undefined;
     if (!container) return;
-    const tocVis = props.tocVisible;
     const fresh = articleRef?.querySelector<HTMLElement>("#toc") ?? null;
     if (fresh) tocNode = fresh;
     const toc = tocNode;
@@ -1147,13 +1162,16 @@ export function Preview(props: PreviewProps) {
         cleanupScroll?.();
       };
     }
-  });
+    return () => {
+      cleanupToc?.();
+      cleanupToc = undefined;
+    };
+    },
+  );
 
-  createTrackedEffect(() => {
-    const _html = props.html;
-    // Also track tocVisible so this re-runs when it changes
-    const tocVis = props.tocVisible;
-
+  createEffect(
+    () => ({ html: props.html, tocVis: props.tocVisible }),
+    ({ html: _html, tocVis }) => {
     if (!articleRef) return;
 
     // Empty HTML (file switch): hide old content but keep it for layout stability.
@@ -1336,7 +1354,11 @@ export function Preview(props: PreviewProps) {
         await renderKrokiBlocks(articleRef!, gen, isStale);
       });
     }
-  });
+    return () => {
+      ++renderGen;
+    };
+    },
+  );
 
   return (
     <div class="preview-scope">
