@@ -72,10 +72,7 @@ fn registry_is_atomic_and_ids_are_session_local() {
 fn fixture() -> tempfile::TempDir {
     // Honors TMPDIR when set, else the system temp dir (CI).
     use std::os::unix::fs::PermissionsExt;
-    let fixture = tempfile::tempdir_in(
-        std::env::temp_dir(),
-    )
-    .unwrap();
+    let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
     std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     fixture
 }
@@ -457,7 +454,7 @@ fn sec_review_tauri_command_respects_window_capability() {
     let app = tauri::test::mock_builder()
         .manage(registry.clone())
         .invoke_handler(tauri::generate_handler![crate::mcp_server::mcp_set_roots])
-        .build(tauri::generate_context!())
+        .build(crate::tauri_context())
         .unwrap();
     let webview =
         tauri::WebviewWindowBuilder::new(&app, "sec-review-no-capability", Default::default())
@@ -721,7 +718,7 @@ fn round2_manifest_keeps_existing_read_dir_callable() {
     let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
     let app = tauri::test::mock_builder()
         .invoke_handler(tauri::generate_handler![crate::read_dir])
-        .build(tauri::generate_context!())
+        .build(crate::tauri_context())
         .unwrap();
     let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
