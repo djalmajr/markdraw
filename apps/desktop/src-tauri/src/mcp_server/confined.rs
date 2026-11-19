@@ -159,6 +159,16 @@ fn ntstatus_error_kind(code: i32) -> io::ErrorKind {
     }
 }
 
+#[cfg(any(windows, test))]
+fn directory_query_has_entry(code: i32, first_query: bool) -> Result<bool, io::ErrorKind> {
+    match code as u32 {
+        0x8000_0006 => Ok(false),                // STATUS_NO_MORE_FILES
+        0xC000_000F if first_query => Ok(false), // STATUS_NO_SUCH_FILE
+        _ if code < 0 => Err(ntstatus_error_kind(code)),
+        _ => Ok(true),
+    }
+}
+
 #[cfg(windows)]
 mod native {
     use super::*;
@@ -290,15 +300,18 @@ mod native {
     pub(in crate::mcp_server) fn child(parent: &File, name: &str) -> io::Result<File> {
         let mut wide: Vec<u16> = name.encode_utf16().collect();
         let length = u16::try_from(wide.len() * 2).map_err(|_| io::ErrorKind::InvalidInput)?;
-        let mut name = Unicode {
+        let mut unicode = Unicode {
             length,
             maximum: length,
             buffer: wide.as_mut_ptr(),
         };
+        open_relative(parent, &mut unicode)
+    }
+    fn open_relative(parent: &File, name: &mut Unicode) -> io::Result<File> {
         let mut attrs = Attributes {
             length: std::mem::size_of::<Attributes>() as u32,
             root: parent.as_raw_handle(),
-            name: &mut name,
+            name,
             flags: 0x40,
             security: std::ptr::null_mut(),
             qos: std::ptr::null_mut(),
@@ -360,12 +373,11 @@ mod native {
                         u8::from(self.restart),
                     )
                 };
-                self.restart = false;
-                if code as u32 == 0x80000006 {
-                    return None;
-                }
-                if code < 0 {
-                    return Some(Err(io::ErrorKind::PermissionDenied.into()));
+                let first_query = std::mem::replace(&mut self.restart, false);
+                match directory_query_has_entry(code, first_query) {
+                    Ok(true) => (),
+                    Ok(false) => return None,
+                    Err(kind) => return Some(Err(kind.into())),
                 }
                 let bytes = unsafe {
                     std::slice::from_raw_parts(
@@ -396,8 +408,15 @@ mod native {
         }
     }
     pub(in crate::mcp_server) fn entries(dir: &File) -> io::Result<Entries> {
+        // An empty relative name reopens the pinned directory itself. A new
+        // file object gives each scan its own cursor.
+        let mut empty_name = Unicode {
+            length: 0,
+            maximum: 0,
+            buffer: std::ptr::null_mut(),
+        };
         Ok(Entries {
-            dir: child(dir, ".")?,
+            dir: open_relative(dir, &mut empty_name)?,
             restart: true,
         })
     }
@@ -418,6 +437,69 @@ pub(in crate::mcp_server) fn open(root: &File, parts: &[&str]) -> io::Result<Fil
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_directory_query_distinguishes_entries_end_and_errors() {
+        use io::ErrorKind::{NotFound, PermissionDenied};
+
+        for (status, first_query, expected) in [
+            (0_u32, true, Ok(true)),         // STATUS_SUCCESS
+            (0x8000_0006, false, Ok(false)), // STATUS_NO_MORE_FILES
+            (0x8000_0006, true, Ok(false)),
+            (0xC000_000F, true, Ok(false)), // STATUS_NO_SUCH_FILE
+            (0xC000_000F, false, Err(NotFound)),
+            (0xC000_0034, true, Err(NotFound)), // STATUS_OBJECT_NAME_NOT_FOUND
+            (0xC000_0022, true, Err(PermissionDenied)), // STATUS_ACCESS_DENIED
+        ] {
+            assert_eq!(
+                directory_query_has_entry(status as i32, first_query),
+                expected,
+                "NTSTATUS {status:#010X}, first query: {first_query}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_lists_empty_and_single_entry_directories() {
+        let fixture = tempfile::tempdir().unwrap();
+        let dir = root(fixture.path()).unwrap();
+        assert!(entries(&dir).unwrap().next().is_none());
+
+        std::fs::write(fixture.path().join("only.txt"), "").unwrap();
+        let names = entries(&dir)
+            .unwrap()
+            .take(2)
+            .collect::<io::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(names, ["only.txt"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_overlapping_listings_have_independent_cursors() {
+        let fixture = tempfile::tempdir().unwrap();
+        let expected: Vec<_> = (0..400)
+            .map(|i| format!("{i:03}-{}.txt", "x".repeat(90)))
+            .collect();
+        // The UTF-16 filenames alone exceed the 64 KiB query buffer.
+        for name in &expected {
+            std::fs::write(fixture.path().join(name), "").unwrap();
+        }
+        let dir = root(fixture.path()).unwrap();
+        let mut first = entries(&dir).unwrap();
+        let mut second = entries(&dir).unwrap();
+        let mut first_names = vec![first.next().unwrap().unwrap()];
+        let mut second_names = vec![second.next().unwrap().unwrap()];
+
+        for (names, listing) in [(&mut first_names, first), (&mut second_names, second)] {
+            for name in listing.take(expected.len()) {
+                names.push(name.unwrap());
+            }
+            names.sort_unstable();
+            assert_eq!(*names, expected);
+        }
+    }
 
     #[test]
     fn windows_missing_statuses_are_distinct_from_refusals() {
