@@ -223,8 +223,11 @@ export function effectivePaneEditorMode(pane: PaneStore): "edit" | "split" | "pr
   const file = pane.selectedFile();
   const kind = file ? fileKind(file.name) : null;
   if (kind === "image" || kind === "pdf") return "preview";
-  if (kind === "other" && pane.html() !== UNSUPPORTED_CONTENT) return "edit";
-  return pane.editorMode();
+  const mode = kind === "other" && pane.html() !== UNSUPPORTED_CONTENT ? "edit" : pane.editorMode();
+  // Keep the preview's loading/error display available without mounting an
+  // editor on a restored tab whose working buffer has not been read yet.
+  if (mode !== "preview" && pane.tabs.getActiveTab()?.needsLoad) return "preview";
+  return mode;
 }
 
 export function createAppState(config: AppStateConfig) {
@@ -469,7 +472,7 @@ export function createAppState(config: AppStateConfig) {
   const isUnsupported = () => html() === UNSUPPORTED_CONTENT;
 
   const canEdit = () => {
-    if (isUnsupported()) return false;
+    if (isUnsupported() || paneManager.activePane().tabs.getActiveTab()?.needsLoad) return false;
     const k = viewerKind();
     return k === "document" || k === "html" || k === "other";
   };

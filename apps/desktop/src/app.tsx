@@ -12,6 +12,8 @@ import { dragOnceMoved, installHyprlandMaximize } from "./lib/hyprland-maximize.
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
+import { createPaneManager } from "@markdraw/ui/composables/create-pane-manager.ts";
+import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
 import { exportChatArtifact, savePlanArtifact } from "./lib/ai-artifacts.ts";
 import { createMockProvider } from "@markdraw/ai/mock-provider.ts";
 import type { AIConfig, MCPServerConfig } from "@markdraw/ai/config-schema.ts";
@@ -425,6 +427,9 @@ export function App() {
   };
 
   const state = createAppState({
+    paneManager: createPaneManager({
+      onTabSelected: (pane, tab) => { void tabActions.selectTab(pane, tab); },
+    }),
     applyTheme,
     convertAdoc,
     convertMarkdown,
@@ -1484,14 +1489,13 @@ export function App() {
   // Find in Files (Cmd/Ctrl+Shift+F).
   const [findInFilesVisible, setFindInFilesVisible] = createSignal(false);
 
-  // Flag to suppress auto-save during tab switches
-  let isTabSwitching = false;
-
   // File watcher (watches current file + includes for content changes).
   // Also fires for our own autosave writes, so the refresh keeps unsaved edits.
   const watcher = new FileWatcher(async () => {
-    const file = state.selectedFile();
-    if (!file) return;
+    const pane = state.paneManager.activePane();
+    const tab = pane.tabs.getActiveTab();
+    const file = pane.selectedFile();
+    if (!file || tab?.needsLoad) return;
 
     try {
       const changedElsewhere = await loader.refreshFromDisk(file);
@@ -1500,12 +1504,7 @@ export function App() {
       // event — each autosave fires one, and re-indexing re-chunks (and, on
       // the Complete tier, re-embeds) the whole document.
       if (changedElsewhere) reindexActiveFile();
-      tabStore().updateActiveTabContent({
-        editorContent: state.editorContent(),
-        savedContent: state.savedContent(),
-        html: state.html(),
-        frontmatter: state.frontmatter(),
-      });
+      if (tab && pane.selectedFile()?.path === file.path) updateLoadedTabCache(pane, tab.id);
     } catch {
       // File likely deleted — the dir watcher will refresh the tree
       // and the tab will show an error until clicked away
@@ -1523,12 +1522,24 @@ export function App() {
     onActivateTab: (tabId) => handleActivateTab(tabId),
   });
 
-  const tabActions = createTabActions({ rootPaths, state, watcher });
+  const tabActions = createTabActions({
+    rootPaths,
+    state,
+    watcher,
+    loadTabContent: loader.loadTabContent,
+    confirmDirtyTab: (tab) => confirmThree({
+      title: "Close Tab",
+      description: `"${tab.fileName}" has unsaved changes. Discard them?`,
+      confirmLabel: m.command_save(),
+      denyLabel: "Discard",
+    }),
+  });
   const folder = createFolder({
     rootPaths,
     setRootPaths,
     state,
     watcher,
+    beforeRootClose: tabActions.approveRootClose,
     onRootClosed: tabActions.closeRootTabs,
   });
 
@@ -1655,12 +1666,7 @@ export function App() {
     };
   });
 
-  const cancelAutosave = createFileAutosave(
-    state,
-    folder.handleEditorSave,
-    reindexActiveFile,
-    () => isTabSwitching,
-  );
+  createFileAutosave(state, folder.handleEditorSave, reindexActiveFile);
   onCleanup(() => { void watcher.destroy(); });
 
   // Hyprland: the toolbar and the welcome screen move the window only once
@@ -2429,16 +2435,27 @@ export function App() {
 
   // ── Tab handlers ────────────────────────────────────────────────────────
 
+  function updateLoadedTabCache(pane: PaneStore, id: string) {
+    if (pane.tabs.activeTabId() !== id || pane.tabs.getTab(id)?.needsLoad) return;
+    pane.tabs.updateTabContent(id, {
+      editorContent: pane.editorContent(),
+      savedContent: pane.savedContent(),
+      html: pane.html(),
+      frontmatter: pane.frontmatter(),
+    });
+  }
+
   /** Single click: load file in the active tab (replacing its content). */
   async function handleLoadFileWithTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
-    tabStore().loadInActiveTab(entry, rootId);
+    const pane = state.paneManager.activePane();
+    const existing = pane.tabs.findTabByFile(entry.path, rootId);
+    const id = pane.tabs.loadInActiveTab(entry, rootId);
+    if (existing?.needsLoad) {
+      await tabActions.selectTab(pane, existing, true, true);
+      return;
+    }
     await loader.loadFileContent(entry, true, false, rootId);
-    tabStore().updateActiveTabContent({
-      editorContent: state.editorContent(),
-      savedContent: state.savedContent(),
-      html: state.html(),
-      frontmatter: state.frontmatter(),
-    });
+    updateLoadedTabCache(pane, id);
   }
 
   /** Inline create commit from the file tree. Creates the file/folder on disk
@@ -2488,22 +2505,22 @@ export function App() {
    *  pane, activate + pin in place rather than duplicating (VSCode
    *  semantics). */
   async function handleOpenInNewTab(entry: import("@markdraw/core/types.ts").FSEntry, rootId: string) {
-    const store = tabStore();
+    const pane = state.paneManager.activePane();
+    const store = pane.tabs;
     const existing = store.findTabByFile(entry.path, rootId);
     if (existing) {
-      store.activateTab(existing.id);
       store.pinTab(existing.id);
-      await loader.loadFileContent(entry, true, false, rootId);
+      if (existing.needsLoad) {
+        await tabActions.activateTab(pane, existing.id, true);
+      } else {
+        store.activateTab(existing.id);
+        await loader.loadFileContent(entry, true, false, rootId);
+      }
       return;
     }
-    store.openTab(entry, rootId);
+    const id = store.openTab(entry, rootId);
     await loader.loadFileContent(entry, true, false, rootId);
-    store.updateActiveTabContent({
-      editorContent: state.editorContent(),
-      savedContent: state.savedContent(),
-      html: state.html(),
-      frontmatter: state.frontmatter(),
-    });
+    updateLoadedTabCache(pane, id);
   }
 
   /** Build a folder @-mention's content from the in-memory workspace tree:
@@ -3109,64 +3126,8 @@ export function App() {
     state.setEditorMode("preview");
   }
 
-  async function handleActivateTab(tabId: string) {
-    const pane = state.paneManager.activePane();
-    const tab = pane.tabs.getTab(tabId);
-    if (!tab) return;
-
-    isTabSwitching = true;
-    cancelAutosave();
-
-    pane.tabs.activateTab(tabId);
-
-    // Scratch tab: it has no entry in any workspace tree, so reconstruct the
-    // sentinel selectedFile directly. activateTab already restored the buffer
-    // (md/adoc content from the tab; an Excalidraw scene re-seeds from
-    // scratchScenes when its frame remounts). No disk load, no watcher.
-    if (tab.rootId === SCRATCH_ROOT_ID) {
-      state.setSelectedFile({ name: tab.fileName, kind: "file", path: tab.filePath });
-      state.setSelectedRootId(SCRATCH_ROOT_ID);
-      void watcher.stop();
-      queueMicrotask(() => {
-        isTabSwitching = false;
-      });
-      return;
-    }
-
-    // Set the selected file/root from the tab
-    const entry = state.findEntryByPath(tab.filePath, tab.rootId);
-    if (entry) {
-      state.setSelectedFile(entry);
-      state.setSelectedRootId(tab.rootId);
-    }
-
-    // If the tab needs content loaded (restored from session or reopened)
-    if (tab.needsLoad && entry) {
-      await loader.loadFileContent(entry, false, true, tab.rootId);
-      if (pane.tabs.activeTabId() === tabId) {
-        pane.tabs.updateTabContent(tabId, {
-          editorContent: pane.editorContent(),
-          savedContent: pane.savedContent(),
-          html: pane.html(),
-          frontmatter: pane.frontmatter(),
-        });
-      }
-    }
-
-    // Re-arm file watcher for the new active tab
-    const rootPath = rootPaths().get(tab.rootId);
-    if (rootPath && tab.filePath) {
-      watcher.setTarget({
-        filePath: `${rootPath}/${tab.filePath}`,
-        includePaths: tab.includePaths,
-        rootPath,
-      });
-      if (state.autoRefresh()) watcher.start();
-    }
-
-    queueMicrotask(() => {
-      isTabSwitching = false;
-    });
+  function handleActivateTab(tabId: string) {
+    return tabActions.activateTab(state.paneManager.activePane(), tabId);
   }
 
   async function handleCloseTab(tabId: string) {
@@ -3194,20 +3155,8 @@ export function App() {
         // "deny" (discard) falls through to close
       }
       scratchScenes.delete(tab.filePath);
-    } else {
-      // For the active tab, check live dirty state; for others, check cached
-      const isDirty = tabId === pane.tabs.activeTabId()
-        ? pane.editorContent() !== pane.savedContent()
-        : tab.editorContent !== tab.savedContent;
-
-      if (isDirty) {
-        const discard = await confirm({
-          title: "Close Tab",
-          description: `"${tab.fileName}" has unsaved changes. Discard them?`,
-          confirmLabel: "Discard",
-        });
-        if (!discard) return;
-      }
+    } else if (!await tabActions.approveTabClose(pane, tabId)) {
+      return;
     }
 
     tabActions.closeTabs(pane, [tabId]);
@@ -3319,8 +3268,7 @@ export function App() {
         },
         "tab.reopen": (ev) => {
           ev.preventDefault();
-          const reopened = tabStore().reopenClosedTab();
-          if (reopened) void handleActivateTab(reopened.id);
+          tabStore().reopenClosedTab();
         },
         "tab.next": (ev) => {
           ev.preventDefault();

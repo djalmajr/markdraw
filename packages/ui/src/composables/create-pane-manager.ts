@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import { createPaneStore, type PaneStore } from "./create-pane-store.ts";
+import { createPaneStore, type OnPaneTabSelected, type PaneStore } from "./create-pane-store.ts";
 
 /**
  * Single pane = single column. Two panes = vertical split with the
@@ -47,6 +47,8 @@ export interface PaneManagerConfig {
    *  splitter stays where the user left it. Defaults to the persisted
    *  value (or `DEFAULT_SPLIT_RATIO` if there isn't one). */
   initialSplitRatio?: number;
+  /** Host activation when closing or reopening tabs through the store. */
+  onTabSelected?: OnPaneTabSelected;
 }
 
 export function createPaneManager(config: PaneManagerConfig = {}): PaneManager {
@@ -58,7 +60,7 @@ export function createPaneManager(config: PaneManagerConfig = {}): PaneManager {
   const initialPaneCount = Math.min(2, Math.max(1, persistedLayout?.paneCount ?? 1));
   const initialPanes: PaneStore[] = [];
   for (let i = 0; i < initialPaneCount; i += 1) {
-    initialPanes.push(createPaneStore(`pane-${i}`));
+    initialPanes.push(createPaneStore(`pane-${i}`, config.onTabSelected));
   }
   const initialActive = persistedLayout
     ? Math.min(Math.max(0, persistedLayout.activePaneIndex), initialPaneCount - 1)
@@ -101,7 +103,7 @@ export function createPaneManager(config: PaneManagerConfig = {}): PaneManager {
     const list = paneList();
     if (list.length >= MAX_PANES) return;
 
-    const newPane = createPaneStore(`pane-${list.length}`);
+    const newPane = createPaneStore(`pane-${list.length}`, config.onTabSelected);
     const next = [...list, newPane];
     setPaneList(next);
     // The newly opened pane becomes active so subsequent file-tree

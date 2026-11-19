@@ -68,10 +68,11 @@ interface TabStoreConfig {
    *  Used by `createPaneStore` to give each pane an isolated session
    *  blob. Defaults to the legacy single-pane key. */
   storageKey?: string;
+  onTabSelected?: (tab: TabState | null) => void;
 }
 
 export function createTabStore(config: TabStoreConfig): TabStore {
-  const { pane, storageKey } = config;
+  const { pane, storageKey, onTabSelected } = config;
 
   const [tabList, setTabList] = createSignal<TabState[]>([]);
   const [activeId, setActiveId] = createSignal<TabId | null>(null);
@@ -109,7 +110,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
 
     setTabList((prev) =>
       prev.map((t) => {
-        if (t.id !== id) return t;
+        if (t.id !== id || t.needsLoad) return t;
         return {
           ...t,
           editorContent: currentContent,
@@ -296,6 +297,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     } else {
       clearPane();
     }
+    onTabSelected?.(next);
     return next;
   }
 
@@ -308,6 +310,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     setActiveId(null);
     clearPane();
     persistSession();
+    onTabSelected?.(null);
   }
 
   function clearPane(): void {
@@ -342,6 +345,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     setActiveId(tab.id);
     restoreTab(tab);
     persistSession();
+    onTabSelected?.(tab);
     return tab;
   }
 
@@ -378,7 +382,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
 
   function updateTabContent(tabId: TabId, content: Parameters<TabStore["updateTabContent"]>[1]): void {
     setTabList((prev) =>
-      prev.map((t) => (t.id === tabId ? { ...t, needsLoad: false, ...content } : t)),
+      prev.map((t) => (t.id === tabId ? { ...t, ...content } : t)),
     );
   }
 

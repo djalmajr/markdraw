@@ -14,10 +14,12 @@ interface FolderDeps {
   state: AppState;
   watcher: FileWatcher;
   onRootClosed?: (rootId: string, paths: ReadonlyMap<string, string>) => void;
+  beforeRootClose?: (rootId: string) => Promise<boolean>;
 }
 
 export function createFolder(deps: FolderDeps) {
-  const { rootPaths, setRootPaths, state, watcher, onRootClosed } = deps;
+  const { rootPaths, setRootPaths, state, watcher, onRootClosed, beforeRootClose } = deps;
+  const closingRoots = new Set<string>();
 
   // Serialize authorization changes together with their UI publication. In
   // particular a close is acknowledged by Rust before it disappears locally;
@@ -29,8 +31,10 @@ export function createFolder(deps: FolderDeps) {
   function updateRoots(
     change: (next: Map<string, string>) => void,
     publish: (next: ReadonlyMap<string, string>) => void | Promise<void>,
+    approve?: () => boolean | Promise<boolean>,
   ) {
     const update = rootUpdates.then(async () => {
+      if (approve && !await approve()) return;
       const next = new Map(rootPaths());
       change(next);
       await invoke("mcp_set_roots", {
@@ -168,14 +172,18 @@ export function createFolder(deps: FolderDeps) {
   }
 
   async function handleCloseRoot(rootId: string) {
+    if (closingRoots.has(rootId)) return;
+    closingRoots.add(rootId);
     try {
       await updateRoots((next) => { next.delete(rootId); }, (next) => {
         state.removeRoot(rootId);
         onRootClosed?.(rootId, next);
         if (next.size === 0) return watcher.destroy();
-      });
+      }, () => rootPaths().has(rootId) && (beforeRootClose?.(rootId) ?? true));
     } catch (e) {
       if (e !== rootUpdateRejected) console.error("Could not close workspace: MCP authorization update failed");
+    } finally {
+      closingRoots.delete(rootId);
     }
   }
 
@@ -187,16 +195,21 @@ export function createFolder(deps: FolderDeps) {
     // not the pane whose buffer we actually persisted. See Round 4
     // Lesson 6 for the canonical write-up.
     const targetPane = state.paneManager.activePane();
+    const tab = targetPane.tabs.getActiveTab();
     const entry = targetPane.selectedFile();
     const rootId = targetPane.selectedRootId();
     const rootPath = rootId ? rootPaths().get(rootId) : null;
-    if (!entry || !rootPath) return;
+    if (!entry || !rootId || !rootPath || tab?.needsLoad || closingRoots.has(rootId)) return;
 
     try {
       const absolutePath = `${rootPath}/${entry.path}`;
       const content = targetPane.editorContent();
       await writeFile(absolutePath, content);
-      targetPane.setSavedContent(content);
+      if (targetPane.tabs.activeTabId() === (tab?.id ?? null)
+        && targetPane.selectedFile()?.path === entry.path
+        && targetPane.selectedRootId() === rootId) {
+        targetPane.setSavedContent(content);
+      }
     } catch (e) {
       console.error("Failed to save file:", e);
     }
