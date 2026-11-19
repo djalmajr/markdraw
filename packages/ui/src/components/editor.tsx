@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onSettled } from "solid-js";
+import { createEffect, createSignal, onSettled, untrack } from "solid-js";
 import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   Decoration,
@@ -184,6 +184,9 @@ export function Editor(props: EditorProps) {
   let lastFindTrigger = props.findTrigger;
   let lastRedoTrigger = props.redoTrigger;
   let lastSearchOpen = props.searchOpen;
+  // Only a real `props.content` change may replace the document. Search
+  // state is read as a snapshot in the apply phase, never as a trigger.
+  let lastAppliedExternalContent: string | undefined;
   let lastSyncScrollTargetVersion = props.syncScrollTargetVersion;
   let lastScrollToLineVersion = props.scrollToLineVersion ?? 0;
   let lastUndoTrigger = props.undoTrigger;
@@ -570,14 +573,10 @@ export function Editor(props: EditorProps) {
   });
 
   createEffect(
-    () => ({
-      content: props.content,
-      searchOpen: props.searchOpen,
-      query: searchQuery(),
-      options: searchOptions(),
-    }),
-    ({ content: newContent, searchOpen, query, options }) => {
-      if (!view) return;
+    () => props.content,
+    (newContent) => {
+      if (!view || newContent === lastAppliedExternalContent) return;
+      lastAppliedExternalContent = newContent;
       if (view.state.doc.toString() !== newContent) {
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: newContent },
@@ -587,6 +586,11 @@ export function Editor(props: EditorProps) {
           // A pending AI diff belongs to the old document — drop it on swap.
           effects: clearAiDiffs.of(null),
         });
+        // Snapshot the search state: opening/finding/changing options must
+        // never become a document-swap trigger and clobber unsaved edits.
+        const searchOpen = untrack(() => props.searchOpen);
+        const query = untrack(searchQuery);
+        const options = untrack(searchOptions);
         if (searchOpen && query) recomputeMatches(query, options);
       }
     },
