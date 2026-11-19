@@ -3,10 +3,17 @@
 // against the actual reader output, not a hand-copied expectation.
 
 import { describe, expect, it } from "bun:test";
-import type { CachedModel, ModelCache } from "@markdraw/ai/config-schema.ts";
+import {
+  mergeConfigs,
+  type CachedModel,
+  type ModelCache,
+  type ModelConfig,
+} from "@markdraw/ai/config-schema.ts";
 import {
   canRefreshProvider,
   MODEL_REFRESH_FAILURE,
+  refreshModelsFromUi,
+  refreshModelsOnConnect,
   refreshProviderModels,
   refreshStaleProviders,
   staleProviderIds,
@@ -332,5 +339,142 @@ describe("model-refresh — falha e atualização automática", () => {
     expect(canRefreshProvider("grok-sub", { kind: "grok-cli", name: "Grok" })).toBe(true);
     expect(canRefreshProvider("custom", { kind: "openai-compatible", name: "x" })).toBe(false);
     expect(canRefreshProvider("missing", undefined)).toBe(false);
+  });
+});
+
+describe("model-refresh — rodada 2: F1, F2 e connect", () => {
+  it("F2: selecionado fora da nova lista fica no cache com nome/limites de antes e volta sem previous", async () => {
+    // Same shape as a live ModelConfig: writing it to the cache must preserve
+    // every field, and a fresh config load must resolve it verbatim.
+    const previous: ModelConfig = {
+      name: "GPT velho (manual)",
+      limit: { context: 123456, output: 4096 },
+      reasoning: ["low"],
+    };
+    const h = harness({
+      "https://api.openai.com/v1/models": { data: [{ id: "gpt-new", name: "GPT novo" }] },
+    });
+    h.ctx.providers = { openai: openAiProvider("https://api.openai.com/v1", "openai") };
+    h.ctx.selectedModel = "openai/gpt-old";
+    h.ctx.modelDefinition = (id, modelId) =>
+      id === "openai" && modelId === "gpt-old" ? structuredClone(previous) : undefined;
+    const result = await refreshProviderModels(["openai"], h.ctx);
+    expect(result).toEqual({ ok: true, refreshed: ["openai"] });
+    expect(models(h.cache().openai)).toEqual({
+      "gpt-new": { name: "GPT novo" },
+      "gpt-old": previous,
+    });
+    expect(h.cache().openai?.source).toBe("openai-compatible:/models");
+    expect(h.cache().openai?.fetchedAt).toBe(NOW.toISOString());
+
+    // Nova abertura: só o cache e os embutidos, sem `previous` nem `selected`.
+    const reopened = mergeConfigs(
+      { openai: { kind: "openai", name: "OpenAI", models: {} } },
+      {},
+      h.cache(),
+    );
+    expect(reopened.provider.openai.models["gpt-old"]).toEqual(previous);
+    expect(reopened.provider.openai.models["gpt-new"]).toEqual({ name: "GPT novo" });
+  });
+
+  it("F2: selecionado ainda presente mantém a definição nova da fonte", async () => {
+    const h = harness({
+      "https://api.openai.com/v1/models": { data: [{ id: "gpt-old", name: "Nome novo" }] },
+    });
+    h.ctx.providers = { openai: openAiProvider("https://api.openai.com/v1", "openai") };
+    h.ctx.selectedModel = "openai/gpt-old";
+    h.ctx.modelDefinition = () => ({ name: "Nome antigo", limit: { context: 1 } });
+    expect((await refreshProviderModels(["openai"], h.ctx)).ok).toBe(true);
+    // O leitor OpenAI não traz contexto; o que importa é o nome novo vencer o antigo.
+    expect(models(h.cache().openai)).toEqual({ "gpt-old": { name: "Nome novo" } });
+  });
+
+  it("F2: sem definição anterior não inventa entrada; falha não grava a retenção", async () => {
+    const h = harness();
+    h.ctx.providers = { openai: openAiProvider("https://api.openai.com/v1", "openai") };
+    h.ctx.selectedModel = "openai/gpt-old";
+    h.ctx.modelDefinition = () => undefined;
+    h.ctx.sources!.httpGetJson = async () => ({ status: 200, body: JSON.stringify({ data: [{ id: "gpt-new" }] }) });
+    expect((await refreshProviderModels(["openai"], h.ctx)).ok).toBe(true);
+    expect(Object.keys(models(h.cache().openai))).toEqual(["gpt-new"]);
+
+    h.storage.setItem(MODEL_CACHE_KEY, JSON.stringify({ openai: {
+      source: "x",
+      fetchedAt: "2026-11-01T12:00:00.000Z",
+      models: { "gpt-kept": { name: "GPT kept" } },
+    } }));
+    const before = h.storage.raw;
+    h.ctx.modelDefinition = () => ({ name: "GPT velho" });
+    h.ctx.sources!.httpGetJson = async () => { throw new Error("network down"); };
+    expect((await refreshProviderModels(["openai"], h.ctx)).ok).toBe(false);
+    expect(h.storage.raw).toBe(before);
+  });
+
+  it("F1: falha parcial em grupo misto avisa a UI e mantém o que foi gravado", async () => {
+    const responses: Record<string, unknown> = {
+      "https://models.dev/api.json": {
+        anthropic: {
+          models: { "claude-opus-5-5": { id: "claude-opus-5-5", name: "Opus 5.5" } },
+        },
+      },
+    };
+    const h = harness(responses);
+    h.ctx.sources!.httpGetJson = async (url) => {
+      if (url === "https://api.anthropic.com/v1/models") return { status: 401, body: "{}" };
+      return { status: 200, body: JSON.stringify(responses[url]) };
+    };
+    h.ctx.providers = {
+      anthropic: { kind: "anthropic", name: "Anthropic" },
+      "claude-sub": { kind: "claude-cli", name: "Claude" },
+    };
+    let reloaded = 0;
+    let thrown: unknown;
+    try {
+      await refreshModelsFromUi(["anthropic", "claude-sub"], h.ctx, () => {
+        reloaded++;
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(MODEL_REFRESH_FAILURE);
+    expect(JSON.stringify(thrown)).not.toContain("fake-key");
+    expect(reloaded).toBe(1);
+    expect(h.cache().anthropic).toBeUndefined();
+    expect(models(h.cache()["claude-sub"])).toEqual({
+      "claude-opus-5-5": { name: "Opus 5.5" },
+    });
+
+    // Controle: sem falha, nenhum erro é levantado e a recarga acontece igual.
+    h.ctx.sources!.httpGetJson = async (url) => ({
+      status: 200,
+      body: JSON.stringify(responses[url] ?? { data: [{ id: "claude-a" }] }),
+    });
+    reloaded = 0;
+    await refreshModelsFromUi(["anthropic", "claude-sub"], h.ctx, () => {
+      reloaded++;
+    });
+    expect(reloaded).toBe(1);
+    expect(models(h.cache().anthropic)["claude-a"]).toEqual({ name: "claude-a" });
+  });
+
+  it("connect: primeira busca usa o orquestrador com a chave recém-digitada; falha não derruba a conexão", async () => {
+    const h = harness({
+      "https://api.anthropic.com/v1/models": {
+        data: [{ id: "claude-new", display_name: "Claude New" }],
+      },
+    });
+    h.ctx.providers = { anthropic: { kind: "anthropic", name: "Anthropic" } };
+    h.ctx.apiKeyFor = (id) => (id === "anthropic" ? "just-typed-key" : null);
+    const ok = await refreshModelsOnConnect("anthropic", h.ctx);
+    expect(ok).toEqual({ ok: true, refreshed: ["anthropic"] });
+    expect(h.calls.http[0].headers?.["x-api-key"]).toBe("just-typed-key");
+    expect(models(h.cache().anthropic)["claude-new"]).toEqual({ name: "Claude New" });
+
+    const before = h.storage.raw;
+    h.ctx.sources!.httpGetJson = async () => ({ status: 401, body: "{}" });
+    const failed = await refreshModelsOnConnect("anthropic", h.ctx);
+    expect(failed).toEqual({ ok: false, refreshed: [], error: MODEL_REFRESH_FAILURE });
+    expect(h.storage.raw).toBe(before);
   });
 });

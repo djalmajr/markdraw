@@ -65,13 +65,15 @@ import {
   type EmbeddingMeta,
 } from "./lib/ai-index.ts";
 import { fetchModels, isOpenAiChatModelId } from "@markdraw/ai/model-catalog.ts";
-import { loadAIConfig, loadUserAIConfig, saveAIConfig, saveFetchedModels } from "./lib/ai-config.ts";
+import { loadAIConfig, loadUserAIConfig, saveAIConfig } from "./lib/ai-config.ts";
 import { readModelCache } from "./lib/model-cache.ts";
 import {
   canRefreshProvider,
-  refreshProviderModels,
+  refreshModelsFromUi,
+  refreshModelsOnConnect,
   refreshStaleProviders,
   staleProviderIds,
+  type ModelRefreshContext,
 } from "./lib/model-refresh.ts";
 import { buildMcpTools } from "@markdraw/ai/mcp-tools.ts";
 import {
@@ -472,6 +474,9 @@ export function App() {
 
   // Load the AI config (ai.json merged with builtins) once at startup, then
   // connect any enabled MCP servers so their tools are ready for the first turn.
+  // `selected` keeps a dropped model resolvable only during THIS session; what
+  // carries it across launches is the refresh keeping its old definition in
+  // the cache (there is no `previous` config to pass at boot).
   onSettled(() => {
     void (async () => {
       try {
@@ -490,10 +495,7 @@ export function App() {
       // only, one at a time. No error toast — the old list stays usable.
       const stale = staleProviderIds(refreshableProviderIds(), readModelCache());
       if (stale.length > 0) {
-        void refreshStaleProviders(stale, {
-          providers: aiConfig().provider,
-          apiKeyFor: (id) => getApiKey(id),
-        })
+        void refreshStaleProviders(stale, modelRefreshContext())
           .then((result) => {
             if (result.refreshed.length === 0) return;
             return reloadAiConfigAndProviders().then(() => syncModelCacheInfo());
@@ -643,6 +645,21 @@ export function App() {
     const config = await loadAIConfig(aiConfig(), selected ? [selected] : []);
     setAiConfig(config);
     await refreshConnectedProviders(config);
+  }
+
+  /** Effective catalog, live credentials and the current selection for every
+   *  refresh path (startup, button and connect). `modelDefinition` reads the
+   *  config BEFORE a refresh overwrites it, so the selected model's name and
+   *  limits can be kept in the new cache entry. */
+  function modelRefreshContext(
+    apiKeyFor?: (id: string) => string | null | Promise<string | null>,
+  ): ModelRefreshContext {
+    return {
+      providers: aiConfig().provider,
+      apiKeyFor: apiKeyFor ?? ((id) => getApiKey(id)),
+      selectedModel: getStoredAiModel(),
+      modelDefinition: (id, modelId) => aiConfig().provider[id]?.models[modelId],
+    };
   }
 
   /** Connected providers whose models can actually be refreshed (the UI shows
@@ -936,9 +953,28 @@ export function App() {
     await reloadAiConfigAndProviders();
   }
 
-  /** Connect a built-in provider: store its key (keychain) and, when it lists no
-   *  models yet but has a baseURL, fetch + register them so they show up in
-   *  Manage models. Used by the per-provider connect sub-page. */
+  /** First model fetch on connect: the same orchestrator as Refresh, with the
+   *  just-typed key. A failed source never fails the connection — the embedded
+   *  list stays usable — and a successful one already writes the enriched
+   *  cache (names/limits), not just bare ids. */
+  async function fetchModelsOnConnect(providerId: string, apiKey: string): Promise<void> {
+    if (canRefreshProvider(providerId, aiConfig().provider[providerId])) {
+      try {
+        const result = await refreshModelsOnConnect(
+          providerId,
+          modelRefreshContext((id) => (id === providerId && apiKey ? apiKey : getApiKey(id))),
+        );
+        if (result.refreshed.length > 0) syncModelCacheInfo();
+      } catch {
+        // Already connected; a broken source must not undo the connection.
+      }
+    }
+    await reloadAiConfigAndProviders();
+  }
+
+  /** Connect a built-in provider: store its key (keychain) or remember the CLI
+   *  subscription, then fetch its models through the shared orchestrator when
+   *  it has a dynamic source. Used by the per-provider connect sub-page. */
   async function connectProvider(input: { providerId: string; apiKey: string }): Promise<void> {
     const { providerId, apiKey } = input;
     const provider = aiConfig().provider[providerId];
@@ -948,20 +984,11 @@ export function App() {
         throw new Error(probe.error ?? "CLI subscription not available");
       }
       persistConnectedSubscription(providerId, true); // remember across launches
-      await reloadAiConfigAndProviders();
+      await fetchModelsOnConnect(providerId, apiKey);
       return;
     }
     if (apiKey) await setApiKey(providerId, apiKey);
-    if (provider && Object.keys(provider.models).length === 0 && provider.options?.baseURL) {
-      let ids: string[] = [];
-      try {
-        ids = await listAiModels(providerId, apiKey);
-      } catch {
-        ids = [];
-      }
-      if (ids.length) saveFetchedModels(providerId, ids, "/models");
-    }
-    await reloadAiConfigAndProviders();
+    await fetchModelsOnConnect(providerId, apiKey);
   }
 
   /** Disconnect a provider group ("Remove provider" in Manage models). Receives
@@ -970,17 +997,15 @@ export function App() {
    *  kind+name — are also dropped from ai.json; built-ins keep their catalog
    *  entry and merely lose the credential (the connected filter hides them). */
   /** Refresh one or several providers through the shared orchestrator. The
-   *  OpenCode Go pair is deduplicated there; a failure leaves every cache entry
-   *  and every hand-written model untouched. */
+   *  OpenCode Go pair is deduplicated there; a failed source leaves its cache
+   *  entry untouched. A partial failure still reloads the writes that DID land
+   *  and then raises the fixed short error the settings UI displays. */
   async function refreshModels(providerIds: string | string[]): Promise<void> {
     const ids = Array.isArray(providerIds) ? providerIds : [providerIds];
-    const result = await refreshProviderModels(ids, {
-      providers: aiConfig().provider,
-      apiKeyFor: (id) => getApiKey(id),
+    await refreshModelsFromUi(ids, modelRefreshContext(), async () => {
+      await reloadAiConfigAndProviders();
+      syncModelCacheInfo();
     });
-    if (result.refreshed.length === 0) throw new Error("model refresh failed");
-    await reloadAiConfigAndProviders();
-    syncModelCacheInfo();
   }
 
   async function removeProvider(ids: string[]): Promise<void> {

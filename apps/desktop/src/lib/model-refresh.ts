@@ -1,7 +1,10 @@
 // Per-provider model-list refresh. One click (or one startup pass) resolves a
 // provider's source, parses it with the shared readers and writes ONLY the
 // versioned localStorage cache — never ai.json. A failure leaves every cache
-// entry untouched, so the old list and hand-written models keep working.
+// entry untouched, so the old list and hand-written models keep working. A
+// selected model dropped by a source keeps its old definition in the new cache
+// entry, which is what makes it survive a later launch (there is no `previous`
+// config to carry it at boot).
 
 import type { CachedModel, ModelCache } from "@markdraw/ai/config-schema.ts";
 import {
@@ -62,6 +65,11 @@ export interface ModelRefreshContext {
   sources?: Partial<ModelRefreshSources>;
   storage?: ModelCacheStorage;
   now?: () => Date;
+  /** Selected `provider/model` (`getStoredAiModel()`), if any. */
+  selectedModel?: string | null;
+  /** Its definition in the config loaded BEFORE the refresh (name/limits), so
+   *  a source that drops it cannot make it disappear on the next launch. */
+  modelDefinition?: (providerId: string, modelId: string) => CachedModel | undefined;
 }
 
 export interface ModelRefreshResult {
@@ -138,6 +146,23 @@ function toCached(models: CatalogModel[]): Record<string, CachedModel> {
 
 function ensureNonEmpty(models: Record<string, CachedModel>): void {
   if (Object.keys(models).length === 0) throw new Error("empty model list");
+}
+
+/** Keep the currently selected model in the fresh cache entry when a source
+ *  dropped it. The old definition is copied verbatim: same name and limits,
+ *  never a synthesized `{ name: id }`. A still-present id is left untouched. */
+function retainSelectedModel(writes: RefreshWrite[], ctx: ModelRefreshContext): void {
+  const ref = ctx.selectedModel;
+  if (!ref) return;
+  const slash = ref.indexOf("/");
+  if (slash <= 0 || slash >= ref.length - 1) return;
+  const providerId = ref.slice(0, slash);
+  const modelId = ref.slice(slash + 1);
+  const target = writes.find((write) => write.providerId === providerId);
+  if (!target || target.models[modelId]) return;
+  const previous = ctx.modelDefinition?.(providerId, modelId);
+  if (!previous) return;
+  target.models[modelId] = structuredClone(previous);
 }
 
 function parseJson(body: string): unknown {
@@ -369,6 +394,7 @@ export async function refreshProviderModels(
     try {
       // Resolve FIRST: a failed source must not touch a single cache entry.
       const writes = await resolveWrites(id, ctx, sources);
+      retainSelectedModel(writes, ctx);
       for (const write of writes) {
         writeModelCache(write.providerId, write.models, write.source, storage, fetchedAt);
         refreshed.push(write.providerId);
@@ -378,6 +404,33 @@ export async function refreshProviderModels(
     }
   }
   return ok ? { ok, refreshed } : { ok, refreshed, error: MODEL_REFRESH_FAILURE };
+}
+
+/** Refresh behind a UI button. A partial failure is an error even when a
+ *  sibling source was written; `onWritten` lets the caller pick up those
+ *  writes BEFORE the fixed error reaches the UI. Nothing is undone. */
+export async function refreshModelsFromUi(
+  providerIds: string[],
+  ctx: ModelRefreshContext,
+  onWritten: () => void | Promise<void>,
+): Promise<void> {
+  const result = await refreshProviderModels(providerIds, ctx);
+  if (result.refreshed.length > 0) await onWritten();
+  if (!result.ok) throw new Error(MODEL_REFRESH_FAILURE);
+}
+
+/** First fetch when connecting a provider with a dynamic source. A source
+ *  failure is non-fatal: the credential/subscription is already valid and the
+ *  embedded list remains usable. Never throws an upstream detail to the UI. */
+export async function refreshModelsOnConnect(
+  providerId: string,
+  ctx: ModelRefreshContext,
+): Promise<ModelRefreshResult> {
+  try {
+    return await refreshProviderModels([providerId], ctx);
+  } catch {
+    return { ok: false, refreshed: [], error: MODEL_REFRESH_FAILURE };
+  }
 }
 
 /** Startup pass: one provider at a time, no UI feedback, no CLI for a
