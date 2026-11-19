@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createRoot } from "solid-js";
+import { createRoot, flush, runWithOwner } from "solid-js";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AITool, ToolApprovalRequest } from "@markdraw/ai/types.ts";
@@ -34,7 +34,28 @@ function withState<T>(
   overrides: Partial<Parameters<typeof createAppState>[0]> = {},
 ): T {
   const deps = makeConfig(overrides);
-  return createRoot(() => fn(createAppState(deps), deps));
+  const state = createRoot(() => createAppState(deps));
+  flush();
+  // Handlers run from DOM events in the app, outside any owner. Drive them
+  // the same way here, and settle each call before the assertions read back.
+  const live = new Proxy(state, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        const result = runWithOwner(null, () => (value as (...a: unknown[]) => unknown).apply(target, args));
+        if (result && typeof (result as Promise<unknown>).then === "function") {
+          return (result as Promise<unknown>).then((settled) => {
+            flush();
+            return settled;
+          });
+        }
+        flush();
+        return result;
+      };
+    },
+  });
+  return runWithOwner(null, () => fn(live, deps));
 }
 
 describe("AppState — theme slice (DJA-42)", () => {
@@ -59,6 +80,29 @@ describe("AppState — theme slice (DJA-42)", () => {
       expect(deps.applyTheme).toHaveBeenCalledTimes(1);
       expect(deps.applyTheme).toHaveBeenCalledWith("dark");
     });
+  });
+
+  it("the system theme listener is removed when the state owner is disposed", () => {
+    const add = vi.fn();
+    const remove = vi.fn();
+    const matchMedia = vi.spyOn(window, "matchMedia").mockReturnValue({
+      addEventListener: add,
+      removeEventListener: remove,
+    } as unknown as MediaQueryList);
+    try {
+      let dispose!: () => void;
+      createRoot((stop) => {
+        dispose = stop;
+        createAppState(makeConfig());
+      });
+      flush();
+      expect(add).toHaveBeenCalledTimes(1);
+      dispose();
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(remove.mock.calls[0]![0]).toBe("change");
+    } finally {
+      matchMedia.mockRestore();
+    }
   });
 
   it("darkMode mirrors the document class state on each theme change", () => {
