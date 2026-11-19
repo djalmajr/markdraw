@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onSettled, createTrackedEffect } from "solid-js";
+import { createEffect, createSignal, onSettled } from "solid-js";
 import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
   Decoration,
@@ -565,163 +565,185 @@ export function Editor(props: EditorProps) {
       cancelAnimationFrame(scrollRaf);
       scrollEl.removeEventListener("scroll", onScroll);
       window.removeEventListener("keydown", onWindowKeyDown);
+      view?.destroy();
     };
   });
 
-  createTrackedEffect(() => {
-    const newContent = props.content;
-    if (!view) return;
-    if (view.state.doc.toString() !== newContent) {
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: newContent },
-        // Tag the dispatch so updateListener can skip onChange —
-        // this is a content swap from the parent, not a user edit.
-        annotations: externalContentSwap.of(true),
-        // A pending AI diff belongs to the old document — drop it on swap.
-        effects: clearAiDiffs.of(null),
-      });
-      if (props.searchOpen && searchQuery()) {
-        recomputeMatches(searchQuery(), searchOptions());
+  createEffect(
+    () => ({
+      content: props.content,
+      searchOpen: props.searchOpen,
+      query: searchQuery(),
+      options: searchOptions(),
+    }),
+    ({ content: newContent, searchOpen, query, options }) => {
+      if (!view) return;
+      if (view.state.doc.toString() !== newContent) {
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: newContent },
+          // Tag the dispatch so updateListener can skip onChange —
+          // this is a content swap from the parent, not a user edit.
+          annotations: externalContentSwap.of(true),
+          // A pending AI diff belongs to the old document — drop it on swap.
+          effects: clearAiDiffs.of(null),
+        });
+        if (searchOpen && query) recomputeMatches(query, options);
       }
-    }
-  });
+    },
+  );
 
-  createTrackedEffect(() => {
-    if (!props.searchOpen) {
-      matches = [];
-      setMatchCount(0);
-      setCurrentMatchIndex(0);
-      updateSearchHighlights();
-    }
+  createEffect(
+    () => props.searchOpen,
+    (open) => {
+      if (!open) {
+        matches = [];
+        setMatchCount(0);
+        setCurrentMatchIndex(0);
+        updateSearchHighlights();
+      }
 
-    if (lastSearchOpen && !props.searchOpen) {
-      queueMicrotask(() => view?.focus());
-    }
-    lastSearchOpen = props.searchOpen;
-  });
+      if (lastSearchOpen && !open) {
+        queueMicrotask(() => view?.focus());
+      }
+      lastSearchOpen = open;
+    },
+  );
 
-  createTrackedEffect(() => {
-    const wrapText = props.wrapText;
-    if (!view) return;
-    view.dispatch({
-      effects: wrapCompartment.reconfigure(wrapText ? EditorView.lineWrapping : []),
-    });
-  });
+  createEffect(
+    () => props.wrapText,
+    (wrapText) => {
+      if (!view) return;
+      view.dispatch({
+        effects: wrapCompartment.reconfigure(wrapText ? EditorView.lineWrapping : []),
+      });
+    },
+  );
 
-  createTrackedEffect(() => {
-    const darkMode = props.darkMode;
-    if (!view) return;
-    view.dispatch({
-      effects: themeCompartment.reconfigure(darkMode ? darkTheme : lightTheme),
-    });
-  });
+  createEffect(
+    () => props.darkMode,
+    (darkMode) => {
+      if (!view) return;
+      view.dispatch({
+        effects: themeCompartment.reconfigure(darkMode ? darkTheme : lightTheme),
+      });
+    },
+  );
 
-  createTrackedEffect(() => {
-    const showLineNumbers = props.showLineNumbers;
-    if (!view) return;
-    view.dispatch({
-      effects: lineNumbersCompartment.reconfigure(showLineNumbers ? lineNumbers() : []),
-    });
-  });
+  createEffect(
+    () => props.showLineNumbers,
+    (showLineNumbers) => {
+      if (!view) return;
+      view.dispatch({
+        effects: lineNumbersCompartment.reconfigure(showLineNumbers ? lineNumbers() : []),
+      });
+    },
+  );
 
-  createTrackedEffect(() => {
-    const showInvisibles = props.showInvisibles;
-    if (!view) return;
-    view.dispatch({
-      effects: invisiblesCompartment.reconfigure(showInvisibles ? visibleWhitespace : []),
-    });
-  });
+  createEffect(
+    () => props.showInvisibles,
+    (showInvisibles) => {
+      if (!view) return;
+      view.dispatch({
+        effects: invisiblesCompartment.reconfigure(showInvisibles ? visibleWhitespace : []),
+      });
+    },
+  );
 
-  createTrackedEffect(() => {
-    const indentMode = props.indentMode;
-    const indentSize = props.indentSize;
-    if (!view) return;
-    view.dispatch({
-      effects: indentCompartment.reconfigure([
-        EditorState.tabSize.of(indentSize),
-        indentUnit.of(indentMode === "tabs" ? "\t" : " ".repeat(indentSize)),
-      ]),
-    });
-  });
+  createEffect(
+    () => ({ mode: props.indentMode, size: props.indentSize }),
+    ({ mode, size }) => {
+      if (!view) return;
+      view.dispatch({
+        effects: indentCompartment.reconfigure([
+          EditorState.tabSize.of(size),
+          indentUnit.of(mode === "tabs" ? "\t" : " ".repeat(size)),
+        ]),
+      });
+    },
+  );
 
-  createTrackedEffect(() => {
-    const trigger = props.findTrigger;
-    if (trigger === lastFindTrigger) return;
-    lastFindTrigger = trigger;
-    openFind();
-  });
+  createEffect(
+    () => props.findTrigger,
+    (trigger) => {
+      if (trigger === lastFindTrigger) return;
+      lastFindTrigger = trigger;
+      openFind();
+    },
+  );
 
-  createTrackedEffect(() => {
-    const targetVersion = props.syncScrollTargetVersion;
-    if (targetVersion === lastSyncScrollTargetVersion) return;
-    lastSyncScrollTargetVersion = targetVersion;
+  createEffect(
+    () => ({
+      version: props.syncScrollTargetVersion,
+      active: props.syncScrollActive,
+      ratio: props.syncScrollTargetRatio,
+    }),
+    ({ version, active, ratio }) => {
+      if (version === lastSyncScrollTargetVersion) return;
+      lastSyncScrollTargetVersion = version;
 
-    if (!view || !props.syncScrollActive) return;
+      if (!view || !active || ratio === null) return;
 
-    const targetRatio = props.syncScrollTargetRatio;
-    if (targetRatio === null) return;
+      const scrollEl = view.scrollDOM;
+      const maxScrollTop = scrollEl.scrollHeight - scrollEl.clientHeight;
+      const targetTop = maxScrollTop <= 0 ? 0 : Math.max(0, Math.min(1, ratio)) * maxScrollTop;
 
-    const scrollEl = view.scrollDOM;
-    const maxScrollTop = scrollEl.scrollHeight - scrollEl.clientHeight;
-    const targetTop = maxScrollTop <= 0 ? 0 : Math.max(0, Math.min(1, targetRatio)) * maxScrollTop;
+      suppressScrollCallback = true;
+      scrollEl.scrollTop = targetTop;
+      requestAnimationFrame(() => {
+        suppressScrollCallback = false;
+      });
+    },
+  );
 
-    suppressScrollCallback = true;
-    scrollEl.scrollTop = targetTop;
-    requestAnimationFrame(() => {
-      suppressScrollCallback = false;
-    });
-  });
-
-  createTrackedEffect(() => {
-    const trigger = props.undoTrigger;
-    if (trigger === lastUndoTrigger) return;
-    lastUndoTrigger = trigger;
-    if (!view) return;
-    undo(view);
-    emitHistoryState(view.state);
-    view.focus();
-  });
+  createEffect(
+    () => props.undoTrigger,
+    (trigger) => {
+      if (trigger === lastUndoTrigger) return;
+      lastUndoTrigger = trigger;
+      if (!view) return;
+      undo(view);
+      emitHistoryState(view.state);
+      view.focus();
+    },
+  );
 
   // Go-to-Symbol scroll: caller bumps `scrollToLineVersion` with the
   // 0-indexed line set in `scrollToLine`. We dispatch a CodeMirror
   // selection + scrollIntoView so the line is centered AND focused.
-  createTrackedEffect(() => {
-    const targetVersion = props.scrollToLineVersion ?? 0;
-    if (targetVersion === lastScrollToLineVersion) return;
-    lastScrollToLineVersion = targetVersion;
-    if (!view) return;
+  createEffect(
+    () => ({ version: props.scrollToLineVersion ?? 0, line: props.scrollToLine ?? null }),
+    ({ version, line: lineIndex }) => {
+      if (version === lastScrollToLineVersion) return;
+      lastScrollToLineVersion = version;
+      if (!view || lineIndex === null || lineIndex < 0) return;
 
-    const lineIndex = props.scrollToLine ?? null;
-    if (lineIndex === null || lineIndex < 0) return;
+      const total = view.state.doc.lines;
+      // Lines are 1-indexed in CodeMirror's `doc.line(n)` API, but our
+      // descriptor uses 0-indexed lines (matches everything else in the
+      // codebase). Clamp to the valid range to survive a stale palette
+      // pointing past EOF.
+      const cmLine = Math.min(Math.max(1, lineIndex + 1), total);
+      const lineInfo = view.state.doc.line(cmLine);
 
-    const total = view.state.doc.lines;
-    // Lines are 1-indexed in CodeMirror's `doc.line(n)` API, but our
-    // descriptor uses 0-indexed lines (matches everything else in the
-    // codebase). Clamp to the valid range to survive a stale palette
-    // pointing past EOF.
-    const cmLine = Math.min(Math.max(1, lineIndex + 1), total);
-    const lineInfo = view.state.doc.line(cmLine);
+      view.dispatch({
+        selection: { anchor: lineInfo.from, head: lineInfo.from },
+        effects: EditorView.scrollIntoView(lineInfo.from, { y: "center" }),
+      });
+      view.focus();
+    },
+  );
 
-    view.dispatch({
-      selection: { anchor: lineInfo.from, head: lineInfo.from },
-      effects: EditorView.scrollIntoView(lineInfo.from, { y: "center" }),
-    });
-    view.focus();
-  });
-
-  createTrackedEffect(() => {
-    const trigger = props.redoTrigger;
-    if (trigger === lastRedoTrigger) return;
-    lastRedoTrigger = trigger;
-    if (!view) return;
-    redo(view);
-    emitHistoryState(view.state);
-    view.focus();
-  });
-
-  onCleanup(() => {
-    view?.destroy();
-  });
+  createEffect(
+    () => props.redoTrigger,
+    (trigger) => {
+      if (trigger === lastRedoTrigger) return;
+      lastRedoTrigger = trigger;
+      if (!view) return;
+      redo(view);
+      emitHistoryState(view.state);
+      view.focus();
+    },
+  );
 
   return (
     <div class="editor-search-scope">

@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, createTrackedEffect } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import type { TabStore } from "../composables/create-tab-store.ts";
 import type { TabState } from "@markdraw/core/tabs.ts";
@@ -90,11 +90,16 @@ function DraggableTab(props: {
   // doesn't expose a direct callback at this layer, but the boolean
   // flips synchronously when the gesture commits, which is the
   // exact moment we want to pin.
-  createTrackedEffect(() => {
-    if (draggable.isDragging() && !props.tab.isPinned) {
-      props.onPin?.();
-    }
-  });
+  createEffect(
+    () => ({
+      dragging: draggable.isDragging(),
+      pinned: props.tab.isPinned,
+      onPin: props.onPin,
+    }),
+    ({ dragging, pinned, onPin }) => {
+      if (dragging && !pinned) onPin?.();
+    },
+  );
 
   return (
     <Tooltip openDelay={600}>
@@ -183,23 +188,25 @@ export function TabBar(props: TabBarProps) {
   }
 
   // Watch for overflow changes
-  createTrackedEffect(() => {
-    tabs();
-    queueMicrotask(updateScrollState);
-  });
+  createEffect(
+    () => tabs(),
+    () => queueMicrotask(updateScrollState),
+  );
 
   // Scroll active tab into view when it changes
-  createTrackedEffect(() => {
-    const id = activeTabId();
-    if (!id || !listRef) return;
-    queueMicrotask(() => {
-      const el = listRef?.querySelector(`[data-tab-id="${CSS.escape(id)}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-        queueMicrotask(updateScrollState);
-      }
-    });
-  });
+  createEffect(
+    () => activeTabId(),
+    (id) => {
+      if (!id || !listRef) return;
+      queueMicrotask(() => {
+        const el = listRef?.querySelector(`[data-tab-id="${CSS.escape(id)}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+          queueMicrotask(updateScrollState);
+        }
+      });
+    },
+  );
 
   function scrollLeft() {
     listRef?.scrollBy({ left: -SCROLL_STEP, behavior: "smooth" });

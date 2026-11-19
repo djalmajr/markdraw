@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { flush } from "solid-js";
 import { Toolbar } from "./toolbar.tsx";
 
 afterEach(cleanup);
@@ -145,7 +146,11 @@ describe("Toolbar — Release Notes prop wiring (DJA-33)", () => {
 describe("Toolbar — editor-mode tabs gated by capabilities", () => {
   function tabState(baseElement: Element) {
     const tabs = [...baseElement.querySelectorAll<HTMLButtonElement>('.toolbar-center [role="tab"]')];
-    return Object.fromEntries(tabs.map((t) => [t.textContent?.trim(), t.disabled]));
+    // ui-sdk marks disabled tabs with aria-disabled/data-disabled instead of
+    // the native `disabled` attribute (disabled tabs stay focusable).
+    return Object.fromEntries(
+      tabs.map((t) => [t.textContent?.trim(), t.getAttribute("aria-disabled") === "true"]),
+    );
   }
 
   it("media (preview-only): edit + split disabled, preview enabled", () => {
@@ -204,7 +209,10 @@ describe("Toolbar — minimal window frame", () => {
     fireEvent.dblClick(menu);
     expect(drag).not.toHaveBeenCalled();
     expect(maximize).not.toHaveBeenCalled();
-    fireEvent.keyDown(menu, { key: "Enter" });
+    // ui-sdk opens the menu from a trigger press; Solid 2 commits the open
+    // state on the next flush.
+    fireEvent.click(menu);
+    flush();
     await vi.waitFor(() => expect(baseElement.textContent).toContain("Open Folder"));
   });
 });
