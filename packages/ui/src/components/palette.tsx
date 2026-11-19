@@ -1,4 +1,4 @@
-import { Show, createMemo, createSignal, For, onCleanup, onSettled, createTrackedEffect } from "solid-js";
+import { Show, createMemo, createSignal, For, onSettled, createEffect } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Portal } from "@solidjs/web";
 
@@ -53,31 +53,36 @@ export function Palette<T>(props: PaletteProps<T>) {
   // initial focus is paired with `select()` so the first keystroke
   // either replaces the previous query (just type) or refines it
   // (press End / arrow keys to deselect first).
-  createTrackedEffect(() => {
-    if (props.open) {
-      queueMicrotask(() => {
-        inputRef?.focus();
-        inputRef?.select();
-      });
-    }
+  createEffect(() => props.open, (open) => {
+    if (!open) return;
+    queueMicrotask(() => {
+      inputRef?.focus();
+      inputRef?.select();
+    });
   });
 
   // Clamp the active index when the result set shrinks (the user types
   // more characters and the matching set narrows).
-  createTrackedEffect(() => {
-    const length = filtered().length;
-    if (activeIndex() >= length) {
-      setActiveIndex(Math.max(0, length - 1));
-    }
-  });
+  createEffect(
+    () => {
+      const length = filtered().length;
+      const active = activeIndex();
+      return active >= length ? Math.max(0, length - 1) : null;
+    },
+    (clamped) => {
+      if (clamped !== null) setActiveIndex(clamped);
+    },
+  );
 
   // Auto-scroll the active row into view inside the list container.
-  createTrackedEffect(() => {
-    const i = activeIndex();
-    if (!props.open || !listRef) return;
-    const target = listRef.querySelector<HTMLElement>(`[data-palette-index="${i}"]`);
-    target?.scrollIntoView({ block: "nearest" });
-  });
+  createEffect(
+    () => ({ open: props.open, index: activeIndex() }),
+    ({ open, index }) => {
+      if (!open || !listRef) return;
+      const target = listRef.querySelector<HTMLElement>(`[data-palette-index="${index}"]`);
+      target?.scrollIntoView({ block: "nearest" });
+    },
+  );
 
   function handleKeyDown(event: KeyboardEvent) {
     const length = filtered().length;

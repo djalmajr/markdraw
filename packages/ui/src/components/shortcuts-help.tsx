@@ -1,4 +1,4 @@
-import { For, Show, createMemo, onCleanup, onSettled } from "solid-js";
+import { For, Show, createMemo, onSettled } from "solid-js";
 import { Portal } from "@solidjs/web";
 import {
   SHORTCUTS,
@@ -58,7 +58,7 @@ export function ShortcutsHelp(props: ShortcutsHelpProps) {
       }
     }
     document.addEventListener("keydown", global, true);
-    onCleanup(() => document.removeEventListener("keydown", global, true));
+    return () => document.removeEventListener("keydown", global, true);
   });
 
   return (

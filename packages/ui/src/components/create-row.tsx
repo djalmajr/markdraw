@@ -1,4 +1,4 @@
-import { onCleanup, onSettled } from "solid-js";
+import { onSettled } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import * as m from "@markdraw/i18n";
 
@@ -69,10 +69,7 @@ export function CreateRow(props: CreateRowProps) {
 
   onSettled(() => {
     scheduleFocus();
-  });
-
-  onCleanup(() => {
-    clearScheduledFocus();
+    return clearScheduledFocus;
   });
 
   function commit() {

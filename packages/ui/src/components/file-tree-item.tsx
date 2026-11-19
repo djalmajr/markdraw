@@ -1,4 +1,4 @@
-import { createMemo, Show, For, onSettled, onCleanup, createTrackedEffect } from "solid-js";
+import { createMemo, Show, For, onSettled, createEffect } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { fileKind, fileManagerKind } from "@markdraw/core/utils.ts";
@@ -203,8 +203,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
   // Auto-expand handled centrally in FileTree when selectedPath changes.
 
   // React to expand/collapse all action
-  createTrackedEffect(() => {
-    const ea = props.expandAction;
+  createEffect(() => props.expandAction, (ea) => {
     if (ea.version > lastExpandVersion && props.entry.kind === "directory") {
       setExpanded(ea.action === "expand");
     }
@@ -240,7 +239,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
     itemRef.addEventListener("tree-trash", onTrashEvt);
     itemRef.addEventListener("tree-add-to-chat", onAddToChatEvt);
     itemRef.addEventListener("tree-reveal", onRevealEvt);
-    onCleanup(() => {
+    return () => {
       itemRef!.removeEventListener("tree-expand", onExpand);
       itemRef!.removeEventListener("tree-collapse", onCollapse);
       itemRef!.removeEventListener("tree-rename", onRenameEvt);
@@ -251,7 +250,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
       itemRef!.removeEventListener("tree-trash", onTrashEvt);
       itemRef!.removeEventListener("tree-add-to-chat", onAddToChatEvt);
       itemRef!.removeEventListener("tree-reveal", onRevealEvt);
-    });
+    };
   });
 
   const isFocused = () => props.focusedPath === props.entry.path;
@@ -301,10 +300,10 @@ export function FileTreeItem(props: FileTreeItemProps) {
   const indent = () => props.depth * INDENT_PER_DEPTH + BASE_PADDING;
 
   // When entering edit mode, focus the .tree-name span and select the basename.
-  createTrackedEffect(() => {
-    if (!isEditing() || !nameRef) return;
+  createEffect(() => isEditing(), (editing) => {
+    if (!editing || !nameRef) return;
     busyRename = false;
-    // Defer to next microtask so the contentEditable attribute is in the DOM
+    // Defer to next microtask so the contenteditable attribute is in the DOM
     queueMicrotask(() => {
       if (!nameRef || !isEditing()) return;
       nameRef.focus();
@@ -324,21 +323,25 @@ export function FileTreeItem(props: FileTreeItemProps) {
   });
 
   // If the user navigates to another file/folder while editing, cancel the rename.
-  createTrackedEffect(() => {
-    const sel = app.selectedFile()?.path;
-    if (isEditing() && sel && sel !== props.entry.path) {
-      cancelRename();
-    }
-  });
+  createEffect(
+    () => ({ editing: isEditing(), selected: app.selectedFile()?.path }),
+    ({ editing, selected }) => {
+      if (editing && selected && selected !== props.entry.path) cancelRename();
+    },
+  );
 
   // Auto-expand a directory when an inline create targets it, so the CreateRow
   // placeholder is visible even if the folder was collapsed.
-  createTrackedEffect(() => {
-    const c = app.creatingAt();
-    if (c && c.parentPath === props.entry.path && c.rootId === props.rootId && isDirectory() && !expanded()) {
-      setExpanded(true);
-    }
-  });
+  createEffect(
+    () => {
+      const c = app.creatingAt();
+      return !!c && c.parentPath === props.entry.path && c.rootId === props.rootId
+        && isDirectory() && !expanded();
+    },
+    (shouldExpand) => {
+      if (shouldExpand) setExpanded(true);
+    },
+  );
 
   function handleClick() {
     if (isEditing()) return;
@@ -389,13 +392,16 @@ export function FileTreeItem(props: FileTreeItemProps) {
     name: props.entry.name,
     kind: props.entry.kind,
   });
+  function dragDisabled(): boolean {
+    return !props.onMove || isEditing();
+  }
   const draggable = useDraggable({
     id: dndId,
     get data() {
       return dndData();
     },
     get disabled() {
-      return !props.onMove || isEditing();
+      return dragDisabled();
     },
   });
   // Both folders and files are drop targets: dropping onto a folder moves the
@@ -693,7 +699,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
         >
           <span
             class={`tree-icon ${isDirectory() ? "tree-chevron" : ""}`}
-            onClick={isDirectory() ? handleChevronClick : undefined}
+            onClick={(e) => { if (isDirectory()) handleChevronClick(e); }}
           >
             <Show when={isDirectory()}>
               <IconChevronRight
@@ -715,7 +721,7 @@ export function FileTreeItem(props: FileTreeItemProps) {
             ref={(el) => (nameRef = el)}
             class={["tree-name", { "tree-name-editing": isEditing() }]}
             
-            contentEditable={isEditing()}
+            contenteditable={isEditing()}
             spellcheck={false}
             onKeyDown={handleNameKeyDown}
             onPaste={handleNamePaste}

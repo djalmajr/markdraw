@@ -22,7 +22,7 @@ export function TierCard(props: TierCardProps): JSX.Element {
       type="button"
       role="radio"
       aria-checked={props.selected ? "true" : "false"}
-      aria-disabled={props.disabled}
+      aria-disabled={props.disabled ? "true" : "false"}
       disabled={props.disabled}
       class={["settings-tier-card", {
         "settings-tier-card-selected": props.selected,
