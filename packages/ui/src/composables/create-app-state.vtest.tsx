@@ -5,6 +5,7 @@ import { setChatSessionsIndex } from "@markdraw/core/ai-chat-sessions.ts";
 import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AITool, ToolApprovalRequest } from "@markdraw/ai/types.ts";
 import { createAppState, type ThemeMode } from "./create-app-state.ts";
+import { createPaneStore } from "./create-pane-store.ts";
 
 // Storage helpers — happy-dom ships localStorage, but we still clear
 // it between suites so module-level singletons (recent-files cache,
@@ -149,8 +150,8 @@ describe("effective editor mode", () => {
     });
   });
   it("keeps each pane's chosen mode through media and unsupported files", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn");
+    const error = vi.spyOn(console, "error");
     try {
       withState((s) => {
         const file = (name: string): FSEntry => ({ name, path: name, kind: "file" });
@@ -199,6 +200,44 @@ describe("effective editor mode", () => {
       error.mockRestore();
     }
   });
+});
+
+it("restores the pane mode and content when closing and reopening a PDF tab", () => {
+  const { pane, dispose } = createRoot((dispose) => ({
+    pane: createPaneStore("close-reopen"),
+    dispose,
+  }));
+  try {
+    const markdownId = pane.tabs.openTab({ kind: "file", name: "doc.md", path: "doc.md" }, "root");
+    flush();
+    pane.setEditorMode("split");
+    flush();
+    pane.setEditorContent("From Markdown");
+    flush();
+
+    const pdfId = pane.tabs.openTab({ kind: "file", name: "doc.pdf", path: "doc.pdf" }, "root");
+    flush();
+    pane.setEditorMode("preview");
+    flush();
+    pane.setEditorContent("From PDF");
+    flush();
+    pane.tabs.snapshotActiveTab();
+    flush();
+
+    pane.tabs.closeTab(pdfId);
+    flush();
+    expect(pane.tabs.activeTabId()).toBe(markdownId);
+    expect(pane.editorMode()).toBe("split");
+    expect(pane.editorContent()).toBe("From Markdown");
+
+    pane.tabs.reopenClosedTab();
+    flush();
+    expect(pane.tabs.activeTabId()).toBe(pdfId);
+    expect(pane.editorMode()).toBe("preview");
+    expect(pane.editorContent()).toBe("From PDF");
+  } finally {
+    dispose();
+  }
 });
 
 describe("AppState — sidebar / TOC slices (DJA-42)", () => {

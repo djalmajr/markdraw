@@ -118,6 +118,11 @@ function DraggableTab(props: {
               droppable.ref(el);
             }}
             onClick={() => props.onActivate()}
+            onKeyDown={(e: KeyboardEvent) => {
+              if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+              e.preventDefault();
+              props.onActivate();
+            }}
             onDblClick={() => props.onPin?.()}
             onMouseDown={(e: MouseEvent) => {
               if (e.button === 1) {

@@ -66,8 +66,8 @@ function installScrollMetrics(
 
 describe("AiPanel", () => {
   it("clears a draft on session change without reading inlineRefs in the effect callback", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn");
+    const error = vi.spyOn(console, "error");
     try {
       const [store, setStore] = createSignal(readyStore());
       const { container } = render(() => <AiPanel store={store()} providerLabel="Mock" />);

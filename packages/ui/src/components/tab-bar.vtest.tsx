@@ -14,6 +14,47 @@ function setupPaneWithTabs(filenames: string[]) {
   return pane;
 }
 
+describe("TabBar — keyboard activation", () => {
+  it.each(["Enter", " "])("activates a focused tab with %j", (key) => {
+    const pane = setupPaneWithTabs(["a.md", "b.md"]);
+    flush();
+    expect(pane.tabs.activeTabId()).toBe("root::b.md");
+    const activate = vi.fn(pane.tabs.activateTab);
+    const { getByRole } = render(() => (
+      <TabBar tabStore={pane.tabs} onActivateTab={activate} onCloseTab={() => {}} />
+    ));
+    const tab = getByRole("button", { name: "a.md" });
+    expect(tab.tabIndex).toBe(0);
+    expect(fireEvent.keyDown(tab, { key })).toBe(false);
+    flush();
+    expect(activate).toHaveBeenCalledExactlyOnceWith("root::a.md");
+    expect(pane.tabs.activeTabId()).toBe("root::a.md");
+  });
+
+  it("leaves the close button and keyboard context menu in control of their keys", () => {
+    const pane = setupPaneWithTabs(["a.md"]);
+    flush();
+    const activate = vi.fn();
+    const close = vi.fn();
+    const { getByRole } = render(() => (
+      <TabBar tabStore={pane.tabs} onActivateTab={activate} onCloseTab={close} />
+    ));
+    const tab = getByRole("button", { name: "a.md" });
+    const closeButton = getByRole("button", { name: "Close Tab" });
+    expect(fireEvent.keyDown(closeButton, { key: "Enter" })).toBe(true);
+    expect(fireEvent.keyDown(closeButton, { key: " " })).toBe(true);
+    fireEvent.click(closeButton);
+    expect(close).toHaveBeenCalledExactlyOnceWith("root::a.md");
+
+    expect(fireEvent.keyDown(tab, { key: "ContextMenu" })).toBe(true);
+    expect(fireEvent.keyDown(tab, { key: "F10", shiftKey: true })).toBe(true);
+    fireEvent.contextMenu(tab, { button: 0 });
+    flush();
+    expect(screen.getByRole("menuitem", { name: "Close Others" })).toBeTruthy();
+    expect(activate).not.toHaveBeenCalled();
+  });
+});
+
 describe("TabBar — Move to Other Pane menu entry", () => {
   it("retains a named tab element across updates and keeps its menu usable", () => {
     const pane = setupPaneWithTabs(["a.md"]);

@@ -64,7 +64,7 @@ const SINGLE_ROOT: WorkspaceRoot[] = [
 
 describe("FileTree", () => {
   it("reveals a selected descendant without untracked-read warnings and names row menus", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn");
     try {
       const [selected, setSelected] = createSignal<string | null>(null);
       const { container, getByText } = render(() => (

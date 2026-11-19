@@ -15,8 +15,8 @@ import { PaneView } from "./pane-view.tsx";
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 it("routes CodeMirror selection through a composed active-pane prop without creating primitives in the listener", async () => {
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const warn = vi.spyOn(console, "warn");
+  const error = vi.spyOn(console, "error");
   let dispose!: () => void;
   const state = createRoot((stop) => {
     dispose = stop;

@@ -152,8 +152,8 @@ describe("Editor", () => {
 /** Regression probes from the Solid 2 editor review, promoted to permanent tests. */
 describe("Solid 2 editor conversion", () => {
   it("updates a real editor while searching without listener errors", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error");
+    const warn = vi.spyOn(console, "warn");
     const [content, setContent] = createSignal("one one");
     const [searchOpen, setSearchOpen] = createSignal(true);
     let api: EditorApi | undefined;

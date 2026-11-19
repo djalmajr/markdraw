@@ -1220,13 +1220,17 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   transition: background-color 0.15s, color 0.15s;
 }
 
-.content-toolbar-btn:hover:not(:disabled) {
+.content-toolbar-btn:hover:not(:disabled):not([aria-disabled="true"]) {
   background: hsl(var(--accent));
   color: hsl(var(--accent-foreground));
 }
 
-.content-toolbar-btn:disabled {
+.content-toolbar-btn:disabled,
+.content-toolbar-btn[aria-disabled="true"] {
   opacity: 0.3;
+}
+
+.content-toolbar-btn:disabled {
   pointer-events: none;
 }
 
