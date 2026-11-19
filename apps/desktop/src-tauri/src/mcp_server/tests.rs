@@ -247,7 +247,7 @@ async fn real_rmcp_client_lists_calls_observes_close_and_eof() {
     });
     let client = ().serve(client_transport).await.unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 1);
+    assert_eq!(tools.len(), 4);
     assert_eq!(tools[0].name, "list_workspaces");
     let result = client
         .call_tool(CallToolRequestParams::new("list_workspaces"))
@@ -308,6 +308,7 @@ async fn simultaneous_peers_are_bounded_without_blocking_authenticated_reads() {
         &Request {
             id: 1,
             method: "list_workspaces".into(),
+            arguments: Value::Null,
         },
     )
     .await
@@ -777,4 +778,230 @@ async fn round2_valid_unix_socket_path_survives_private_publication() {
         result.is_ok(),
         "private staging must preserve a valid final socket path"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn disk_tools_are_advertised_before_dispatch() {
+    let fixture = fixture();
+    let registry = Arc::new(Registry::default());
+    registry
+        .replace(vec![RootInput {
+            name: "notes".into(),
+            path: fixture.path().canonicalize().unwrap(),
+        }])
+        .unwrap();
+    let root_id = registry.list().unwrap()["roots"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    std::fs::write(fixture.path().join("a.md"), "hello sk-aaaaaaaaaaaaaaaaaaaa").unwrap();
+    let directory = fixture.path().join("endpoint");
+    std::fs::create_dir(&directory).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let _endpoint = platform::Endpoint::start(&directory, registry.clone()).unwrap();
+    let (client_io, server_io) = tokio::io::duplex(MAX_RESPONSE);
+    let server = tokio::spawn(async move {
+        Proxy::new(directory)
+            .serve(server_io)
+            .await
+            .unwrap()
+            .waiting()
+            .await
+            .unwrap();
+    });
+    let client = ().serve(client_io).await.unwrap();
+    let tools = client.list_all_tools().await.unwrap();
+    for name in ["list_files", "read_file", "search_workspace"] {
+        assert!(tools.iter().any(|tool| tool.name == name), "missing {name}");
+    }
+    for tool in &tools {
+        assert_eq!(
+            tool.annotations.as_ref().unwrap().read_only_hint,
+            Some(true)
+        );
+    }
+    for (name, arguments, field) in [
+        ("list_files", json!({"root_id":root_id}), "entries"),
+        (
+            "read_file",
+            json!({"root_id":root_id,"path":"a.md"}),
+            "content",
+        ),
+        (
+            "search_workspace",
+            json!({"root_id":root_id,"query":"hello"}),
+            "matches",
+        ),
+    ] {
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new(name)
+                    .with_arguments(arguments.as_object().unwrap().clone()),
+            )
+            .await
+            .unwrap();
+        let value = result.structured_content.unwrap();
+        assert!(value.get(field).is_some());
+        assert!(!value.to_string().contains("sk-aaaaaaaaaaaaaaaaaaaa"));
+        if name == "read_file" {
+            assert_eq!(value["content"], "hello [secret]");
+        }
+        if name == "search_workspace" {
+            assert_eq!(value["matches"][0]["text"], "hello [secret]");
+        }
+    }
+    registry.replace(vec![]).unwrap();
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("read_file").with_arguments(
+                json!({"root_id":root_id,"path":"a.md"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(result.content[0].as_text().unwrap().text, "root closed");
+    client.cancel().await.unwrap();
+    server.await.unwrap();
+}
+
+#[test]
+fn security_fix_root_command_yields_until_read_releases() {
+    use std::{
+        future::Future,
+        pin::pin,
+        task::{Context, Poll, Waker},
+        time::Instant,
+    };
+    use tauri::Manager;
+    let registry = Arc::new(Registry::default());
+    registry
+        .replace(vec![RootInput {
+            name: "notes".into(),
+            path: std::env::current_dir().unwrap(),
+        }])
+        .unwrap();
+    let app = tauri::test::mock_builder()
+        .manage(registry.clone())
+        .build(crate::tauri_context())
+        .unwrap();
+    let _main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let held = registry.clone();
+    let reader = std::thread::spawn(move || {
+        let guard = held.roots.read().unwrap();
+        ready_tx.send(()).unwrap();
+        std::thread::sleep(Duration::from_millis(400));
+        assert_eq!(
+            guard.len(),
+            1,
+            "root must remain authorized until the read ends"
+        );
+    });
+    ready_rx.recv().unwrap();
+    let webview: &tauri::Webview<_> = _main.as_ref();
+    let mut future = pin!(mcp_set_roots(webview.clone(), vec![], app.state()));
+    let started = Instant::now();
+    let poll = future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()));
+    let elapsed = started.elapsed();
+    reader.join().unwrap();
+    assert!(
+        elapsed < Duration::from_millis(200),
+        "first poll blocked for {elapsed:?}"
+    );
+    assert!(
+        matches!(poll, Poll::Pending),
+        "acknowledged before read completed: {poll:?}"
+    );
+    tauri::async_runtime::block_on(future).unwrap();
+    assert_eq!(registry.list().unwrap(), json!({"roots":[]}));
+    let error = tauri::async_runtime::block_on(mcp_set_roots(
+        webview.clone(),
+        vec![RootInput {
+            name: "invalid".into(),
+            path: PathBuf::from("relative"),
+        }],
+        app.state(),
+    ))
+    .unwrap_err();
+    assert_eq!(error, "Could not update MCP workspaces");
+    assert_eq!(registry.list().unwrap(), json!({"roots":[]}));
+}
+
+#[test]
+fn security_fix_root_command_during_36_mib_disk_read() {
+    use std::{
+        future::Future,
+        pin::pin,
+        task::{Context, Poll, Waker},
+        time::Instant,
+    };
+    use tauri::Manager;
+    let dir = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
+    std::fs::write(dir.path().join("large.md"), vec![b'x'; 36 * 1024 * 1024]).unwrap();
+    let registry = Arc::new(Registry::default());
+    registry
+        .replace(vec![RootInput {
+            name: "notes".into(),
+            path: dir.path().canonicalize().unwrap(),
+        }])
+        .unwrap();
+    let id = registry.list().unwrap()["roots"][0]["id"].clone();
+    let app = tauri::test::mock_builder()
+        .manage(registry.clone())
+        .build(crate::tauri_context())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let reading = registry.clone();
+    let reader = std::thread::spawn(move || {
+        reading.disk("read_file", json!({"root_id":id, "path":"large.md"}))
+    });
+    let started = Instant::now();
+    while registry.roots.try_write().is_ok() {
+        assert!(
+            !reader.is_finished(),
+            "disk read finished before lock contention was observed"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "disk did not acquire authorization lock"
+        );
+        std::thread::yield_now();
+    }
+    let webview: &tauri::Webview<_> = main.as_ref();
+    let mut future = pin!(mcp_set_roots(webview.clone(), vec![], app.state()));
+    let started = Instant::now();
+    let poll = future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()));
+    let elapsed = started.elapsed();
+    let read = reader.join().unwrap();
+    assert!(
+        elapsed < Duration::from_millis(200),
+        "first poll blocked for {elapsed:?}; read={read:?}"
+    );
+    assert!(
+        matches!(poll, Poll::Pending),
+        "unexpected immediate acknowledgement: {poll:?}"
+    );
+    match read {
+        Ok(value) => assert_eq!(value["total_lines"], 1),
+        Err(error) => assert_eq!(error, "timed out"),
+    }
+    tauri::async_runtime::block_on(future).unwrap();
+    assert_eq!(registry.list().unwrap(), json!({"roots":[]}));
 }

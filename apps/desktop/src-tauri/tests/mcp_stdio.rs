@@ -79,8 +79,24 @@ async fn stdio_cli_real_client_fake_app_eof_and_app_shutdown() {
                         line.clear();
                         stream.read_line(&mut line).await.unwrap();
                         let request:serde_json::Value = serde_json::from_str(&line).unwrap();
-                        assert_eq!(request["method"],"list_workspaces");
-                        stream.write_all(b"{\"id\":1,\"result\":{\"roots\":[{\"id\":\"opaque\",\"name\":\"notes\"}]}}\n").await.unwrap();
+                        let result = match request["method"].as_str().unwrap() {
+                            "list_workspaces" => serde_json::json!({"roots":[{"id":"opaque","name":"notes"}]}),
+                            "list_files" => {
+                                assert_eq!(request["arguments"],serde_json::json!({"root_id":"opaque"}));
+                                serde_json::json!({"entries":[{"name":"a.md","path":"a.md","kind":"file"}]})
+                            },
+                            "read_file" => {
+                                assert_eq!(request["arguments"],serde_json::json!({"root_id":"opaque","path":"a.md","start_line":2,"end_line":3}));
+                                serde_json::json!({"content":"hello [secret]","total_lines":3,"start_line":2,"end_line":3,"truncated":false})
+                            },
+                            "search_workspace" => {
+                                assert_eq!(request["arguments"],serde_json::json!({"root_id":"opaque","query":"hello"}));
+                                serde_json::json!({"matches":[{"path":"a.md","line":2,"text":"hello [secret]"}]})
+                            },
+                            other => panic!("unexpected method {other}"),
+                        };
+                        let response = serde_json::json!({"id":1,"result":result}).to_string()+"\n";
+                        stream.write_all(response.as_bytes()).await.unwrap();
                     });
                 },
                 _ = peers.join_next(), if !peers.is_empty() => (),
@@ -125,6 +141,32 @@ async fn stdio_cli_real_client_fake_app_eof_and_app_shutdown() {
         result.structured_content.unwrap(),
         serde_json::json!({"roots":[{"id":"opaque","name":"notes"}]})
     );
+    for (name, arguments, expected) in [
+        (
+            "list_files",
+            serde_json::json!({"root_id":"opaque"}),
+            serde_json::json!({"entries":[{"name":"a.md","path":"a.md","kind":"file"}]}),
+        ),
+        (
+            "read_file",
+            serde_json::json!({"root_id":"opaque","path":"a.md","start_line":2,"end_line":3}),
+            serde_json::json!({"content":"hello [secret]","total_lines":3,"start_line":2,"end_line":3,"truncated":false}),
+        ),
+        (
+            "search_workspace",
+            serde_json::json!({"root_id":"opaque","query":"hello"}),
+            serde_json::json!({"matches":[{"path":"a.md","line":2,"text":"hello [secret]"}]}),
+        ),
+    ] {
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new(name)
+                    .with_arguments(arguments.as_object().unwrap().clone()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.structured_content.unwrap(), expected);
+    }
     client.cancel().await.unwrap();
     let status = tokio::time::timeout(Duration::from_secs(3), child.wait())
         .await
@@ -166,6 +208,9 @@ impl Drop for FakeApp {
 }
 impl FakeApp {
     fn new() -> Self {
+        Self::with_slow_read(false)
+    }
+    fn with_slow_read(slow_read: bool) -> Self {
         let fixture = tempfile::tempdir_in(std::env::temp_dir()).unwrap();
         let directory = fixture
             .path()
@@ -206,6 +251,13 @@ impl FakeApp {
                             if stream.write_all(b"{\"id\":0,\"result\":{}}\n").await.is_err() {return;}
                             line.clear();
                             if stream.read_line(&mut line).await.unwrap_or(0) == 0 {return;}
+                            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                            if slow_read && request["method"] == "read_file" {
+                                // Deliberate incomplete progress: timeout must discard
+                                // these file bytes, never return a partial result.
+                                stream.write_all(b"{\"id\":1,\"result\":{\"content\":\"ZQVX").await.unwrap();
+                                std::future::pending::<()>().await;
+                            }
                             let _ = stream.write_all(b"{\"id\":1,\"result\":{\"roots\":[]}}\n").await;
                         });
                     },
@@ -345,6 +397,42 @@ async fn stdio_cli_partial_frame_times_out_but_idle_session_survives() {
         .is_some());
     drop(idle.stdin.take());
     assert!(tokio::time::timeout(Duration::from_secs(3), idle.wait())
+        .await
+        .unwrap()
+        .unwrap()
+        .success());
+}
+
+#[tokio::test]
+async fn amendment_read_timeout_is_fixed_without_content_or_cursor() {
+    let app = FakeApp::with_slow_read(true);
+    let mut child = app.spawn();
+    let transport = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
+    let client = ().serve(transport).await.unwrap();
+    let started = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(8),
+        client.call_tool(
+            CallToolRequestParams::new("read_file").with_arguments(
+                serde_json::json!({"root_id":"opaque","path":"a"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        ),
+    )
+    .await
+    .unwrap();
+    match result.unwrap_err() {
+        rmcp::ServiceError::McpError(error) => {
+            assert_eq!(error.message, "timed out");
+            assert!(error.data.is_none());
+        }
+        other => panic!("unexpected timeout response: {other}"),
+    }
+    assert!(started.elapsed() >= Duration::from_secs(5));
+    client.cancel().await.unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(3), child.wait())
         .await
         .unwrap()
         .unwrap()
