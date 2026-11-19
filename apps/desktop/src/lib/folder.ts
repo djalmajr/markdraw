@@ -265,6 +265,15 @@ export function createFolder(deps: FolderDeps) {
     await refreshRoot(rootId);
     if (entry.kind === "file") {
       onFileRenamed?.(targetPane, rootId, entry.path, { ...entry, path: newRelative, name: newName });
+    } else {
+      const pending = targetPane.tabs.getActiveTab();
+      if (pending?.needsLoad && pending.rootId === rootId && pending.filePath.startsWith(entry.path + "/")) {
+        onFileRenamed?.(targetPane, rootId, pending.filePath, {
+          path: newRelative + pending.filePath.slice(entry.path.length),
+          name: pending.fileName,
+          kind: "file",
+        });
+      }
     }
   }
 

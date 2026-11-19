@@ -106,9 +106,10 @@ export function createTabActions({
   }
 
   function renameOpenTab(pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry) {
-    const tab = pane.tabs.findTabByFile(oldPath, rootId);
+    const activeTab = pane.tabs.getActiveTab();
+    const active = activeTab?.rootId === rootId && activeTab.filePath === oldPath;
+    const tab = active ? activeTab : pane.tabs.findTabByFile(oldPath, rootId);
     if (!tab) return;
-    const active = pane.tabs.activeTabId() === tab.id;
     const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name);
     if (active && renamedTab?.needsLoad) {
       void loadTabContent(pane, entry, renamedTab);
