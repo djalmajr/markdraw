@@ -306,9 +306,11 @@ async fn read_file(path: String) -> Result<String, String> {
 
 /// Bytes of a media file (image/PDF) under an OPEN root, for paths the asset
 /// protocol refuses (dot components). The webview-supplied `root` is only
-/// honoured if its canonical form is one of the roots `mcp_set_roots` holds
-/// (`Registry::contains_root`); see `media_read`. Errors are `{ code, message }`
-/// with fixed text, never the path.
+/// honoured if it is, string for string, a root `mcp_set_roots` holds
+/// (`Registry::with_root`, matched before any filesystem access); reads are
+/// limited to 2 at a time and 200 MiB in flight (`busy` at once otherwise,
+/// before any blocking thread is requested); see `media_read`. Errors are
+/// `{ code, message }` with fixed text, never the path.
 #[tauri::command]
 async fn read_file_bytes_confined<R: Runtime>(
     webview: tauri::Webview<R>,
@@ -320,14 +322,21 @@ async fn read_file_bytes_confined<R: Runtime>(
         return Err(media_read::NOT_ALLOWED);
     }
     let registry = registry.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        media_read::read_confined(Path::new(&root), &relative_path, &|canonical| {
-            registry.contains_root(canonical)
-        })
-    })
+    // The slot is taken here, before a blocking thread is requested, and is
+    // held until the IPC response has been built from the bytes.
+    media_read::serve(
+        media_read::shared_admission(),
+        &root,
+        &relative_path,
+        move |ticket| ticket.read(&media_read::registry_authority(&registry)),
+        |job| async move {
+            tauri::async_runtime::spawn_blocking(job)
+                .await
+                .map_err(|_| ())
+        },
+        tauri::ipc::Response::new,
+    )
     .await
-    .map_err(|_| media_read::UNAVAILABLE)?
-    .map(tauri::ipc::Response::new)
 }
 
 /// Read one environment variable from the host process, for `{env:VAR}`

@@ -111,6 +111,30 @@ describe("splitUnderRoots", () => {
     expect(splitUnderRoots("/ab/.d/x.pdf", ["/a"])).toBeNull();
     expect(splitUnderRoots("/a", ["/a"])).toBeNull();
   });
+  it("handles a filesystem root and a drive root, returning the root as registered", () => {
+    expect(splitUnderRoots("/.notes/sample.pdf", ["/"])).toEqual({ root: "/", relative: ".notes/sample.pdf" });
+    expect(splitUnderRoots("C:/.notes/sample.pdf", ["C:/"])).toEqual({ root: "C:/", relative: ".notes/sample.pdf" });
+    expect(splitUnderRoots("C:\\.notes\\sample.pdf", ["C:\\"])).toEqual({ root: "C:\\", relative: ".notes/sample.pdf" });
+    // Control: a regular root keeps working, and the longest root still wins.
+    expect(splitUnderRoots("/workspace/.notes/sample.pdf", ["/workspace"])).toEqual({
+      root: "/workspace",
+      relative: ".notes/sample.pdf",
+    });
+    expect(splitUnderRoots("/ws/.d/x.pdf", ["/", "/ws"])).toEqual({ root: "/ws", relative: ".d/x.pdf" });
+    expect(splitUnderRoots("/ws/.d/x.pdf", ["/ws", "/"])).toEqual({ root: "/ws", relative: ".d/x.pdf" });
+  });
+  it("never matches the root itself, an empty root or another drive", () => {
+    expect(splitUnderRoots("/", ["/"])).toBeNull();
+    expect(splitUnderRoots("C:/", ["C:/"])).toBeNull();
+    expect(splitUnderRoots("/x/.d/a.pdf", [""])).toBeNull();
+    expect(splitUnderRoots("D:/.d/a.pdf", ["C:/"])).toBeNull();
+  });
+  it("returns the root string exactly as registered, not a normalized spelling", () => {
+    // The backend matches the registered string exactly, so a trailing slash
+    // or a backslash spelling must survive.
+    expect(splitUnderRoots("/ws/.d/x.pdf", ["/ws/"])).toEqual({ root: "/ws/", relative: ".d/x.pdf" });
+    expect(splitUnderRoots("C:/ws/.d/x.pdf", ["C:\\ws"])).toEqual({ root: "C:\\ws", relative: ".d/x.pdf" });
+  });
 });
 
 describe("fetchMediaBytes", () => {

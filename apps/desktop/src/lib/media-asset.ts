@@ -97,19 +97,28 @@ export function routeMediaAsset(
   };
 }
 
-/** Longest opened root that contains `absolutePath`, with the relative rest. */
+/**
+ * Longest opened root that contains `absolutePath`, with the relative rest.
+ * `root` is returned exactly as registered (the backend only accepts the
+ * string it holds); matching ignores `\\` vs `/` and a trailing separator, and
+ * a filesystem or drive root (`/`, `C:/`) matches with its separator kept.
+ */
 export function splitUnderRoots(
   absolutePath: string,
   roots: readonly string[],
 ): { root: string; relative: string } | null {
   const target = absolutePath.replace(/\\/g, "/");
-  let best: { root: string; relative: string } | null = null;
+  let best: { root: string; relative: string; length: number } | null = null;
   for (const root of roots) {
-    const r = root.replace(/\\/g, "/").replace(/\/+$/, "");
-    if (!r || !target.startsWith(`${r}/`)) continue;
-    if (!best || r.length > best.root.length) best = { root: r, relative: target.slice(r.length + 1) };
+    if (!root) continue;
+    // "/" -> "" and "C:/" -> "C:" after trimming; the prefix is always `<trimmed>/`.
+    const prefix = `${root.replace(/\\/g, "/").replace(/\/+$/, "")}/`;
+    if (!target.startsWith(prefix) || target.length === prefix.length) continue;
+    if (!best || prefix.length > best.length) {
+      best = { root, relative: target.slice(prefix.length), length: prefix.length };
+    }
   }
-  return best;
+  return best && { root: best.root, relative: best.relative };
 }
 
 /**

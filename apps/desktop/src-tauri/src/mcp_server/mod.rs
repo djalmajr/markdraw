@@ -31,6 +31,18 @@ mod confined;
 mod disk;
 mod scrub;
 
+/// Windows: open `parts` under the canonical `root` through a chain of
+/// directory handles (`confined`): the volume and every component are opened
+/// with `FILE_OPEN_REPARSE_POINT` (never followed) and refused when their
+/// attributes say reparse point, so no I/O reaches a link's target before the
+/// caller confirms the handle's final path. `root` must be a verbatim disk
+/// path (`\\?\C:\...`); anything else is refused.
+#[cfg(windows)]
+pub(crate) fn open_confined(root: &Path, parts: &[&str]) -> io::Result<std::fs::File> {
+    let root = confined::root(root)?;
+    confined::open(&root, parts)
+}
+
 const MAX_FRAME: usize = 64 * 1024;
 const MAX_RESPONSE: usize = 4 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 16;
@@ -121,18 +133,26 @@ impl Registry {
         *roots = next;
         Ok(())
     }
-    /// Read-only: is `canonical` (already canonicalized by the caller) one of
-    /// the currently open roots? Each registered root is canonicalized here,
-    /// so a root that was opened through a symlink still matches, and one that
-    /// has since vanished from disk cannot match. Compared as whole path
-    /// components, so `/a` and `/a/bc` never match an open `/a/b`.
-    pub fn contains_root(&self, canonical: &Path) -> bool {
-        let Ok(roots) = self.roots.read() else {
-            return false;
-        };
-        roots
+    /// Run `f` with the canonical path of the open root whose registered path
+    /// is EXACTLY `received` (string equality with what the frontend
+    /// registered), holding the registry read guard for the whole call: a
+    /// `replace` that closes the root waits until `f` returns, so `f` (which
+    /// opens the file) never starts after a confirmed close.
+    ///
+    /// `received` is matched BEFORE any filesystem access: a string that is
+    /// not registered (a UNC path, a link or `..` spelling of a registered
+    /// root, an ancestor, a sibling prefix) returns `None` without touching
+    /// the disk. Only the registered path is canonicalized here (the user may
+    /// have opened the folder through a link); a root that has vanished from
+    /// disk gives `None`. The guard is NOT held while the caller reads bytes,
+    /// only until `f` returns.
+    pub fn with_root<T>(&self, received: &str, f: impl FnOnce(&Path) -> T) -> Option<T> {
+        let roots = self.roots.read().ok()?;
+        let root = roots
             .iter()
-            .any(|root| std::fs::canonicalize(&root.path).is_ok_and(|open| open == canonical))
+            .find(|root| root.path.as_os_str() == std::ffi::OsStr::new(received))?;
+        let canonical = std::fs::canonicalize(&root.path).ok()?;
+        Some(f(&canonical))
     }
     fn list(&self) -> io::Result<Value> {
         let roots = self
