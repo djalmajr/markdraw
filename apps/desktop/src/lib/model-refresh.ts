@@ -123,6 +123,16 @@ function canonicalId(providerId: string): string {
   return providerId === "opencode-go-chat" ? "opencode-go" : providerId;
 }
 
+/** Whether a connect-time refresh must actually fetch for this id. The settings
+ *  Connect flow calls the hook once per id of a merged catalog group; ids that
+ *  share one model source collapse to their canonical id (see `canonicalId`),
+ *  and a refresh of the canonical id already writes every cache entry of the
+ *  group. So the alias does not fetch again — the same dedupe the refresh icon
+ *  gets from `refreshProviderModels` over the whole group. */
+function ownsConnectRefresh(providerId: string): boolean {
+  return canonicalId(providerId) === providerId;
+}
+
 /** Ids that have a real source. Used by the UI to show the icon only where a
  *  refresh can do something, and by startup to skip unconnected CLIs. */
 export function canRefreshProvider(
@@ -454,11 +464,15 @@ export async function refreshModelsFromUi(
 
 /** First fetch when connecting a provider with a dynamic source. A source
  *  failure is non-fatal: the credential/subscription is already valid and the
- *  embedded list remains usable. Never throws an upstream detail to the UI. */
+ *  embedded list remains usable. Never throws an upstream detail to the UI.
+ *  Connect may span several catalog ids of one service (OpenCode Go's two API
+ *  shapes), so only the canonical id fetches: its single fetch writes every
+ *  cache entry of the group and the alias returns without a second one. */
 export async function refreshModelsOnConnect(
   providerId: string,
   ctx: ModelRefreshContext,
 ): Promise<ModelRefreshResult> {
+  if (!ownsConnectRefresh(providerId)) return { ok: true, refreshed: [] };
   try {
     return await refreshProviderModels([providerId], ctx);
   } catch {
