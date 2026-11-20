@@ -106,6 +106,12 @@ mock.module("@tauri-apps/api/core", () => ({
 }));
 mock.module("@tauri-apps/api/event", () => ({
   listen: async () => () => {},
+  // bun shares module mocks across test files: keep every export that
+  // `@tauri-apps/api/window` imports (the tray suite loads it).
+  once: async () => () => {},
+  emit: async () => {},
+  emitTo: async () => {},
+  TauriEvent: {},
 }));
 // `plugin-updater` extends Resource from `api/core`; the file-loader
 // suite (which runs in the same test process) replaces `api/core`
