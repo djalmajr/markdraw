@@ -6,6 +6,7 @@ import MarkdownIt, { type MarkdownIt as MarkdownItInstance } from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
 import mk from "@traptitech/markdown-it-katex";
+import katex from "katex";
 import { alert } from "@mdit/plugin-alert";
 import footnote from "markdown-it-footnote";
 import { full as emoji } from "markdown-it-emoji";
@@ -229,7 +230,12 @@ function createMarkdownIt(): MarkdownItInstance {
   md.use(taskLists, { enabled: true, label: true });
 
   // --- Math (KaTeX) ---
-  md.use(mk, { throwOnError: false, errorColor: "#cc0000" });
+  // The plugin resolves its own `katex` 0.16 unless it is handed one
+  // (`options.katex`, read at setup). The renderer has to be the version the
+  // preview's stylesheet comes from (`katex/dist/katex.min.css`): 0.18 renamed
+  // the internal classes to `katex-base` / `katex-strut` / `katex-sizing`, so
+  // 0.16 markup under the current CSS renders with collapsed struts.
+  md.use(mk, { throwOnError: false, errorColor: "#cc0000", katex });
 
   // --- GitHub-style alerts (NOTE, WARNING, TIP, CAUTION, IMPORTANT) ---
   // @mdit/plugin-alert 2.x echoes the label as written (`[!NOTE]` becomes
