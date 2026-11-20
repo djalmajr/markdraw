@@ -281,6 +281,78 @@ async fn real_rmcp_client_lists_calls_observes_close_and_eof() {
         .unwrap();
 }
 
+// rmcp 3.x dropped `CallToolRequestParams::task` (the server used to reject
+// task-augmented calls) and added the MRTR retry fields. This server never
+// issues an input-required result, so a call carrying them is invalid.
+// F5 (declined): rmcp decodes `"requestState": null` / `"inputResponses": null`
+// into `None`, the same value as an absent key, so the guard below cannot tell
+// them apart. This pins that premise: if the SDK ever keeps the distinction
+// (e.g. a tri-state field), this test fails and the guard must be revisited.
+#[test]
+fn mrtr_null_fields_decode_exactly_like_absent_ones() {
+    use rmcp::model::CallToolRequestParams;
+    let with_null: CallToolRequestParams = serde_json::from_value(serde_json::json!({
+        "name": "list_workspaces",
+        "requestState": null,
+        "inputResponses": null,
+    }))
+    .unwrap();
+    let absent: CallToolRequestParams =
+        serde_json::from_value(serde_json::json!({ "name": "list_workspaces" })).unwrap();
+    assert_eq!(with_null, absent);
+    assert!(with_null.request_state.is_none() && with_null.input_responses.is_none());
+    // Control: a present, non-null value IS visible to the guard.
+    let present: CallToolRequestParams = serde_json::from_value(serde_json::json!({
+        "name": "list_workspaces",
+        "requestState": "opaque",
+    }))
+    .unwrap();
+    assert!(present.request_state.is_some());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn mrtr_retry_fields_are_rejected_as_invalid_params() {
+    use rmcp::model::CallToolRequestParams;
+    let fixture = fixture();
+    let directory = fixture.path().join("endpoint");
+    let registry = Arc::new(Registry::default());
+    let endpoint = platform::Endpoint::start(&directory, registry).unwrap();
+    let (client_transport, server_transport) = tokio::io::duplex(8192);
+    let proxy = Proxy::new(directory.clone());
+    let server = tokio::spawn(async move {
+        let service = proxy.serve(server_transport).await.unwrap();
+        service.waiting().await.unwrap()
+    });
+    let client = ().serve(client_transport).await.unwrap();
+    let mut with_state = CallToolRequestParams::new("list_workspaces");
+    with_state.request_state = Some("opaque".into());
+    let mut with_inputs = CallToolRequestParams::new("list_workspaces");
+    with_inputs.input_responses = Some(Default::default());
+    for params in [with_state, with_inputs] {
+        let error = client.call_tool(params).await.unwrap_err().to_string();
+        assert!(
+            error.contains("Unknown tool or invalid arguments"),
+            "{error}"
+        );
+    }
+    // Control: the same tool without the retry fields still works.
+    let ok = client
+        .call_tool(CallToolRequestParams::new("list_workspaces"))
+        .await
+        .unwrap();
+    assert_eq!(
+        ok.structured_content.unwrap(),
+        serde_json::json!({"roots":[]})
+    );
+    drop(endpoint);
+    client.cancel().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn simultaneous_peers_are_bounded_without_blocking_authenticated_reads() {

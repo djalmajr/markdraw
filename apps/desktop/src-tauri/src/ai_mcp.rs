@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
-use rmcp::model::{CallToolRequestParams, CallToolResult, Content, TaskSupport};
+use rmcp::model::{CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock};
 use rmcp::service::{RoleClient, RunningService};
 use rmcp::transport::auth::AuthClient;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -236,10 +236,14 @@ async fn connect_client(config: &McpServerConfig) -> Result<ConnectOutcome, Stri
 /// opening a browser (only the explicit [`ai_mcp_authorize`] command does that).
 async fn connect_http_oauth(server_id: &str, url: &str) -> Result<ConnectOutcome, String> {
     let mut manager = ai_mcp_oauth::manager_with_store(server_id, url).await?;
-    let has_creds = manager
-        .initialize_from_store()
-        .await
-        .map_err(|e| format!("load OAuth credentials: {e}"))?;
+    // Stored tokens are only bound to a PUBLISHED authorization server (see
+    // `initialize_from_store_discovered`); without one this behaves as "no
+    // credentials yet", which falls into the plain-connect / Authorize path.
+    let has_creds = ai_mcp_oauth::initialize_from_store_discovered(
+        &mut manager,
+        &ai_mcp_oauth::KeychainCredentialStore::new(server_id),
+    )
+    .await?;
     let http_config = StreamableHttpClientTransportConfig::with_uri(url.to_string());
 
     let served = if has_creds {
@@ -287,17 +291,9 @@ fn is_auth_error<E: std::error::Error>(err: &E) -> bool {
         || s.contains("unauthorized")
 }
 
-/// Whether a tool can be surfaced to the model. Tools that *require* task-based
-/// invocation can't be called via the plain `call_tool` path, so offering them
-/// would only produce a guaranteed call-time failure — drop them at list time.
-fn keep_tool(task_support: TaskSupport) -> bool {
-    !matches!(task_support, TaskSupport::Required)
-}
-
 fn tool_infos(server: &str, tools: Vec<rmcp::model::Tool>) -> Vec<McpToolInfo> {
     tools
         .into_iter()
-        .filter(|t| keep_tool(t.task_support()))
         .map(|t| McpToolInfo {
             server: server.to_string(),
             name: t.name.to_string(),
@@ -322,7 +318,7 @@ fn parse_text_or_json(text: &str) -> serde_json::Value {
 /// becomes a string (or parsed JSON); multiple text blocks join with newlines;
 /// anything with non-text blocks (images/resources) keeps the raw envelope so
 /// nothing is lost.
-fn flatten_content(content: &[Content]) -> serde_json::Value {
+fn flatten_content(content: &[ContentBlock]) -> serde_json::Value {
     let texts: Vec<String> = content
         .iter()
         .filter_map(|c| c.as_text().map(|t| t.text.clone()))
@@ -334,6 +330,31 @@ fn flatten_content(content: &[Content]) -> serde_json::Value {
         [] => serde_json::Value::Null,
         [one] => parse_text_or_json(one),
         many => serde_json::Value::String(many.join("\n")),
+    }
+}
+
+/// Resolve a `tools/call` reply. Markdraw runs one request per call, so a server
+/// that answers with a task (SEP-2663) or an input-required result (MRTR) cannot
+/// be served: the reply becomes a clear, fixed error — never the remote's own
+/// text — instead of an opaque protocol failure, and nothing is retried.
+fn call_response_to_value(
+    response: CallToolResponse,
+    has_output_schema: bool,
+    server: &str,
+    name: &str,
+) -> Result<serde_json::Value, String> {
+    match response {
+        CallToolResponse::Complete(result) => Ok(normalize_call_result(result, has_output_schema)),
+        CallToolResponse::InputRequired(_) => Err(format!(
+            "MCP tool {server}/{name} needs additional input (input-required), which Markdraw does not support"
+        )),
+        CallToolResponse::Task(_) => Err(format!(
+            "MCP tool {server}/{name} runs as an asynchronous task, which Markdraw does not support"
+        )),
+        // `CallToolResponse` is non-exhaustive: a future reply kind is refused too.
+        _ => Err(format!(
+            "MCP tool {server}/{name} returned a reply type Markdraw does not support"
+        )),
     }
 }
 
@@ -567,7 +588,9 @@ pub async fn ai_mcp_call_tool(
         None => Some(Duration::from_secs(60)),
     };
 
-    let outcome = run_with_cancel(peer.call_tool(request), cancel_rx, timeout).await;
+    // `call_tool_once`, not `call_tool`: the latter collapses a task / input-required
+    // reply into an opaque `UnexpectedResponse`; here it becomes a clear error.
+    let outcome = run_with_cancel(peer.call_tool_once(request), cancel_rx, timeout).await;
 
     // Drop the inflight entry (no-op if a cancel already removed it).
     if let Some(id) = &call_id {
@@ -576,7 +599,9 @@ pub async fn ai_mcp_call_tool(
     drop(local_keep);
 
     match outcome {
-        CallOutcome::Done(Ok(result)) => Ok(normalize_call_result(result, has_output_schema)),
+        CallOutcome::Done(Ok(response)) => {
+            call_response_to_value(response, has_output_schema, &server, &name)
+        }
         CallOutcome::Done(Err(e)) => Err(e.to_string()),
         CallOutcome::Cancelled => Err(format!("MCP tool call cancelled: {server}/{name}")),
         CallOutcome::TimedOut => Err(format!("MCP tool call timed out: {server}/{name}")),
@@ -601,13 +626,6 @@ mod tests {
     use super::*;
     use rmcp::model::CallToolResult;
     use serde_json::json;
-
-    #[test]
-    fn keep_tool_drops_only_task_required() {
-        assert!(keep_tool(TaskSupport::Forbidden));
-        assert!(keep_tool(TaskSupport::Optional));
-        assert!(!keep_tool(TaskSupport::Required));
-    }
 
     #[test]
     fn find_in_path_resolves_a_cmd_shim() {
@@ -645,25 +663,44 @@ mod tests {
 
     #[test]
     fn normalize_single_text_block_parses_json() {
-        let result = CallToolResult::success(vec![Content::text("{\"a\":1}")]);
+        let result = CallToolResult::success(vec![ContentBlock::text("{\"a\":1}")]);
         assert_eq!(normalize_call_result(result, false), json!({ "a": 1 }));
     }
 
     #[test]
     fn normalize_single_plain_text_stays_a_string() {
-        let result = CallToolResult::success(vec![Content::text("hello world")]);
+        let result = CallToolResult::success(vec![ContentBlock::text("hello world")]);
         assert_eq!(normalize_call_result(result, false), json!("hello world"));
     }
 
     #[test]
     fn normalize_multiple_text_blocks_join_with_newlines() {
-        let result = CallToolResult::success(vec![Content::text("a"), Content::text("b")]);
+        let result =
+            CallToolResult::success(vec![ContentBlock::text("a"), ContentBlock::text("b")]);
         assert_eq!(normalize_call_result(result, false), json!("a\nb"));
     }
 
     #[test]
+    fn normalize_non_text_blocks_keep_the_raw_envelope() {
+        // rmcp 2.x renamed `Content` to `ContentBlock`; the model-facing value
+        // for a result carrying a non-text block is the serialized block list,
+        // so its wire shape (`type`, camelCase `mimeType`) is pinned here.
+        let result = CallToolResult::success(vec![
+            ContentBlock::text("caption"),
+            ContentBlock::image("aGk=", "image/png"),
+        ]);
+        assert_eq!(
+            normalize_call_result(result, false),
+            json!([
+                { "type": "text", "text": "caption" },
+                { "type": "image", "data": "aGk=", "mimeType": "image/png" },
+            ]),
+        );
+    }
+
+    #[test]
     fn normalize_error_surfaces_is_error_and_message() {
-        let result = CallToolResult::error(vec![Content::text("boom")]);
+        let result = CallToolResult::error(vec![ContentBlock::text("boom")]);
         assert_eq!(
             normalize_call_result(result, false),
             json!({ "isError": true, "error": "boom" }),
@@ -677,6 +714,61 @@ mod tests {
             normalize_call_result(result, false),
             json!({ "isError": true, "error": "MCP tool returned an error" }),
         );
+    }
+
+    #[test]
+    fn complete_reply_is_normalized_like_before() {
+        let response =
+            CallToolResponse::Complete(CallToolResult::success(vec![ContentBlock::text("hi")]));
+        assert_eq!(
+            call_response_to_value(response, false, "srv", "t").unwrap(),
+            json!("hi")
+        );
+    }
+
+    #[test]
+    fn task_and_input_required_replies_become_clear_fixed_errors() {
+        use rmcp::model::{CreateTaskResult, InputRequiredResult, Task, TaskStatus};
+        let input = CallToolResponse::InputRequired(InputRequiredResult::new(
+            None,
+            Some("remote-secret-state".to_string()),
+        ));
+        let err = call_response_to_value(input, false, "srv", "t").unwrap_err();
+        assert!(
+            err.contains("srv/t") && err.contains("input-required"),
+            "{err}"
+        );
+        assert!(!err.contains("remote-secret-state"), "{err}");
+
+        let task = CallToolResponse::Task(CreateTaskResult::new(Task::new(
+            "remote-task-id",
+            TaskStatus::Working,
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:00:00Z",
+        )));
+        let err = call_response_to_value(task, false, "srv", "t").unwrap_err();
+        assert!(
+            err.contains("srv/t") && err.contains("asynchronous task"),
+            "{err}"
+        );
+        assert!(!err.contains("remote-task-id"), "{err}");
+    }
+
+    // F4 evidence: rmcp 3 dropped `execution.taskSupport` from `Tool`, so a
+    // legacy "async only" marker cannot be seen by the host — the typed
+    // descriptor never carries it. The reply-side error above is the guard.
+    #[test]
+    fn rmcp_tool_descriptor_drops_the_legacy_task_support_marker() {
+        let tool: rmcp::model::Tool = serde_json::from_value(json!({
+            "name": "slow",
+            "inputSchema": { "type": "object" },
+            "execution": { "taskSupport": "required" }
+        }))
+        .unwrap();
+        assert!(!serde_json::to_string(&tool)
+            .unwrap()
+            .contains("taskSupport"));
+        assert_eq!(tool_infos("srv", vec![tool]).len(), 1);
     }
 
     #[test]

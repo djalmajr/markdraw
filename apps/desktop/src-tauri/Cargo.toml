@@ -20,7 +20,7 @@ serde = { version = "1", features = ["derive"] }
 # cargo-machete reports it as unused because no Rust source references it
 # directly, but removing it breaks the build.
 serde_json = "1"
-# rmcp's CredentialStore / StateStore traits are `#[async_trait]`, so our
+# rmcp 3's CredentialStore / StateStore traits are `#[async_trait]`, so our
 # keychain-backed impl needs the same attribute macro (ai_mcp_oauth.rs).
 async-trait = "0.1"
 notify = { version = "8", features = ["macos_fsevent"] }
@@ -51,7 +51,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # over stdio (spawned child process) or Streamable HTTP. Lives in Rust because
 # the webview can't spawn processes and MCP-over-HTTP from the webview hits the
 # same SSE-delivery wall that forced generateText over streamText. See ai_mcp.rs.
-rmcp = { version = "1", default-features = false, features = [
+rmcp = { version = "3", default-features = false, features = [
     "client",
     "server",
     "transport-io",
@@ -75,7 +75,7 @@ toml = "0.9"
 # body chunks flow to the webview over an ipc Channel. Pinned to 0.12 to share
 # tauri-plugin-http's reqwest; `stream` adds bytes_stream().
 reqwest = { version = "0.12", features = ["stream"] }
-# rmcp 1.7's OAuth `AuthClient` wraps a reqwest **0.13** client (rmcp pins 0.13,
+# rmcp 3.11's OAuth `AuthClient` wraps a reqwest **0.13** client (rmcp pins 0.13,
 # while the rest of the app + tauri-plugin-http stay on 0.12 above). The two
 # `reqwest::Client` types don't unify, so the AuthClient's inner client must be
 # the 0.13 one rmcp's `StreamableHttpClient` impl targets. Alias the 0.13 line —
