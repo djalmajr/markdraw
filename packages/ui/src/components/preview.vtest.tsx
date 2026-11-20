@@ -193,6 +193,24 @@ describe("Preview", () => {
     expect(off.container.querySelector(".doc-body")?.classList.contains("doc-tables-wrap")).toBe(false);
   });
 
+  it("keeps an admonition's layout table out of the scroll wrapper, but wraps tables inside it", async () => {
+    // Mutation captured: wrapping the admonition's own table puts the
+    // wrapper's bottom margin inside the box, so the box shows a strip
+    // below the content that it does not have above it.
+    const html =
+      '<div class="admonitionblock warning"><table><tbody><tr>' +
+      '<td class="icon"><i class="fa icon-warning" title="Warning"></i></td>' +
+      '<td class="content"><div class="paragraph"><p>Careful.</p></div>' +
+      '<table class="tableblock"><tbody><tr><td>inner</td></tr></tbody></table>' +
+      "</td></tr></tbody></table></div>";
+    const { container } = render(() => <Preview {...withDefaults({ html })} />);
+    await waitFor(() => expect(container.querySelector("td.content table.tableblock")).not.toBeNull());
+    const box = container.querySelector(".admonitionblock")!;
+    expect(box.firstElementChild?.tagName).toBe("TABLE");
+    expect(box.querySelector(":scope > .table-wrapper")).toBeNull();
+    expect(container.querySelector("td.content table.tableblock")?.parentElement?.classList.contains("table-wrapper")).toBe(true);
+  });
+
   it("strips <script> tags from supplied HTML (defense in depth)", async () => {
     const { container } = render(() => (
       <Preview {...withDefaults({

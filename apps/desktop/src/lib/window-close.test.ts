@@ -8,7 +8,7 @@ describe("decideCloseAction", () => {
     // window-X click quit the app for every user on the default
     // setting — a silent regression of the pre-DJA-50 behaviour.
     expect(
-      decideCloseAction({ closeBehavior: "tray", isUpdating: false }),
+      decideCloseAction({ closeBehavior: "tray", isUpdating: false, trayAvailable: true }),
     ).toBe("hide");
   });
 
@@ -20,8 +20,22 @@ describe("decideCloseAction", () => {
     // handler down the `process.exit(0)` path which kills the
     // process on every platform.
     expect(
-      decideCloseAction({ closeBehavior: "quit", isUpdating: false }),
+      decideCloseAction({ closeBehavior: "quit", isUpdating: false, trayAvailable: true }),
     ).toBe("exit");
+  });
+
+  it("'tray' setting minimizes instead of hiding when there is no tray icon", () => {
+    // Mutation captured: hiding without a tray icon (setting it up failed,
+    // e.g. a Linux session with no StatusNotifierItem host) leaves the app
+    // running with no way back to the window; quitting instead could drop
+    // unsaved work in other panes or a pending autosave.
+    expect(
+      decideCloseAction({ closeBehavior: "tray", isUpdating: false, trayAvailable: false }),
+    ).toBe("minimize");
+    // The updater bypass still wins without a tray.
+    expect(
+      decideCloseAction({ closeBehavior: "tray", isUpdating: true, trayAvailable: false }),
+    ).toBe("let-close");
   });
 
   it("updater bypass forces let-close even when the user picked 'tray'", () => {
@@ -32,7 +46,7 @@ describe("decideCloseAction", () => {
     // strand the install half-applied, and "exit" here would
     // pre-empt the relaunch's own exit logic.
     expect(
-      decideCloseAction({ closeBehavior: "tray", isUpdating: true }),
+      decideCloseAction({ closeBehavior: "tray", isUpdating: true, trayAvailable: true }),
     ).toBe("let-close");
   });
 
@@ -43,7 +57,7 @@ describe("decideCloseAction", () => {
     // on Windows tends to corrupt the updater's swap. `"let-close"`
     // here defers the exit to `relaunch()`'s own teardown.
     expect(
-      decideCloseAction({ closeBehavior: "quit", isUpdating: true }),
+      decideCloseAction({ closeBehavior: "quit", isUpdating: true, trayAvailable: true }),
     ).toBe("let-close");
   });
 });

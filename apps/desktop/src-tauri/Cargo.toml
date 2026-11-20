@@ -143,6 +143,13 @@ gtk = "0.18"
 # Connect to Hyprland's IPC socket with a timeout (hyprland.rs); std's
 # UnixStream has no connect_timeout. Already in the tree via tokio.
 socket2 = "0.6"
+# Tray backend: Tauri's tray-icon defaults to libayatana-appindicator, which
+# never reports clicks, so a left click on the tray icon could only open the
+# menu. Turning on the `ksni` feature (StatusNotifierItem over D-Bus) on the
+# same tray-icon version Tauri uses makes it the backend (it wins over
+# libappindicator when both are on) and delivers the left click that shows the
+# window (tray.ts).
+tray-icon = { version = "0.25.1", default-features = false, features = ["ksni"] }
 
 [target.'cfg(unix)'.dependencies]
 # Process-group kill (killpg) so the login-shell PATH probe can terminate the

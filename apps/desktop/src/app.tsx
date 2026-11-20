@@ -1869,10 +1869,18 @@ export function App() {
 
     // No system tray in dev — keeps the dev instance from cluttering the menu
     // bar / colliding with a running prod build (which owns the real tray).
+    // Close-to-tray only hides the window once the tray icon exists: without
+    // it (setup failed, e.g. a Linux session with no StatusNotifierItem
+    // host) a hidden window could not be brought back.
+    let trayAvailable = false;
     if (!import.meta.env.DEV) {
       void setupTray({
         onOpenFolder: folder.handleOpenFolder,
-      }).catch((e) => console.error("Failed to set up tray:", e));
+      })
+        .then(() => {
+          trayAvailable = true;
+        })
+        .catch((e) => console.error("Failed to set up tray:", e));
     }
 
     // Close-to-tray: clicking the window X hides instead of quitting
@@ -1891,6 +1899,7 @@ export function App() {
         ? "exit"
         : decideCloseAction({
             closeBehavior: state.closeBehavior(),
+            trayAvailable,
             isUpdating:
               (window as unknown as { __markdraw_updating?: boolean }).__markdraw_updating ??
               false,
@@ -1920,6 +1929,13 @@ export function App() {
         // keeps running with no UI. Call exit explicitly so the
         // gesture matches the user's intent on every platform.
         await exit(0);
+        return;
+      }
+      if (action === "minimize") {
+        // "tray" setting, but no tray icon to bring a hidden window back:
+        // keep the window reachable from the taskbar instead.
+        event.preventDefault();
+        await win.minimize();
         return;
       }
       // action === "hide": pre-DJA-50 default.
