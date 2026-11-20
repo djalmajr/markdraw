@@ -326,7 +326,8 @@ fn deadlines_do_not_return_unbounded_work() {
                     query: "hit".into(),
                     cursor: None
                 },
-                Instant::now() - Duration::from_secs(1)
+                Instant::now() - Duration::from_secs(1),
+                true
             )
             .unwrap_err(),
         "timed out"
@@ -340,7 +341,8 @@ fn deadlines_do_not_return_unbounded_work() {
                 start_line: None,
                 end_line: None
             },
-            Instant::now() - Duration::from_secs(1)
+            Instant::now() - Duration::from_secs(1),
+            true
         )
         .unwrap_err(),
         "timed out"
@@ -664,4 +666,92 @@ fn security_fix_search_matches_only_redacted_text() {
     assert_eq!(result["matches"].as_array().unwrap().len(), 2);
     assert_eq!(result["matches"][0]["text"], "ordinary [secret]");
     assert_eq!(result["matches"][1]["text"], "ordinary control");
+}
+
+#[test]
+fn the_mask_policy_governs_every_disk_output_and_search_matching() {
+    use crate::mcp_server::settings::Settings;
+    const SECRET: &str = "sk-aaaaaaaaaaaaaaaaaaaa";
+    let f = Fixture::new();
+    f.write(&format!("{SECRET}.md"), format!("key {SECRET}\nnext"));
+    f.registry
+        .replace(vec![RootInput {
+            name: SECRET.into(),
+            path: f.dir.path().canonicalize().unwrap(),
+        }])
+        .unwrap();
+    let id = f.registry.list().unwrap()["roots"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let call = |method: &str, args: Value| {
+        let mut args = args;
+        args["root_id"] = json!(id);
+        f.registry.disk(method, args)
+    };
+    let name = format!("{SECRET}.md");
+    // Masked (the default): names, paths, content and the roots list.
+    assert_eq!(f.registry.list().unwrap()["roots"][0]["name"], "[secret]");
+    assert_eq!(
+        call("list_files", json!({})).unwrap()["entries"][0]["name"],
+        "[secret].md"
+    );
+    assert_eq!(
+        call("read_file", json!({"path": name})).unwrap()["content"],
+        "key [secret]\nnext"
+    );
+    // Search compares against the masked text, so a raw secret finds nothing.
+    assert!(
+        call("search_workspace", json!({"query": SECRET})).unwrap()["matches"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        call("search_workspace", json!({"query": "[secret]"})).unwrap()["matches"][0]["text"],
+        "key [secret]"
+    );
+    // The user turned masking off: everything is raw, and search matches raw text.
+    f.registry
+        .policy
+        .set_with(
+            Settings {
+                mask_secrets: false,
+            },
+            |_| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(f.registry.list().unwrap()["roots"][0]["name"], SECRET);
+    assert_eq!(
+        call("list_files", json!({})).unwrap()["entries"][0]["name"],
+        name
+    );
+    assert_eq!(
+        call("read_file", json!({"path": name})).unwrap()["content"],
+        format!("key {SECRET}\nnext")
+    );
+    let found = call("search_workspace", json!({"query": SECRET})).unwrap();
+    assert_eq!(found["matches"][0]["text"], format!("key {SECRET}"));
+    assert_eq!(found["matches"][0]["path"], name);
+    // Confinement and ignored files do not depend on the policy.
+    assert_eq!(
+        call("read_file", json!({"path": "../x"})).unwrap_err(),
+        "not allowed"
+    );
+    f.write(".hidden.md", format!("key {SECRET}"));
+    let found = call("search_workspace", json!({"query": SECRET})).unwrap();
+    assert_eq!(
+        found["matches"].as_array().unwrap().len(),
+        1,
+        "dotfiles stay out of search"
+    );
+    // Back on: masked again.
+    f.registry
+        .policy
+        .set_with(Settings { mask_secrets: true }, |_| Ok(()))
+        .unwrap();
+    assert_eq!(
+        call("read_file", json!({"path": name})).unwrap()["content"],
+        "key [secret]\nnext"
+    );
 }

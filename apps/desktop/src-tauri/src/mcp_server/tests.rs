@@ -247,7 +247,7 @@ async fn real_rmcp_client_lists_calls_observes_close_and_eof() {
     });
     let client = ().serve(client_transport).await.unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 4);
+    assert_eq!(tools.len(), 7);
     assert_eq!(tools[0].name, "list_workspaces");
     let result = client
         .call_tool(CallToolRequestParams::new("list_workspaces"))
@@ -1076,4 +1076,144 @@ fn security_fix_root_command_during_36_mib_disk_read() {
     }
     tauri::async_runtime::block_on(future).unwrap();
     assert_eq!(registry.list().unwrap(), json!({"roots":[]}));
+}
+
+#[cfg(unix)]
+fn one_root(path: &Path) -> Registry {
+    let registry = Registry::default();
+    registry
+        .replace(vec![RootInput {
+            name: "notes".into(),
+            path: path.to_path_buf(),
+        }])
+        .unwrap();
+    registry
+}
+
+#[cfg(unix)]
+#[test]
+fn with_root_resolves_without_the_lock_and_rechecks_after_it() {
+    let dir = fixture();
+    let root = dir.path().to_path_buf();
+    let received = root.to_str().unwrap().to_owned();
+    // A `replace` issued from inside the resolution step completes at once
+    // (the read lock is not held there) and a root closed in that window
+    // never reaches `f`.
+    let registry = Arc::new(one_root(&root));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = registry.clone();
+    std::thread::spawn(move || {
+        let canonical = std::fs::canonicalize(&root).unwrap();
+        let ran = std::cell::Cell::new(false);
+        let out = worker.with_root_resolved(
+            &received,
+            |_| {
+                worker.replace(vec![]).unwrap();
+                Some(canonical)
+            },
+            |_| ran.set(true),
+        );
+        tx.send((out.is_none(), ran.get())).unwrap();
+    });
+    let (refused, ran) = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("replace blocked: the root lock was held during the resolution");
+    assert!(refused, "a root closed during resolution must be refused");
+    assert!(!ran, "f must not start after the root was closed");
+    // Control: still registered after resolution, `f` runs under the guard.
+    let dir = fixture();
+    let received = dir.path().to_str().unwrap().to_owned();
+    let registry = one_root(dir.path());
+    let seen = registry
+        .with_root(&received, |canonical| canonical.to_path_buf())
+        .unwrap();
+    assert_eq!(seen, std::fs::canonicalize(dir.path()).unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_root_closed_and_reopened_with_the_same_spelling_during_resolution_is_refused() {
+    let dir = fixture();
+    let root = dir.path().to_path_buf();
+    let received = root.to_str().unwrap().to_owned();
+    let registry = Arc::new(one_root(&root));
+    let canonical = std::fs::canonicalize(&root).unwrap();
+    let ran = std::cell::Cell::new(false);
+    // Inside the resolution step (no lock held) the folder is closed and
+    // opened again under the very same spelling: a new registration.
+    let out = registry.with_root_resolved(
+        &received,
+        |_| {
+            registry.replace(vec![]).unwrap();
+            registry
+                .replace(vec![RootInput {
+                    name: "notes".into(),
+                    path: root.clone(),
+                }])
+                .unwrap();
+            Some(canonical.clone())
+        },
+        |_| ran.set(true),
+    );
+    assert!(out.is_none(), "the reopened root is not the one resolved");
+    assert!(
+        !ran.get(),
+        "f must not start for a registration that closed"
+    );
+    // Control: a `replace` that keeps the folder open keeps its id, so the
+    // read in progress is still valid.
+    let registry = one_root(&root);
+    let out = registry.with_root_resolved(
+        &received,
+        |_| {
+            registry
+                .replace(vec![RootInput {
+                    name: "renamed".into(),
+                    path: root.clone(),
+                }])
+                .unwrap();
+            Some(canonical.clone())
+        },
+        |_| true,
+    );
+    assert_eq!(out, Some(true));
+}
+
+#[cfg(unix)]
+#[test]
+fn with_root_matches_the_exact_registration_before_any_filesystem_access() {
+    let dir = fixture();
+    let registry = one_root(dir.path());
+    let exact = dir.path().to_str().unwrap();
+    for received in [
+        format!("{exact}/"),
+        format!("{exact}/."),
+        format!(
+            "{exact}/../{}",
+            dir.path().file_name().unwrap().to_str().unwrap()
+        ),
+        format!("{exact}x"),
+        dir.path().parent().unwrap().to_str().unwrap().to_owned(),
+        format!("{exact}/sub"),
+        "\\\\server\\share".to_owned(),
+        String::new(),
+    ] {
+        let touched = std::cell::Cell::new(false);
+        let out = registry.with_root_resolved(
+            &received,
+            |_| {
+                touched.set(true);
+                None
+            },
+            |_| (),
+        );
+        assert!(out.is_none(), "{received:?} must not match");
+        assert!(!touched.get(), "{received:?} reached the filesystem step");
+    }
+    // A registered root that vanished from disk is refused.
+    let gone = fixture();
+    let received = gone.path().to_str().unwrap().to_owned();
+    let registry = one_root(gone.path());
+    drop(gone);
+    assert!(registry.with_root(&received, |_| ()).is_none());
 }

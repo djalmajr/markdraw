@@ -501,6 +501,70 @@ mod tests {
         }
     }
 
+    // Native-only (never compiled on Unix): a junction or a symlink inside an
+    // open root must not lead out of it, whether it is opened by name or used
+    // as a directory on the way to a file outside.
+    #[cfg(windows)]
+    #[test]
+    fn windows_junctions_and_symlinks_do_not_lead_out_of_a_root() {
+        let fixture = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "outside").unwrap();
+        let inside = fixture.path().join("root");
+        std::fs::create_dir(&inside).unwrap();
+        std::fs::write(inside.join("plain.txt"), "inside").unwrap();
+        let dir = root(&inside).unwrap();
+        // Control: an ordinary file in the root opens.
+        assert!(open(&dir, &["plain.txt"]).is_ok());
+
+        let junction = inside.join("junction");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(outside.path())
+            .output()
+            .unwrap();
+        assert!(
+            made.status.success(),
+            "mklink /J failed: {}",
+            String::from_utf8_lossy(&made.stdout)
+        );
+        assert!(child(&dir, "junction").is_err(), "the junction itself");
+        assert!(open(&dir, &["junction"]).is_err());
+        assert!(
+            open(&dir, &["junction", "secret.txt"]).is_err(),
+            "through it"
+        );
+
+        // Symlinks need a privilege (or Developer Mode); without it there is
+        // nothing to test, and the run says so.
+        let link = inside.join("symlink");
+        match std::os::windows::fs::symlink_dir(outside.path(), &link) {
+            Ok(()) => {
+                assert!(child(&dir, "symlink").is_err(), "the symlink itself");
+                assert!(
+                    open(&dir, &["symlink", "secret.txt"]).is_err(),
+                    "through it"
+                );
+            }
+            Err(error) => println!("skipped symlink half: {error}"),
+        }
+        let file_link = inside.join("file-symlink.txt");
+        if std::os::windows::fs::symlink_file(outside.path().join("secret.txt"), &file_link).is_ok()
+        {
+            assert!(open(&dir, &["file-symlink.txt"]).is_err());
+        }
+        // Listing the directory still names them, but never opens them.
+        let names = entries(&dir)
+            .unwrap()
+            .collect::<io::Result<Vec<_>>>()
+            .unwrap();
+        assert!(names.iter().any(|name| name == "junction"));
+        assert!(names
+            .iter()
+            .all(|name| name == "plain.txt" || child(&dir, name).is_err()));
+    }
+
     #[test]
     fn windows_missing_statuses_are_distinct_from_refusals() {
         use io::ErrorKind::{NotFound, PermissionDenied};

@@ -120,6 +120,9 @@ fn timed_out(deadline: Instant) -> bool {
 impl Registry {
     pub(super) fn disk(&self, method: &str, arguments: Value) -> Result<Value> {
         let deadline = Instant::now() + WORK_TIME;
+        // One policy value for this whole request, whatever the UI changes
+        // while it runs.
+        let mask = self.policy.mask();
         // Read ownership is held until every handle has been dropped. Closing
         // a root linearizes at replace's write lock and invalidates cursors.
         let roots = self.roots.read().map_err(|_| "not allowed")?;
@@ -131,9 +134,9 @@ impl Registry {
         confined::supported_root(&authorized.path)?;
         let root = confined::root(&authorized.path).map_err(fs_error)?;
         let result = match method {
-            "list_files" => self.list_files(&root, args(arguments)?, deadline),
-            "read_file" => read_file(&root, args(arguments)?, deadline),
-            "search_workspace" => self.search(&root, args(arguments)?, deadline),
+            "list_files" => self.list_files(&root, args(arguments)?, deadline, mask),
+            "read_file" => read_file(&root, args(arguments)?, deadline, mask),
+            "search_workspace" => self.search(&root, args(arguments)?, deadline, mask),
             _ => Err("invalid arguments"),
         }?;
         if serde_json::to_vec(&result)
@@ -145,7 +148,7 @@ impl Registry {
         }
         Ok(result)
     }
-    fn list_files(&self, root: &File, a: ListArgs, deadline: Instant) -> Result<Value> {
+    fn list_files(&self, root: &File, a: ListArgs, deadline: Instant, mask: bool) -> Result<Value> {
         if a.path.as_deref() == Some("") {
             return Err("not allowed");
         }
@@ -201,7 +204,7 @@ impl Registry {
                 break;
             }
             seen += 1;
-            entries.push(json!({"name":scrub::short_text(&name),"path":scrub::short_text(&relative(&path,&name)),"kind":if metadata.is_dir(){"dir"}else{"file"}}));
+            entries.push(json!({"name":scrub::text(mask, &name),"path":scrub::text(mask, &relative(&path,&name)),"kind":if metadata.is_dir(){"dir"}else{"file"}}));
         }
         let mut result = json!({"entries":entries});
         if more {
@@ -213,7 +216,7 @@ impl Registry {
         }
         Ok(result)
     }
-    fn search(&self, root: &File, a: SearchArgs, deadline: Instant) -> Result<Value> {
+    fn search(&self, root: &File, a: SearchArgs, deadline: Instant, mask: bool) -> Result<Value> {
         if a.query.is_empty() || a.query.len() > super::MAX_FRAME {
             return Err("invalid arguments");
         }
@@ -321,7 +324,11 @@ impl Registry {
                     // lines before a cursor, before selecting matching lines.
                     let mut stream = scrub::Stream::default();
                     for (index, line) in text.lines().enumerate() {
-                        let safe = stream.line(line);
+                        let safe = if mask {
+                            stream.line(line)
+                        } else {
+                            line.to_owned()
+                        };
                         if index < offset {
                             continue;
                         }
@@ -334,7 +341,7 @@ impl Registry {
                                 lookahead = Some(Job::File(path.clone(), index));
                                 break;
                             }
-                            matches.push(json!({"path":scrub::short_text(&path),"line":index+1,"text":safe.chars().take(500).collect::<String>()}));
+                            matches.push(json!({"path":scrub::text(mask, &path),"line":index+1,"text":safe.chars().take(500).collect::<String>()}));
                         }
                     }
                     if lookahead.is_some() {
@@ -422,7 +429,7 @@ fn line(reader: &mut impl BufRead, deadline: Instant) -> Result<Option<(String, 
         }
     }
 }
-fn read_file(root: &File, a: ReadArgs, deadline: Instant) -> Result<Value> {
+fn read_file(root: &File, a: ReadArgs, deadline: Instant, mask: bool) -> Result<Value> {
     let start = a.start_line.unwrap_or(1);
     let end = a.end_line.unwrap_or(usize::MAX);
     if start == 0 || end < start {
@@ -450,7 +457,9 @@ fn read_file(root: &File, a: ReadArgs, deadline: Instant) -> Result<Value> {
         } else {
             (text.as_str(), "")
         };
-        let mut safe = if opaque_tail {
+        let mut safe = if !mask {
+            body.to_owned()
+        } else if opaque_tail {
             "[secret]".to_owned()
         } else {
             stream.line_with_cut(body, overflow)

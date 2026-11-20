@@ -132,6 +132,8 @@ interface AppShellProps {
    *  add/remove/toggle handlers. Forwarded to SettingsDialog — typed by the
    *  dialog's own contract so new fields (args/tools) can't silently drop. */
   mcpServers?: SettingsMcpServer[];
+  mcpServerMaskSecrets?: boolean;
+  onSetMcpServerMaskSecrets?: (maskSecrets: boolean) => Promise<void>;
   /** Auto-discovered agent skills shown read-only in Settings. */
   skills?: SettingsSkill[];
   onSaveMcpServer?: (server: {
@@ -743,6 +745,8 @@ export function AppShell(props: AppShellProps) {
           refreshableProviders={props.refreshableProviders ?? []}
           modelCacheInfo={props.modelCacheInfo}
           mcpServers={props.mcpServers ?? []}
+          mcpServerMaskSecrets={props.mcpServerMaskSecrets}
+          onSetMcpServerMaskSecrets={props.onSetMcpServerMaskSecrets}
           skills={props.skills ?? []}
           onSaveMcpServer={(s) => props.onSaveMcpServer?.(s)}
           onRemoveMcpServer={(id) => props.onRemoveMcpServer?.(id)}

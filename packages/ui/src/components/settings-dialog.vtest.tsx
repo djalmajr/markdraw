@@ -674,4 +674,161 @@ describe("SettingsDialog", () => {
     flush();
     expect(baseElement.querySelectorAll(".settings-mcp-tool-chip").length).toBe(6);
   });
+
+  describe("Servidor MCP do Markdraw — máscara de segredos", () => {
+    function maskSwitch(baseElement: HTMLElement): HTMLElement {
+      const found = [...baseElement.querySelectorAll('[role="switch"]')].find(
+        (s) => s.getAttribute("aria-label") === "Mask secrets",
+      );
+      expect(found, "switch named Mask secrets").toBeTruthy();
+      return found as HTMLElement;
+    }
+
+    function confirmDialog(baseElement: HTMLElement): HTMLElement | null {
+      return (
+        [...baseElement.querySelectorAll('[data-slot="alert-dialog-content"]')].find((el) =>
+          (el.textContent ?? "").includes("Turn off secret masking?"),
+        ) ?? null
+      );
+    }
+
+    function deferredSetter() {
+      let resolve!: () => void;
+      const setter = vi.fn(
+        (_value: boolean) =>
+          new Promise<void>((r) => {
+            resolve = r;
+          }),
+      );
+      return { setter, resolve: () => resolve() };
+    }
+
+    it("começa mascarado e separa o servidor externo dos servidores do assistente", () => {
+      const { baseElement } = setup();
+      openMcpSection(baseElement);
+      expect(baseElement.textContent).toContain("Markdraw MCP server");
+      expect(baseElement.textContent).toContain("MCP servers");
+      expect(maskSwitch(baseElement).getAttribute("aria-checked")).toBe("true");
+      expect(baseElement.querySelector('[role="status"]')).toBeNull();
+    });
+
+    it("mostra o estado salvo falso e o aviso permanente", () => {
+      const { baseElement } = setup({
+        mcpServerMaskSecrets: false,
+        onSetMcpServerMaskSecrets: vi.fn(async () => {}),
+      });
+      openMcpSection(baseElement);
+      expect(maskSwitch(baseElement).getAttribute("aria-checked")).toBe("false");
+      expect(baseElement.querySelector('[role="status"]')?.textContent).toBe(
+        "Secret masking is off",
+      );
+    });
+
+    it("desligar chama o handler sem diálogo próprio: a confirmação é a nativa", async () => {
+      const setter = vi.fn(async () => {});
+      const { baseElement } = setup({
+        mcpServerMaskSecrets: true,
+        onSetMcpServerMaskSecrets: setter,
+      });
+      openMcpSection(baseElement);
+      fireEvent.click(maskSwitch(baseElement));
+      flush();
+      expect(confirmDialog(baseElement)).toBeNull();
+      await waitFor(() => {
+        expect(setter).toHaveBeenCalledWith(false);
+      });
+    });
+
+    it("desligar só vale quando a promessa resolve, com o controle desabilitado no meio", async () => {
+      const { setter, resolve } = deferredSetter();
+      const { baseElement } = setup({
+        mcpServerMaskSecrets: true,
+        onSetMcpServerMaskSecrets: setter,
+      });
+      openMcpSection(baseElement);
+      fireEvent.click(maskSwitch(baseElement));
+      flush();
+      await waitFor(() => {
+        expect(setter).toHaveBeenCalledWith(false);
+      });
+      expect(maskSwitch(baseElement).getAttribute("aria-checked")).toBe("true");
+      const pending = maskSwitch(baseElement);
+      expect(
+        pending.hasAttribute("disabled") || pending.getAttribute("aria-disabled") === "true",
+      ).toBe(true);
+      expect(baseElement.querySelector('[role="status"]')).toBeNull();
+      resolve();
+      await waitFor(() => {
+        expect(maskSwitch(baseElement).getAttribute("aria-checked")).toBe("false");
+      });
+      expect(baseElement.querySelector('[role="status"]')?.textContent).toBe(
+        "Secret masking is off",
+      );
+    });
+
+    it("cancelar o diálogo nativo (resultado declined) mantém a chave ligada, sem erro", async () => {
+      for (const reason of ["declined", new Error("declined")]) {
+        const setter = vi.fn(async () => {
+          throw reason;
+        });
+        const { baseElement } = setup({
+          mcpServerMaskSecrets: true,
+          onSetMcpServerMaskSecrets: setter,
+        });
+        openMcpSection(baseElement);
+        fireEvent.click(maskSwitch(baseElement));
+        flush();
+        await waitFor(() => {
+          expect(setter).toHaveBeenCalledWith(false);
+        });
+        await waitFor(() => {
+          const control = maskSwitch(baseElement);
+          expect(control.hasAttribute("disabled") || control.getAttribute("aria-disabled") === "true").toBe(false);
+        });
+        expect(maskSwitch(baseElement).getAttribute("aria-checked")).toBe("true");
+        expect(baseElement.querySelector('[role="alert"]')).toBeNull();
+        expect(baseElement.querySelector('[role="status"]')).toBeNull();
+        cleanup();
+      }
+    });
+
+    it("ligar não pede confirmação e espera a promessa", async () => {
+      const { setter, resolve } = deferredSetter();
+      const { baseElement } = setup({
+        mcpServerMaskSecrets: false,
+        onSetMcpServerMaskSecrets: setter,
+      });
+      openMcpSection(baseElement);
+      fireEvent.click(maskSwitch(baseElement));
+      flush();
+      expect(setter).toHaveBeenCalledWith(true);
+      expect(confirmDialog(baseElement)).toBeNull();
+      expect(maskSwitch(baseElement).getAttribute("aria-checked")).toBe("false");
+      resolve();
+      await waitFor(() => {
+        expect(maskSwitch(baseElement).getAttribute("aria-checked")).toBe("true");
+      });
+      expect(baseElement.querySelector('[role="status"]')).toBeNull();
+    });
+
+    it("uma falha real volta ao estado anterior e mostra erro curto", async () => {
+      const setter = vi.fn(async () => {
+        throw new Error("ipc failed");
+      });
+      const { baseElement } = setup({
+        mcpServerMaskSecrets: true,
+        onSetMcpServerMaskSecrets: setter,
+      });
+      openMcpSection(baseElement);
+      fireEvent.click(maskSwitch(baseElement));
+      flush();
+      await waitFor(() => {
+        expect(baseElement.querySelector('[role="alert"]')?.textContent).toBe(
+          "Could not change secret masking.",
+        );
+      });
+      expect(maskSwitch(baseElement).getAttribute("aria-checked")).toBe("true");
+      expect(baseElement.querySelector('[role="status"]')).toBeNull();
+    });
+  });
 });

@@ -93,6 +93,11 @@ async fn stdio_cli_real_client_fake_app_eof_and_app_shutdown() {
                                 assert_eq!(request["arguments"],serde_json::json!({"root_id":"opaque","query":"hello"}));
                                 serde_json::json!({"matches":[{"path":"a.md","line":2,"text":"hello [secret]"}]})
                             },
+                            "list_open_tabs" | "get_active_document" | "get_selection" => {
+                                // The proxy forwards the name and never any argument.
+                                assert!(request.get("arguments").is_none_or(|a| a.is_null() || a == &serde_json::json!({})));
+                                serde_json::json!({"seen": request["method"]})
+                            },
                             other => panic!("unexpected method {other}"),
                         };
                         let response = serde_json::json!({"id":1,"result":result}).to_string()+"\n";
@@ -166,6 +171,30 @@ async fn stdio_cli_real_client_fake_app_eof_and_app_shutdown() {
             .await
             .unwrap();
         assert_eq!(result.structured_content.unwrap(), expected);
+    }
+    let tools = client.list_all_tools().await.unwrap();
+    assert_eq!(tools.len(), 7);
+    for name in ["list_open_tabs", "get_active_document", "get_selection"] {
+        assert!(tools.iter().any(|tool| tool.name == name), "{name}");
+        let result = client
+            .call_tool(CallToolRequestParams::new(name))
+            .await
+            .unwrap();
+        assert_eq!(
+            result.structured_content.unwrap(),
+            serde_json::json!({"seen": name})
+        );
+        let refused = client
+            .call_tool(
+                CallToolRequestParams::new(name).with_arguments(
+                    serde_json::json!({"path":"/etc/passwd"})
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                ),
+            )
+            .await;
+        assert!(refused.is_err(), "{name} must not take arguments");
     }
     client.cancel().await.unwrap();
     let status = tokio::time::timeout(Duration::from_secs(3), child.wait())

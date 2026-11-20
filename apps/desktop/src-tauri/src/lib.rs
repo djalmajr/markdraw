@@ -28,7 +28,10 @@ use ai_mcp::{
 // configure, at global + per-project scope, normalized for Markdraw. Read-only;
 // the JS host gates which tools to read and approves project servers.
 pub mod mcp_server;
-use mcp_server::mcp_set_roots;
+use mcp_server::{
+    mcp_approval_respond, mcp_server_get_settings, mcp_server_set_settings, mcp_set_roots,
+    mcp_state_respond,
+};
 mod mcp_discovery;
 use mcp_discovery::mcp_discover;
 
@@ -1450,11 +1453,31 @@ pub fn run() {
     }
 
     builder
+        // A page that starts loading (a reload) can no longer answer what the
+        // MCP server asked of the old one: fail those requests now instead of
+        // letting them wait out their deadline.
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started
+            {
+                webview
+                    .state::<std::sync::Arc<mcp_server::Registry>>()
+                    .page_reloading();
+            }
+        })
         .setup(|app| {
             let registry = app
                 .state::<std::sync::Arc<mcp_server::Registry>>()
                 .inner()
                 .clone();
+            // The user's masking choice is loaded, and the `main` window wired
+            // for live-state and approval events, before the endpoint can
+            // accept a single call.
+            match app.path().app_config_dir() {
+                Ok(directory) => registry.configure(&directory),
+                Err(_) => eprintln!("Markdraw MCP settings directory unavailable; masking stays on"),
+            }
+            registry.attach_window(mcp_server::tauri_main(app.handle().clone()));
+            registry.attach_confirm(mcp_server::tauri_confirm(app.handle().clone()));
             match mcp_server::AppEndpoint::start(registry) {
                 Ok(endpoint) => {
                     *app.state::<Mutex<Option<mcp_server::AppEndpoint>>>()
@@ -1544,6 +1567,10 @@ pub fn run() {
         .manage(html_preview::HtmlPreviewState::default())
         .invoke_handler(tauri::generate_handler![
             mcp_set_roots,
+            mcp_state_respond,
+            mcp_approval_respond,
+            mcp_server_get_settings,
+            mcp_server_set_settings,
             open_directory_dialog,
             save_file_dialog,
             read_dir,
@@ -1611,6 +1638,8 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app, _event| {
             if matches!(_event, tauri::RunEvent::Exit) {
+                _app.state::<std::sync::Arc<mcp_server::Registry>>()
+                    .shutdown();
                 if let Some(endpoint) = _app
                     .state::<Mutex<Option<mcp_server::AppEndpoint>>>()
                     .lock()
