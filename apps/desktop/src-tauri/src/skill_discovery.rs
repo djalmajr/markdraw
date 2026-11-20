@@ -56,7 +56,8 @@ fn frontmatter_value(content: &str, key: &str) -> Option<String> {
         if let Some(value) = trimmed.strip_prefix(&prefix) {
             let value = unquote(value);
             if matches!(value.as_bytes().first(), Some(b'>') | Some(b'|')) {
-                let value = frontmatter_block_value(&frontmatter[index + 1..], value.starts_with('>'));
+                let value =
+                    frontmatter_block_value(&frontmatter[index + 1..], value.starts_with('>'));
                 if !value.is_empty() {
                     return Some(value);
                 }
@@ -91,7 +92,8 @@ fn frontmatter_block_value(lines: &[&str], folded: bool) -> String {
         block.push(line.trim().to_string());
     }
     if folded {
-        block.join(" ")
+        block
+            .join(" ")
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
