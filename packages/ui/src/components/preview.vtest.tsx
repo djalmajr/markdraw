@@ -25,24 +25,20 @@ const diagramCtl = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("mermaid", () => ({
-  default: {
-    initialize: () => {},
-    render: (id: string) => {
-      if (id === "mermaid-prewarm") {
-        return Promise.resolve({ svg: '<svg viewBox="0 0 10 10"></svg>' });
-      }
-      diagramCtl.started.mermaid.push(id);
-      if (diagramCtl.mode.mermaid === "reject") {
-        return Promise.reject(new Error("mermaid failed"));
-      }
-      if (diagramCtl.mode.mermaid === "pending") {
-        return new Promise<{ svg: string }>((resolve) => {
-          diagramCtl.pending.mermaid = resolve;
-        });
-      }
-      return Promise.resolve({ svg: `<svg id="${id}" viewBox="0 0 10 400"><defs><marker id="arrow" /></defs><text>arrow</text><path marker-end="url(#arrow)" /></svg>` });
-    },
+vi.mock(import("../lib/mermaid-frame.ts"), async (original) => ({
+  ...await original(),
+  ensureMermaidWarm: async () => {},
+  renderInFrame: (id: string) => {
+    diagramCtl.started.mermaid.push(id);
+    if (diagramCtl.mode.mermaid === "reject") {
+      return Promise.reject(new Error("mermaid failed"));
+    }
+    if (diagramCtl.mode.mermaid === "pending") {
+      return new Promise<{ svg: string }>((resolve) => {
+        diagramCtl.pending.mermaid = resolve;
+      });
+    }
+    return Promise.resolve({ svg: `<svg id="${id}" viewBox="0 0 10 400"><defs><marker id="arrow" /></defs><text>arrow</text><path marker-end="url(#arrow)" /></svg>` });
   },
 }));
 

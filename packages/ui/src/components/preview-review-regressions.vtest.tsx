@@ -3,19 +3,19 @@ import { createSignal, flush } from "solid-js";
 import { cleanup, render, waitFor } from "@solidjs/testing-library";
 
 const state = vi.hoisted(() => ({ theme: "", pause: null as null | (() => void), calls: [] as string[], queue: Promise.resolve() }));
-vi.mock("mermaid", () => ({
-  default: {
-    initialize: ({ theme }: { theme: string }) => { state.theme = theme; },
-    render: (id: string, source: string) => {
-      const result = state.queue.then(async () => {
-        if (source === "hold") await new Promise<void>((resolve) => { state.pause = resolve; });
-        const theme = state.theme;
-        if (id !== "mermaid-prewarm") state.calls.push(`${theme}:${source}`);
-        return { svg: `<svg id="${id}" viewBox="0 0 100 100"><text>${theme}:${source}</text></svg>` };
-      });
-      state.queue = result.then(() => {}, () => {});
-      return result;
-    },
+vi.mock(import("../lib/mermaid-frame.ts"), async (original) => ({
+  ...await original(),
+  ensureMermaidWarm: async () => {},
+  renderInFrame: (id: string, source: string, theme: "dark" | "default") => {
+    state.theme = theme;
+    const result = state.queue.then(async () => {
+      if (source === "hold") await new Promise<void>((resolve) => { state.pause = resolve; });
+      const renderedTheme = state.theme;
+      state.calls.push(`${renderedTheme}:${source}`);
+      return { svg: `<svg id="${id}" viewBox="0 0 100 100"><text>${renderedTheme}:${source}</text></svg>` };
+    });
+    state.queue = result.then(() => {}, () => {});
+    return result;
   },
 }));
 

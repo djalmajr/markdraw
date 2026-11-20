@@ -5,10 +5,11 @@ import {
   Submenu,
 } from "@tauri-apps/api/menu";
 import { getVersion } from "@tauri-apps/api/app";
+import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 
 interface MenuDeps {
   onOpenFolder: () => void;
-  onExportPdf: () => void;
+  exportPdfState: Pick<AppState, "handleExportPdf">;
   onCheckForUpdates: () => void;
   onCloseTab?: () => void;
   onEditorMode: (mode: "edit" | "split" | "preview") => void;
@@ -65,7 +66,7 @@ export async function setupAppMenu(deps: MenuDeps): Promise<void> {
       await MenuItem.new({
         id: "export-pdf",
         text: "Export PDF",
-        action: deps.onExportPdf,
+        action: deps.exportPdfState.handleExportPdf,
       }),
       await PredefinedMenuItem.new({ item: "Separator" }),
       ...(deps.onCloseTab
