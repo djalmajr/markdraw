@@ -180,7 +180,7 @@ import { confirm, confirmThree } from "@markdraw/ui/components/confirm-dialog.ts
 import { SCRATCH_ROOT_ID, isScratchPath, makeScratchEntry, type ScratchKind } from "./lib/scratch.ts";
 import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
-import { createTrayPreferenceSync, setupTray } from "./lib/tray.ts";
+import { createTrayPreferenceSync, setupTray } from "./lib/tray-native.ts";
 import { decideCloseAction } from "./lib/window-close.ts";
 import {
   ALL_WINDOW_CAPABILITIES,

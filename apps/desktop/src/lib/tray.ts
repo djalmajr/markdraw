@@ -5,9 +5,9 @@ import type {
   MenuItemOptions,
   PredefinedMenuItem as TauriPredefinedMenuItem,
 } from "@tauri-apps/api/menu";
-import { TrayIcon, type TrayIconOptions } from "@tauri-apps/api/tray";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { invoke } from "./chaos-invoke.ts";
+import type { TrayIcon, TrayIconOptions } from "@tauri-apps/api/tray";
+import type { getCurrentWindow } from "@tauri-apps/api/window";
+import type { invoke } from "./chaos-invoke.ts";
 import {
   themeFollower,
   trayIconBase64,
@@ -16,7 +16,7 @@ import {
   type TrayTheme,
 } from "./tray-icon.ts";
 
-interface DisposableResource {
+export interface DisposableResource {
   close: () => Promise<void>;
 }
 
@@ -25,12 +25,12 @@ export interface TrayHandle {
   dispose: () => Promise<void>;
 }
 
-interface TrayDeps {
+export interface TrayDeps {
   onOpenFolder: () => void;
   hideWindow: () => Promise<void>;
 }
 
-interface TrayWindowRuntime {
+export interface TrayWindowRuntime {
   platform: string;
   getCurrentWindow: () => Pick<
     ReturnType<typeof getCurrentWindow>, "isVisible" | "isMinimized" | "minimize" | "setFocus"
@@ -39,7 +39,7 @@ interface TrayWindowRuntime {
   removeTray: typeof TrayIcon.removeById;
 }
 
-interface TraySetupRuntime<Item, Menu, Image> extends TrayWindowRuntime {
+export interface TraySetupRuntime<Item, Menu, Image> extends TrayWindowRuntime {
   createItem: (options: MenuItemOptions) => Promise<Item>;
   createSeparator: () => Promise<Item>;
   createMenu: (items: Item[]) => Promise<Menu>;
@@ -53,12 +53,6 @@ interface TraySetupRuntime<Item, Menu, Image> extends TrayWindowRuntime {
   exit: (code: number) => Promise<void>;
 }
 
-const tauriWindowRuntime: TrayWindowRuntime = {
-  get platform() { return navigator.platform; },
-  getCurrentWindow,
-  invoke,
-  removeTray: TrayIcon.removeById,
-};
 
 function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
@@ -86,30 +80,6 @@ function base64ToBytes(base64: string): Uint8Array {
  * lingered briefly) can leave duplicates in the macOS menu bar.
  */
 export const TRAY_ID = "markdraw-tray";
-
-export async function setupTray(deps: TrayDeps): Promise<TrayHandle> {
-  const [{ Menu, MenuItem, PredefinedMenuItem }, { Image }, { exit }, { appCacheDir, runtimeDir }, { listen }] =
-    await Promise.all([
-      import("@tauri-apps/api/menu"),
-      import("@tauri-apps/api/image"),
-      import("@tauri-apps/plugin-process"),
-      import("@tauri-apps/api/path"),
-      import("@tauri-apps/api/event"),
-    ]);
-
-  return setupTrayWithRuntime<TauriMenuItem | TauriPredefinedMenuItem, TauriMenu, TauriImage>(deps, {
-    ...tauriWindowRuntime,
-    createItem: MenuItem.new,
-    createSeparator: () => PredefinedMenuItem.new({ item: "Separator" }),
-    createMenu: (items) => Menu.new({ items }),
-    createImage: Image.fromBytes,
-    createTray: TrayIcon.new,
-    runtimeDir,
-    appCacheDir,
-    listenForTheme: (listener) => listen<TrayTheme>("system-theme-changed", ({ payload }) => listener(payload)),
-    exit,
-  });
-}
 
 export async function setupTrayWithRuntime<
   Item extends DisposableResource,
@@ -297,7 +267,7 @@ export async function setupTrayWithRuntime<
   }
 }
 
-interface TrayPreferenceSyncDeps {
+export interface TrayPreferenceSyncDeps {
   /** Dev never creates a tray, even when the stored preference is on. */
   isDev: boolean;
   /** The live value read by the close handler and the tray menu. */
@@ -314,7 +284,7 @@ interface TrayPreferenceSyncDeps {
  */
 export function createTrayPreferenceSync(
   deps: TrayPreferenceSyncDeps,
-  runtime: TrayWindowRuntime = tauriWindowRuntime,
+  runtime: TrayWindowRuntime,
 ): {
   sync: (showTrayIcon: boolean) => Promise<void>;
   /** Chooses between hiding and minimizing inside the tray teardown queue. */
