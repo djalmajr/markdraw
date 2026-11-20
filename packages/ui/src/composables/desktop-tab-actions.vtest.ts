@@ -20,6 +20,7 @@ import { PaneView } from "../components/pane-view.tsx";
 import { TabBar } from "../components/tab-bar.tsx";
 import { DragDropProvider } from "../lib/dnd/index.ts";
 import { tabDisplayName } from "./create-tab-store.ts";
+import { createNavigation } from "../../../../apps/desktop/src/lib/navigation.ts";
 
 // Partial mock: the pane tests render without a drag provider, but the mounted
 // app needs the real `DragDropProvider` and the rest of the module.
@@ -3188,5 +3189,200 @@ describe("rename and move re-aim the shared watcher", () => {
     expect(right.tabs.findTabByFile("manual/guide.md", workspace)).toMatchObject({
       filePath: "manual/guide.md", needsLoad: true,
     });
+  });
+});
+
+describe("identity of the saved active tab and of tabs with a suffixed id", () => {
+  const key = "markdraw-tab-session-pane-0";
+  const saved = (rootId: string, filePath: string, id = `${rootId}::${filePath}`) =>
+    ({ id, rootId, filePath, fileName: filePath.split("/").at(-1)!, isPinned: true, editorMode: "split" as const });
+  const delayedRoot = "/delayed";
+
+  // The saved batch has a duplicate whose saved suffix (`#12`) differs from the
+  // one the restore allocates; the second root is still reading.
+  async function restoreDuplicateWithPendingRoot() {
+    const { folder, state, paneManager, rootPaths } = fixture();
+    const delayed = Promise.withResolvers<FSEntry[]>();
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return args.path === delayedRoot ? delayed.promise : [alpha, beta];
+      if (command === "plugin:event|listen") return 1;
+    });
+    const a = saved(workspace, alpha.path);
+    const oldDuplicate = saved(workspace, alpha.path, a.id + "#12");
+    setTabSession({ tabs: [a, oldDuplicate], activeTabId: oldDuplicate.id }, key);
+    setOpenRoots([workspace, delayedRoot].map((path) => ({ id: path, path })));
+    const pane = paneManager.activePane();
+    const restore = createSessionRestore(pane, (filePath, rootId) => state.findEntryByPath(filePath, rootId));
+    const restoring = folder.restoreOpenRoots();
+    await vi.advanceTimersByTimeAsync(0);
+    restore.rootsChanged(rootPaths().keys());
+    flush();
+    const [, duplicate] = pane.tabs.tabs();
+    expect(duplicate!.id).not.toBe(oldDuplicate.id);
+    const finish = async () => {
+      delayed.resolve([]);
+      await restoring;
+    };
+    return { folder, pane, restore, duplicate: duplicate!, oldDuplicate, finish };
+  }
+
+  it("writes the id the restore allocated for the saved active tab while a later root is pending", async () => {
+    const { folder, restore, duplicate, finish } = await restoreDuplicateWithPendingRoot();
+    try {
+      await vi.advanceTimersByTimeAsync(501);
+      const persisted = JSON.parse(localStorage.getItem(key)!);
+      await finish();
+      expect(persisted.activeTabId).toBe(duplicate.id);
+      expect(restore.settle(folder.savedRootIds())).toBe(duplicate.id);
+    } finally {
+      await finish();
+    }
+  });
+
+  it("keeps the saved active tab on disk through a move made while a later root is pending", async () => {
+    const { pane, duplicate, finish } = await restoreDuplicateWithPendingRoot();
+    try {
+      const moved = pane.tabs.updateTabFile(duplicate.id, "moved.md", "moved.md");
+      flush();
+      await vi.advanceTimersByTimeAsync(501);
+      const persisted = JSON.parse(localStorage.getItem(key)!);
+      expect(persisted.activeTabId).toBe(moved!.id);
+    } finally {
+      await finish();
+    }
+  });
+
+  it("control: a saved active tab without a suffix change is written as saved", async () => {
+    const { folder, state, paneManager, rootPaths } = fixture();
+    const delayed = Promise.withResolvers<FSEntry[]>();
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return args.path === delayedRoot ? delayed.promise : [alpha, beta];
+      if (command === "plugin:event|listen") return 1;
+    });
+    const a = saved(workspace, alpha.path);
+    setTabSession({ tabs: [a, saved(workspace, beta.path)], activeTabId: a.id }, key);
+    setOpenRoots([workspace, delayedRoot].map((path) => ({ id: path, path })));
+    const pane = paneManager.activePane();
+    const restore = createSessionRestore(pane, (filePath, rootId) => state.findEntryByPath(filePath, rootId));
+    const restoring = folder.restoreOpenRoots();
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      restore.rootsChanged(rootPaths().keys());
+      flush();
+      await vi.advanceTimersByTimeAsync(501);
+      expect(JSON.parse(localStorage.getItem(key)!).activeTabId).toBe(a.id);
+    } finally {
+      delayed.resolve([]);
+      await restoring;
+    }
+  });
+
+  const other = "/other";
+  const html: FSEntry = { kind: "file", path: "page.html", name: "page.html" };
+  const moved = { ...html, path: "sub/page.html" };
+  const sub: FSEntry = { kind: "directory", path: "sub", name: "sub", children: [] };
+
+  async function setupNavigation(movedOnDisk = false) {
+    const { folder, state, paneManager, actions, rootPaths } = fixture();
+    const savedOnDisk = "<h1 id='anchor'>on disk</h1>";
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") {
+        return args.path === other
+          ? [{ ...sub, children: movedOnDisk ? [moved] : [] }]
+          : movedOnDisk ? [beta] : [html, beta];
+      }
+      if (command === "move_path") movedOnDisk = true;
+      if (command === "read_file") return savedOnDisk;
+      if (command === "plugin:event|listen") return 1;
+    });
+    await folder.openFolderPath(other);
+    await folder.openFolderPath(workspace);
+    const navigation = createNavigation({
+      state, rootPaths,
+      loadFileContent: async () => {},
+      tabStore: () => paneManager.activePane().tabs,
+      onActivateTab: (tabId) => { void actions.activateTab(paneManager.activePane(), tabId); },
+      onOpenHistoryTab: (entry, rootId) => { void actions.openFile(entry, rootId, true, false); },
+      onOpenFile: actions.openFile,
+    });
+    const settle = async (promise: Promise<unknown> | void) => {
+      await vi.advanceTimersByTimeAsync(5);
+      await promise;
+      flush();
+      await vi.advanceTimersByTimeAsync(5);
+    };
+    const navigate = async (path: string, fragment: string) => settle(navigation.handleNavigate(path, fragment));
+    return { folder, state, paneManager, navigation, navigate, settle, savedOnDisk };
+  }
+
+  // A background tab with edits moved onto a path whose stale tab is then
+  // closed: the moved tab is the only tab of that file and its id has a suffix.
+  async function onlySuffixedTabAtTarget() {
+    const setup = await setupNavigation();
+    const { folder, state, paneManager, savedOnDisk } = setup;
+    const pane = paneManager.activePane();
+    const stale = pane.tabs.openTab(moved, other, { background: true });
+    const incoming = pane.tabs.openTab(html, workspace, { background: true });
+    pane.tabs.updateTabContent(incoming, {
+      editorContent: "<h1 id='anchor'>unsaved edit</h1>",
+      savedContent: savedOnDisk,
+    });
+    pane.tabs.openTab(beta, workspace);
+    pane.setSelectedFile(beta);
+    pane.setSelectedRootId(workspace);
+    flush();
+    await folder.handleMove(html, "sub", workspace, other);
+    flush();
+    const movedTab = pane.tabs.tabs().find((tab) => tab.filePath === moved.path && tab.id !== stale)!;
+    expect(movedTab.id).toMatch(/#\d+$/);
+    pane.tabs.closeTab(stale);
+    flush();
+    expect(pane.tabs.tabs().filter((tab) => tab.filePath === moved.path)).toHaveLength(1);
+    return { ...setup, pane, movedTab, state };
+  }
+
+  const tabsAtTarget = (pane: PaneStore) =>
+    pane.tabs.tabs().filter((tab) => tab.filePath === moved.path).map((tab) => tab.id);
+
+  it("follows an HTML link into the only open tab of the path when its id has a suffix", async () => {
+    const { state, pane, movedTab, navigate } = await onlySuffixedTabAtTarget();
+
+    await navigate(moved.path, "anchor");
+
+    expect(state.pendingHtmlNavigation()[pane.paneId]?.fragment).toBe("anchor");
+    expect({ active: pane.tabs.activeTabId(), tabs: tabsAtTarget(pane), editor: pane.editorContent() })
+      .toEqual({ active: movedTab.id, tabs: [movedTab.id], editor: movedTab.editorContent });
+  });
+
+  it("goes back and forward to the only open tab of the path when its id has a suffix", async () => {
+    const { pane, movedTab, navigation, navigate, settle } = await onlySuffixedTabAtTarget();
+    await navigate(moved.path, "anchor");
+    await navigate("beta.md", "");
+    expect(pane.tabs.getActiveTab()?.filePath).toBe("beta.md");
+
+    navigation.handleGoBack();
+    await settle();
+
+    expect({ active: pane.tabs.activeTabId(), tabs: tabsAtTarget(pane), editor: pane.editorContent() })
+      .toEqual({ active: movedTab.id, tabs: [movedTab.id], editor: movedTab.editorContent });
+    navigation.handleGoForward();
+    await settle();
+    expect(pane.tabs.getActiveTab()?.filePath).toBe("beta.md");
+    navigation.handleGoBack();
+    await settle();
+    expect({ active: pane.tabs.activeTabId(), tabs: tabsAtTarget(pane) })
+      .toEqual({ active: movedTab.id, tabs: [movedTab.id] });
+  });
+
+  it("control: a link to a path whose tab has the canonical id still reuses that tab", async () => {
+    const { paneManager, navigate, savedOnDisk } = await setupNavigation(true);
+    const pane = paneManager.activePane();
+    const target = pane.tabs.openTab(moved, other, { background: true });
+    pane.tabs.updateTabContent(target, { editorContent: "edit", savedContent: savedOnDisk });
+    pane.tabs.openTab(beta, workspace);
+    flush();
+    await navigate(moved.path, "anchor");
+    expect({ active: pane.tabs.activeTabId(), tabs: tabsAtTarget(pane), editor: pane.editorContent() })
+      .toEqual({ active: target, tabs: [target], editor: "edit" });
   });
 });

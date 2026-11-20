@@ -1604,7 +1604,15 @@ describe("conversion cost", () => {
       },
       invoke: async (command: string, args: Record<string, any>) => {
         if (command === "watch_paths") watched.push(args.paths);
-        if (command === "read_dir") return files;
+        if (command === "read_dir") {
+          return files.filter((file) => disk.has(`${args.path}/${file.path}`));
+        }
+        if (command === "move_path") {
+          const oldPath = `${args.srcRoot}/${args.srcRelative}`;
+          disk.set(`${args.dstRoot}/${args.dstRelative}`, disk.get(oldPath)!);
+          disk.delete(oldPath);
+          return undefined;
+        }
         if (command === "rename_file") {
           const oldPath = `${args.root}/${args.oldRelative}`;
           disk.set(`${args.root}/${args.newRelative}`, disk.get(oldPath)!);
@@ -2452,6 +2460,102 @@ describe("conversion cost", () => {
       expect(pane.html()).toBe(`<p>${"= Perf\n\nno includes here\n".length}:0</p>`);
       expect(h.watched.at(-1)).toEqual([`${ROOT}/${MAIN}`]);
       expect(pane.tabs.getActiveTab()?.includePaths).toEqual([]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it.each(["autosave echo", "manual refresh"] as const)(
+    "a pending edit converts with the destination includes after a cross-root move and %s",
+    async (refresh) => {
+      const { h, pane } = await openForEditing();
+      try {
+        const dest = "/perf-destination";
+        const destPath = `${dest}/${MAIN}`;
+        const destInclude = `${dest}/partials/p0.adoc`;
+        h.disk.set(destInclude, "destination include");
+        expect(await h.app.folder.openFolderPath(dest)).toBe(true);
+        const sourceTab = pane.tabs.findTabByFile(MAIN, ROOT)!;
+        await h.app.actions.activateTab(pane, sourceTab.id);
+        expect(pane.selectedRootId()).toBe(ROOT);
+        const text = pane.editorContent() + "\nedit before changing workspace\n";
+        type(h.app, text);
+
+        await h.app.folder.handleMove(entry, "", ROOT, dest);
+        flush();
+        expect(pane.tabs.getActiveTab()).toMatchObject({ rootId: dest, filePath: MAIN });
+        await vi.advanceTimersByTimeAsync(1300);
+        expect(h.disk.get(destPath)).toBe(text);
+        expect(h.watched.at(-1)).toContain(destInclude);
+        await h.emitFsChange(refresh === "autosave echo" ? [destPath] : undefined);
+        expect(pane.html()).toBe(`<p>${text.length}:1</p>`);
+      } finally {
+        await h.close();
+      }
+    },
+  );
+
+  it.each(["autosave echo", "manual refresh"] as const)(
+    "an accepted edit keeps its nested includes watched across a same-folder rename and %s",
+    async (refresh) => {
+      const { h, pane } = await openForEditing();
+      try {
+        const text = pane.editorContent() + "\nedit already rendered\n";
+        type(h.app, text);
+        await vi.advanceTimersByTimeAsync(310);
+        expect(pane.html()).toBe(`<p>${text.length}:20</p>`);
+        const nested = `${ROOT}/partials/nested/n0.adoc`;
+        expect(h.watched.at(-1)).toContain(nested);
+        await h.app.folder.handleRename(entry, ROOT, "renamed-ready.adoc");
+        flush();
+        await vi.advanceTimersByTimeAsync(1000);
+        const path = `${ROOT}/renamed-ready.adoc`;
+        expect(h.disk.get(path)).toBe(text);
+        await h.emitFsChange(refresh === "autosave echo" ? [path] : undefined);
+        expect(h.watched.at(-1)).toContain(nested);
+      } finally {
+        await h.close();
+      }
+    },
+  );
+
+  it("a rendered edit is converted again with the destination includes after a cross-root move", async () => {
+    const { h, pane } = await openForEditing();
+    try {
+      const dest = "/perf-destination";
+      const destPath = `${dest}/${MAIN}`;
+      h.disk.set(`${dest}/partials/p0.adoc`, "destination include");
+      expect(await h.app.folder.openFolderPath(dest)).toBe(true);
+      await h.app.actions.activateTab(pane, pane.tabs.findTabByFile(MAIN, ROOT)!.id);
+      const text = pane.editorContent() + "\nedit already rendered\n";
+      type(h.app, text);
+      await vi.advanceTimersByTimeAsync(310);
+      expect(pane.html()).toBe(`<p>${text.length}:20</p>`); // built from the source workspace
+
+      await h.app.folder.handleMove(entry, "", ROOT, dest);
+      flush();
+      await vi.advanceTimersByTimeAsync(1300);
+      expect(h.disk.get(destPath)).toBe(text);
+      await h.emitFsChange([destPath]); // the echo of the save in the destination
+      expect(pane.html()).toBe(`<p>${text.length}:1</p>`);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("control: a rendered edit is not converted again by the echo after a same-folder rename", async () => {
+    const { h, pane } = await openForEditing();
+    try {
+      const text = pane.editorContent() + "\nedit already rendered\n";
+      type(h.app, text);
+      await vi.advanceTimersByTimeAsync(310);
+      await h.app.folder.handleRename(entry, ROOT, "renamed-ready.adoc");
+      flush();
+      await vi.advanceTimersByTimeAsync(1000);
+      const before = h.counters.conversions;
+      await h.emitFsChange([`${ROOT}/renamed-ready.adoc`]);
+      expect(h.counters.conversions - before).toBe(0);
+      expect(pane.html()).toBe(`<p>${text.length}:20</p>`);
     } finally {
       await h.close();
     }

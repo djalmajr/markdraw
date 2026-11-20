@@ -64,6 +64,9 @@ export interface TabStore {
   markTabNeedsLoad(tabId: TabId): void;
 
   getTab(tabId: TabId): TabState | undefined;
+  /** The tab showing a file: the one with the canonical id, else a tab of that
+   *  root and path whose id carries a suffix (a tab moved onto the path while
+   *  another held the name, or a duplicate). The active one wins among several. */
   findTabByFile(filePath: string, rootId: string): TabState | undefined;
   getActiveTab(): TabState | undefined;
   getDirtyTabs(): TabState[];
@@ -130,8 +133,10 @@ export function createTabStore(config: TabStoreConfig): TabStore {
   }
 
   function findTabByFile(filePath: string, rootId: string): TabState | undefined {
-    const id = makeTabId(rootId, filePath);
-    return getTab(id);
+    const canonical = getTab(makeTabId(rootId, filePath));
+    if (canonical) return canonical;
+    const same = tabList().filter((t) => t.rootId === rootId && t.filePath === filePath);
+    return same.find((t) => t.id === activeId()) ?? same[0];
   }
 
   function getActiveTab(): TabState | undefined {
@@ -207,7 +212,9 @@ export function createTabStore(config: TabStoreConfig): TabStore {
   }
 
   function loadInActiveTab(entry: FSEntry, rootId: string): TabId {
-    const tabId = makeTabId(rootId, entry.path);
+    // The tab already showing the file keeps its id, suffix included.
+    const existing = findTabByFile(entry.path, rootId);
+    const tabId = existing?.id ?? makeTabId(rootId, entry.path);
 
     // Empty/scratch ("+") tab acts as a passthrough: opening a file
     // while it's active never leaves it behind, whether the target is
@@ -217,7 +224,6 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     const emptyActive = active && active.filePath === "" ? active : null;
 
     // If this file is already open in a tab, just activate it.
-    const existing = getTab(tabId);
     if (existing) {
       if (emptyActive && emptyActive.id !== existing.id) {
         // Drop the empty placeholder silently — skip closedTabsStack,

@@ -3,7 +3,7 @@ import type { FSEntry } from "@markdraw/core/types.ts";
 import { getIncludePaths } from "@markdraw/core/asciidoc.ts";
 import { getMarkdownIncludePaths } from "@markdraw/core/markdown.ts";
 import { fileKind, isMdFile, isSupportedFile, UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
-import type { AppState, ConvertedDoc } from "@markdraw/ui/composables/create-app-state.ts";
+import type { AppState, ConvertedDoc, DocReader } from "@markdraw/ui/composables/create-app-state.ts";
 import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
 import type { TabState } from "@markdraw/core/tabs.ts";
 import {
@@ -53,6 +53,81 @@ export function createFileLoader(deps: FileLoaderDeps) {
   // preview and then finds one more was published meanwhile did not confirm it.
   const errorsPublished = new WeakMap<object, number>();
   const latestLoad = new WeakMap<PaneStore, object>();
+
+  /** How a document of the workspace at `root` reads its includes: one cache,
+   *  one IPC per layer of nested includes, and the hook that keeps the tab and
+   *  the watcher on what an accepted edit conversion depends on. */
+  function createReader(root: string, rootId: string | null | undefined, includeFileCache = new Map<string, string>()): DocReader {
+    const readFile = async (relPath: string) => {
+      const cached = includeFileCache.get(relPath);
+      if (cached !== undefined) return cached;
+
+      const fileContent = await readFileByPath(root, relPath);
+      if (fileContent !== null) {
+        includeFileCache.set(relPath, fileContent);
+      }
+      return fileContent;
+    };
+    // One IPC for a whole layer of nested includes (what the converter asks
+    // for), not one per file. Unreadable files come back as null, like
+    // readFile; if the batch itself fails each file is read on its own, so
+    // the error handling stays the one readFile always had.
+    const readFiles = async (relPaths: string[]) => {
+      const found = new Map<string, string | null>();
+      const missing: string[] = [];
+      for (const relPath of relPaths) {
+        const cached = includeFileCache.get(relPath);
+        if (cached !== undefined) found.set(relPath, cached);
+        else missing.push(relPath);
+      }
+      if (missing.length === 0) return found;
+      let batch: Map<string, string> | null = null;
+      try {
+        batch = await readFilesRelative(root, missing);
+      } catch (error) {
+        console.warn("Batch include read failed, reading files one by one:", error);
+      }
+      for (const relPath of missing) {
+        const fileContent = batch ? (batch.get(relPath) ?? null) : await readFileByPath(root, relPath);
+        if (fileContent !== null) includeFileCache.set(relPath, fileContent);
+        found.set(relPath, fileContent);
+      }
+      return found;
+    };
+    // After an edit conversion the document may depend on other includes
+    // than at load: keep the tab snapshot and the watcher on them, or an
+    // include typed after the load would never refresh the preview.
+    // The document is named by the conversion (`doc`), not by the loaded entry:
+    // after a rename the tab, the base directory and the watched target all use
+    // the path now in use. The tab may be a background one (its conversion ended
+    // after a tab switch): its snapshot gets the dependencies, and the
+    // watcher only follows the tab on screen.
+    // `consulted` is what the accepted conversion asked for (missing paths it
+    // tried to read included), so an include the edit removed leaves the list
+    // even though the cache still holds its text.
+    const converted = (pane: PaneStore, _text: string, doc: ConvertedDoc, consulted: ReadonlySet<string>) => {
+      if (doc.rootId !== rootId || doc.tabId === null) return;
+      const current = pane.tabs.getTab(doc.tabId);
+      if (!current || current.filePath !== doc.filePath || current.rootId !== rootId) return;
+      const paths = Array.from(consulted);
+      const known = new Set(current.includePaths);
+      if (paths.length !== known.size || paths.some((p) => !known.has(p))) {
+        pane.tabs.updateTabContent(current.id, { includePaths: paths });
+      }
+      if (pane === state.paneManager.activePane() && pane.tabs.activeTabId() === current.id) {
+        syncWatcher({ kind: "file", name: current.fileName, path: doc.filePath }, root, paths);
+      }
+    };
+    return { readFile, readFiles, converted };
+  }
+
+  // A loaded tab moved to another workspace gets a reader for that workspace
+  // (new root, empty cache) before its pending conversion is carried over.
+  // Tests give the loader a partial state, hence the optional call.
+  state.setReaderFactory?.((rootId) => {
+    const root = rootPaths().get(rootId);
+    return root ? createReader(root, rootId) : undefined;
+  });
 
   function syncWatcher(entry: FSEntry | null, rootPath?: string | null, includePaths: string[] = []) {
     if (entry?.kind === "file" && rootPath) {
@@ -320,74 +395,15 @@ export function createFileLoader(deps: FileLoaderDeps) {
         watchedIncludes = Array.from(new Set([...scanPaths, ...includeFileCache.keys()]));
       }
 
-      const readFile = async (relPath: string) => {
-        const cached = includeFileCache.get(relPath);
-        if (cached !== undefined) return cached;
-
-        const fileContent = await readFileByPath(root, relPath);
-        if (fileContent !== null) {
-          includeFileCache.set(relPath, fileContent);
-        }
-        return fileContent;
-      };
-      // One IPC for a whole layer of nested includes (what the converter asks
-      // for), not one per file. Unreadable files come back as null, like
-      // readFile; if the batch itself fails each file is read on its own, so
-      // the error handling stays the one readFile always had.
-      const readFiles = async (relPaths: string[]) => {
-        const found = new Map<string, string | null>();
-        const missing: string[] = [];
-        for (const relPath of relPaths) {
-          const cached = includeFileCache.get(relPath);
-          if (cached !== undefined) found.set(relPath, cached);
-          else missing.push(relPath);
-        }
-        if (missing.length === 0) return found;
-        let batch: Map<string, string> | null = null;
-        try {
-          batch = await readFilesRelative(root, missing);
-        } catch (error) {
-          console.warn("Batch include read failed, reading files one by one:", error);
-        }
-        for (const relPath of missing) {
-          const fileContent = batch ? (batch.get(relPath) ?? null) : await readFileByPath(root, relPath);
-          if (fileContent !== null) includeFileCache.set(relPath, fileContent);
-          found.set(relPath, fileContent);
-        }
-        return found;
-      };
-
       // Edits of this document convert with this reader (this root and cache),
       // not with whichever file loaded last. An outdated load must not replace
       // a newer one's reader.
       if (superseded()) return;
-      // After an edit conversion the document may depend on other includes
-      // than at load: keep the tab snapshot and the watcher on them, or an
-      // include typed after the load would never refresh the preview.
-      // The document is named by the conversion (`doc`), not by `entry`: after
-      // a rename the tab, the base directory and the watched target all use the
-      // path now in use. The tab may be a background one (its conversion ended
-      // after a tab switch): its snapshot gets the dependencies, and the
-      // watcher only follows the tab on screen.
-      // `consulted` is what the accepted conversion asked for (missing paths it
-      // tried to read included), so an include the edit removed leaves the list
-      // even though the cache still holds its text.
-      const converted = (pane: PaneStore, _text: string, doc: ConvertedDoc, consulted: ReadonlySet<string>) => {
-        if (doc.rootId !== targetRootId || doc.tabId === null) return;
-        const current = pane.tabs.getTab(doc.tabId);
-        if (!current || current.filePath !== doc.filePath || current.rootId !== targetRootId) return;
-        const paths = Array.from(consulted);
-        const known = new Set(current.includePaths);
-        if (paths.length !== known.size || paths.some((p) => !known.has(p))) {
-          pane.tabs.updateTabContent(current.id, { includePaths: paths });
-        }
-        if (pane === state.paneManager.activePane() && pane.tabs.activeTabId() === current.id) {
-          syncWatcher({ kind: "file", name: current.fileName, path: doc.filePath }, root, paths);
-        }
-      };
-      state.registerReader(targetPane, targetRootId ?? null, entry.path, { readFile, readFiles, converted });
+      const reader = createReader(root, targetRootId, includeFileCache);
+      const { readFile, readFiles } = reader;
+      state.registerReader(targetPane, targetRootId ?? null, entry.path, reader);
 
-      const result = await state.convert(entry.path, source, readFile, readFiles);
+      const result = await state.convert(entry.path, source, readFile, readFiles!);
       // Conversion may have read includes missing from the batch above.
       watchedIncludes = Array.from(new Set([...scanPaths, ...includeFileCache.keys()]));
 

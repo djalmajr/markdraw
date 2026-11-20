@@ -1710,6 +1710,22 @@ export function createAppState(config: AppStateConfig) {
     registerReader(pane, rootId, newPath, reader);
   }
 
+  // How the host builds the reader of a workspace (its root, a fresh include
+  // cache). The loader installs it; a loaded tab moved to another workspace
+  // asks for one because the reader it had resolves against the old root.
+  let readerFactory: ((rootId: string) => DocReader | undefined) | null = null;
+  function setReaderFactory(factory: ((rootId: string) => DocReader | undefined) | null) {
+    readerFactory = factory;
+  }
+
+  /** A loaded file now lives in another workspace: give it a reader of that
+   *  workspace (fresh cache, destination root) so its pending conversion and
+   *  later edits resolve includes there. Without a factory nothing changes. */
+  function rebindReader(pane: PaneStore, rootId: string, filePath: string) {
+    const reader = readerFactory?.(rootId);
+    if (reader) registerReader(pane, rootId, filePath, reader);
+  }
+
   function convertWith(filePath: string, content: string, reader: DocReader): Promise<ConvertResult> {
     const convertOpts = { filePath, fileContent: content, readFile: reader.readFile, readFiles: reader.readFiles };
     return isMdFile(filePath) ? config.convertMarkdown(convertOpts) : config.convertAdoc(convertOpts);
@@ -1900,6 +1916,12 @@ export function createAppState(config: AppStateConfig) {
     filePath: string;
   }
 
+  const folderOf = (filePath: string) => filePath.includes("/") ? filePath.slice(0, filePath.lastIndexOf("/")) : "";
+  const sameResolution = (from: EditSite, to: EditSite) =>
+    from.rootId === to.rootId
+    && folderOf(from.filePath) === folderOf(to.filePath)
+    && isMdFile(from.filePath) === isMdFile(to.filePath);
+
   /** The document was renamed or its tab moved to another pane while an edit
    *  still waited for its conversion (or ran): the job is bound to the old
    *  identity and would be dropped, leaving the preview on older text. Retire
@@ -1909,12 +1931,15 @@ export function createAppState(config: AppStateConfig) {
     const oldKey = editKey(from.tabId, from.rootId, from.filePath);
     const newKey = editKey(to.tabId, to.rootId, to.filePath);
     if (from.pane === to.pane && oldKey === newKey) return;
-    // The screen shows the same thing under the new identity.
+    // The screen shows the same thing under the new identity, as long as the
+    // includes resolve the same way: another workspace, folder or format means
+    // the preview on screen may have been built from other files, so the record
+    // is dropped and the next refresh converts again.
     const shown = publishedMap(from.pane);
     if (shown.has(oldKey)) {
       const record = shown.get(oldKey)!;
       shown.delete(oldKey);
-      publishedMap(to.pane).set(newKey, record);
+      if (sameResolution(from, to)) publishedMap(to.pane).set(newKey, record);
     }
     const doc = editConverts.get(from.pane)?.get(oldKey);
     const job = doc?.pending;
@@ -2178,6 +2203,8 @@ export function createAppState(config: AppStateConfig) {
     registerReader,
     transferReader,
     rekeyReader,
+    rebindReader,
+    setReaderFactory,
     carryEdit,
     previewReflects,
     notePreviewed,

@@ -11,7 +11,7 @@ import type { createFileLoader } from "./file-loader.ts";
 import { SCRATCH_ROOT_ID, scratchPath } from "./scratch.ts";
 
 interface TabActionDeps {
-  state: Pick<AppState, "paneManager" | "findEntryByPath" | "roots" | "transferReader" | "rekeyReader" | "carryEdit">;
+  state: Pick<AppState, "paneManager" | "findEntryByPath" | "roots" | "transferReader" | "rekeyReader" | "carryEdit" | "pushNavHistory" | "rebindReader">;
   rootPaths: () => ReadonlyMap<string, string>;
   syncWatcher: ReturnType<typeof createFileLoader>["syncWatcher"];
   loadTabContent: ReturnType<typeof createFileLoader>["loadTabContent"];
@@ -166,6 +166,18 @@ export function createTabActions({
     });
   }
 
+  // Show an already loaded tab that was just activated. A buffer with unsaved
+  // edits is the document: reading the disk again would replace it, so the tab
+  // is shown as it was left. A clean one is read again, like any other open.
+  async function showLoadedTab(pane: PaneStore, tab: TabState, entry: FSEntry, rootId: string, pushHistory: boolean) {
+    if (tab.editorContent === tab.savedContent) {
+      await loadFileContent(entry, pushHistory, false, rootId);
+      return;
+    }
+    await selectTab(pane, pane.tabs.getTab(tab.id) ?? tab, true, false);
+    if (pushHistory) state.pushNavHistory({ entry, rootId });
+  }
+
   async function openFile(entry: FSEntry, rootId: string, pinned = false, pushHistory = true) {
     const pane = manager.activePane();
     const store = pane.tabs;
@@ -176,7 +188,7 @@ export function createTabActions({
         await activateTab(pane, existing.id, pushHistory);
       } else {
         store.activateTab(existing.id);
-        await loadFileContent(entry, pushHistory, false, rootId);
+        await showLoadedTab(pane, existing, entry, rootId, pushHistory);
       }
       return;
     }
@@ -190,7 +202,7 @@ export function createTabActions({
       await selectTab(pane, existing, true, pushHistory);
       return;
     }
-    await loadFileContent(entry, pushHistory, false, rootId);
+    await showLoadedTab(pane, existing, entry, rootId, pushHistory);
     updateLoadedTabCache(pane, id);
   }
 
@@ -224,10 +236,19 @@ export function createTabActions({
     if (!pending) pendingEntries.set(newRootId, pending = new Map());
     pending.set(entry.path, { entry, tree: currentTree(newRootId) });
     const content = active && !tab.needsLoad ? pane.editorContent() : tab.editorContent;
-    const base = entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "";
-    const includePaths = isMdFile(entry.path)
-      ? getMarkdownIncludePaths(content, base)
-      : getIncludePaths(content, base);
+    const folderOf = (path: string) => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    const base = folderOf(entry.path);
+    // A loaded document renamed where its includes resolve the same way (same
+    // workspace, folder and format) keeps the dependencies its last accepted
+    // conversion confirmed, nested includes included: the direct scan below
+    // sees only the first layer and would stop the watcher on the rest.
+    const sameResolution = newRootId === rootId && !tab.needsLoad
+      && folderOf(oldPath) === base && isMdFile(oldPath) === isMdFile(entry.path);
+    const includePaths = sameResolution
+      ? tab.includePaths
+      : isMdFile(entry.path)
+        ? getMarkdownIncludePaths(content, base)
+        : getIncludePaths(content, base);
     if (newRootId === rootId) {
       const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, rootId, { includePaths }, displacedAsDraft);
       if (!renamedTab) return;
@@ -268,6 +289,9 @@ export function createTabActions({
         };
     const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, newRootId, { ...carried, includePaths }, displacedAsDraft);
     if (!renamedTab) return;
+    // The reader the tab loaded with resolves against the old workspace: the
+    // pending conversion must read the includes of the destination one.
+    if (!tab.needsLoad) state.rebindReader(pane, newRootId, entry.path);
     state.carryEdit(
       { pane, tabId: tab.id, rootId, filePath: oldPath },
       { pane, tabId: renamedTab.id, rootId: newRootId, filePath: entry.path },

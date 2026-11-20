@@ -151,8 +151,13 @@ export function createSessionRestore(
     // already (their roots opened) while another root still reads, and the
     // write of that moment must not forget which one was active. The tab store
     // only uses it while no tab is active, so a choice made meanwhile wins.
-    pane.tabs.holdPendingSession(snapshot && (tabs.length > 0 || snapshot.activeTabId !== null)
-      ? { tabs, activeTabId: snapshot.activeTabId }
+    // Once the saved active tab reopened, the id the restore gave it is the one
+    // to save: a duplicate gets a new suffix, and the tab store follows that id
+    // if the tab is moved before the last root opens. Until then the saved id
+    // stays (the tab store ignores one that no live tab has).
+    const savedActive = activeTabId ?? snapshot?.activeTabId ?? null;
+    pane.tabs.holdPendingSession(snapshot && (tabs.length > 0 || savedActive !== null)
+      ? { tabs, activeTabId: savedActive }
       : null);
   }
 
