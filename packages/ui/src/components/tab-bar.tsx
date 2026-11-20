@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { PointerSensor } from "@dnd-kit/dom";
 import { useDraggable, useDroppable } from "../lib/dnd/index.ts";
-import type { TabStore } from "../composables/create-tab-store.ts";
+import { tabDisplayName, type TabStore } from "../composables/create-tab-store.ts";
 import type { TabState } from "@markdraw/core/tabs.ts";
 import {
   ContextMenu,
@@ -168,7 +168,7 @@ function DraggableTab(props: {
       </ContextMenu>
       <TooltipContent>
         {props.tab.filePath.startsWith("scratch://")
-          ? `${props.tab.fileName} (${(useLocale(), m.tab_unsaved_scratch())})`
+          ? `${(useLocale(), tabDisplayName(props.tab))} (${m.tab_unsaved_scratch()})`
           : `${props.tab.rootId}/${props.tab.filePath}`}
       </TooltipContent>
     </Tooltip>
@@ -228,19 +228,22 @@ export function TabBar(props: TabBarProps) {
   }
 
   const displayNames = createMemo(() => {
+    useLocale();
     const list = tabs();
+    const names = new Map(list.map((t) => [t.id, tabDisplayName(t)]));
     const nameCount = new Map<string, number>();
-    for (const t of list) {
-      nameCount.set(t.fileName, (nameCount.get(t.fileName) ?? 0) + 1);
+    for (const name of names.values()) {
+      nameCount.set(name, (nameCount.get(name) ?? 0) + 1);
     }
     const result = new Map<string, string>();
     for (const t of list) {
-      if (!t.filePath || (nameCount.get(t.fileName) ?? 0) <= 1) {
-        result.set(t.id, t.fileName);
+      const name = names.get(t.id)!;
+      if (!t.filePath || (nameCount.get(name) ?? 0) <= 1) {
+        result.set(t.id, name);
       } else {
         const parts = t.filePath.split("/");
         const parent = parts.length > 1 ? parts[parts.length - 2] : t.rootId.split("/").pop();
-        result.set(t.id, `${t.fileName} — ${parent}`);
+        result.set(t.id, `${name} — ${parent}`);
       }
     }
     return result;
@@ -270,7 +273,7 @@ export function TabBar(props: TabBarProps) {
               paneIndex={props.paneIndex}
               isActive={tab().id === activeTabId()}
               isDirty={tab().id === activeTabId() ? (props.activeTabDirty ?? false) : tab().editorContent !== tab().savedContent}
-              displayName={displayNames().get(tab().id) ?? tab().fileName}
+              displayName={displayNames().get(tab().id) ?? tabDisplayName(tab())}
               canDrag={canDrag()}
               onActivate={() => props.onActivateTab(tab().id)}
               onClose={() => props.onCloseTab(tab().id)}

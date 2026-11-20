@@ -1,6 +1,5 @@
 import { type Accessor } from "solid-js";
 import type { FSEntry, QualifiedPath } from "@markdraw/core/types.ts";
-import { makeTabId } from "@markdraw/core/tabs.ts";
 import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import type { TabStore } from "@markdraw/ui/composables/create-tab-store.ts";
 import { showToast } from "@markdraw/ui/components/ui/toast.tsx";
@@ -137,10 +136,10 @@ export function createNavigation(deps: NavigationDeps) {
     // If tabs are active, check if the target is already in a tab
     if (getTabStore && onActivateTab) {
       const tabStore = getTabStore();
-      const tabId = makeTabId(qp.rootId, qp.path);
-      const tab = tabStore.getTab(tabId);
+      // A tab moved onto the path while another held the name has a suffixed id.
+      const tab = tabStore.findTabByFile(qp.path, qp.rootId);
       if (tab) {
-        onActivateTab(tabId);
+        onActivateTab(tab.id);
         return;
       }
       if (onOpenHistoryTab) {

@@ -61,6 +61,128 @@ describe("collectIncludes", () => {
   });
 });
 
+describe("collectIncludes — layered batch reads", () => {
+  // A diamond with a cycle and a missing file: main -> a, b; a -> c, gone;
+  // b -> c, a (a is already seen); c -> deep/d; deep/d -> ../a (cycle back).
+  const files: Record<string, string> = {
+    "a.adoc": "include::c.adoc[]\ninclude::gone.adoc[]",
+    "b.adoc": "include::c.adoc[]\ninclude::a.adoc[]",
+    "c.adoc": "include::deep/d.adoc[]",
+    "deep/d.adoc": "include::../a.adoc[]",
+  };
+  const main = "include::a.adoc[]\ninclude::b.adoc[]";
+
+  it("reads one batch per layer instead of one read per nested file", async () => {
+    const batches: string[][] = [];
+    let singles = 0;
+    const cache = await collectIncludes(
+      main,
+      "",
+      async () => { singles++; return null; },
+      new Set(),
+      async (paths) => {
+        batches.push([...paths]);
+        return new Map(paths.filter((p) => p in files).map((p) => [p, files[p]!]));
+      },
+    );
+    // layer 0: a, b; layer 1: c, gone (a is already visited); layer 2: deep/d;
+    // layer 3 has nothing new (../a is visited) so no fourth batch.
+    expect(batches).toEqual([
+      ["a.adoc", "b.adoc"],
+      ["c.adoc", "gone.adoc"],
+      ["deep/d.adoc"],
+    ]);
+    expect(singles).toBe(0);
+    expect([...cache.keys()].sort()).toEqual(["a.adoc", "b.adoc", "c.adoc", "deep/d.adoc"]);
+  });
+
+  it("yields the same map as the per-file reader (same keys, contents, one read per file)", async () => {
+    const perFileReads: string[] = [];
+    const sequential = await collectIncludes(main, "", async (p) => {
+      perFileReads.push(p);
+      return files[p] ?? null;
+    });
+    const batched = await collectIncludes(
+      main,
+      "",
+      async () => null,
+      new Set(),
+      async (paths) => new Map(paths.filter((p) => p in files).map((p) => [p, files[p]!])),
+    );
+    expect(Object.fromEntries(batched)).toEqual(Object.fromEntries(sequential));
+    // each resolved path is requested exactly once, whatever the order
+    expect(new Set(perFileReads).size).toBe(perFileReads.length);
+  });
+
+  it("does not expand a file the batch reports missing, null or undefined", async () => {
+    const batches: string[][] = [];
+    const cache = await collectIncludes(
+      "include::x.adoc[]\ninclude::y.adoc[]\ninclude::z.adoc[]",
+      "",
+      async () => null,
+      new Set(),
+      async (paths) => {
+        batches.push([...paths]);
+        return new Map<string, string | null>([["x.adoc", "include::nested.adoc[]"], ["y.adoc", null]]);
+      },
+    );
+    expect([...cache.keys()]).toEqual(["x.adoc"]);
+    // nested.adoc is requested (x was readable); y and z are not expanded
+    expect(batches).toEqual([["x.adoc", "y.adoc", "z.adoc"], ["nested.adoc"]]);
+  });
+
+  it("resolves `..` and absolute targets per including file and never leaves the root", async () => {
+    const tree: Record<string, string> = {
+      "docs/guide/a.adoc": "include::../shared/b.adoc[]\ninclude::/top.adoc[]\ninclude::../../../../escape.adoc[]",
+      "docs/shared/b.adoc": "include::./c.adoc[]",
+      "docs/shared/c.adoc": "leaf",
+      "top.adoc": "leaf",
+      "escape.adoc": "leaf",
+    };
+    const asked: string[] = [];
+    await collectIncludes(
+      "include::guide/a.adoc[]",
+      "docs",
+      async () => null,
+      new Set(),
+      async (paths) => {
+        asked.push(...paths);
+        return new Map(paths.filter((p) => p in tree).map((p) => [p, tree[p]!]));
+      },
+    );
+    expect(asked).toEqual([
+      "docs/guide/a.adoc",
+      "docs/shared/b.adoc",
+      "top.adoc",
+      "escape.adoc", // pop() past the root clamps at the root, same as before
+      "docs/shared/c.adoc",
+    ]);
+  });
+
+  it("an include removed between layers just drops out of the result", async () => {
+    let call = 0;
+    const cache = await collectIncludes(
+      "include::a.adoc[]",
+      "",
+      async () => null,
+      new Set(),
+      async (paths) => {
+        call++;
+        if (call === 1) return new Map([["a.adoc", "include::b.adoc[]"]]);
+        return new Map(); // b vanished before layer 1 was read
+      },
+    );
+    expect([...cache.keys()]).toEqual(["a.adoc"]);
+  });
+
+  it("without a doc-level include (0 layers) never calls the batch reader", async () => {
+    let calls = 0;
+    const cache = await collectIncludes("= Plain\n\nno includes", "", async () => null, new Set(), async () => { calls++; return new Map(); });
+    expect(cache.size).toBe(0);
+    expect(calls).toBe(0);
+  });
+});
+
 describe("convertAdoc", () => {
   it("renders a basic document and surfaces frontmatter", async () => {
     const { html, frontmatter } = await convertAdoc({

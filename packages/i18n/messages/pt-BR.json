@@ -111,6 +111,7 @@
   "command_new_scratch_asciidoc": "Novo rascunho: AsciiDoc",
   "command_new_scratch_excalidraw": "Novo rascunho: Excalidraw",
   "tab_unsaved_scratch": "rascunho não salvo",
+  "tab_recovered_draft": "(recuperado {n})",
   "tree_copy_path": "Copiar caminho",
   "tree_rename": "Renomear",
   "tree_move_to_trash": "Mover para a lixeira",

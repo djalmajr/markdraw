@@ -18,6 +18,26 @@ const TabSessionWrapperSchema = v.object({
   activeTabId: v.optional(v.union([v.string(), v.null()])),
 });
 
+/** Storage key for the roots that were open when the session was last saved.
+ *  A persisted tab session is only restorable while its root is open, so a
+ *  webview reload (Vite HMR in dev) that drops the in-memory roots leaves the
+ *  tabs orphaned in storage without this list. */
+export const OPEN_ROOTS_STORAGE_KEY = "markdraw-open-roots-v1";
+
+/** A root open at the end of the session. `id` is the root id tabs are filed
+ *  under (the absolute path today); `path` is what gets reopened on disk. */
+export interface OpenRoot {
+  id: string;
+  path: string;
+}
+
+const OpenRootsSchema = v.array(
+  v.object({
+    id: v.string(),
+    path: v.string(),
+  }),
+);
+
 export type TabId = string;
 
 export interface TabState {
@@ -109,6 +129,113 @@ export function clearTabSession(storageKey: string = DEFAULT_STORAGE_KEY): void 
  * and harmless when no legacy data exists. Returns true when a migration
  * actually happened so the caller can log it once.
  */
+/**
+ * The saved inventory of open roots, deduped by path so the same folder opened
+ * twice is reopened once. `null` means there is no usable inventory: the key
+ * was never written (a version that predates it), or its content is corrupt or
+ * from another version. That is different from an inventory that is empty (the
+ * user closed every folder): only a real inventory can say a root is gone.
+ */
+export function loadOpenRoots(storageKey: string = OPEN_ROOTS_STORAGE_KEY): OpenRoot[] | null {
+  if (typeof localStorage === "undefined") return null;
+  const parsed = safeJsonParse(localStorage.getItem(storageKey), OpenRootsSchema);
+  if (!parsed) return null;
+
+  const seen = new Set<string>();
+  const roots: OpenRoot[] = [];
+  for (const root of parsed) {
+    if (root.path.length === 0 || seen.has(root.path)) continue;
+    seen.add(root.path);
+    roots.push({ id: root.id, path: root.path });
+  }
+  return roots;
+}
+
+/**
+ * Roots to reopen after a reload. Corrupt or foreign-version storage returns
+ * an empty list instead of failing startup (see `loadOpenRoots` to tell that
+ * apart from an empty inventory).
+ */
+export function getOpenRoots(storageKey: string = OPEN_ROOTS_STORAGE_KEY): OpenRoot[] {
+  return loadOpenRoots(storageKey) ?? [];
+}
+
+/** Replace the persisted open-root list. An empty list is written as `[]`, not
+ *  removed: "no folder open" is a known inventory, unlike a missing key. */
+export function setOpenRoots(
+  roots: Iterable<OpenRoot>,
+  storageKey: string = OPEN_ROOTS_STORAGE_KEY,
+): void {
+  if (typeof localStorage === "undefined") return;
+  const seen = new Set<string>();
+  const normalized: OpenRoot[] = [];
+  for (const root of roots) {
+    if (root.path.length === 0 || seen.has(root.path)) continue;
+    seen.add(root.path);
+    normalized.push({ id: root.id, path: root.path });
+  }
+  localStorage.setItem(storageKey, JSON.stringify(normalized));
+}
+
+/** Storage key for the roots whose saved tabs predate the open-roots list.
+ *  Updating from a version without `OPEN_ROOTS_STORAGE_KEY` leaves tabs filed
+ *  under roots nobody knows to reopen; the first list written afterwards holds
+ *  only the folders opened since, so it cannot tell those roots are gone. They
+ *  stay here until the folder is opened or its absence is confirmed. */
+export const PENDING_TAB_ROOTS_STORAGE_KEY = "markdraw-pending-tab-roots-v1";
+
+const PendingTabRootsSchema = v.array(v.string());
+
+/** Root ids whose saved tabs are kept until the root opens or is confirmed
+ *  gone. Missing, corrupt or foreign-version storage reads as none. */
+export function getPendingTabRoots(storageKey: string = PENDING_TAB_ROOTS_STORAGE_KEY): string[] {
+  if (typeof localStorage === "undefined") return [];
+  const parsed = safeJsonParse(localStorage.getItem(storageKey), PendingTabRootsSchema);
+  return parsed ? [...new Set(parsed.filter((id) => id.length > 0))] : [];
+}
+
+/** Replace the pending list. An empty list removes the key: nothing is pending. */
+export function setPendingTabRoots(
+  rootIds: Iterable<string>,
+  storageKey: string = PENDING_TAB_ROOTS_STORAGE_KEY,
+): void {
+  if (typeof localStorage === "undefined") return;
+  const ids = [...new Set(rootIds)].filter((id) => id.length > 0);
+  if (ids.length === 0) localStorage.removeItem(storageKey);
+  else localStorage.setItem(storageKey, JSON.stringify(ids));
+}
+
+export interface TabRestorePlan {
+  /** Roots that had never been restored before this call. The caller records
+   *  them so a root opened later restores its own tabs without replaying the
+   *  tabs of roots already handled. */
+  rootIds: string[];
+  /** Persisted tabs (with `needsLoad` semantics implied) for those roots. */
+  tabs: PersistedTab[];
+  /** Persisted active tab, when it belongs to this batch. */
+  activeTabId: string | null;
+}
+
+/**
+ * Decide which tabs a batch of newly opened roots may restore. Restoring is
+ * idempotent per root: a root already in `restoredRootIds` contributes nothing,
+ * so opening a second folder after startup still restores that folder's tabs.
+ */
+export function planTabRestore(
+  session: PersistedTabSession | null,
+  openRootIds: Iterable<string>,
+  restoredRootIds: ReadonlySet<string>,
+): TabRestorePlan {
+  const rootIds = [...new Set(openRootIds)].filter((id) => !restoredRootIds.has(id));
+  if (rootIds.length === 0) return { rootIds, tabs: [], activeTabId: null };
+
+  const fresh = new Set(rootIds);
+  const tabs = session?.tabs.filter((tab) => fresh.has(tab.rootId)) ?? [];
+  const activeTabId =
+    session && tabs.some((tab) => tab.id === session.activeTabId) ? session.activeTabId : null;
+  return { rootIds, tabs, activeTabId };
+}
+
 export function migrateLegacyTabSession(targetKey: string): boolean {
   if (targetKey === LEGACY_STORAGE_KEY) return false;
   if (typeof localStorage === "undefined") return false;

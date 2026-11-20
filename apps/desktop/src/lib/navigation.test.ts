@@ -209,6 +209,61 @@ describe("createNavigation.handleNavigate — links .html sem irmão .adoc", () 
   });
 });
 
+describe("createNavigation — voltar e avançar com abas de id com sufixo", () => {
+  function setup(tabs: Array<{ id: string; rootId: string; filePath: string }>) {
+    const activated: string[] = [];
+    const historyOpened: string[] = [];
+    const state = {
+      navStack: () => [{ path: "sub/page.html", rootId: "/other" }, { path: "b.md", rootId: "/other" }],
+      navIndex: () => 1,
+      setNavIndex: () => {},
+      findEntryByPath: (path: string): FSEntry => ({ name: path.split("/").pop()!, path, kind: "file" }),
+    } as unknown as AppState;
+    const navigation = createNavigation({
+      loadFileContent: () => Promise.resolve(),
+      rootPaths: () => new Map(),
+      state,
+      // The store answers like the real one: the canonical id first, else the
+      // tab of that root and path, whatever its id.
+      tabStore: () => ({
+        getTab: (id: string) => tabs.find((tab) => tab.id === id),
+        findTabByFile: (path: string, rootId: string) =>
+          tabs.find((tab) => tab.id === `${rootId}::${path}`)
+          ?? tabs.find((tab) => tab.rootId === rootId && tab.filePath === path),
+      }) as never,
+      onActivateTab: (id) => { activated.push(id); },
+      onOpenHistoryTab: (entry) => { historyOpened.push(entry.path); },
+      onOpenFile: () => Promise.resolve(),
+    });
+    return { navigation, activated, historyOpened };
+  }
+
+  it("ativa a única aba do caminho mesmo quando o id dela tem sufixo", () => {
+    const { navigation, activated, historyOpened } = setup([
+      { id: "/other::sub/page.html#1", rootId: "/other", filePath: "sub/page.html" },
+    ]);
+    navigation.handleGoBack();
+    expect(activated).toEqual(["/other::sub/page.html#1"]);
+    expect(historyOpened).toEqual([]);
+  });
+
+  it("controle: com o id canônico, ativa esse id", () => {
+    const { navigation, activated } = setup([
+      { id: "/other::sub/page.html#1", rootId: "/other", filePath: "sub/page.html" },
+      { id: "/other::sub/page.html", rootId: "/other", filePath: "sub/page.html" },
+    ]);
+    navigation.handleGoBack();
+    expect(activated).toEqual(["/other::sub/page.html"]);
+  });
+
+  it("sem aba do caminho, abre pelo histórico", () => {
+    const { navigation, activated, historyOpened } = setup([]);
+    navigation.handleGoBack();
+    expect(activated).toEqual([]);
+    expect(historyOpened).toEqual(["sub/page.html"]);
+  });
+});
+
 describe("resolveNavigationTarget", () => {
   const roots = new Map([
     ["repo", "/Users/djalmajr/Developer/djalmajr/markdraw"],
