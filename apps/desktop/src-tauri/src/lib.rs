@@ -74,6 +74,7 @@ use html_preview::{html_preview_clear_overlay, html_preview_register, html_previ
 // custom caption buttons only offer what works.
 #[cfg(any(target_os = "linux", test))]
 mod hyprland;
+mod media_read;
 mod window_caps;
 
 // Pure-Rust helpers split out of this file so the Miri sub-crate
@@ -301,6 +302,41 @@ async fn find_in_files(
 #[tauri::command]
 async fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+/// Bytes of a media file (image/PDF) under an OPEN root, for paths the asset
+/// protocol refuses (dot components). The webview-supplied `root` is only
+/// honoured if it is, string for string, a root `mcp_set_roots` holds
+/// (`Registry::with_root`, matched before any filesystem access); reads are
+/// limited to 2 at a time and 200 MiB in flight (`busy` at once otherwise,
+/// before any blocking thread is requested); see `media_read`. Errors are
+/// `{ code, message }` with fixed text, never the path.
+#[tauri::command]
+async fn read_file_bytes_confined<R: Runtime>(
+    webview: tauri::Webview<R>,
+    root: String,
+    relative_path: String,
+    registry: tauri::State<'_, std::sync::Arc<mcp_server::Registry>>,
+) -> Result<tauri::ipc::Response, media_read::ReadError> {
+    if webview.label() != "main" {
+        return Err(media_read::NOT_ALLOWED);
+    }
+    let registry = registry.inner().clone();
+    // The slot is taken here, before a blocking thread is requested, and is
+    // held until the IPC response has been built from the bytes.
+    media_read::serve(
+        media_read::shared_admission(),
+        &root,
+        &relative_path,
+        move |ticket| ticket.read(&media_read::registry_authority(&registry)),
+        |job| async move {
+            tauri::async_runtime::spawn_blocking(job)
+                .await
+                .map_err(|_| ())
+        },
+        tauri::ipc::Response::new,
+    )
+    .await
 }
 
 /// Read one environment variable from the host process, for `{env:VAR}`
@@ -759,9 +795,70 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
 
 type FsDebouncer = notify_debouncer_mini::Debouncer<ContentWatcher>;
 
-struct WatcherHolder(Mutex<Option<FsDebouncer>>);
+/// One watcher slot shared by the overlapping `watch_*` / `stop_watching_*`
+/// commands. Every command takes a ticket on entry (arrival order) and applies
+/// its change under the slot lock only if no newer ticket was applied first:
+/// the last arrival wins, so a late `stop` can never shut down the watcher a
+/// newer `watch` just installed, and a slow older `watch` can never replace a
+/// newer one. The old watcher is dropped and the new one built while the lock
+/// is held, so two applications never interleave.
+struct WatchSlot<T> {
+    next_ticket: std::sync::atomic::AtomicU64,
+    state: Mutex<SlotState<T>>,
+}
 
-struct DirWatcherHolder(Mutex<Option<FsDebouncer>>);
+struct SlotState<T> {
+    applied: u64,
+    current: Option<T>,
+}
+
+impl<T> WatchSlot<T> {
+    fn new() -> Self {
+        Self {
+            next_ticket: std::sync::atomic::AtomicU64::new(0),
+            state: Mutex::new(SlotState {
+                applied: 0,
+                current: None,
+            }),
+        }
+    }
+
+    /// Arrival order. Call as the first thing a command does.
+    fn ticket(&self) -> u64 {
+        self.next_ticket
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
+    }
+
+    /// Apply `build` (the new content of the slot; `None` stops) unless a
+    /// newer ticket was already applied, in which case this call is stale and
+    /// a no-op (`Ok`). The previous content is dropped first.
+    fn apply<F>(&self, ticket: u64, build: F) -> Result<(), String>
+    where
+        F: FnOnce() -> Result<Option<T>, String>,
+    {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        if ticket <= state.applied {
+            return Ok(());
+        }
+        state.applied = ticket;
+        state.current = None;
+        state.current = build()?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn is_active(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.current.is_some())
+            .unwrap_or(false)
+    }
+}
+
+struct WatcherHolder(WatchSlot<FsDebouncer>);
+
+struct DirWatcherHolder(WatchSlot<FsDebouncer>);
 
 /// Event kinds that mean the file or tree changed: create, remove, modify,
 /// and close-after-write.
@@ -854,60 +951,48 @@ where
 
 #[tauri::command]
 async fn watch_paths<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> Result<(), String> {
-    // Stop existing watcher
-    if let Some(state) = app.try_state::<WatcherHolder>() {
-        let mut lock = state.0.lock().map_err(|e| e.to_string())?;
-        *lock = None;
-    }
-
+    let Some(state) = app.try_state::<WatcherHolder>() else {
+        return Ok(());
+    };
+    let ticket = state.0.ticket();
     let app_clone = app.clone();
-    let debouncer = make_watcher(&paths, Duration::from_millis(500), false, move |changed| {
-        let _ = app_clone.emit("fs-change", WatchEvent { paths: changed });
-    })?;
-
-    // Store to prevent drop
-    if let Some(state) = app.try_state::<WatcherHolder>() {
-        let mut lock = state.0.lock().map_err(|e| e.to_string())?;
-        *lock = Some(debouncer);
-    }
-
-    Ok(())
+    state.0.apply(ticket, || {
+        make_watcher(&paths, Duration::from_millis(500), false, move |changed| {
+            let _ = app_clone.emit("fs-change", WatchEvent { paths: changed });
+        })
+        .map(Some)
+    })
 }
 
 #[tauri::command]
 async fn stop_watching<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     if let Some(state) = app.try_state::<WatcherHolder>() {
-        let mut lock = state.0.lock().map_err(|e| e.to_string())?;
-        *lock = None;
+        let ticket = state.0.ticket();
+        state.0.apply(ticket, || Ok(None))?;
     }
     Ok(())
 }
 
 #[tauri::command]
 async fn watch_dirs<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> Result<(), String> {
-    if let Some(state) = app.try_state::<DirWatcherHolder>() {
-        let mut lock = state.0.lock().map_err(|e| e.to_string())?;
-        *lock = None;
-    }
-
+    let Some(state) = app.try_state::<DirWatcherHolder>() else {
+        return Ok(());
+    };
+    let ticket = state.0.ticket();
     let app_clone = app.clone();
-    let debouncer = make_watcher(&paths, Duration::from_millis(800), true, move |changed| {
-        let _ = app_clone.emit("fs-tree-change", WatchEvent { paths: changed });
-    })?;
-
-    if let Some(state) = app.try_state::<DirWatcherHolder>() {
-        let mut lock = state.0.lock().map_err(|e| e.to_string())?;
-        *lock = Some(debouncer);
-    }
-
-    Ok(())
+    state.0.apply(ticket, || {
+        make_watcher(&paths, Duration::from_millis(800), true, move |changed| {
+            let _ = app_clone.emit("fs-tree-change", WatchEvent { paths: changed });
+        })
+        .map(Some)
+    })
 }
 
 #[tauri::command]
 async fn stop_watching_dirs<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     if let Some(state) = app.try_state::<DirWatcherHolder>() {
-        let mut lock = state.0.lock().map_err(|e| e.to_string())?;
-        *lock = None;
+        let ticket = state.0.ticket();
+        state.0.apply(ticket, || Ok(None))?;
     }
     Ok(())
 }
@@ -1450,8 +1535,8 @@ pub fn run() {
         .manage(std::sync::Arc::new(mcp_server::Registry::default()))
         .manage(Mutex::new(None::<mcp_server::AppEndpoint>))
         .manage(WindowMemory::default())
-        .manage(WatcherHolder(Mutex::new(None)))
-        .manage(DirWatcherHolder(Mutex::new(None)))
+        .manage(WatcherHolder(WatchSlot::new()))
+        .manage(DirWatcherHolder(WatchSlot::new()))
         .manage(McpManager::default())
         .manage(HttpStreamManager::default())
         .manage(CliStreamManager::default())
@@ -1465,6 +1550,7 @@ pub fn run() {
             read_file,
             read_file_relative,
             read_files_relative,
+            read_file_bytes_confined,
             find_in_files,
             get_startup_args,
             set_dock_visible,
@@ -2402,9 +2488,218 @@ mod tests {
 
     fn build_test_app() -> tauri::App<MockRuntime> {
         let app = mock_app();
-        app.manage(WatcherHolder(Mutex::new(None)));
-        app.manage(DirWatcherHolder(Mutex::new(None)));
+        app.manage(WatcherHolder(WatchSlot::new()));
+        app.manage(DirWatcherHolder(WatchSlot::new()));
         app
+    }
+
+    // Records every value that is dropped, so a test can tell which watcher
+    // was shut down and in which order.
+    struct Probe(&'static str, Arc<StdMutex<Vec<&'static str>>>);
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            self.1.lock().unwrap().push(self.0);
+        }
+    }
+
+    fn current_name(slot: &WatchSlot<Probe>) -> Option<&'static str> {
+        slot.state.lock().unwrap().current.as_ref().map(|p| p.0)
+    }
+
+    #[test]
+    fn watch_slot_late_stop_cannot_shut_down_a_newer_watch() {
+        // Arrival order: stop (ticket 1), then watch (ticket 2). The watch is
+        // applied FIRST (the stop was delayed): the stale stop must be a no-op.
+        // Mutation (drop the `ticket <= applied` guard): the stop clears the
+        // newer watch and the final assertion fails.
+        let slot = WatchSlot::<Probe>::new();
+        let drops = Arc::new(StdMutex::new(Vec::new()));
+        let stop_ticket = slot.ticket();
+        let watch_ticket = slot.ticket();
+        slot.apply(watch_ticket, || Ok(Some(Probe("new", drops.clone()))))
+            .unwrap();
+        slot.apply(stop_ticket, || Ok(None)).unwrap();
+        assert_eq!(
+            current_name(&slot),
+            Some("new"),
+            "late stop killed the newer watch"
+        );
+        assert!(drops.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn watch_slot_in_order_stop_after_watch_still_stops() {
+        // Control: a stop that really arrives after the watch must stop it.
+        let slot = WatchSlot::<Probe>::new();
+        let drops = Arc::new(StdMutex::new(Vec::new()));
+        let watch_ticket = slot.ticket();
+        let stop_ticket = slot.ticket();
+        slot.apply(watch_ticket, || Ok(Some(Probe("w", drops.clone()))))
+            .unwrap();
+        slot.apply(stop_ticket, || Ok(None)).unwrap();
+        assert_eq!(current_name(&slot), None);
+        assert_eq!(*drops.lock().unwrap(), vec!["w"]);
+    }
+
+    #[test]
+    fn watch_slot_stale_older_watch_is_skipped_and_never_built() {
+        let slot = WatchSlot::<Probe>::new();
+        let drops = Arc::new(StdMutex::new(Vec::new()));
+        let older = slot.ticket();
+        let newer = slot.ticket();
+        slot.apply(newer, || Ok(Some(Probe("newer", drops.clone()))))
+            .unwrap();
+        let mut built = false;
+        slot.apply(older, || {
+            built = true;
+            Ok(Some(Probe("older", drops.clone())))
+        })
+        .unwrap();
+        assert!(!built, "a superseded watch must not even be built");
+        assert_eq!(current_name(&slot), Some("newer"));
+    }
+
+    #[test]
+    fn watch_slot_overlapping_apply_calls_are_serialized_and_newest_wins() {
+        // Interleave INSIDE the window: the older watch is blocked in its
+        // build closure (holding the slot) while the newer watch and a stop
+        // are issued from other threads. They must wait for the older one,
+        // then apply in ticket order; the newest (watch) survives.
+        let slot = Arc::new(WatchSlot::<Probe>::new());
+        let drops = Arc::new(StdMutex::new(Vec::new()));
+        let log = Arc::new(StdMutex::new(Vec::<&'static str>::new()));
+        let t_old = slot.ticket();
+        let t_stop = slot.ticket();
+        let t_new = slot.ticket();
+
+        let (in_build_tx, in_build_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+
+        let old = {
+            let (slot, drops, log) = (slot.clone(), drops.clone(), log.clone());
+            std::thread::spawn(move || {
+                slot.apply(t_old, || {
+                    in_build_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    log.lock().unwrap().push("old-built");
+                    Ok(Some(Probe("old", drops)))
+                })
+                .unwrap();
+            })
+        };
+        in_build_rx.recv().unwrap();
+        let spawn_apply = |ticket: u64, name: &'static str, probe: Option<&'static str>| {
+            let (slot, drops, log) = (slot.clone(), drops.clone(), log.clone());
+            std::thread::spawn(move || {
+                slot.apply(ticket, || {
+                    log.lock().unwrap().push(name);
+                    Ok(probe.map(|p| Probe(p, drops)))
+                })
+                .unwrap();
+            })
+        };
+        let new = spawn_apply(t_new, "new-built", Some("new"));
+        let stop = spawn_apply(t_stop, "stop-ran", None);
+        // Neither can run while the older apply holds the slot.
+        std::thread::sleep(Duration::from_millis(150));
+        assert_eq!(*log.lock().unwrap(), Vec::<&str>::new());
+        release_tx.send(()).unwrap();
+        old.join().unwrap();
+        new.join().unwrap();
+        stop.join().unwrap();
+
+        assert_eq!(
+            current_name(&slot),
+            Some("new"),
+            "newest watch must survive"
+        );
+        let log = log.lock().unwrap().clone();
+        assert_eq!(log[0], "old-built");
+        // The stop (ticket 2) may run before the newer watch (ticket 3) or be
+        // skipped as stale when the watch got the lock first; never after it.
+        if let Some(stop_at) = log.iter().position(|e| *e == "stop-ran") {
+            let new_at = log.iter().position(|e| *e == "new-built").unwrap();
+            assert!(
+                stop_at < new_at,
+                "stale stop ran after the newer watch: {log:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn watch_slot_failed_build_leaves_slot_empty_and_reports_the_error() {
+        let slot = WatchSlot::<Probe>::new();
+        let drops = Arc::new(StdMutex::new(Vec::new()));
+        let t1 = slot.ticket();
+        slot.apply(t1, || Ok(Some(Probe("first", drops.clone()))))
+            .unwrap();
+        let t2 = slot.ticket();
+        let err = slot.apply(t2, || Err("boom".into())).unwrap_err();
+        assert_eq!(err, "boom");
+        assert_eq!(current_name(&slot), None);
+        assert_eq!(*drops.lock().unwrap(), vec!["first"]);
+    }
+
+    #[test]
+    fn watch_paths_command_accepts_empty_and_missing_paths_and_stays_stoppable() {
+        let app = build_test_app();
+        let handle = app.handle().clone();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let dir = tempdir().unwrap();
+        let missing = dir.path().join("missing").to_string_lossy().to_string();
+        runtime.block_on(async {
+            watch_paths(handle.clone(), vec![]).await.unwrap();
+            watch_paths(handle.clone(), vec![missing]).await.unwrap();
+            assert!(app.state::<WatcherHolder>().0.is_active());
+            stop_watching(handle.clone()).await.unwrap();
+            stop_watching(handle.clone()).await.unwrap();
+        });
+        assert!(!app.state::<WatcherHolder>().0.is_active());
+    }
+
+    #[test]
+    fn watch_commands_overlapped_from_threads_keep_state_consistent() {
+        // Real commands, many overlapping calls on a multi-thread runtime:
+        // the final state must equal the effect of the highest ticket.
+        let app = build_test_app();
+        let handle = app.handle().clone();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .enable_all()
+            .build()
+            .unwrap();
+        let dir = tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        runtime.block_on(async {
+            let mut tasks = Vec::new();
+            for i in 0..16 {
+                let (h, p) = (handle.clone(), path.clone());
+                tasks.push(tokio::spawn(async move {
+                    if i % 2 == 0 {
+                        watch_paths(h, vec![p]).await.unwrap();
+                    } else {
+                        stop_watching(h).await.unwrap();
+                    }
+                }));
+            }
+            for t in tasks {
+                t.await.unwrap();
+            }
+        });
+        let holder = app.state::<WatcherHolder>();
+        let state = holder.0.state.lock().unwrap();
+        assert_eq!(
+            state.applied, 16,
+            "the newest ticket must have been applied last"
+        );
+        // `state.current` mirrors the last-applied ticket's kind only when it
+        // is the newest; whichever it is, it must be coherent (no panic, no poison).
+        drop(state);
+        runtime.block_on(async { stop_watching(handle.clone()).await.unwrap() });
+        assert!(!holder.0.is_active());
     }
 
     #[test]
@@ -2426,10 +2721,7 @@ mod tests {
         });
         {
             let holder = app.state::<WatcherHolder>();
-            assert!(
-                holder.0.lock().unwrap().is_some(),
-                "debouncer must be stored"
-            );
+            assert!(holder.0.is_active(), "debouncer must be stored");
         }
 
         runtime.block_on(async {
@@ -2437,7 +2729,7 @@ mod tests {
         });
         {
             let holder = app.state::<WatcherHolder>();
-            assert!(holder.0.lock().unwrap().is_none(), "stop must clear state");
+            assert!(!holder.0.is_active(), "stop must clear state");
         }
     }
 
@@ -2461,16 +2753,16 @@ mod tests {
         // Both holders coexist, but only DirWatcherHolder should be populated.
         let dir_holder = app.state::<DirWatcherHolder>();
         let path_holder = app.state::<WatcherHolder>();
-        assert!(dir_holder.0.lock().unwrap().is_some());
+        assert!(dir_holder.0.is_active());
         assert!(
-            path_holder.0.lock().unwrap().is_none(),
+            !path_holder.0.is_active(),
             "watch_dirs must NOT touch the path-watcher slot",
         );
 
         runtime.block_on(async {
             stop_watching_dirs(handle.clone()).await.unwrap();
         });
-        assert!(dir_holder.0.lock().unwrap().is_none());
+        assert!(!dir_holder.0.is_active());
     }
 
     #[test]

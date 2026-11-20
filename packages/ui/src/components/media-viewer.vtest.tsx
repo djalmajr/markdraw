@@ -189,6 +189,116 @@ describe("MediaViewer — pdf continuous scroll", () => {
   });
 });
 
+describe("MediaViewer — blob fallback (confined read)", () => {
+  // URL.createObjectURL / revokeObjectURL are not implemented by jsdom.
+  let counter = 0;
+  const created: string[] = [];
+  const revoked: string[] = [];
+  beforeEach(() => {
+    counter = 0;
+    created.length = 0;
+    revoked.length = 0;
+    URL.createObjectURL = vi.fn(() => {
+      const url = `blob:test/${++counter}`;
+      created.push(url);
+      return url;
+    });
+    URL.revokeObjectURL = vi.fn((url: string) => {
+      revoked.push(url);
+    });
+  });
+
+  it("shows the image from a blob: URL when src is null and loadBlob resolves", async () => {
+    // Mutation: ignoring loadBlob leaves the 'unable to load' message.
+    const loadBlob = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" }));
+    const { container } = render(() => (
+      <MediaViewer kind="image" src={null} loadBlob={loadBlob} fileName="img.png" />
+    ));
+    await waitFor(() =>
+      expect(container.querySelector("img.media-image")?.getAttribute("src")).toBe("blob:test/1"),
+    );
+    expect(loadBlob).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call loadBlob when the host already resolved an asset src", () => {
+    const loadBlob = vi.fn(async () => new Blob([]));
+    const { container } = render(() => (
+      <MediaViewer kind="image" src="asset://photo.png" loadBlob={loadBlob} fileName="photo.png" />
+    ));
+    expect(container.querySelector("img.media-image")?.getAttribute("src")).toBe("asset://photo.png");
+    expect(loadBlob).not.toHaveBeenCalled();
+    expect(created).toEqual([]);
+  });
+
+  it("revokes the blob URL when the viewer switches to another file", async () => {
+    // Mutation: dropping revokeBlob() in the effect leaks the first URL.
+    const first = vi.fn(async () => new Blob([new Uint8Array([1])]));
+    const second = vi.fn(async () => new Blob([new Uint8Array([2])]));
+    const [loader, setLoader] = createSignal({ fn: first });
+    const { container } = render(() => (
+      <MediaViewer kind="image" src={null} loadBlob={loader().fn} fileName="a.png" />
+    ));
+    await waitFor(() => expect(container.querySelector("img.media-image")?.getAttribute("src")).toBe("blob:test/1"));
+    setLoader({ fn: second });
+    flush();
+    await waitFor(() => expect(container.querySelector("img.media-image")?.getAttribute("src")).toBe("blob:test/2"));
+    expect(revoked).toEqual(["blob:test/1"]);
+  });
+
+  it("revokes the blob URL on unmount", async () => {
+    // Mutation: dropping revokeBlob() from onCleanup leaks the URL.
+    const loadBlob = vi.fn(async () => new Blob([new Uint8Array([1])]));
+    const { container, unmount } = render(() => (
+      <MediaViewer kind="image" src={null} loadBlob={loadBlob} fileName="a.png" />
+    ));
+    await waitFor(() => expect(container.querySelector("img.media-image")).not.toBeNull());
+    unmount();
+    expect(revoked).toEqual(["blob:test/1"]);
+  });
+
+  it("a slow load superseded by a newer file never publishes (or leaks) its URL", async () => {
+    // Mutation: dropping the generation guard shows the stale file.
+    let releaseSlow!: (b: Blob) => void;
+    const slow = () => new Promise<Blob>((r) => (releaseSlow = r));
+    const fast = async () => new Blob([new Uint8Array([2])]);
+    const [loader, setLoader] = createSignal({ fn: slow });
+    const { container } = render(() => (
+      <MediaViewer kind="image" src={null} loadBlob={loader().fn} fileName="a.png" />
+    ));
+    setLoader({ fn: fast });
+    flush();
+    await waitFor(() => expect(container.querySelector("img.media-image")?.getAttribute("src")).toBe("blob:test/1"));
+    releaseSlow(new Blob([new Uint8Array([9])]));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(created).toEqual(["blob:test/1"]);
+    expect(container.querySelector("img.media-image")?.getAttribute("src")).toBe("blob:test/1");
+  });
+
+  it("a failing read shows the unable-to-load message and logs only the code", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const loadBlob = vi.fn(async () => {
+      throw { code: "not_allowed", message: "Path is not allowed" };
+    });
+    const { findByText } = render(() => (
+      <MediaViewer kind="image" src={null} loadBlob={loadBlob} fileName="a.png" />
+    ));
+    await findByText("Unable to load a.png");
+    expect(err).toHaveBeenCalledWith("[MediaViewer] failed to read file:", "not_allowed");
+    err.mockRestore();
+  });
+
+  it("a PDF loads from the blob URL through pdf.js", async () => {
+    getDocumentArgs.length = 0;
+    const loadBlob = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "application/pdf" }));
+    const { findAllByText } = render(() => (
+      <MediaViewer kind="pdf" src={null} loadBlob={loadBlob} fileName="d.pdf" />
+    ));
+    await findAllByText(/3 pages/);
+    expect(getDocumentArgs.at(-1)).toEqual({ url: "blob:test/1" });
+  });
+});
+
 describe("MediaViewer — i18n", () => {
   it("renders labels in pt-BR after switchLocale", async () => {
     // Mutation captured: reverting any label to a hardcoded English

@@ -2,6 +2,9 @@ import { describe, expect, it, mock } from "bun:test";
 
 const calls: string[] = [];
 mock.module("@tauri-apps/api/core", () => ({
+  // bun shares module mocks across test files: keep every export a module
+  // under test may import, or a later file fails to link.
+  convertFileSrc: (path: string) => path,
   invoke: async (command: string) => { calls.push(command); },
   Resource: class {},
   Channel: class {},

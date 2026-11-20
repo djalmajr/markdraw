@@ -79,3 +79,14 @@ jobs:
         env:
           ASCIIMARK_EMBED_TEST_MANIFEST: "1"
         run: cargo test --locked --lib model_list
+
+      # The confined media read: reparse points and junctions (Windows), the
+      # handle chain and the admission budget. The symlink test fails, not
+      # skips, on CI when the runner cannot create symlinks.
+      - name: Media read unit tests
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        env:
+          ASCIIMARK_EMBED_TEST_MANIFEST: "1"
+        run: cargo test --locked --lib media_read

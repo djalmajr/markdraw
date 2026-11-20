@@ -94,6 +94,9 @@ mock.module("@tauri-apps/plugin-opener", () => ({
 // `@tauri-apps/api/core` which exports `Resource`. Stubbing core
 // + event keeps the import graph happy in bun.
 mock.module("@tauri-apps/api/core", () => ({
+  // bun shares module mocks across test files: keep every export a module
+  // under test may import, or a later file fails to link.
+  convertFileSrc: (path: string) => path,
   invoke: async () => undefined,
   Resource: class {},
   // Channel — see updater-drain.test.ts: plugin-updater statically

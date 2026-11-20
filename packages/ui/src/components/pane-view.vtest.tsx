@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRoot, createSignal, flush, untrack } from "solid-js";
-import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { createComponent, createRoot, createSignal, flush, untrack } from "solid-js";
+import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AppState } from "../composables/create-app-state.ts";
@@ -465,6 +465,51 @@ describe("AppShell HTML navigation pane ownership", () => {
     expect(f.state.pendingHtmlNavigation()).toEqual({});
     expect(left.getAttribute("src")).toContain("#se%C3%A7%C3%A3o");
     expect(right.getAttribute("src")).not.toContain("#");
+  });
+});
+
+describe("AppShell → PaneView resolveFileBlob wiring", () => {
+  it("AppShell hands resolveFileBlob to the PaneView so a dot-folder image opens from a blob: URL", async () => {
+    // Mutation: dropping `resolveFileBlob={props.resolveFileBlob}` from the
+    // AppShell's <PaneView> leaves the viewer on the (refused) asset URL path.
+    URL.createObjectURL = vi.fn(() => "blob:test/shell");
+    URL.revokeObjectURL = vi.fn();
+    const load = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" }));
+    const resolveFileBlob = vi.fn((_root: string, p: string) => (p.startsWith(".docs/") ? load : null));
+    let state!: ReturnType<typeof createAppState>;
+    const { container } = render(() => {
+      state = createAppState({
+        applyTheme: () => {},
+        convertAdoc: async () => ({ html: "", frontmatter: null }),
+        convertMarkdown: async () => ({ html: "", frontmatter: null }),
+        getStoredTheme: () => "system",
+      });
+      return createComponent(AppShell, {
+        state,
+        showToolbar: false,
+        hasRoot: true,
+        showEditorTabs: true,
+        showNavButtons: false,
+        showSidebar: false,
+        toolbarFilePath: null,
+        toolbarRootName: "",
+        onGoBack: vi.fn(),
+        onGoForward: vi.fn(),
+        onLoadFile: vi.fn(),
+        onOpenFolder: vi.fn(),
+        resolveFileSrc: (_root: string, p: string) => `asset://${p}`,
+        resolveFileBlob,
+      });
+    });
+    const pane = state.paneManager.activePane();
+    pane.setSelectedFile({ name: "img.png", path: ".docs/img.png", kind: "file" });
+    pane.setSelectedRootId("root-0");
+    flush();
+    await waitFor(() =>
+      expect(container.querySelector("img.media-image")?.getAttribute("src")).toBe("blob:test/shell"),
+    );
+    expect(resolveFileBlob).toHaveBeenCalledWith("root-0", ".docs/img.png");
+    expect(load).toHaveBeenCalledTimes(1);
   });
 });
 
