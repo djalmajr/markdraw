@@ -551,3 +551,52 @@ describe("createAiChatStore", () => {
     expect((receivedTools as Array<{ name: string }>)[0]?.name).toBe("app__noop");
   });
 });
+
+describe("createAiChatStore — Go session id", () => {
+  /** Captures the ChatOptions of every provider.chat call. */
+  function recordingProvider(seen: Array<string | undefined>): AIProvider {
+    return {
+      async *chat(_messages, opts) {
+        seen.push(opts?.sessionId);
+        yield { type: "text-delta", text: "ok" };
+        yield { type: "done" };
+      },
+      async complete() {
+        return "";
+      },
+      async embed() {
+        return [];
+      },
+    };
+  }
+
+  it("reuses one generated session id across messages in the same store", async () => {
+    const seen: Array<string | undefined> = [];
+    const store = createAiChatStore({ getProvider: () => recordingProvider(seen) });
+    await store.sendMessage("one");
+    await store.sendMessage("two");
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(seen[1]).toBe(seen[0]);
+  });
+
+  it("uses the configured session id verbatim", async () => {
+    const seen: Array<string | undefined> = [];
+    const store = createAiChatStore({
+      getProvider: () => recordingProvider(seen),
+      sessionId: "chat-custom",
+    });
+    await store.sendMessage("one");
+    await store.sendMessage("two");
+    expect(seen).toEqual(["chat-custom", "chat-custom"]);
+  });
+
+  it("generates different ids for separate stores", async () => {
+    const seen: Array<string | undefined> = [];
+    const provider = () => recordingProvider(seen);
+    await createAiChatStore({ getProvider: provider }).sendMessage("one");
+    await createAiChatStore({ getProvider: provider }).sendMessage("two");
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).not.toBe(seen[1]);
+  });
+});

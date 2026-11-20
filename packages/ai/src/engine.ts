@@ -77,6 +77,9 @@ export interface AIEngineOptions {
    *  spike), so streaming stays opt-in and the buffered path is the safe
    *  default + kill-switch. */
   streaming?: boolean;
+  /** Own user agent sent to OpenCode Go providers (e.g. "Markdraw/0.26.0").
+   *  Ignored for every other provider and omitted entirely when unset. */
+  userAgent?: string;
 }
 
 /** Builds a concrete `AIProvider` for a resolved model. The implementation

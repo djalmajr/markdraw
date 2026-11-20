@@ -2,12 +2,19 @@ import { describe, expect, it } from "bun:test";
 import {
   MAX_CONTEXT_MESSAGES,
   aiSdkEngine,
+  isOpenCodeGoBaseURL,
   mapFullStream,
   reasoningProviderOptions,
 } from "./ai-sdk.ts";
 import type { FetchImpl } from "../engine.ts";
 import type { ResolvedModel } from "../resolve-model.ts";
-import type { AIMessage, AITool, AIStreamPart, ToolApprovalRequest } from "../types.ts";
+import type {
+  AIMessage,
+  AITool,
+  AIStreamPart,
+  ChatOptions,
+  ToolApprovalRequest,
+} from "../types.ts";
 
 type Part = { type: string } & Record<string, unknown>;
 
@@ -512,5 +519,205 @@ describe("reasoningProviderOptions", () => {
     expect(reasoningProviderOptions("openai-compatible", "max")).toEqual({
       openaiCompatible: { reasoningEffort: "max" },
     });
+  });
+});
+
+// ── OpenCode Go session + user-agent headers ─────────────────────────────────
+// The Go endpoints refuse chat requests without x-opencode-session and ask
+// clients to identify with their own user agent. These tests drive the real
+// engine through a fake fetch and read the headers of the actual HTTP request.
+
+type GoKind = "anthropic" | "openai-compatible";
+
+const GO_BASE_URL = "https://opencode.ai/zen/go/v1";
+
+function goModel(kind: GoKind, baseURL: string | undefined = GO_BASE_URL): ResolvedModel {
+  return {
+    id: "test/m",
+    providerId: "test",
+    modelId: "m",
+    provider: {
+      kind,
+      name: "Test",
+      ...(baseURL ? { options: { baseURL } } : {}),
+      models: { m: { name: "m" } },
+    },
+    model: { name: "m" },
+  };
+}
+
+function sseEvent(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+function openAiSse(): string {
+  const chunk = (delta: Record<string, unknown>, finish_reason: string | null) =>
+    `data: ${JSON.stringify({
+      id: "chatcmpl-1",
+      object: "chat.completion.chunk",
+      created: 0,
+      model: "m",
+      choices: [{ index: 0, delta, finish_reason }],
+    })}\n\n`;
+  return (
+    chunk({ role: "assistant", content: "ok" }, null) +
+    chunk({}, "stop") +
+    "data: [DONE]\n\n"
+  );
+}
+
+function anthropicSse(): string {
+  return (
+    sseEvent("message_start", {
+      type: "message_start",
+      message: {
+        id: "msg",
+        type: "message",
+        role: "assistant",
+        model: "m",
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 0 },
+      },
+    }) +
+    sseEvent("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }) +
+    sseEvent("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } }) +
+    sseEvent("content_block_stop", { type: "content_block_stop", index: 0 }) +
+    sseEvent("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 1 } }) +
+    sseEvent("message_stop", { type: "message_stop" })
+  );
+}
+
+function anthropicCompletion(): Record<string, unknown> {
+  return {
+    id: "msg",
+    type: "message",
+    role: "assistant",
+    model: "m",
+    content: [{ type: "text", text: "ok" }],
+    stop_reason: "end_turn",
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+}
+
+/** Captures the headers of every request the SDK actually makes. */
+function headerCapture(kind: GoKind, streaming: boolean): {
+  fetchImpl: FetchImpl;
+  captured: Headers[];
+} {
+  const captured: Headers[] = [];
+  const impl = async (_input: URL | RequestInfo, init?: RequestInit): Promise<Response> => {
+    captured.push(new Headers(init?.headers));
+    const contentType = streaming ? "text/event-stream" : "application/json";
+    const body = streaming
+      ? kind === "anthropic"
+        ? anthropicSse()
+        : openAiSse()
+      : kind === "anthropic"
+        ? JSON.stringify(anthropicCompletion())
+        : JSON.stringify(completionResponse("ok"));
+    return new Response(body, { status: 200, headers: { "content-type": contentType } });
+  };
+  return { fetchImpl: Object.assign(impl, { preconnect: () => {} }), captured };
+}
+
+function runGoChat(
+  model: ResolvedModel,
+  fetchImpl: FetchImpl,
+  options: { streaming?: boolean; userAgent?: string } = {},
+  chatOpts?: ChatOptions,
+): Promise<AIStreamPart[]> {
+  const provider = aiSdkEngine.createProvider(model, async () => "key", {
+    fetch: fetchImpl,
+    ...(options.streaming ? { streaming: true } : {}),
+    ...(options.userAgent ? { userAgent: options.userAgent } : {}),
+  });
+  return collect(provider.chat([{ role: "user", content: "hi" }], chatOpts));
+}
+
+describe("ai-sdk engine OpenCode Go headers", () => {
+  for (const kind of ["anthropic", "openai-compatible"] as const) {
+    for (const streaming of [false, true]) {
+      it(`sends sessionId and userAgent on ${kind} ${streaming ? "streaming" : "buffered"} requests`, async () => {
+        const { fetchImpl, captured } = headerCapture(kind, streaming);
+        await runGoChat(
+          goModel(kind),
+          fetchImpl,
+          { streaming, userAgent: "Markdraw/1.2.3" },
+          { sessionId: "session-abc" },
+        );
+        expect(captured).toHaveLength(1);
+        expect(captured[0].get("x-opencode-session")).toBe("session-abc");
+        expect(captured[0].get("user-agent")).toBe("Markdraw/1.2.3");
+      });
+    }
+  }
+
+  it("also sends both headers on the buffered complete() path", async () => {
+    const { fetchImpl, captured } = headerCapture("openai-compatible", false);
+    const provider = aiSdkEngine.createProvider(goModel("openai-compatible"), async () => "key", {
+      fetch: fetchImpl,
+      userAgent: "Markdraw/1.2.3",
+    });
+    expect(await provider.complete("hi", { sessionId: "complete-session" })).toBe("ok");
+    expect(captured[0].get("x-opencode-session")).toBe("complete-session");
+    expect(captured[0].get("user-agent")).toBe("Markdraw/1.2.3");
+  });
+
+  it("generates a fresh UUID session when sessionId is omitted", async () => {
+    const { fetchImpl, captured } = headerCapture("openai-compatible", false);
+    await runGoChat(goModel("openai-compatible"), fetchImpl, { userAgent: "Markdraw/1.2.3" });
+    await runGoChat(goModel("openai-compatible"), fetchImpl, { userAgent: "Markdraw/1.2.3" });
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    expect(captured).toHaveLength(2);
+    expect(captured[0].get("x-opencode-session")).toMatch(uuid);
+    expect(captured[1].get("x-opencode-session")).toMatch(uuid);
+    expect(captured[0].get("x-opencode-session")).not.toBe(captured[1].get("x-opencode-session"));
+  });
+
+  it("does not set a Markdraw user agent when userAgent is omitted", async () => {
+    const { fetchImpl, captured } = headerCapture("openai-compatible", false);
+    await runGoChat(goModel("openai-compatible"), fetchImpl, {}, { sessionId: "session-abc" });
+    expect(captured[0].get("x-opencode-session")).toBe("session-abc");
+    // The SDK adds its own library suffix; the engine adds none of its own.
+    expect(captured[0].get("user-agent") ?? "").not.toContain("Markdraw");
+  });
+
+  it("leaves non-Go providers untouched", async () => {
+    const noBaseURL: ResolvedModel = {
+      id: "test/m",
+      providerId: "test",
+      modelId: "m",
+      provider: { kind: "anthropic", name: "Test", models: { m: { name: "m" } } },
+      model: { name: "m" },
+    };
+    const cases: ResolvedModel[] = [
+      { ...resolvedModel(), provider: { ...resolvedModel().provider, options: { baseURL: "http://fake.test/v1" } } },
+      noBaseURL,
+      goModel("openai-compatible", "https://opencode.ai/zen/v1"),
+    ];
+    for (const model of cases) {
+      const { fetchImpl, captured } = headerCapture(model.provider.kind as GoKind, false);
+      await runGoChat(model, fetchImpl, { userAgent: "Markdraw/1.2.3" }, { sessionId: "session-abc" });
+      expect(captured).toHaveLength(1);
+      expect(captured[0].has("x-opencode-session")).toBe(false);
+      expect(captured[0].get("user-agent") ?? "").not.toContain("Markdraw");
+    }
+  });
+
+  it("treats an invalid baseURL as non-Go without throwing", async () => {
+    expect(isOpenCodeGoBaseURL("not a url")).toBe(false);
+    const { fetchImpl, captured } = headerCapture("openai-compatible", false);
+    const parts = await runGoChat(
+      goModel("openai-compatible", "not a url"),
+      fetchImpl,
+      { userAgent: "Markdraw/1.2.3" },
+      { sessionId: "session-abc" },
+    );
+    // The SDK itself reports the bad URL as an error part; the engine's Go
+    // detection neither throws nor adds the Go headers.
+    expect(parts.some((p) => p.type === "error")).toBe(true);
+    expect(captured).toHaveLength(0);
   });
 });

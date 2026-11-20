@@ -4,13 +4,12 @@ import { createSignal, flush } from "solid-js";
 import { cleanup, render, waitFor } from "@solidjs/testing-library";
 
 const counts = vi.hoisted(() => ({ mermaid: 0 }));
-vi.mock("mermaid", () => ({
-  default: {
-    initialize: () => {},
-    render: async (id: string) => {
-      if (id !== "mermaid-prewarm") counts.mermaid++;
-      return { svg: '<svg viewBox="0 0 10 10"><text>Ready</text></svg>' };
-    },
+vi.mock(import("../lib/mermaid-frame.ts"), async (original) => ({
+  ...await original(),
+  ensureMermaidWarm: async () => {},
+  renderInFrame: async () => {
+    counts.mermaid++;
+    return { svg: '<svg viewBox="0 0 10 10"><text>Ready</text></svg>' };
   },
 }));
 
@@ -19,6 +18,7 @@ import { Preview } from "./preview.tsx";
 const fixture = process.env.MARKDRAW_PERF_HTML;
 afterEach(() => {
   cleanup();
+  counts.mermaid = 0;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -55,6 +55,7 @@ it.skipIf(!fixture)("measures the synthetic AsciiDoc fixture across preview acti
       }, { timeout: 15000 });
     };
     await ready();
+    expect(counts.mermaid).toBe(10);
     console.log(`perf open mermaid=${counts.mermaid} fetch=${fetches} max=${maximum}`);
     setHtml("<h1>Other tab</h1>");
     flush();
@@ -63,11 +64,13 @@ it.skipIf(!fixture)("measures the synthetic AsciiDoc fixture across preview acti
     setHtml(documentHtml);
     flush();
     await ready();
+    expect(counts.mermaid).toBe(10);
     console.log(`perf return mermaid=${counts.mermaid} fetch=${fetches} max=${maximum}`);
     setTocVisible(true);
     flush();
     await new Promise((resolve) => setTimeout(resolve, 1000));
     await ready();
+    expect(counts.mermaid).toBe(10);
     console.log(`perf toc mermaid=${counts.mermaid} fetch=${fetches} max=${maximum}`);
   } finally {
     toc.remove();

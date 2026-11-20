@@ -21,6 +21,7 @@ import {
 } from "@markdraw/core/right-panel-tabs.ts";
 import { getStoredAiMode, setStoredAiMode, type AIChatMode } from "@markdraw/core/ai-prefs.ts";
 import { formatChatTranscript } from "../lib/chat-export.ts";
+import { flushPendingMermaid } from "../lib/mermaid-flush.ts";
 import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
 import type { CustomInstructions } from "@markdraw/ai/slash-commands.ts";
 import type { ReadFiles } from "@markdraw/core/asciidoc.ts";
@@ -1531,11 +1532,18 @@ export function createAppState(config: AppStateConfig) {
 
   // ── PDF export ──────────────────────────────────────────────────────────
 
-  function handleExportPdf() {
+  async function handleExportPdf(): Promise<void> {
+    // Draw the pending diagrams with the theme the live preview is using:
+    // removing `dark` first would give the article two diagram themes after
+    // the dialog closes. The light theme belongs to the printed page only.
+    await flushPendingMermaid();
     const wasDark = document.documentElement.classList.contains("dark");
     if (wasDark) document.documentElement.classList.remove("dark");
-    void config.printPage?.();
-    if (wasDark) document.documentElement.classList.add("dark");
+    try {
+      await config.printPage?.();
+    } finally {
+      if (wasDark) document.documentElement.classList.add("dark");
+    }
   }
 
   // ── Sidebar resize ─────────────────────────────────────────────────────

@@ -345,3 +345,94 @@ describe("createAiChatSessions — hydrate", () => {
     });
   });
 });
+
+describe("createAiChatSessions — Go session id", () => {
+  it("hands each session its own opaque sessionId, stable across turns, including forks", async () => {
+    await withRoot(async (create) => {
+      const seen: Array<string | undefined> = [];
+      const provider: AIProvider = {
+        async *chat(_messages, opts) {
+          seen.push(opts?.sessionId);
+          yield { type: "text-delta", text: "ok" };
+          yield { type: "done" };
+        },
+        async complete() {
+          return "";
+        },
+        async embed() {
+          return [];
+        },
+      };
+      const mgr = create(() => createAiChatSessions({ getProvider: () => provider }));
+      const first = mgr.createSession();
+      const second = mgr.createSession();
+      await mgr.storeFor(first)!.sendMessage("a");
+      await mgr.storeFor(first)!.sendMessage("a2");
+      await mgr.storeFor(second)!.sendMessage("b");
+      const fork = mgr.forkSession(first)!;
+      await mgr.storeFor(fork)!.sendMessage("c");
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+      expect(seen).toHaveLength(4);
+      for (const id of seen) expect(id).toMatch(uuid);
+      // Stable across one conversation's turns, distinct across conversations
+      // and the fork, and never the local id (it encodes the creation time).
+      expect(seen[0]).toBe(seen[1]);
+      expect(new Set([seen[0], seen[2], seen[3]]).size).toBe(3);
+      for (const local of [first, second, fork]) expect(seen).not.toContain(local);
+
+      // Closing the chat and reopening it from history keeps its id.
+      mgr.closeSession(first);
+      flush();
+      mgr.openFromHistory(first);
+      flush();
+      await mgr.storeFor(first)!.sendMessage("a3");
+      expect(seen[4]).toBe(seen[0]);
+    });
+  });
+
+  it("forgets the id of a conversation the history cap evicts", async () => {
+    await withRoot(async (create) => {
+      const seen: Array<string | undefined> = [];
+      const provider: AIProvider = {
+        async *chat(_messages, opts) {
+          seen.push(opts?.sessionId);
+          yield { type: "text-delta", text: "ok" };
+          yield { type: "done" };
+        },
+        async complete() {
+          return "";
+        },
+        async embed() {
+          return [];
+        },
+      };
+      const mgr = create(() => createAiChatSessions({ getProvider: () => provider }));
+      const meta = (id: string, lastActiveAt: number, isOpen: boolean) => ({
+        id,
+        title: id,
+        createdAt: lastActiveAt,
+        lastActiveAt,
+        isArchived: false,
+        isOpen,
+      });
+      // 50 sessions: the cap. Sending touches "victim", so the others are
+      // dated later to keep it the oldest; the next session evicts it.
+      const later = Date.now() + 1_000_000;
+      const sessions = [meta("victim", 0, true), ...Array.from({ length: 49 }, (_, i) => meta(`s${i}`, later + i, false))];
+      mgr.hydrate({ sessions, activeId: "victim" });
+      flush();
+      await mgr.storeFor("victim")!.sendMessage("first");
+      mgr.activateSession(mgr.createSession()); // 51 sessions; the index save evicts "victim"
+      flush();
+      await new Promise((r) => setTimeout(r, 650));
+      expect(mgr.allSessions().some((m) => m.id === "victim")).toBe(false);
+
+      // The same local id coming back is another conversation: a new wire id.
+      mgr.hydrate({ sessions: [meta("victim", 100, true)], activeId: "victim" });
+      flush();
+      await mgr.storeFor("victim")!.sendMessage("again");
+      expect(seen).toHaveLength(2);
+      expect(seen[1]).not.toBe(seen[0]);
+    });
+  });
+});

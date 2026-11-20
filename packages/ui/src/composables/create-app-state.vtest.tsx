@@ -6,6 +6,7 @@ import { setChatSessionsIndex } from "@markdraw/core/ai-chat-sessions.ts";
 import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AITool, ToolApprovalRequest } from "@markdraw/ai/types.ts";
 import { createAppState, type ThemeMode } from "./create-app-state.ts";
+import { registerMermaidFlush } from "../lib/mermaid-flush.ts";
 import { createPaneManager } from "./create-pane-manager.ts";
 import { createPaneStore } from "./create-pane-store.ts";
 import type { AiInlineReference } from "./ai-context.ts";
@@ -3730,6 +3731,51 @@ describe("overlapping edit conversions", () => {
       expect(pane.html()).toBe("<p>b</p>");
       expect(converted).toEqual([]);
     });
+  });
+});
+
+describe("AppState — exportação PDF com diagramas pendentes", () => {
+  it("espera o flush do preview antes de chamar printPage", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const unregister = registerMermaidFlush(async () => {
+      order.push("flush-start");
+      await gate;
+      order.push("flush-end");
+    });
+    try {
+      const pending = withState((state) => state.handleExportPdf(), {
+        printPage: () => { order.push("print"); },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(order).toEqual(["flush-start"]);
+      release();
+      await pending;
+      expect(order).toEqual(["flush-start", "flush-end", "print"]);
+    } finally {
+      unregister();
+    }
+  });
+
+  it("drena os diagramas com o tema vigente e só remove dark para imprimir", async () => {
+    const seen: string[] = [];
+    document.documentElement.classList.add("dark");
+    const unregister = registerMermaidFlush(async () => {
+      seen.push(document.documentElement.classList.contains("dark") ? "dark" : "light");
+    });
+    try {
+      await withState((state) => state.handleExportPdf(), {
+        printPage: () => {
+          seen.push(document.documentElement.classList.contains("dark") ? "dark" : "light");
+        },
+      });
+      expect(seen).toEqual(["dark", "light"]);
+      expect(document.documentElement.classList.contains("dark")).toBe(true);
+    } finally {
+      unregister();
+      document.documentElement.classList.remove("dark");
+    }
   });
 });
 

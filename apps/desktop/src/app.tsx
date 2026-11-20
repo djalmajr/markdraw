@@ -228,6 +228,9 @@ export function App() {
   // AI provider catalog (ai.json merged over builtins). Starts with builtins so
   // a provider is resolvable before the async load completes; refreshed onMount.
   const [aiConfig, setAiConfig] = createSignal<AIConfig>(withBuiltins({}));
+  // Hydrated from getVersion() below; buildEngineOptions uses it for the
+  // OpenCode Go user agent, so the signal must exist before any provider build.
+  const [appVersion, setAppVersion] = createSignal<string>("");
 
   // MCP (Model Context Protocol) client. The Rust manager (src-tauri/ai_mcp.rs)
   // owns connections for both transports; this bridge drives tool discovery and
@@ -344,14 +347,17 @@ export function App() {
 
   /** Engine options read fresh per provider build: streaming picks the Rust
    *  SSE transport (tauri-plugin-http buffers whole bodies); reasoning "default"
-   *  omits the option entirely (the model uses its own default effort). */
+   *  omits the option entirely (the model uses its own default effort). The Go
+   *  user agent uses the same appVersion signal as the About dialog. */
   function buildEngineOptions(
     kind?: string,
   ): Parameters<typeof createAiProvider>[3] {
     const reasoning: AIReasoningEffort = getStoredAiReasoning();
+    const version = appVersion();
     const base = {
       fetch: getStoredAiStreaming() ? streamingFetch : tauriFetch,
       streaming: getStoredAiStreaming(),
+      userAgent: version ? `Markdraw/${version}` : "Markdraw",
       ...(reasoning !== "default" ? { reasoningEffort: reasoning } : {}),
     };
     if (kind && isCliProviderKind(kind as never)) {
@@ -1602,7 +1608,6 @@ export function App() {
   // Shortcuts help (Cmd/Ctrl+/ + toolbar menu item) — same pattern.
   const [shortcutsHelpVisible, setShortcutsHelpVisible] = createSignal(false);
   const [aboutOpen, setAboutOpen] = createSignal(false);
-  const [appVersion, setAppVersion] = createSignal<string>("");
   // Command palette (Cmd/Ctrl+Shift+P).
   const [commandPaletteVisible, setCommandPaletteVisible] = createSignal(false);
   // The palette has no keystroke of its own, so it cannot tell which surface a
@@ -1867,7 +1872,7 @@ export function App() {
 
     void setupAppMenu({
       onOpenFolder: folder.handleOpenFolder,
-      onExportPdf: () => invoke("print_webview"),
+      exportPdfState: state,
       onCheckForUpdates: () => checkForAppUpdates(false),
       onCloseTab: () => {
         const activeTab = tabStore().activeTabId();
