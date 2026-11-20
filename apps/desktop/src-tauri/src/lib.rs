@@ -1662,6 +1662,20 @@ pub fn run() {
                     }
                 }
             }
+            // macOS Dock click after a close that hid the window while no
+            // tray icon exists (the tray is disabled or failed to start).
+            // Same restore path as the tray action and a second instance:
+            // show through the Linux-aware helper, then focus.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                if let Some(window) = _app.get_webview_window("main") {
+                    let app = _app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = show_window(app).await;
+                        let _ = window.set_focus();
+                    });
+                }
+            }
         });
 }
 

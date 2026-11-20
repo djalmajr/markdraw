@@ -76,6 +76,10 @@ interface ToolbarProps {
    *  submenu is hidden when this prop is undefined (Chrome extension
    *  has no tray, no window lifecycle to manage). */
   closeBehavior?: "tray" | "quit";
+  /** Desktop-only: whether the OS tray icon is enabled. When false the
+   *  close-behaviour menu calls the `tray` choice "Keep the app running"
+   *  instead of promising a tray it does not have. */
+  showTrayIcon?: boolean;
   tocVisible: boolean;
   onEditorModeChange: (mode: "edit" | "split" | "preview") => void;
   onCheckForUpdates?: () => void;
@@ -328,7 +332,9 @@ export function Toolbar(props: ToolbarProps) {
               >
                 <DropdownMenuRadioItem value="tray">
                   <IconMinimize2 width={14} height={14} />
-                  {(useLocale(), m.menu_window_close_tray())}
+                  {(useLocale(), props.showTrayIcon === false
+                    ? m.menu_window_keep_running()
+                    : m.menu_window_close_tray())}
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="quit">
                   <IconLogOut width={14} height={14} />

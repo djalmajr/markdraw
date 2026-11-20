@@ -235,3 +235,60 @@ describe("Toolbar — minimal window frame", () => {
     await vi.waitFor(() => expect(baseElement.textContent).toContain("Open Folder"));
   });
 });
+
+describe("Toolbar — Window menu label", () => {
+  const WINDOW_PROPS = {
+    ...BASE_PROPS,
+    closeBehavior: "tray" as const,
+    onCloseBehaviorChange: () => {},
+  };
+
+  async function openWindowMenu(baseElement: HTMLElement): Promise<void> {
+    const menu = baseElement.querySelector<HTMLButtonElement>('[aria-label="Menu"]')!;
+    fireEvent.click(menu);
+    flush();
+    const submenu = await vi.waitFor(() => {
+      const found = [...baseElement.querySelectorAll('[role="menuitem"]')].find(
+        (b) => (b.textContent ?? "").trim() === "Window",
+      );
+      expect(found).toBeTruthy();
+      return found as HTMLElement;
+    });
+    fireEvent.click(submenu);
+    flush();
+  }
+
+  it("keeps the tray label when the icon is enabled", async () => {
+    const { baseElement } = render(() => <Toolbar {...WINDOW_PROPS} showTrayIcon={true} />);
+    await openWindowMenu(baseElement);
+    await vi.waitFor(() =>
+      expect(baseElement.textContent).toContain("Minimize to tray"),
+    );
+  });
+
+  it("says Keep the app running when the tray is off, but still stores 'tray'", async () => {
+    // Mutation captured: using the old label would promise an icon the user
+    // just disabled; changing the value to quit would silently change the
+    // close gesture instead of only relabelling it.
+    const onCloseBehaviorChange = vi.fn();
+    const { baseElement } = render(() => (
+      <Toolbar
+        {...WINDOW_PROPS}
+        closeBehavior="quit"
+        showTrayIcon={false}
+        onCloseBehaviorChange={onCloseBehaviorChange}
+      />
+    ));
+    await openWindowMenu(baseElement);
+    const item = await vi.waitFor(() => {
+      const found = [...baseElement.querySelectorAll("[role=menuitemradio]")].find((el) =>
+        /Keep the app running/.test(el.textContent ?? ""),
+      );
+      expect(found).toBeTruthy();
+      return found as HTMLElement;
+    });
+    fireEvent.click(item);
+    flush();
+    expect(onCloseBehaviorChange).toHaveBeenCalledWith("tray");
+  });
+});

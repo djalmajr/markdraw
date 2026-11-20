@@ -5,6 +5,7 @@
 type CloseBehavior = "tray" | "quit";
 
 const CLOSE_BEHAVIOR_KEY = "markdraw-window-close-behavior";
+const TRAY_ICON_KEY = "markdraw-window-tray-icon";
 
 function getStoredCloseBehavior(): CloseBehavior {
   const stored = localStorage.getItem(CLOSE_BEHAVIOR_KEY);
@@ -16,5 +17,20 @@ function setStoredCloseBehavior(value: CloseBehavior): void {
   localStorage.setItem(CLOSE_BEHAVIOR_KEY, value);
 }
 
+function getStoredShowTrayIcon(): boolean {
+  const stored = localStorage.getItem(TRAY_ICON_KEY);
+  if (stored === "true" || stored === "false") return stored === "true";
+  return true;
+}
+
+function setStoredShowTrayIcon(value: boolean): void {
+  localStorage.setItem(TRAY_ICON_KEY, String(value));
+}
+
 export type { CloseBehavior };
-export { getStoredCloseBehavior, setStoredCloseBehavior };
+export {
+  getStoredCloseBehavior,
+  getStoredShowTrayIcon,
+  setStoredCloseBehavior,
+  setStoredShowTrayIcon,
+};

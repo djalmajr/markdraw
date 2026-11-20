@@ -1,6 +1,7 @@
 import { flush } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
+import { switchLocale } from "@markdraw/i18n/solid";
 import { SettingsDialog } from "./settings-dialog.tsx";
 import { ConfirmDialog } from "./confirm-dialog.tsx";
 
@@ -829,6 +830,118 @@ describe("SettingsDialog", () => {
       });
       expect(maskSwitch(baseElement).getAttribute("aria-checked")).toBe("true");
       expect(baseElement.querySelector('[role="status"]')).toBeNull();
+    });
+  });
+});
+
+function openAppearance(baseElement: HTMLElement): void {
+  const tab = [...baseElement.querySelectorAll('[role="tab"]')].find((t) =>
+    /appearance/i.test(t.textContent ?? ""),
+  );
+  fireEvent.click(tab!);
+  flush();
+}
+
+function withPlatform<T>(platform: string, run: () => T): T {
+  const original = Object.getOwnPropertyDescriptor(navigator, "platform");
+  Object.defineProperty(navigator, "platform", { configurable: true, value: platform });
+  try {
+    return run();
+  } finally {
+    if (original) Object.defineProperty(navigator, "platform", original);
+    else Reflect.deleteProperty(navigator, "platform");
+  }
+}
+
+describe("SettingsDialog — tray icon toggle", () => {
+  const PLATFORMS = [
+    {
+      name: "macOS",
+      platform: "MacIntel",
+      label: "Show icon in the menu bar",
+      description: "Without the icon, closing the window hides it and Markdraw stays in the Dock.",
+    },
+    {
+      name: "Windows",
+      platform: "Win32",
+      label: "Show icon in the notification area",
+      description: "Without the icon, closing the window minimizes it.",
+    },
+    {
+      name: "Linux",
+      platform: "Linux x86_64",
+      label: "Show icon in the system tray",
+      description: "Without the icon, closing the window minimizes it.",
+    },
+  ];
+
+  it("is hidden when the host does not pass the props (extension)", () => {
+    const { baseElement } = setup();
+    openAppearance(baseElement);
+    expect(baseElement.textContent).not.toContain("Show icon in");
+    expect(baseElement.querySelector('[data-slot="field-label"]')).toBeNull();
+  });
+
+  for (const item of PLATFORMS) {
+    it(`uses the ${item.name} label and calls the handler`, () => {
+      const onShowTrayIconChange = vi.fn();
+      withPlatform(item.platform, () => {
+        const { baseElement } = setup({
+          showTrayIcon: true,
+          onShowTrayIconChange,
+        });
+        openAppearance(baseElement);
+        expect(baseElement.textContent).toContain("Window");
+        expect(baseElement.textContent).toContain(item.label);
+        expect(baseElement.textContent).toContain(item.description);
+        const fieldLabel = [...baseElement.querySelectorAll<HTMLLabelElement>('[data-slot="field-label"]')]
+          .find((element) => element.textContent?.trim() === item.label);
+        expect(fieldLabel).toBeDefined();
+        const control = baseElement.querySelector<HTMLElement>(
+          `[role="switch"][id="${fieldLabel!.getAttribute("for")}"]`,
+        );
+        expect(control).not.toBeNull();
+        expect(control!.getAttribute("aria-checked")).toBe("true");
+        fireEvent.click(control!);
+        flush();
+        expect(onShowTrayIconChange).toHaveBeenCalledWith(false);
+      });
+    });
+  }
+
+  it("keeps the accessible name and description associated across locale changes", () => {
+    withPlatform("MacIntel", () => {
+      try {
+        switchLocale("en");
+        flush();
+        const { baseElement } = setup({ showTrayIcon: true, onShowTrayIconChange: vi.fn() });
+        openAppearance(baseElement);
+        const labelElement = baseElement.querySelector<HTMLLabelElement>('[data-slot="field-label"]')!;
+        const description = baseElement.querySelector<HTMLElement>('[data-slot="field-description"]')!;
+        const control = baseElement.querySelector<HTMLElement>(
+          `[role="switch"][id="${labelElement.getAttribute("for")}"]`,
+        )!;
+        expect(labelElement.control).toBe(control);
+        expect(control.getAttribute("aria-labelledby")).toBe(labelElement.id);
+        expect(control.getAttribute("aria-describedby")).toBe(description.id);
+        expect(labelElement.textContent).toContain("Show icon in the menu bar");
+
+        for (const [locale, labelText, descriptionText] of [
+          ["pt-BR", "Mostrar ícone na barra de menus", "Sem o ícone, fechar a janela a esconde e o Markdraw continua no Dock."],
+          ["es", "Mostrar icono en la barra de menús", "Sin el icono, cerrar la ventana la oculta y Markdraw sigue en el Dock."],
+        ] as const) {
+          switchLocale(locale);
+          flush();
+          expect(labelElement.textContent).toContain(labelText);
+          expect(description.textContent).toContain(descriptionText);
+          expect(control.getAttribute("aria-labelledby")).toBe(labelElement.id);
+          expect(control.getAttribute("aria-describedby")).toBe(description.id);
+          expect(control.getAttribute("aria-label")).toBeNull();
+        }
+      } finally {
+        switchLocale("en");
+        flush();
+      }
     });
   });
 });

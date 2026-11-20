@@ -93,7 +93,9 @@ import {
 import {
   type CloseBehavior,
   getStoredCloseBehavior,
+  getStoredShowTrayIcon,
   setStoredCloseBehavior,
+  setStoredShowTrayIcon,
 } from "@markdraw/core/window-prefs.ts";
 import {
   type FavoriteFile,
@@ -387,6 +389,7 @@ export function createAppState(config: AppStateConfig) {
   });
   const [respectGitignore, setRespectGitignore] = createSignal(getStoredRespectGitignore());
   const [closeBehavior, setCloseBehavior] = createSignal<CloseBehavior>(getStoredCloseBehavior());
+  const [showTrayIcon, setShowTrayIcon] = createSignal(getStoredShowTrayIcon());
 
   // Derived: list of all roots ordered by rootOrder
   const rootsList = () => {
@@ -615,6 +618,11 @@ export function createAppState(config: AppStateConfig) {
   function handleCloseBehaviorChange(value: CloseBehavior) {
     setCloseBehavior(value);
     setStoredCloseBehavior(value);
+  }
+
+  function handleShowTrayIconChange(value: boolean) {
+    setShowTrayIcon(value);
+    setStoredShowTrayIcon(value);
   }
 
   function triggerEditorFind() {
@@ -2120,6 +2128,7 @@ export function createAppState(config: AppStateConfig) {
     showHiddenEntries,
     respectGitignore,
     closeBehavior,
+    showTrayIcon,
     sidebarVisible,
     sidebarWidth,
     themeMode,
@@ -2170,6 +2179,7 @@ export function createAppState(config: AppStateConfig) {
     setShowHiddenEntries,
     setRespectGitignore,
     setCloseBehavior,
+    setShowTrayIcon,
     setSidebarVisible,
     setSidebarWidth,
     setThemeMode,
@@ -2226,6 +2236,7 @@ export function createAppState(config: AppStateConfig) {
     handleSyncScrollChange,
     handleRespectGitignoreChange,
     handleCloseBehaviorChange,
+    handleShowTrayIconChange,
     handleThemeChange,
     handleWrapTextChange,
     onEditorResizeReset,

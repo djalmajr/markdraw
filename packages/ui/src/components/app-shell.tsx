@@ -70,6 +70,10 @@ interface AppShellProps {
    *  undefined; the submenu is hidden because the gesture has no
    *  meaning in a browser tab. */
   showCloseBehaviorToggle?: boolean;
+  /** Desktop-only tray preference. When omitted, the Settings Window group
+   *  is hidden and the toolbar keeps its generic close-behaviour label. */
+  showTrayIcon?: boolean;
+  onShowTrayIconChange?: (enabled: boolean) => void;
 
   // Platform-derived toolbar strings
   toolbarFilePath: string | null;
@@ -775,6 +779,8 @@ export function AppShell(props: AppShellProps) {
           onIndentModeChange={(v) => s.handleIndentModeChange(v)}
           indentSize={s.indentSize()}
           onIndentSizeChange={(v) => s.handleIndentSizeChange(v)}
+          showTrayIcon={props.showTrayIcon}
+          onShowTrayIconChange={props.onShowTrayIconChange}
           onShowReleaseNotes={props.onReleaseNotes}
           onOpenExternal={props.onOpenExternal}
         />
@@ -891,6 +897,7 @@ export function AppShell(props: AppShellProps) {
             showRecentHistory={!!props.showRecentHistory}
             sidebarVisible={s.sidebarVisible()}
             closeBehavior={props.showCloseBehaviorToggle ? s.closeBehavior() : undefined}
+            showTrayIcon={props.showTrayIcon}
             tocVisible={s.tocVisible()}
             onEditorModeChange={(m) => s.setEditorMode(m)}
             onExportPdf={props.showPdfExport !== false ? s.handleExportPdf : undefined}

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { decideCloseAction } from "./window-close.ts";
 
+const LINUX = "Linux x86_64";
+const WINDOWS = "Win32";
+const MAC = "MacIntel";
+
 describe("decideCloseAction", () => {
   it("default 'tray' setting hides the window when the updater is idle", () => {
     // Mutation captured: dropping the `return "hide"` fallback (e.g.
@@ -8,7 +12,7 @@ describe("decideCloseAction", () => {
     // window-X click quit the app for every user on the default
     // setting — a silent regression of the pre-DJA-50 behaviour.
     expect(
-      decideCloseAction({ closeBehavior: "tray", isUpdating: false, trayAvailable: true }),
+      decideCloseAction({ closeBehavior: "tray", isUpdating: false, trayAvailable: true, platform: LINUX }),
     ).toBe("hide");
   });
 
@@ -20,22 +24,30 @@ describe("decideCloseAction", () => {
     // handler down the `process.exit(0)` path which kills the
     // process on every platform.
     expect(
-      decideCloseAction({ closeBehavior: "quit", isUpdating: false, trayAvailable: true }),
+      decideCloseAction({ closeBehavior: "quit", isUpdating: false, trayAvailable: true, platform: MAC }),
     ).toBe("exit");
   });
 
-  it("'tray' setting minimizes instead of hiding when there is no tray icon", () => {
+  it("Windows and Linux minimize instead of hiding when there is no tray icon", () => {
     // Mutation captured: hiding without a tray icon (setting it up failed,
-    // e.g. a Linux session with no StatusNotifierItem host) leaves the app
-    // running with no way back to the window; quitting instead could drop
-    // unsaved work in other panes or a pending autosave.
+    // e.g. a Linux session with no StatusNotifierItem host, or the user
+    // turned the icon off) leaves the app running with no taskbar/window
+    // way back; quitting instead could drop unsaved work in other panes.
+    for (const platform of [WINDOWS, LINUX]) {
+      expect(
+        decideCloseAction({ closeBehavior: "tray", isUpdating: false, trayAvailable: false, platform }),
+      ).toBe("minimize");
+    }
+  });
+
+  it("macOS hides but keeps the Dock icon when there is no tray icon", () => {
+    // Mutation captured: reusing the Windows/Linux `"minimize"` branch
+    // here would leave a hidden macOS window with no restore affordance
+    // once `set_dock_visible(false)` ran; returning plain `"hide"` would
+    // drop the Dock icon and lose the last way back.
     expect(
-      decideCloseAction({ closeBehavior: "tray", isUpdating: false, trayAvailable: false }),
-    ).toBe("minimize");
-    // The updater bypass still wins without a tray.
-    expect(
-      decideCloseAction({ closeBehavior: "tray", isUpdating: true, trayAvailable: false }),
-    ).toBe("let-close");
+      decideCloseAction({ closeBehavior: "tray", isUpdating: false, trayAvailable: false, platform: MAC }),
+    ).toBe("hide-keep-dock");
   });
 
   it("updater bypass forces let-close even when the user picked 'tray'", () => {
@@ -46,7 +58,7 @@ describe("decideCloseAction", () => {
     // strand the install half-applied, and "exit" here would
     // pre-empt the relaunch's own exit logic.
     expect(
-      decideCloseAction({ closeBehavior: "tray", isUpdating: true, trayAvailable: true }),
+      decideCloseAction({ closeBehavior: "tray", isUpdating: true, trayAvailable: false, platform: LINUX }),
     ).toBe("let-close");
   });
 
@@ -57,7 +69,7 @@ describe("decideCloseAction", () => {
     // on Windows tends to corrupt the updater's swap. `"let-close"`
     // here defers the exit to `relaunch()`'s own teardown.
     expect(
-      decideCloseAction({ closeBehavior: "quit", isUpdating: true, trayAvailable: true }),
+      decideCloseAction({ closeBehavior: "quit", isUpdating: true, trayAvailable: true, platform: WINDOWS }),
     ).toBe("let-close");
   });
 });

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
   getStoredCloseBehavior,
+  getStoredShowTrayIcon,
   setStoredCloseBehavior,
+  setStoredShowTrayIcon,
 } from "./window-prefs.ts";
 import { installLocalStorageMock } from "./test-utils.ts";
 
@@ -19,11 +21,29 @@ describe("window preferences defaults", () => {
     // Default must be `"tray"` to preserve the current contract.
     expect(getStoredCloseBehavior()).toBe("tray");
   });
+
+  it("showTrayIcon defaults to on when nothing is stored", () => {
+    // Mutation captured: defaulting to off would remove the tray from
+    // every existing install on upgrade, changing the close gesture
+    // with no user action.
+    expect(getStoredShowTrayIcon()).toBe(true);
+  });
 });
 
 describe("window preferences round-trip", () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  it("round-trips 'true' and 'false' for the tray icon", () => {
+    // Mutation captured: a setter that always wrote "true" would leave
+    // the toggle stuck on after the user turned it off.
+    setStoredShowTrayIcon(false);
+    expect(localStorage.getItem("markdraw-window-tray-icon")).toBe("false");
+    expect(getStoredShowTrayIcon()).toBe(false);
+    setStoredShowTrayIcon(true);
+    expect(localStorage.getItem("markdraw-window-tray-icon")).toBe("true");
+    expect(getStoredShowTrayIcon()).toBe(true);
   });
 
   it("round-trips both 'tray' and 'quit'", () => {
@@ -40,6 +60,13 @@ describe("window preferences round-trip", () => {
 describe("window preferences invalid stored values", () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  it("falls back to on when the tray-icon value is not in the whitelist", () => {
+    localStorage.setItem("markdraw-window-tray-icon", "yes");
+    expect(getStoredShowTrayIcon()).toBe(true);
+    localStorage.setItem("markdraw-window-tray-icon", "");
+    expect(getStoredShowTrayIcon()).toBe(true);
   });
 
   it("falls back to 'tray' when stored value is not in the whitelist", () => {
