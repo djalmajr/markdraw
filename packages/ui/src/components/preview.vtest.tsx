@@ -41,7 +41,7 @@ vi.mock("mermaid", () => ({
           diagramCtl.pending.mermaid = resolve;
         });
       }
-      return Promise.resolve({ svg: '<svg viewBox="0 0 10 400"><text>Ready</text></svg>' });
+      return Promise.resolve({ svg: `<svg id="${id}" viewBox="0 0 10 400"><defs><marker id="arrow" /></defs><text>arrow</text><path marker-end="url(#arrow)" /></svg>` });
     },
   },
 }));
@@ -73,6 +73,9 @@ vi.mock("../lib/dnd/index.ts", () => ({
 }));
 
 import { Preview, setupTocScrollTracking } from "./preview.tsx";
+import { mermaidCache } from "../lib/mermaid-cache.ts";
+
+afterEach(() => mermaidCache.clear());
 import { PaneView } from "./pane-view.tsx";
 import { FrontmatterPanel } from "./frontmatter-panel.tsx";
 import { ImageLightbox } from "./image-lightbox.tsx";
@@ -708,7 +711,7 @@ describe("Preview — navigation readiness after post-processing", () => {
   });
 
   for (const engine of ["mermaid", "kroki"] as const) {
-    it(`waits for ${engine} completion before consuming a request in the new file`, async () => {
+    it(`jumps before ${engine} completion and repositions after it`, async () => {
       diagramCtl.mode[engine] = "pending";
       const [html, setHtml] = createSignal("<h1>Old</h1>");
       const [fragment, setFragment] = createSignal<string | null>(null);
@@ -750,9 +753,36 @@ describe("Preview — navigation readiness after post-processing", () => {
       );
       await tick();
 
-      expect(callbacksBeforeRenderFinished).toBe(0);
+      expect(callbacksBeforeRenderFinished).toBe(1);
       expect(handled).toHaveBeenCalledTimes(1);
-      expect(scroll).toHaveBeenLastCalledWith({ top: 484, behavior: "smooth" });
+      expect(scroll).toHaveBeenLastCalledWith({ top: 484, behavior: "instant" });
+    });
+  }
+
+  for (const engine of ["mermaid", "kroki"] as const) {
+    it(`stops repositioning a ${engine} jump when the user scrolls`, async () => {
+      diagramCtl.mode[engine] = "pending";
+      const [fragment, setFragment] = createSignal<string | null>(null);
+      const handled = vi.fn(() => setFragment(null));
+      const { container } = render(() => (
+        <div class="content">
+          <Preview {...withDefaults({ html: diagramHtml(engine), currentFilePath: "a.md" })}
+            pendingFragment={fragment()} onFragmentHandled={handled} />
+        </div>
+      ));
+      await waitFor(() => expect(diagramCtl.pending[engine]).toBeTypeOf("function"));
+      const scroller = container.querySelector(".content") as HTMLElement;
+      const scroll = vi.spyOn(scroller, "scrollTo").mockImplementation(() => {});
+      setFragment("target");
+      flush();
+      await waitFor(() => expect(handled).toHaveBeenCalledTimes(1));
+      expect(scroll).toHaveBeenCalledTimes(1);
+      scroller.dispatchEvent(new Event("wheel"));
+      resolveDiagram(engine);
+      await waitFor(() => expect(container.querySelector(`.${engine} svg`)).not.toBeNull());
+      await tick();
+      expect(scroll).toHaveBeenCalledTimes(1);
+      expect(handled).toHaveBeenCalledTimes(1);
     });
   }
 
@@ -783,7 +813,7 @@ describe("Preview — navigation readiness after post-processing", () => {
     setHtml(diagramHtml("mermaid"));
     flush();
     await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
-    setFragment("target");
+    setFragment("missing");
     flush();
     await tick();
     expect(handled).not.toHaveBeenCalled();
@@ -835,10 +865,75 @@ describe("Preview — navigation readiness after post-processing", () => {
       flush();
       await waitFor(() => expect(handled).toHaveBeenCalledTimes(1), { timeout: 2000 });
 
-      expect(container.querySelector(`.${engine} .mermaid-error`)).not.toBeNull();
-      expect(scroll).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(container.querySelector(`.${engine} .mermaid-error`)).not.toBeNull());
+      expect(scroll).toHaveBeenCalled();
     });
   }
+});
+
+describe("Preview — diagram cache and TOC", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    diagramCtl.reset();
+    document.documentElement.classList.remove("dark");
+  });
+
+  it("gives repeated cached diagrams distinct IDs without changing their labels or references", async () => {
+    diagramCtl.reset();
+    const { container } = render(() => (
+      <Preview {...withDefaults({ html: '<div class="mermaid">graph TD; IDS-->X</div><div class="mermaid">graph TD; IDS-->X</div>' })} />
+    ));
+    await waitFor(() => expect(container.querySelectorAll(".mermaid svg")).toHaveLength(2));
+    expect(diagramCtl.started.mermaid).toHaveLength(1);
+    const svgs = Array.from(container.querySelectorAll(".mermaid svg"));
+    const ids = svgs.map((svg) => svg.querySelector("marker")!.id);
+    expect(ids[0]).not.toBe(ids[1]);
+    for (const [index, svg] of svgs.entries()) {
+      expect(svg.querySelector("text")?.textContent).toBe("arrow");
+      expect(svg.querySelector("path")?.getAttribute("marker-end")).toBe(`url(#${ids[index]})`);
+    }
+  });
+
+  it("keeps the DOM on TOC changes and reuses Mermaid when a tab returns", async () => {
+    diagramCtl.reset();
+    const source = "graph TD; CACHE_A-->CACHE_B";
+    const documentHtml = `<div id="toc"><ul><li><a href="#x">X</a></li></ul></div><div class="mermaid">${source}</div><h1 id="x">X</h1>`;
+    const [html, setHtml] = createSignal(documentHtml);
+    const [visible, setVisible] = createSignal(false);
+    const toc = document.createElement("div");
+    document.body.appendChild(toc);
+    try {
+      const { container } = render(() => (
+        <Preview {...withDefaults({ currentFilePath: "cache.md", tocContainer: toc })}
+          html={html()} tocVisible={visible()} />
+      ));
+      await waitFor(() => expect(container.querySelector(".mermaid svg")).not.toBeNull());
+      expect(diagramCtl.started.mermaid).toHaveLength(1);
+      const target = container.querySelector("#x");
+      setVisible(true);
+      flush();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(container.querySelector("#x")).toBe(target);
+      expect(diagramCtl.started.mermaid).toHaveLength(1);
+      setHtml("<h1>Other tab</h1>");
+      flush();
+      setHtml(documentHtml);
+      flush();
+      await waitFor(() => expect(container.querySelector(".mermaid svg")).not.toBeNull());
+      expect(diagramCtl.started.mermaid).toHaveLength(1);
+      document.documentElement.classList.add("dark");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      setHtml("<h1>Other tab</h1>");
+      flush();
+      setHtml(documentHtml);
+      flush();
+      await waitFor(() => expect(container.querySelector(".mermaid svg")).not.toBeNull());
+      expect(diagramCtl.started.mermaid).toHaveLength(2);
+    } finally {
+      toc.remove();
+    }
+  });
 });
 
 describe("Preview — a jump request belongs to its own document", () => {
@@ -846,7 +941,7 @@ describe("Preview — a jump request belongs to its own document", () => {
   type Order = "path-first" | "request-first";
   const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
   const READY_SVG = '<svg viewBox="0 0 10 400"><text>Ready</text></svg>';
-  const A_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="target">Target</h1>';
+  const A_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="other-a">Other A</h1>';
   const B_TARGET_HTML = '<h1 id="target">Target</h1><p>FILE B</p>';
   const B_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="target">Target</h1><p>FILE B</p>';
   const scrollers: HTMLElement[] = [];
@@ -949,7 +1044,7 @@ describe("Preview — a jump request belongs to its own document", () => {
 
   for (const kind of ["heading", "fragment"] as const) {
     for (const order of ["path-first", "request-first"] as const) {
-      it(`opens B with a B ${kind} request (${order}): one jump after the SVG`, async () => {
+      it(`opens B with a B ${kind} request (${order}): jumps before the SVG`, async () => {
         diagramCtl.mode.mermaid = "pending";
         const [path, setPath] = createSignal("a.md");
         const [html, setHtml] = createSignal('<h1 id="old">Old</h1>');
@@ -976,8 +1071,8 @@ describe("Preview — a jump request belongs to its own document", () => {
         setHtml(B_DIAGRAM_HTML);
         flush();
         await waitFor(() => expect(diagramCtl.pending.mermaid).toBeTypeOf("function"));
-        expect(completions).toEqual([]);
-        expect(scroll).not.toHaveBeenCalled();
+        expect(completions).toEqual(["b.md"]);
+        expect(scroll).toHaveBeenCalledTimes(1);
 
         const target = scroller.querySelector("#target") as HTMLElement;
         vi.spyOn(target, "getBoundingClientRect").mockImplementation(
@@ -991,8 +1086,8 @@ describe("Preview — a jump request belongs to its own document", () => {
 
         expect(scroller.textContent).toContain("FILE B");
         expect(completions).toEqual(["b.md"]);
-        expect(scroll).toHaveBeenCalledTimes(1);
-        expect(scroll).toHaveBeenLastCalledWith({ top: 484, behavior: "smooth" });
+        expect(scroll).toHaveBeenCalledTimes(2);
+        expect(scroll).toHaveBeenLastCalledWith({ top: 484, behavior: "instant" });
       });
     }
   }
@@ -1138,9 +1233,9 @@ describe("Preview — a jump request belongs to its own document", () => {
         flush();
 
         expect(discards).toEqual([`${kind}:${oldValue}`]);
-        expect(untrack(request)).toBe(newValue);
-        expect(completions).toEqual([]);
-        expect(scroll).not.toHaveBeenCalled();
+        expect(untrack(request)).toBeNull();
+        expect(completions).toEqual(["b.md"]);
+        expect(scroll).toHaveBeenCalledTimes(1);
 
         diagramCtl.pending.mermaid?.({ svg: READY_SVG });
         await waitFor(() => expect(completions).toEqual(["b.md"]));
@@ -1159,7 +1254,7 @@ describe("PaneView + Preview — host jump signal lifecycle", () => {
   // controlled so the request stays pending across the file switch.
   type Order = "discard-only" | "path-first" | "request-first" | "html-then-reopen";
   const READY_SVG = '<svg viewBox="0 0 10 400"><text>Ready</text></svg>';
-  const A_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="target-a">Target A</h1>';
+  const A_DIAGRAM_HTML = '<div class="mermaid">graph TD; A-->B</div><h1 id="other-a">Other A</h1>';
   const B_HTML = '<h1 id="target-b">Target B</h1><p>FILE B</p>';
   const A_HTML = '<h1 id="target-a">Target A</h1><p>FILE A</p>';
   const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
@@ -1270,7 +1365,7 @@ describe("PaneView + Preview — host jump signal lifecycle", () => {
           expect(untrack(request)).toBeNull();
           expect(scroll).toHaveBeenCalledTimes(1);
           expect(writes.filter((w) => w.value === null)).toEqual([
-            { value: null, committed: newValue, phase: "after-flush" },
+            { value: null, committed: newValue, phase: "inside-flush" },
           ]);
         }
       });
