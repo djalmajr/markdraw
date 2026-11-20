@@ -14,6 +14,8 @@ import {
   createPaletteSelectionOrigin,
   selectionShortcutOrigin,
 } from "./lib/selection-shortcut.ts";
+import { captureMcpState, listenForMcpState, type McpStateRequest } from "./lib/mcp-live-state.ts";
+import { createMcpApprovalQueue, McpApprovalDialog, type McpApprovalRequest } from "@markdraw/ui/components/mcp-approval-dialog.tsx";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
@@ -1313,6 +1315,38 @@ export function App() {
     setImportOpenCodeMcps(on);
   }
   const [rootPaths, setRootPaths] = createSignal<Map<string, string>>(new Map());
+  const [mcpServerMaskSecrets, setMcpServerMaskSecrets] = createSignal(true);
+  const mcpApprovals = createMcpApprovalQueue((response) => invoke("mcp_approval_respond", { response }));
+  let mcpSettingsChanged = false;
+  async function updateMcpServerMaskSecrets(maskSecrets: boolean): Promise<void> {
+    mcpSettingsChanged = true;
+    await invoke("mcp_server_set_settings", { settings: { maskSecrets } });
+    setMcpServerMaskSecrets(maskSecrets);
+  }
+  onSettled(() => {
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    const register = (promise: Promise<() => void>) => {
+      void promise.then((unlisten) => {
+        if (disposed) unlisten();
+        else unlisteners.push(unlisten);
+      }).catch(() => {});
+    };
+    register(listenForMcpState(
+      (event, handler) => listen<McpStateRequest>(event, handler),
+      (kind) => captureMcpState(state.paneManager, rootPaths(), document, kind),
+      invoke,
+    ));
+    register(listen<McpApprovalRequest>("mcp-approval-request", ({ payload }) => mcpApprovals.enqueue(payload)));
+    register(listen<{ id: string; outcome: "expired" | "cancelled" }>("mcp-approval-resolved", ({ payload }) => mcpApprovals.resolve(payload.id)));
+    void invoke<{ maskSecrets: boolean }>("mcp_server_get_settings").then((settings) => {
+      if (!disposed && !mcpSettingsChanged) setMcpServerMaskSecrets(settings.maskSecrets);
+    }).catch(() => {});
+    return () => {
+      disposed = true;
+      for (const unlisten of unlisteners) unlisten();
+    };
+  });
   // Re-discover whenever the open roots, provider connectivity, or the OpenCode
   // toggle change. Fires once on mount too (empty connectivity → no-op until the
   // keychain probe lands), and is latest-wins via the guard inside.
@@ -3560,6 +3594,8 @@ export function App() {
       onRemoveProvider={removeProvider}
       onRefreshModels={refreshModels}
       mcpServers={mcpServersView()}
+      mcpServerMaskSecrets={mcpServerMaskSecrets()}
+      onSetMcpServerMaskSecrets={updateMcpServerMaskSecrets}
       skills={skillsView()}
       onSaveMcpServer={saveMcpServer}
       onRemoveMcpServer={removeMcpServer}
@@ -3701,6 +3737,7 @@ export function App() {
       onToggleRespectGitignore={(respectGitignore) => folder.refreshAllRoots({ respectGitignore })}
       onReorderRoots={(newOrder) => state.reorderRoots(newOrder)}
     />
+    <McpApprovalDialog request={mcpApprovals.current()} onDecide={mcpApprovals.decide} />
     <UpdateAvailableDialog
       open={!!useUpdate()}
       version={useUpdate()?.version ?? ""}

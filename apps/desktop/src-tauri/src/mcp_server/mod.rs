@@ -1,6 +1,10 @@
 //! Read-only external MCP server. Separate from the embedded MCP client.
 //! Only the running app owns authorization; the stdio process never reads
 //! workspace contents and never starts Tauri.
+//!
+//! The app side also answers three live-state tools (open tabs, active
+//! document, selection) by asking the `main` webview (see `state`), and keeps
+//! the user's choice on masking secrets (see `settings`).
 use rmcp::{
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ListToolsResult,
@@ -27,9 +31,18 @@ mod platform;
 #[path = "windows.rs"]
 mod platform;
 
+mod approval;
 mod confined;
 mod disk;
 mod scrub;
+mod settings;
+mod state;
+mod window;
+
+pub use approval::mcp_approval_respond;
+pub use settings::{mcp_server_get_settings, mcp_server_set_settings};
+pub use state::mcp_state_respond;
+pub use window::{tauri_confirm, tauri_main, Confirm, MainEmitter};
 
 /// Windows: open `parts` under the canonical `root` through a chain of
 /// directory handles (`confined`): the volume and every component are opened
@@ -85,8 +98,41 @@ struct Root {
 pub struct Registry {
     roots: RwLock<Vec<Root>>,
     cursors: disk::Cursors,
+    policy: settings::Policy,
+    window: window::Window,
+    bridge: state::Bridge,
+    work: state::Work,
+    approvals: approval::Gate,
+    tab_ids: state::TabIds,
+    confirm: window::Confirmer,
 }
 impl Registry {
+    /// Load the user's settings; call before the endpoint starts accepting.
+    pub fn configure(&self, config_dir: &Path) {
+        self.policy.configure(config_dir.join(settings::FILE_NAME));
+    }
+    /// Connect the registry to the `main` webview (events go to it, only it
+    /// may answer).
+    pub fn attach_window(&self, emitter: Arc<dyn MainEmitter>) {
+        self.window.attach(emitter);
+    }
+    /// Connect the native confirmation of the one change that lowers the
+    /// server's protection (masking off). Without it that change is refused.
+    pub fn attach_confirm(&self, confirm: Arc<dyn Confirm>) {
+        self.confirm.attach(confirm);
+    }
+    /// The page is reloading: requests waiting for it fail now, and a
+    /// confirmation still open from the old page grants nothing.
+    pub fn page_reloading(&self) {
+        self.policy.page_reloading();
+        self.bridge.cancel_all();
+        self.approvals.cancel_all(&self.window);
+    }
+    /// The app is closing.
+    pub fn shutdown(&self) {
+        self.bridge.close();
+        self.approvals.close(&self.window);
+    }
     pub fn replace(&self, inputs: Vec<RootInput>) -> io::Result<()> {
         if inputs.len() > 256
             || inputs.iter().any(|root| {
@@ -123,7 +169,7 @@ impl Registry {
         // IDs are fixed-length session identifiers; names may expand sixfold.
         let response = Response {
             id: u64::MAX,
-            result: Some(Self::list_roots(&next)),
+            result: Some(Self::list_roots(&next, false)),
         };
         if serde_json::to_vec(&response).map_err(|_| invalid())?.len() > MAX_RESPONSE {
             return Err(invalid());
@@ -135,34 +181,56 @@ impl Registry {
     }
     /// Run `f` with the canonical path of the open root whose registered path
     /// is EXACTLY `received` (string equality with what the frontend
-    /// registered), holding the registry read guard for the whole call: a
-    /// `replace` that closes the root waits until `f` returns, so `f` (which
-    /// opens the file) never starts after a confirmed close.
+    /// registered). `f` (which opens the file) runs holding the registry read
+    /// guard: a `replace` that closes the root waits until `f` returns, so `f`
+    /// never starts after a confirmed close.
     ///
     /// `received` is matched BEFORE any filesystem access: a string that is
     /// not registered (a UNC path, a link or `..` spelling of a registered
     /// root, an ancestor, a sibling prefix) returns `None` without touching
-    /// the disk. Only the registered path is canonicalized here (the user may
-    /// have opened the folder through a link); a root that has vanished from
-    /// disk gives `None`. The guard is NOT held while the caller reads bytes,
-    /// only until `f` returns.
+    /// the disk. Only the registered path is canonicalized (the user may have
+    /// opened the folder through a link); a root that has vanished from disk
+    /// gives `None`. Canonicalizing can be slow, so it runs with NO lock held
+    /// (a workspace change is never held up by it); the root is then looked up
+    /// again under the guard by the same registration (id and spelling), and a
+    /// root closed in between, even one reopened with the same spelling, gives
+    /// `None`. The
+    /// guard is NOT held while the caller reads bytes, only until `f` returns.
     pub fn with_root<T>(&self, received: &str, f: impl FnOnce(&Path) -> T) -> Option<T> {
+        self.with_root_resolved(received, |path| std::fs::canonicalize(path).ok(), f)
+    }
+    fn with_root_resolved<T>(
+        &self,
+        received: &str,
+        resolve: impl FnOnce(&Path) -> Option<PathBuf>,
+        f: impl FnOnce(&Path) -> T,
+    ) -> Option<T> {
+        let wanted = std::ffi::OsStr::new(received);
+        // The registration (its id, minted when the folder was opened) and its
+        // spelling: closing a folder and opening the same spelling again gives
+        // a new id, so the second look below can tell them apart.
+        let (id, registered) = {
+            let roots = self.roots.read().ok()?;
+            let root = roots.iter().find(|root| root.path.as_os_str() == wanted)?;
+            (root.id.clone(), root.path.clone())
+        };
+        let canonical = resolve(&registered)?;
         let roots = self.roots.read().ok()?;
-        let root = roots
+        roots
             .iter()
-            .find(|root| root.path.as_os_str() == std::ffi::OsStr::new(received))?;
-        let canonical = std::fs::canonicalize(&root.path).ok()?;
+            .find(|root| root.id == id && root.path.as_os_str() == wanted)?;
         Some(f(&canonical))
     }
     fn list(&self) -> io::Result<Value> {
+        let mask = self.policy.mask();
         let roots = self
             .roots
             .read()
             .map_err(|_| io::Error::other("MCP registry unavailable"))?;
-        Ok(Self::list_roots(&roots))
+        Ok(Self::list_roots(&roots, mask))
     }
-    fn list_roots(roots: &[Root]) -> Value {
-        json!({"roots": roots.iter().map(|root| json!({"id":root.id,"name":scrub::short_text(&root.name)})).collect::<Vec<_>>()})
+    fn list_roots(roots: &[Root], mask: bool) -> Value {
+        json!({"roots": roots.iter().map(|root| json!({"id":root.id,"name":scrub::text(mask, &root.name)})).collect::<Vec<_>>()})
     }
 }
 
@@ -314,7 +382,12 @@ async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(
             return Err(invalid());
         }
         last_id = request.id;
-        let result = if request.method == "list_workspaces" {
+        let result = if state::TOOLS.contains(&request.method.as_str()) {
+            registry
+                .state(&request.method, request.arguments)
+                .await
+                .unwrap_or_else(|message| json!({"mcp_error":message}))
+        } else if request.method == "list_workspaces" {
             if !request.arguments.is_null() && request.arguments != json!({}) {
                 json!({"mcp_error":"invalid arguments"})
             } else {
@@ -428,7 +501,7 @@ impl Proxy {
 impl ServerHandler for Proxy {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("Read-only access to workspaces open in Markdraw.")
+            .with_instructions("Read-only access to workspaces open in Markdraw, and to what is open in its window (tabs, the active document, the selection).")
     }
     async fn list_tools(
         &self,
@@ -464,7 +537,16 @@ impl ServerHandler for Proxy {
                         json!(["root_id", "query"]),
                     ),
                 ] {
-                    let mut tool = Tool::new(name, "Read disk contents of an open workspace; secrets are masked", json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}).as_object().unwrap().clone());
+                    let mut tool = Tool::new(name, "Read disk contents of an open workspace; secrets are masked unless the user turned masking off in Markdraw's settings", json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}).as_object().unwrap().clone());
+                    tool.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(true));
+                    tools.push(tool);
+                }
+                for (name, description) in [
+                    ("list_open_tabs", "List the tabs open in Markdraw, by pane; files outside the open workspaces are named without a location, and a draft (no file) has file null"),
+                    ("get_active_document", "Get the document in Markdraw's active tab, including unsaved edits (up to 1 MiB); a file outside the open workspaces, or a draft with no file, is named (file.outsideRoots true) and its text is not returned"),
+                    ("get_selection", "Get the text selected in Markdraw's active pane, editor or preview (up to 256 KiB), or null; the selection in a file outside the open workspaces, or in a draft with no file, is not returned (file.outsideRoots true), and neither is one in a document above 1 MiB (the call fails as unavailable)"),
+                ] {
+                    let mut tool = Tool::new(name, format!("{description}; secrets are masked unless the user turned masking off in Markdraw's settings"), json!({"type":"object","properties":{},"additionalProperties":false}).as_object().unwrap().clone());
                     tool.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(true));
                     tools.push(tool);
                 }
@@ -478,14 +560,18 @@ impl ServerHandler for Proxy {
         request: CallToolRequestParams,
         _: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        if ![
-            "list_workspaces",
-            "list_files",
-            "read_file",
-            "search_workspace",
-        ]
-        .contains(&request.name.as_ref())
-            || (request.name == "list_workspaces"
+        let name = request.name.as_ref();
+        let live = state::TOOLS.contains(&name);
+        let known = live
+            || [
+                "list_workspaces",
+                "list_files",
+                "read_file",
+                "search_workspace",
+            ]
+            .contains(&name);
+        if !known
+            || ((name == "list_workspaces" || live)
                 && request
                     .arguments
                     .as_ref()
@@ -614,5 +700,9 @@ pub fn run_stdio() -> Result<(), &'static str> {
     result
 }
 
+#[cfg(test)]
+mod command_tests;
+#[cfg(test)]
+mod testkit;
 #[cfg(test)]
 mod tests;

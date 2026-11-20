@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import IconX from "~icons/lucide/x";
 import IconSearch from "~icons/lucide/search";
@@ -227,6 +227,10 @@ export interface SettingsDialogProps {
   /** Whether to import MCP servers from the OpenCode CLI's config. */
   importOpenCodeMcps?: boolean;
   onImportOpenCodeMcpsChange?: (enabled: boolean) => void;
+  /** Mask secrets in the Markdraw MCP server's output (defaults to true). */
+  mcpServerMaskSecrets?: boolean;
+  /** Persist the Markdraw MCP server's secret-masking setting. */
+  onSetMcpServerMaskSecrets?: (value: boolean) => Promise<void>;
   /** Streaming-responses beta toggle (real incremental deltas). */
   aiStreaming?: boolean;
   onAiStreamingChange?: (enabled: boolean) => void;
@@ -1466,6 +1470,69 @@ function mcpGroupOf(s: SettingsMcpServer): McpGroupKey {
   return "available";
 }
 
+/** What `mcp_server_set_settings` rejects with when the user declined the native confirmation. */
+const MCP_MASK_DECLINED = "declined";
+
+function MarkdrawMcpServerSettings(props: SettingsDialogProps): JSX.Element {
+  const [maskSecrets, setMaskSecrets] = createSignal(props.mcpServerMaskSecrets ?? true);
+  const [saving, setSaving] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+
+  createEffect(() => props.mcpServerMaskSecrets, (saved) => {
+    setMaskSecrets(saved ?? true);
+    setError(null);
+  });
+
+  async function apply(next: boolean): Promise<void> {
+    const setter = props.onSetMcpServerMaskSecrets;
+    if (!setter || saving() || next === maskSecrets()) return;
+    const previous = maskSecrets();
+    // Turning masking off is confirmed by the app itself in a native dialog
+    // (the page cannot grant it), so there is no second prompt here.
+    setSaving(true);
+    setError(null);
+    try {
+      await setter(next);
+      setMaskSecrets(next);
+    } catch (reason) {
+      setMaskSecrets(previous);
+      // "declined" is the user saying no (or the pause after a no): not a failure.
+      const declined = reason === MCP_MASK_DECLINED || (reason instanceof Error && reason.message === MCP_MASK_DECLINED);
+      if (!declined) setError(label("settings_mcp_server_mask_error"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section class="settings-mcp-server-config" aria-label={(useLocale(), label("settings_mcp_server_title"))}>
+      <h3 class="settings-h3">{(useLocale(), label("settings_mcp_server_title"))}</h3>
+      <p class="settings-prose">{(useLocale(), label("settings_mcp_server_desc"))}</p>
+      <div class="settings-row" style={{ "align-items": "center", gap: "8px" }}>
+        <ToggleSwitch
+          checked={maskSecrets()}
+          disabled={saving() || !props.onSetMcpServerMaskSecrets}
+          onChange={(checked) => void apply(checked)}
+          aria-label={(useLocale(), label("settings_mcp_server_mask_secrets"))}
+        >
+          <SwitchControl size="sm"><SwitchThumb size="sm" /></SwitchControl>
+        </ToggleSwitch>
+        <label class="settings-label" style={{ margin: "0" }}>
+          {(useLocale(), label("settings_mcp_server_mask_secrets"))}
+        </label>
+      </div>
+      <Show when={!maskSecrets()}>
+        <p role="status" class="settings-prose text-destructive">
+          {(useLocale(), label("settings_mcp_server_mask_off"))}
+        </p>
+      </Show>
+      <Show when={error()}>
+        <p role="alert" class="settings-prose text-destructive">{(useLocale(), error() ?? "")}</p>
+      </Show>
+    </section>
+  );
+}
+
 function McpSection(props: SettingsDialogProps): JSX.Element {
   // Same sub-page pattern as the AI section: a dedicated form view entered from
   // the "New MCP Server" row (add) or a card's pencil (edit), with a back arrow
@@ -1591,6 +1658,8 @@ function McpSection(props: SettingsDialogProps): JSX.Element {
     <div class="settings-section">
       <Switch>
         <Match when={view() === "list"}>
+          <MarkdrawMcpServerSettings {...props} />
+          <div class="my-4 border-t" aria-hidden="true" />
           <h3 class="settings-h3">{(useLocale(), label("settings_mcp_title"))}</h3>
 
           {/* OpenCode has no first-class AI provider in Markdraw (Claude/Codex
