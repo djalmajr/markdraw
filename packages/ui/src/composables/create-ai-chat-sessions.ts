@@ -13,7 +13,7 @@
 // each session an isolated disposal scope nested under the app (no detached-root
 // warning; freed exactly when the session closes).
 
-import { createEffect, createRoot, createSignal, getOwner, runWithOwner, untrack, type Owner } from "solid-js";
+import { createEffect, createRoot, createSignal, getOwner, onCleanup, runWithOwner, untrack, type Owner } from "solid-js";
 import type { AIProvider, AITool } from "@markdraw/ai/types.ts";
 import {
   type PersistedChatMessage,
@@ -131,11 +131,23 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
   // ── Persistence (debounced, mirrors create-tab-store.ts) ──────────────────
   let indexTimer: ReturnType<typeof setTimeout> | undefined;
   const msgTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // A debounced save must not outlive the manager: once its owner is disposed
+  // (a test teardown, a hot reload) the page that would read the save is gone.
+  if (rootOwner) {
+    onCleanup(() => {
+      clearTimeout(indexTimer);
+      for (const timer of msgTimers.values()) clearTimeout(timer);
+      msgTimers.clear();
+    });
+  }
+  const hasStorage = () => typeof localStorage !== "undefined";
 
   function schedulePersistIndex(): void {
     if (hydrating) return;
     clearTimeout(indexTimer);
-    indexTimer = setTimeout(flushIndex, 500);
+    indexTimer = setTimeout(() => {
+      if (hasStorage()) flushIndex();
+    }, 500);
   }
 
   function flushIndex(): void {
@@ -165,7 +177,10 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     clearTimeout(msgTimers.get(id));
     msgTimers.set(
       id,
-      setTimeout(() => setChatMessages(id, mapTurns(turns)), 500),
+      setTimeout(() => {
+        msgTimers.delete(id);
+        if (hasStorage()) setChatMessages(id, mapTurns(turns));
+      }, 500),
     );
   }
 

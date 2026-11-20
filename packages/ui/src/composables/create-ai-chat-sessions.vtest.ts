@@ -87,6 +87,21 @@ describe("deriveAiChatTitle", () => {
   });
 });
 
+describe("createAiChatSessions — debounced saves", () => {
+  it("drops a pending save when the manager is disposed", async () => {
+    await withRoot((create) => {
+      const mgr = create(() => createAiChatSessions({ getProvider: () => stubProvider() }));
+      mgr.createSession();
+      flush();
+    });
+    // The index save was scheduled 500 ms after createSession; the owner is
+    // gone now, so it must never run (in a torn-down test environment it would
+    // throw "localStorage is not defined").
+    await new Promise((r) => setTimeout(r, 650));
+    expect(localStorage.getItem("markdraw-ai-chat-sessions")).toBeNull();
+  });
+});
+
 describe("createAiChatSessions — lifecycle", () => {
   it("createSession adds an open session and activates it", async () => {
     await withRoot((create) => {
