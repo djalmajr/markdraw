@@ -34,7 +34,10 @@ import IconExpand from "~icons/lucide/expand";
 import { Portal } from "@solidjs/web";
 import { FrontmatterPanel } from "./frontmatter-panel.tsx";
 import { renderKroki } from "@markdraw/core/kroki.ts";
-import { mermaidCache } from "../lib/mermaid-cache.ts";
+import { mermaidCache, mermaidCacheKey, MERMAID_CONFIG } from "../lib/mermaid-cache.ts";
+import { createMermaidLazyRenderer, type MermaidLazyRenderer } from "../lib/mermaid-lazy.ts";
+import { MERMAID_CSS_CLASS_PREFIX, MermaidStyleRegistry, parseSvgMarkup, prepareMermaidSvg, svgWithMermaidStyles } from "../lib/mermaid-svg-css.ts";
+import { registerMermaidFlush } from "../lib/mermaid-flush.ts";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
 import "katex/dist/katex.min.css";
 import "@mdit/plugin-alert/style";
@@ -112,17 +115,21 @@ let mermaidTheme: "dark" | "default" | null = null;
 let mermaidQueue: Promise<void> = Promise.resolve();
 let mermaidWarmPromise: Promise<void> | null = null;
 let mermaidId = 0;
-const MERMAID_CONFIG = { look: "classic", layout: "dagre", securityLevel: "strict", fontFamily: "inherit" } as const;
+const pendingMermaidSources = new WeakMap<HTMLElement, string>();
 
-function uniqueMermaidIds(svg: string): string {
-  const template = document.createElement("template");
-  template.innerHTML = svg;
+function uniqueMermaidIds(svg: string, updateStyleText = true): string {
+  const { root, serialize } = parseSvgMarkup(svg);
+  if (!root) return svg;
   const ids = new Map<string, string>();
   const suffix = `-cached-${++mermaidId}`;
-  for (const el of template.content.querySelectorAll("[id]")) {
-    const id = el.id;
+  // querySelectorAll visits descendants only: the cached SVG's own id must
+  // be renamed too, or two insertions of the same SVG share a DOM id.
+  const elements = [root, ...Array.from(root.querySelectorAll("*"))];
+  for (const el of elements) {
+    const id = el.getAttribute("id");
+    if (!id) continue;
     ids.set(id, `${id}${suffix}`);
-    el.id = `${id}${suffix}`;
+    el.setAttribute("id", `${id}${suffix}`);
   }
   const replaceReferences = (value: string) => {
     for (const [id, replacement] of ids) {
@@ -131,18 +138,32 @@ function uniqueMermaidIds(svg: string): string {
     }
     return value;
   };
-  for (const el of template.content.querySelectorAll("*")) {
+  // `content` is a literal: only local SVG references are renamed.
+  const replaceInlineStyleReferences = (value: string) => value.split(";").map((declaration) => {
+    const colon = declaration.indexOf(":");
+    if (colon < 0 || declaration.slice(0, colon).trim().toLowerCase() === "content") {
+      return declaration;
+    }
+    return replaceReferences(declaration);
+  }).join(";");
+  for (const el of elements) {
     for (const attr of Array.from(el.attributes)) {
       if (attr.name === "id") continue;
       if (attr.name === "aria-labelledby" || attr.name === "aria-describedby") {
         el.setAttribute(attr.name, attr.value.split(/\s+/).map((id) => ids.get(id) ?? id).join(" "));
-      } else if (/^(?:href|xlink:href|style|fill|stroke|filter|clip-path|mask|marker-start|marker-mid|marker-end)$/.test(attr.name)) {
+      } else if (attr.name === "style") {
+        el.setAttribute(attr.name, replaceInlineStyleReferences(attr.value));
+      } else if (/^(?:href|xlink:href|fill|stroke|filter|clip-path|mask|marker-start|marker-mid|marker-end)$/.test(attr.name)) {
         el.setAttribute(attr.name, replaceReferences(attr.value));
       }
     }
-    if (el.localName === "style") el.textContent = replaceReferences(el.textContent ?? "");
+    // The no-CSSOM fallback keeps the baseline textual replacement; in the
+    // CSSOM path the stylesheet has already left the SVG and stays untouched.
+    if (updateStyleText && el.localName === "style") {
+      el.textContent = replaceReferences(el.textContent ?? "");
+    }
   }
-  return template.innerHTML;
+  return serialize();
 }
 
 function initMermaid(theme: "dark" | "default") {
@@ -288,104 +309,174 @@ function mermaidSvgLooksRenderable(svg: string): boolean {
   return true;
 }
 
-async function renderMermaidBlocks(
-  container: HTMLElement,
+type InsertionMetrics = { height: number; above: boolean };
+
+function insertionMetrics(block: HTMLElement, root: HTMLElement | null): InsertionMetrics {
+  const rootRect = root?.getBoundingClientRect();
+  return {
+    height: block.offsetHeight,
+    above: !!rootRect && block.getBoundingClientRect().bottom <= rootRect.top + 1,
+  };
+}
+
+function insertMermaidSvg(
+  block: HTMLElement,
+  svg: string,
+  root: HTMLElement | null,
+  styles: MermaidStyleRegistry,
+  onDiagram: () => void,
+  isAnchorTracking: () => boolean,
+  before: InsertionMetrics,
+): string | undefined {
+  // Rewrite the stylesheet while the SVG still has its original id: the
+  // CSSOM path changes selectors only, so `content`/`url(#…)` literals survive.
+  const prepared = prepareMermaidSvg(svg);
+  const html = prepared
+    ? uniqueMermaidIds(prepared.html, false)
+    : uniqueMermaidIds(svg);
+  if (prepared) styles.add(prepared.className, prepared.css);
+  block.innerHTML = html;
+  block.style.color = "";
+  block.style.fontStyle = "";
+  block.style.minHeight = "";
+  block.removeAttribute("data-mermaid-pending");
+  block.removeAttribute("data-processing");
+  block.setAttribute("data-processed", "true");
+
+  // A diagram above the viewport changes the height of everything the user
+  // is currently reading; keep the scroll position stable. Anchor tracking
+  // repositions from its target and would be cancelled by a scroll write.
+  if (root && before.above && !isAnchorTracking()) {
+    root.scrollTop += block.offsetHeight - before.height;
+  }
+  onDiagram();
+  return prepared?.className;
+}
+
+async function renderOneMermaidBlock(
+  block: HTMLElement,
   gen: number,
   isStale: IsStaleFn,
+  root: HTMLElement | null,
+  styles: MermaidStyleRegistry,
   onDiagram: () => void,
+  isAnchorTracking: () => boolean,
 ): Promise<void> {
-  const blocks = container.querySelectorAll<HTMLElement>("div.mermaid");
-  if (blocks.length === 0) return;
-
-  // Pre-warm before the first user-facing render so the lib has
-  // fonts + internals ready. After the first resolve this is a
-  // no-op (memoized promise).
-  await ensureMermaidWarm();
   if (isStale(gen)) return;
-  for (const block of blocks) {
-    // Bail out if a newer render has started (navigation happened mid-render)
+  const source = pendingMermaidSources.get(block) ?? "";
+  if (!source) return;
+  block.setAttribute("data-processing", "true");
+
+  try {
+    // Pre-warm before the first user-facing render so the lib has
+    // fonts + internals ready. After the first resolve this is a no-op.
+    await ensureMermaidWarm();
     if (isStale(gen)) return;
 
-    if (block.getAttribute("data-processed")) {
-      const hasTerminalRender = block.querySelector("svg, .mermaid-error") !== null;
-      if (hasTerminalRender) continue;
-      block.removeAttribute("data-processed");
-    }
-    if (block.getAttribute("data-processing")) continue;
-
-    const source = block.textContent?.trim() ?? "";
-    if (!source) continue;
-    block.setAttribute("data-processing", "true");
-    block.textContent = "Rendering diagram...";
-    block.style.color = "hsl(var(--muted-foreground))";
-    block.style.fontStyle = "italic";
-
-    try {
-      // Mermaid sometimes throws `null is not an object (evaluating
-      // 'element.firstChild')` on the very first render of complex
-      // shapes — internal lazy module loading + layout race that
-      // pre-warm doesn't fully cover for every shape combination.
-      // Real syntax errors fail every attempt and fall through to
-      // the outer catch; transient races resolve within a couple
-      // of frames. Three attempts with growing delays cover both
-      // observed flake patterns without slowing valid renders
-      // (success on attempt 1 short-circuits).
+    const theme = document.documentElement.classList.contains("dark") ? "dark" : "default";
+    const key = mermaidCacheKey(source, theme);
+    let svg: string | undefined = mermaidCache.get(key);
+    let lastErr: unknown;
+    for (let attempt = 0; !svg && attempt < 3; attempt++) {
+      if (isStale(gen)) return;
       const baseId = `mermaid-${++mermaidId}`;
-      const theme = document.documentElement.classList.contains("dark") ? "dark" : "default";
-      const key = JSON.stringify([source, theme, MERMAID_CONFIG]);
-      let svg: string | undefined = mermaidCache.get(key);
-      let lastErr: unknown;
-      for (let attempt = 0; !svg && attempt < 3; attempt++) {
-        if (isStale(gen)) return;
-        const attemptId = attempt === 0 ? baseId : `${baseId}-retry-${attempt}`;
-        try {
-          const result = await withMermaidLock(async () => {
-            if (isStale(gen)) return null;
-            initMermaid(theme);
-            try {
-              return await mermaid.render(attemptId, source);
-            } finally {
-              document.querySelectorAll('div[id^="dmermaid-"]').forEach((el) => el.remove());
-            }
-          });
-          if (isStale(gen)) return;
-          if (result?.svg && mermaidSvgLooksRenderable(result.svg)) {
-            svg = result.svg;
-            break;
+      const attemptId = attempt === 0 ? baseId : `${baseId}-retry-${attempt}`;
+      try {
+        // Mermaid sometimes throws `null is not an object (evaluating
+        // 'element.firstChild')` on the first render of complex shapes.
+        // Transient layout races resolve within a couple of frames.
+        const result = await withMermaidLock(async () => {
+          if (isStale(gen)) return null;
+          initMermaid(theme);
+          try {
+            return await mermaid.render(attemptId, source);
+          } finally {
+            document.querySelectorAll('div[id^="dmermaid-"]').forEach((el) => el.remove());
           }
-          lastErr = new Error("mermaid render returned an empty or invalid svg");
-        } catch (err) {
-          lastErr = err;
+        });
+        if (isStale(gen)) return;
+        if (result?.svg && mermaidSvgLooksRenderable(result.svg)) {
+          svg = result.svg;
+          break;
         }
-        // Layout-settling pause between attempts — most flakes
-        // resolve within one paint frame.
-        await nextPaintFrame();
+        lastErr = new Error("mermaid render returned an empty or invalid svg");
+      } catch (err) {
+        lastErr = err;
       }
-      if (!svg) throw lastErr ?? new Error("mermaid render produced no output");
-      // Check again after await — DOM may have been replaced
-      if (isStale(gen)) return;
-      mermaidCache.set(key, svg);
-      // Mermaid's strict output is safe to inject; IDs must not collide across copies.
-      block.innerHTML = uniqueMermaidIds(svg);
-      block.style.color = "";
-      block.style.fontStyle = "";
-    } catch (e: any) {
-      if (isStale(gen)) return;
-      const errMsg = e?.message || "Unknown error";
-      const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      // Error message is escaped above — safe to inject
-      block.innerHTML = `<pre class="mermaid-error">Mermaid error: ${errMsg.replace(/</g, "&lt;")}\n\n${escaped}</pre>`;
-      block.style.color = "";
-      block.style.fontStyle = "";
+      await nextPaintFrame();
     }
-
-    // Always mark as processed to prevent re-processing on effect re-runs
+    if (!svg) throw lastErr ?? new Error("mermaid render produced no output");
+    if (isStale(gen)) return;
+    // Measure at the mutation point: while the async render ran, the block
+    // may have moved (e.g. the user scrolled it into the viewport).
+    const before = insertionMetrics(block, root);
+    const className = insertMermaidSvg(block, svg, root, styles, onDiagram, isAnchorTracking, before);
+    mermaidCache.set(key, svg, className);
+  } catch (e: any) {
+    if (isStale(gen)) return;
+    const errMsg = e?.message || "Unknown error";
+    const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // Error message is escaped above — safe to inject
+    block.innerHTML = `<pre class="mermaid-error">Mermaid error: ${errMsg.replace(/</g, "&lt;")}\n\n${escaped}</pre>`;
+    block.style.color = "";
+    block.style.fontStyle = "";
+    block.style.minHeight = "";
+    block.removeAttribute("data-mermaid-pending");
     block.removeAttribute("data-processing");
     block.setAttribute("data-processed", "true");
     onDiagram();
-
-    await yieldToMain();
   }
+}
+
+function setupMermaidBlocks(
+  container: HTMLElement,
+  gen: number,
+  isStale: IsStaleFn,
+  styles: MermaidStyleRegistry,
+  onDiagram: () => void,
+  isAnchorTracking: () => boolean,
+): { renderer: MermaidLazyRenderer; ready: Promise<void> } | null {
+  const candidates = Array.from(container.querySelectorAll<HTMLElement>("div.mermaid"));
+  const blocks: HTMLElement[] = [];
+  for (const block of candidates) {
+    if (isStale(gen)) return null;
+    if (block.getAttribute("data-processed")) {
+      if (block.querySelector("svg, .mermaid-error")) continue;
+      block.removeAttribute("data-processed");
+    }
+    const source = block.textContent?.trim() ?? "";
+    if (!source) continue;
+    pendingMermaidSources.set(block, source);
+    block.textContent = "Rendering diagram...";
+    block.style.color = "hsl(var(--muted-foreground))";
+    block.style.fontStyle = "italic";
+    block.style.minHeight = "160px";
+    block.setAttribute("data-mermaid-pending", "true");
+    blocks.push(block);
+  }
+  if (blocks.length === 0) return null;
+
+  void ensureMermaidWarm();
+  const root = container.closest<HTMLElement>(".content");
+  const renderer = createMermaidLazyRenderer({
+    root,
+    blocks,
+    tryImmediate: (block) => {
+      if (isStale(gen)) return true;
+      const source = pendingMermaidSources.get(block) ?? "";
+      const theme = document.documentElement.classList.contains("dark") ? "dark" : "default";
+      const key = mermaidCacheKey(source, theme);
+      const cached = mermaidCache.get(key);
+      if (!cached) return false;
+      const className = insertMermaidSvg(block, cached, root, styles, onDiagram, isAnchorTracking, insertionMetrics(block, root));
+      if (className && mermaidCache.classNameFor(key) !== className) {
+        mermaidCache.set(key, cached, className);
+      }
+      return true;
+    },
+    render: (block) => renderOneMermaidBlock(block, gen, isStale, root, styles, onDiagram, isAnchorTracking),
+  });
+  return { renderer, ready: renderer.whenInitialDone() };
 }
 
 /**
@@ -911,7 +1002,84 @@ export function Preview(props: PreviewProps) {
   let stopAnchorTracking: (() => void) | undefined;
   let repositionAnchor: (() => void) | undefined;
   let processingGen: number | null = null;
+  let mermaidRenderer: MermaidLazyRenderer | undefined;
+  let mermaidStyles: MermaidStyleRegistry | undefined;
+  let generationWait: { gen: number; ready: Promise<void>; resolve: () => void } | undefined;
   const [settledGen, setSettledGen] = createSignal(-1);
+
+  // The flush used by PDF export is registered before any asynchronous step
+  // of a generation. Each generation owns a readiness promise, released both
+  // when its initial pass settles and when the generation is discarded.
+  function releaseGenerationWait() {
+    const wait = generationWait;
+    generationWait = undefined;
+    wait?.resolve();
+  }
+
+  function beginGenerationWait(gen: number) {
+    releaseGenerationWait();
+    let resolve!: () => void;
+    const ready = new Promise<void>((r) => { resolve = r; });
+    generationWait = { gen, ready, resolve };
+  }
+
+  async function flushCurrentMermaid(): Promise<void> {
+    for (;;) {
+      const wait = generationWait;
+      if (!wait) return;
+      await wait.ready;
+      // The generation may have changed while waiting (including inside
+      // flushAll): follow the new one instead of reporting stale work done.
+      if (generationWait !== wait) continue;
+      const renderer = mermaidRenderer;
+      if (renderer) await renderer.flushAll();
+      if (generationWait !== wait) continue;
+      return;
+    }
+  }
+
+  const unregisterMermaidFlush = registerMermaidFlush(
+    () => flushCurrentMermaid(),
+    // AppShell gives `tocContainer` only to the active pane; this is the same
+    // signal that decides which pane's TOC is shared.
+    () => !!untrack(() => props.tocContainer),
+  );
+
+  function disposeMermaidGeneration() {
+    mermaidRenderer?.dispose();
+    mermaidRenderer = undefined;
+  }
+
+  function scheduleMermaidStylePrune(gen: number) {
+    setTimeout(() => {
+      if (isStale(gen) || !articleRef || !mermaidStyles) return;
+      const used = new Set<string>();
+      for (const svg of articleRef.querySelectorAll("svg")) {
+        for (const name of Array.from(svg.classList)) {
+          if (name.startsWith(MERMAID_CSS_CLASS_PREFIX)) used.add(name);
+        }
+      }
+      // An unchanged diagram may be outside the margin in the new generation:
+      // its placeholder has no SVG, but its known sheet must stay for revisits.
+      for (const block of articleRef.querySelectorAll<HTMLElement>("[data-mermaid-pending]")) {
+        const source = pendingMermaidSources.get(block);
+        if (!source) continue;
+        const theme = document.documentElement.classList.contains("dark") ? "dark" : "default";
+        const className = mermaidCache.classNameFor(mermaidCacheKey(source, theme));
+        if (className) used.add(className);
+      }
+      // One macrotask, one removal pass: editing a diagram must not pay the
+      // WebKit cost of removing and re-adding sheets on every generation.
+      mermaidStyles.prune(used);
+    }, 0);
+  }
+
+  function ensureMermaidStyles(): MermaidStyleRegistry {
+    if (!mermaidStyles) {
+      mermaidStyles = new MermaidStyleRegistry(articleRef?.closest(".preview") ?? articleRef ?? document.body);
+    }
+    return mermaidStyles;
+  }
 
   function stopTrackingAnchor() {
     stopAnchorTracking?.();
@@ -920,6 +1088,12 @@ export function Preview(props: PreviewProps) {
   }
 
   onCleanup(stopTrackingAnchor);
+  onCleanup(() => {
+    unregisterMermaidFlush();
+    releaseGenerationWait();
+    disposeMermaidGeneration();
+    mermaidStyles?.dispose();
+  });
 
   // A superseded generation must not mutate the live article.
   async function finishPostProcessing(
@@ -1162,7 +1336,7 @@ export function Preview(props: PreviewProps) {
       if (svgEl) {
         e.preventDefault();
         e.stopPropagation();
-        setViewerSvg(svgEl.outerHTML);
+        setViewerSvg(svgWithMermaidStyles(svgEl, mermaidStyles));
         return;
       }
     }
@@ -1302,6 +1476,8 @@ export function Preview(props: PreviewProps) {
     (_html) => {
     if (!articleRef) return;
     stopTrackingAnchor();
+    disposeMermaidGeneration();
+    releaseGenerationWait();
     processingGen = null;
 
     // Empty HTML (file switch): hide old content but keep it for layout stability.
@@ -1330,6 +1506,7 @@ export function Preview(props: PreviewProps) {
     }
 
     const gen = ++renderGen;
+    beginGenerationWait(gen);
     const krokiController = new AbortController();
     processingGen = gen;
     // Invalidate the previous generation immediately: a request arriving
@@ -1339,6 +1516,40 @@ export function Preview(props: PreviewProps) {
     const isNewDocument = pendingNewDocument;
     pendingNewDocument = false;
     const sanitizedHtml = sanitizeHtmlFragment(_html);
+
+    function prepareMermaidGeneration(currentGen: number): Promise<void> {
+      const wait = generationWait;
+      const settle = () => {
+        if (generationWait === wait) releaseGenerationWait();
+        scheduleMermaidStylePrune(currentGen);
+      };
+      let renderer: MermaidLazyRenderer | undefined;
+      try {
+        const setup = setupMermaidBlocks(
+          articleRef!, currentGen, isStale, ensureMermaidStyles(),
+          () => repositionAnchor?.(), () => !!repositionAnchor,
+        );
+        if (!setup || isStale(currentGen)) {
+          settle();
+          return Promise.resolve();
+        }
+        renderer = setup.renderer;
+        mermaidRenderer = renderer;
+        return setup.ready.then(() => {
+          if (generationWait === wait) releaseGenerationWait();
+          scheduleMermaidStylePrune(currentGen);
+        }, () => {
+          renderer?.dispose();
+          if (mermaidRenderer === renderer) mermaidRenderer = undefined;
+          settle();
+        });
+      } catch {
+        renderer?.dispose();
+        if (mermaidRenderer === renderer) mermaidRenderer = undefined;
+        settle();
+        return Promise.resolve();
+      }
+    }
 
     // Shared post-swap logic: TOC handling, collapse toggles, reveal, fragment scroll
     function afterSwap(container: HTMLElement, scrollToTop: boolean) {
@@ -1429,7 +1640,7 @@ export function Preview(props: PreviewProps) {
           // been laid out before mermaid measures. Without this, the
           // first block races with layout and throws `firstChild`.
           () => nextPaintFrame(),
-          () => renderMermaidBlocks(articleRef!, gen, isStale, () => repositionAnchor?.()),
+          () => prepareMermaidGeneration(gen),
           () => renderKrokiBlocks(articleRef!, gen, isStale, krokiController.signal, () => repositionAnchor?.()),
         ]),
       );
@@ -1447,7 +1658,7 @@ export function Preview(props: PreviewProps) {
       queueMicrotask(() =>
         finishPostProcessing(gen, [
           () => highlightCodeBlocks(articleRef!, gen, isStale),
-          () => renderMermaidBlocks(articleRef!, gen, isStale, () => repositionAnchor?.()),
+          () => prepareMermaidGeneration(gen),
           () => renderKrokiBlocks(articleRef!, gen, isStale, krokiController.signal, () => repositionAnchor?.()),
         ]),
       );
