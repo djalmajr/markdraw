@@ -405,6 +405,34 @@ export function createAppState(config: AppStateConfig) {
   const [pendingFragment, setPendingFragment] = createSignal<string | null>(
     null,
   );
+  type HtmlNavigation = { rootId: string; path: string; fragment: string };
+  const [pendingHtmlNavigation, updatePendingHtmlNavigation] = createSignal<Record<string, HtmlNavigation>>({});
+  const [appliedHtmlNavigation, updateAppliedHtmlNavigation] = createSignal<Record<string, HtmlNavigation>>({});
+  function clearAppliedHtmlNavigation(paneId: string) {
+    updateAppliedHtmlNavigation((current) => {
+      const next = { ...current };
+      delete next[paneId];
+      return next;
+    });
+  }
+  function setPendingHtmlNavigation(paneId: string, target: HtmlNavigation | null) {
+    updatePendingHtmlNavigation((current) => {
+      const next = { ...current };
+      if (target) next[paneId] = target;
+      else delete next[paneId];
+      return next;
+    });
+    clearAppliedHtmlNavigation(paneId);
+  }
+  function consumePendingHtmlNavigation(paneId: string, target: HtmlNavigation) {
+    updatePendingHtmlNavigation((current) => {
+      if (current[paneId] !== target) return current;
+      const next = { ...current };
+      delete next[paneId];
+      return next;
+    });
+    updateAppliedHtmlNavigation((current) => ({ ...current, [paneId]: target }));
+  }
   const [previewSearchOpen, setPreviewSearchOpen] = createSignal(false);
   const [previewFindTrigger, setPreviewFindTrigger] = createSignal(0);
   const [navStack, setNavStack] = createSignal<QualifiedPath[]>([]);
@@ -1697,6 +1725,8 @@ export function createAppState(config: AppStateConfig) {
     navIndex,
     navStack,
     pendingFragment,
+    pendingHtmlNavigation,
+    appliedHtmlNavigation,
     pendingHeadingText,
     setPendingHeadingText,
     previewSearchOpen,
@@ -1749,6 +1779,9 @@ export function createAppState(config: AppStateConfig) {
     setNavIndex,
     setNavStack,
     setPendingFragment,
+    setPendingHtmlNavigation,
+    consumePendingHtmlNavigation,
+    clearAppliedHtmlNavigation,
     setPreviewSearchOpen,
     setPreviewFindTrigger,
     setRecentFiles,

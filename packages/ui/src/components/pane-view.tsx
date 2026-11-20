@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, untrack } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { useDroppable } from "../lib/dnd/index.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
@@ -127,6 +127,39 @@ export function PaneView(props: PaneViewProps) {
   const onSelectionPopover = (info: Parameters<AppState["setSelectionPopover"]>[0]) => {
     if (untrack(isActive)) s.setSelectionPopover(info);
   };
+
+  // A closed pane's id is reused by the next split (`pane-1` again): drop its
+  // anchor requests when this pane leaves the layout, so the new pane never
+  // inherits them. A pane that only remounts (still listed) keeps its own.
+  onCleanup(() => {
+    const closing = pane();
+    const listed = s.paneManager ? untrack(s.paneManager.panes) : [closing];
+    if (!listed.includes(closing)) s.setPendingHtmlNavigation(closing.paneId, null);
+  });
+  const matchesPane = (target: { rootId: string; path: string }) =>
+    pane().selectedRootId() === target.rootId && pane().selectedFile()?.path === target.path;
+  const pendingHtmlNavigation = () => {
+    const target = s.pendingHtmlNavigation()[pane().paneId];
+    return target && matchesPane(target) ? target : null;
+  };
+  const htmlFragment = () => {
+    const pending = pendingHtmlNavigation();
+    if (pending) return pending.fragment;
+    const applied = s.appliedHtmlNavigation()[pane().paneId];
+    return applied && matchesPane(applied) ? applied.fragment : null;
+  };
+  createEffect(
+    () => props.htmlPreviewHost ? [pane().selectedRootId(), pane().selectedFile()?.path] as const : null,
+    (selection) => {
+      if (!selection) return;
+      const [rootId, path] = selection;
+      const applied = untrack(s.appliedHtmlNavigation)[pane().paneId];
+      if (applied && (applied.rootId !== rootId || applied.path !== path)) {
+        s.clearAppliedHtmlNavigation(pane().paneId);
+      }
+    },
+    { defer: true },
+  );
 
   // When the selected file is an image or PDF, the media viewer takes
   // over the whole content area — there's no text to edit or convert.
@@ -315,7 +348,7 @@ export function PaneView(props: PaneViewProps) {
           onFragmentDiscarded={(fragment) => {
             if (untrack(s.pendingFragment) === fragment) s.setPendingFragment(null);
           }}
-          onNavigate={props.onNavigate ?? (() => {})}
+          onNavigate={(target, fragment) => props.onNavigate?.(target, fragment)}
           onOpenExternal={props.onOpenExternal}
           onSearchOpenChange={s.setPreviewSearchOpen}
           onSelectionPopover={onSelectionPopover}
@@ -327,6 +360,13 @@ export function PaneView(props: PaneViewProps) {
             content={pane().editorContent()}
             baseHref={htmlBaseHref()}
             folderRoot={htmlFolderRoot()}
+            fragment={htmlFragment()}
+            onFragmentHandled={() => {
+              const target = untrack(pendingHtmlNavigation);
+              if (!target) return;
+              s.consumePendingHtmlNavigation(pane().paneId, target);
+              if (target.fragment && untrack(s.pendingFragment) === target.fragment) s.setPendingFragment(null);
+            }}
           />
         </Show>
       </Show>

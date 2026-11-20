@@ -17,10 +17,13 @@ interface NavigationDeps {
   tabStore?: () => TabStore;
   onActivateTab?: (tabId: string) => void;
   onOpenHistoryTab?: (entry: FSEntry, rootId: string) => void;
+  /** Open a link target as a tab in the active pane. Injected as a thunk
+   *  because tabActions is created after navigation in app.tsx. */
+  onOpenFile: (entry: FSEntry, rootId: string, pinned: boolean, pushHistory: boolean) => void | Promise<void>;
 }
 
 export function createNavigation(deps: NavigationDeps) {
-  const { loadFileContent, rootPaths, state, tabStore: getTabStore, onActivateTab, onOpenHistoryTab } = deps;
+  const { loadFileContent, rootPaths, state, tabStore: getTabStore, onActivateTab, onOpenHistoryTab, onOpenFile } = deps;
 
   function canGoBack() {
     return state.navIndex() > 0;
@@ -30,10 +33,18 @@ export function createNavigation(deps: NavigationDeps) {
     return state.navIndex() < state.navStack().length - 1;
   }
 
+  async function openTarget(entry: FSEntry, rootId: string, fragment: string | null) {
+    const paneId = state.paneManager.activePane().paneId;
+    state.setPendingHtmlNavigation(paneId, fragment && /\.html?$/i.test(entry.path)
+      ? { rootId, path: entry.path, fragment }
+      : null);
+    await onOpenFile(entry, rootId, false, true);
+  }
+
   /** Try a single candidate path in the tree, then on the filesystem.
    *  Returns true when the navigation was handled (including a directory
    *  opened as a new root). */
-  async function tryOpenTarget(targetPath: string, resolvedRootId?: string): Promise<boolean> {
+  async function tryOpenTarget(targetPath: string, fragment: string | null, resolvedRootId?: string): Promise<boolean> {
     const currentRootId = state.selectedRootId();
     const preferredRootId = resolvedRootId ?? currentRootId;
 
@@ -41,7 +52,7 @@ export function createNavigation(deps: NavigationDeps) {
     if (preferredRootId) {
       const entry = state.findEntryByPath(targetPath, preferredRootId);
       if (entry && entry.kind === "file") {
-        loadFileContent(entry, true, false, preferredRootId);
+        await openTarget(entry, preferredRootId, fragment);
         return true;
       }
     }
@@ -50,7 +61,7 @@ export function createNavigation(deps: NavigationDeps) {
     for (const root of state.rootsList()) {
       const entry = state.findEntryByPath(targetPath, root.id);
       if (entry && entry.kind === "file") {
-        loadFileContent(entry, true, false, root.id);
+        await openTarget(entry, root.id, fragment);
         return true;
       }
     }
@@ -63,22 +74,21 @@ export function createNavigation(deps: NavigationDeps) {
       try {
         const absolutePath = `${currentRootPath}/${targetPath}`;
         const entries = await readTree(absolutePath, state.showHiddenEntries());
-        if (entries.length > 0) {
-          // Navigate into a subdirectory — add it as a new root
-          state.addRoot({
-            collapsed: false,
-            entries,
-            id: absolutePath,
-            name: targetPath.includes("/")
-              ? targetPath.substring(targetPath.lastIndexOf("/") + 1)
-              : targetPath,
-          });
-          state.setSelectedRootId(absolutePath);
-          state.setSidebarVisible(true);
-          state.setSelectedFile(null);
-          state.setHtml("");
-          return true;
-        }
+        // A successful readTree means a directory even when it is empty —
+        // read_dir rejects files before returning any entries.
+        state.addRoot({
+          collapsed: false,
+          entries,
+          id: absolutePath,
+          name: targetPath.includes("/")
+            ? targetPath.substring(targetPath.lastIndexOf("/") + 1)
+            : targetPath,
+        });
+        state.setSelectedRootId(absolutePath);
+        state.setSidebarVisible(true);
+        state.setSelectedFile(null);
+        state.setHtml("");
+        return true;
       } catch {
         // Not a directory
       }
@@ -91,7 +101,7 @@ export function createNavigation(deps: NavigationDeps) {
           ? targetPath.substring(targetPath.lastIndexOf("/") + 1)
           : targetPath;
         const syntheticEntry: FSEntry = { name, kind: "file", path: targetPath };
-        loadFileContent(syntheticEntry, true, false, fallbackRootId!);
+        await openTarget(syntheticEntry, fallbackRootId!, fragment);
         return true;
       } catch {
         // File doesn't exist at that path
@@ -103,6 +113,7 @@ export function createNavigation(deps: NavigationDeps) {
 
   async function handleNavigate(targetPath: string, fragment?: string | null) {
     state.setPendingFragment(fragment ?? null);
+    state.setPendingHtmlNavigation(state.paneManager.activePane().paneId, null);
     const resolved = resolveNavigationTarget(targetPath, rootPaths());
     // Preview maps AsciiDoc's generated `.html` xref links back to `.adoc`.
     // If that document is absent, try the literal `.html` file before failing.
@@ -110,7 +121,7 @@ export function createNavigation(deps: NavigationDeps) {
       ? [resolved.path, `${resolved.path.slice(0, -5)}.html`]
       : [resolved.path];
     for (const candidate of candidates) {
-      if (await tryOpenTarget(candidate, resolved.rootId)) return;
+      if (await tryOpenTarget(candidate, fragment ?? null, resolved.rootId)) return;
     }
     showToast({ title: "File not found", description: resolved.path, duration: 4000 });
   }
