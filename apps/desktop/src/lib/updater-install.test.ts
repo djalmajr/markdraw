@@ -5,6 +5,9 @@ import { describe, expect, it, mock } from "bun:test";
 
 // Same Resource/Channel stubbing rationale as updater-drain.test.ts.
 mock.module("@tauri-apps/api/core", () => ({
+  // bun shares module mocks across test files: keep every export a module
+  // under test may import, or a later file fails to link.
+  convertFileSrc: (path: string) => path,
   invoke: async () => undefined,
   Resource: class {},
   Channel: class {},

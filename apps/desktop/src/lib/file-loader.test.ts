@@ -67,6 +67,9 @@ mock.module("@tauri-apps/api/event", () => ({
   listen: async () => () => {},
 }));
 mock.module("@tauri-apps/api/core", () => ({
+  // bun shares module mocks across test files: keep every export a module
+  // under test may import, or a later file fails to link.
+  convertFileSrc: (path: string) => path,
   invoke: async () => undefined,
   // Resource is a base class used by other Tauri plugins (notably
   // plugin-updater's Update class). Other test suites in this folder
