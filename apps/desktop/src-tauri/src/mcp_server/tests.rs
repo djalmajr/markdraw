@@ -1078,6 +1078,7 @@ fn security_fix_root_command_during_36_mib_disk_read() {
     assert_eq!(registry.list().unwrap(), json!({"roots":[]}));
 }
 
+#[cfg(unix)]
 fn one_root(path: &Path) -> Registry {
     let registry = Registry::default();
     registry
@@ -1089,6 +1090,7 @@ fn one_root(path: &Path) -> Registry {
     registry
 }
 
+#[cfg(unix)]
 #[test]
 fn with_root_resolves_without_the_lock_and_rechecks_after_it() {
     let dir = fixture();
@@ -1128,6 +1130,7 @@ fn with_root_resolves_without_the_lock_and_rechecks_after_it() {
     assert_eq!(seen, std::fs::canonicalize(dir.path()).unwrap());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_root_closed_and_reopened_with_the_same_spelling_during_resolution_is_refused() {
     let dir = fixture();
@@ -1176,6 +1179,7 @@ fn a_root_closed_and_reopened_with_the_same_spelling_during_resolution_is_refuse
     assert_eq!(out, Some(true));
 }
 
+#[cfg(unix)]
 #[test]
 fn with_root_matches_the_exact_registration_before_any_filesystem_access() {
     let dir = fixture();
