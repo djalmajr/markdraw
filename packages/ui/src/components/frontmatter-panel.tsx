@@ -22,6 +22,15 @@ interface FrontmatterPanelProps {
 
 type IconComponent = (props: { width?: number; height?: number }) => JSX.Element;
 
+// Deepest nesting the panel renders. The parser (`extractFrontmatter`) already
+// rejects cyclic or >64-deep frontmatter, so this is defense in depth: a value
+// that reaches the panel another way (restored state, a test fixture) stops
+// expanding here instead of recursing without bound.
+const MAX_RENDER_DEPTH = 32;
+
+// Shown in place of a value nested deeper than MAX_RENDER_DEPTH.
+const DEPTH_LIMIT_MARKER = "…";
+
 // Display order + icons for known keys. Unknown keys fall through to the
 // generic "list" icon and a key-as-label rendering.
 const KNOWN_KEYS: { key: string; icon: IconComponent; label: string }[] = [
@@ -128,7 +137,7 @@ export function FrontmatterPanel(props: FrontmatterPanelProps) {
     );
   }
 
-  function renderValue(key: string, value: unknown): JSX.Element {
+  function renderValue(key: string, value: unknown, depth = 0): JSX.Element {
     // Sources / related: array of wiki-links or URLs (always rendered as links)
     if (key === "sources" || key === "related") {
       const arr = toStringArray(value);
@@ -199,15 +208,20 @@ export function FrontmatterPanel(props: FrontmatterPanelProps) {
         return renderChips([value.trim()]);
       }
     }
-    // Nested objects: render as key: value list
+    // Nested objects: render as key: value list (bounded by MAX_RENDER_DEPTH)
     if (typeof value === "object") {
+      if (depth >= MAX_RENDER_DEPTH) {
+        // Fixed marker, never `String(value)`: a YAML map may carry a data key
+        // named `toString`, and coercing it throws TypeError.
+        return <span class="frontmatter-text">{DEPTH_LIMIT_MARKER}</span>;
+      }
       return (
         <div class="frontmatter-nested">
           <For each={Object.entries(value as Record<string, unknown>)}>
             {([k, v]) => (
               <div class="frontmatter-nested-row">
                 <span class="frontmatter-nested-key">{k}:</span>
-                <span class="frontmatter-nested-value">{renderValue(k, v)}</span>
+                <span class="frontmatter-nested-value">{renderValue(k, v, depth + 1)}</span>
               </div>
             )}
           </For>

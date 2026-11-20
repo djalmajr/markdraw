@@ -23,7 +23,7 @@ import ins from "markdown-it-ins";
 import mark from "markdown-it-mark";
 import multimdTable from "markdown-it-multimd-table";
 import container from "markdown-it-container";
-import { escapeHtml } from "./utils";
+import { escapeHtml } from "./utils.ts";
 
 // ─── AsciiDoc ───────────────────────────────────────────────────────────────
 
@@ -168,6 +168,28 @@ function slugify(s: string): string {
 
 let mdInstance: MarkdownItInstance | null = null;
 
+// A bare document name is a file, not a domain. linkify-it's fuzzy pass turns
+// any token whose suffix is a TLD into a link, and `.md` is Moldova's TLD, so
+// `README.md` became `http://README.md` (a parked spam domain). The fuzzy match
+// carries `schema: ""`; an explicit URL (`https://example.com/notes.md`) keeps
+// its scheme and stays linked. Only an isolated file name is suppressed: a
+// match with a path before the name (`example.com/README.md`) is a domain plus
+// a document path and stays a link. Same policy as packages/core/src/markdown.ts.
+const DOCUMENT_FILE_NAME_RE = /^[^/?#]+\.(?:md|markdown|adoc|asciidoc)$/i;
+
+function ignoreDocumentFileFuzzyLinks(linkify: MarkdownItInstance["linkify"]): void {
+  const match = linkify.match.bind(linkify);
+  linkify.match = (text: string) => {
+    const matches = match(text);
+    if (!matches) return null;
+    // An empty array (not null) keeps markdown-it's linkify rule happy for a
+    // text whose only matches were document names: it re-emits the text as is.
+    return matches.filter(
+      (m) => m.schema !== "" || !DOCUMENT_FILE_NAME_RE.test(m.text),
+    );
+  };
+}
+
 function getMd(): MarkdownItInstance {
   if (mdInstance) return mdInstance;
 
@@ -184,6 +206,7 @@ function getMd(): MarkdownItInstance {
   // links (`example.com`) and credentials in URLs by default; the preview has
   // always linked both, so opt back in explicitly. See packages/core/src/markdown.ts.
   md.linkify.set({ fuzzyLink: true, urlAuth: true });
+  ignoreDocumentFileFuzzyLinks(md.linkify);
   md.use(anchor, { slugify });
   md.use(taskLists, { enabled: true, label: true });
   md.use(mk, { throwOnError: false, errorColor: "#cc0000", katex });

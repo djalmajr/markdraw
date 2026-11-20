@@ -39,6 +39,14 @@ describe("renderChatMarkdown", () => {
     expect(html).not.toMatch(/href=["'][^"']*notes\.md/i);
   });
 
+  it("keeps a URL with credentials whole instead of cutting it at the @", () => {
+    const html = renderChatMarkdown("See http://user:pass@example.com/path for details");
+    expect(html).toContain(
+      '<a href="http://user:pass@example.com/path">http://user:pass@example.com/path</a>',
+    );
+    expect(html).not.toContain('<a href="http://user">');
+  });
+
   it("links workspace document paths that include a directory", () => {
     const html = renderChatMarkdown(
       "See apps/site/public/demo-folder/docs/architecture.adoc:18 for the diagram.",

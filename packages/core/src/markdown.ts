@@ -18,8 +18,8 @@ import ins from "markdown-it-ins";
 import mark from "markdown-it-mark";
 import multimdTable from "markdown-it-multimd-table";
 import container from "markdown-it-container";
-import { escapeHtml } from "./utils";
-import { extractFrontmatter, type Frontmatter } from "./frontmatter";
+import { escapeHtml } from "./utils.ts";
+import { extractFrontmatter, type Frontmatter } from "./frontmatter.ts";
 
 export interface ConvertResult {
   html: string;
@@ -203,6 +203,29 @@ function slugify(s: string): string {
 
 // --- Markdown-it setup ---
 
+// A bare document name is a file, not a domain. linkify-it's fuzzy pass turns
+// any token whose suffix is a TLD into a link, and `.md` is Moldova's TLD, so
+// `README.md` became `http://README.md` (a parked spam domain). The fuzzy match
+// carries `schema: ""`; an explicit URL (`https://example.com/notes.md`) keeps
+// its scheme and stays linked. Only an isolated file name is suppressed: a
+// match with a path before the name (`example.com/README.md`) is a domain plus
+// a document path and stays a link. `.markdown`/`.adoc`/`.asciidoc` are not
+// TLDs today, so the filter is a guard for the whole document-extension family.
+const DOCUMENT_FILE_NAME_RE = /^[^/?#]+\.(?:md|markdown|adoc|asciidoc)$/i;
+
+function ignoreDocumentFileFuzzyLinks(linkify: MarkdownItInstance["linkify"]): void {
+  const match = linkify.match.bind(linkify);
+  linkify.match = (text: string) => {
+    const matches = match(text);
+    if (!matches) return null;
+    // An empty array (not null) keeps markdown-it's linkify rule happy for a
+    // text whose only matches were document names: it re-emits the text as is.
+    return matches.filter(
+      (m) => m.schema !== "" || !DOCUMENT_FILE_NAME_RE.test(m.text),
+    );
+  };
+}
+
 function createMarkdownIt(): MarkdownItInstance {
   const md = new MarkdownIt({
     html: true,
@@ -218,6 +241,7 @@ function createMarkdownIt(): MarkdownItInstance {
   // default. The preview has always linked both, so opt back in explicitly (the chat renderer sets it to false on
   // purpose: `.md` is Moldova's TLD — see packages/ui/src/lib/chat-markdown.ts).
   md.linkify.set({ fuzzyLink: true, urlAuth: true });
+  ignoreDocumentFileFuzzyLinks(md.linkify);
 
   // --- Core plugins ---
 

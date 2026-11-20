@@ -2,9 +2,9 @@
 // Include resolution (which needs platform-specific readFile) stays on main thread.
 // The actual conversion (asciidoctor.js / markdown-it) runs in the worker.
 
-import { collectIncludes } from "./asciidoc";
-import type { ConvertOptions } from "./asciidoc";
-import { extractFrontmatter, type Frontmatter } from "./frontmatter";
+import { collectIncludes } from "./asciidoc.ts";
+import type { ConvertOptions } from "./asciidoc.ts";
+import { extractFrontmatter, type Frontmatter } from "./frontmatter.ts";
 
 export type { ConvertOptions };
 
