@@ -150,12 +150,28 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     }, 500);
   }
 
+  // OpenCode Go routes and caches by a per-conversation id. Never the local
+  // `chat-…` id (it encodes the creation time): one random UUID per
+  // conversation, kept here so closing a chat and reopening it from history
+  // keeps the same id for the rest of this run. A fork is another conversation
+  // and gets its own.
+  const wireIds = new Map<string, string>();
+  function wireIdFor(id: string): string {
+    let wireId = wireIds.get(id);
+    if (!wireId) {
+      wireId = crypto.randomUUID();
+      wireIds.set(id, wireId);
+    }
+    return wireId;
+  }
+
   function flushIndex(): void {
     const { index, evictedIds } = enforceSessionCap({ sessions: metas(), activeId: activeId() });
     for (const id of evictedIds) {
       records.get(id)?.store.cancel();
       records.get(id)?.dispose();
       records.delete(id);
+      wireIds.delete(id);
       deleteChatMessages(id);
     }
     if (evictedIds.length) setMetas((ms) => ms.filter((m) => !evictedIds.includes(m.id)));
@@ -220,6 +236,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
           ...(config.getContext ? { getContext: config.getContext } : {}),
           ...(config.onAssistantTurn ? { onAssistantTurn: config.onAssistantTurn } : {}),
           ...(config.onApprovalRequest ? { onApprovalRequest: config.onApprovalRequest } : {}),
+          sessionId: wireIdFor(id),
           initialMessages: initial,
         });
 
@@ -416,6 +433,7 @@ export function createAiChatSessions(config: AiChatSessionsConfig): AiChatSessio
     teardown(id, false);
     clearTimeout(msgTimers.get(id));
     msgTimers.delete(id);
+    wireIds.delete(id);
     deleteChatMessages(id); // immediate — destructive, must not be lost to a debounce
     setMetas((ms) => ms.filter((m) => m.id !== id));
     if (activeId() === id) setActiveId(neighbor);

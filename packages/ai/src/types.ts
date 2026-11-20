@@ -108,6 +108,10 @@ export interface ChatOptions {
   /** Max steps in the tool-calling loop (AI SDK `stopWhen: isStepCount`).
    *  Defaults to 8. Ignored when `tools` is empty. */
   maxSteps?: number;
+  /** Stable per-conversation id sent as `x-opencode-session` to OpenCode Go
+   *  providers (required by that API). Other providers ignore it; when it is
+   *  absent the engine generates a fresh id for each call. */
+  sessionId?: string;
   /** Engine-level human-in-the-loop: when provided, the ENGINE gates every
    *  `prompt`-tier tool (per `resolveApprovalTier`) behind this callback before
    *  executing — hosts no longer need to pre-wrap tools with `withApproval`.
