@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createSignal, getOwner, onCleanup } from "solid-js";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import {
   type TabId,
@@ -526,6 +526,9 @@ export function createTabStore(config: TabStoreConfig): TabStore {
   }
 
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
+  // A save still pending when the owner goes away (app teardown, a test's
+  // root disposed) must not fire later against a torn-down environment.
+  if (getOwner()) onCleanup(() => clearTimeout(persistTimer));
   let pendingSession: PersistedTabSession | null = null;
   let discarded = false;
   // Old id -> current id of tabs renamed during this store's life: the saved
@@ -564,6 +567,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
       const savedActive = pendingSession?.activeTabId == null ? null : resolveTabId(pendingSession.activeTabId);
       const activeTabId = activeId()
         ?? (savedActive !== null && tabs.some((t) => t.id === savedActive) ? savedActive : null);
+      if (typeof localStorage === "undefined") return;
       setTabSession({ tabs, activeTabId }, storageKey);
     }, 500);
   }

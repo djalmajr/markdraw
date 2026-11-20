@@ -46,6 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select.tsx";
+import { Field, FieldDescription, FieldLabel } from "@ui-sdk/solid/field";
 import {
   Switch as ToggleSwitch,
   SwitchControl,
@@ -66,6 +67,33 @@ const SETTINGS_LABEL_FALLBACKS: Record<string, string> = {
   settings_skills_sources: "Sources",
 };
 const label = (key: string): string => messages[key]?.() ?? SETTINGS_LABEL_FALLBACKS[key] ?? key;
+
+type TrayLocation = "mac" | "windows" | "linux";
+
+/** The OS name for the tray location, mirroring the platform checks used by
+ *  the desktop window-frame and tray-icon helpers. */
+export function trayLocationFor(platform: string): TrayLocation {
+  if (detectPlatform(platform) === "mac") return "mac";
+  if (platform.startsWith("Win")) return "windows";
+  return "linux";
+}
+
+const TRAY_LABEL_KEYS: Record<TrayLocation, string> = {
+  mac: "settings_window_tray_macos",
+  windows: "settings_window_tray_windows",
+  linux: "settings_window_tray_linux",
+};
+
+function traySettingKeys(platform: string): { label: string; description: string } {
+  const location = trayLocationFor(platform);
+  return {
+    label: TRAY_LABEL_KEYS[location],
+    description:
+      location === "mac"
+        ? "settings_window_tray_description_macos"
+        : "settings_window_tray_description_other",
+  };
+}
 
 export type SettingsSection =
   | "ai"
@@ -243,6 +271,10 @@ export interface SettingsDialogProps {
   fontFamily?: string;
   fontSize?: number;
   onFontPrefsChange?: (partial: { fontFamily?: string; fontSize?: number }) => void;
+  /** Desktop-only: whether the OS tray icon is shown. When either this or
+   *  the handler is omitted (browser extension) the Window group is hidden. */
+  showTrayIcon?: boolean;
+  onShowTrayIconChange?: (enabled: boolean) => void;
   /** Editor preferences (Editor section) — mirror the editor toolbar toggles so
    *  they're discoverable/configurable from Settings too. */
   wrapText?: boolean;
@@ -311,6 +343,9 @@ function SettingsBreadcrumb(props: { segments: string[] }): JSX.Element {
 export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
   const [section, setSection] = createSignal<SettingsSection>(
     props.initialSection ?? "ai",
+  );
+  const trayKeys = () => traySettingKeys(
+    typeof navigator === "undefined" ? "" : navigator.platform,
   );
 
   return (
@@ -525,6 +560,27 @@ export function SettingsDialog(props: SettingsDialogProps): JSX.Element {
                     </Select>
                   </div>
                 </div>
+                <Show when={props.showTrayIcon !== undefined && props.onShowTrayIconChange}>
+                  <div class="settings-section" style={{ "margin-top": "12px" }}>
+                    <h4 class="settings-h3">{(useLocale(), label("settings_window_title"))}</h4>
+                    <Field class="settings-row">
+                      <div class="min-w-0">
+                        <FieldLabel class="settings-label">
+                          {(useLocale(), label(trayKeys().label))}
+                        </FieldLabel>
+                        <FieldDescription class="text-[11px] leading-snug text-muted-foreground">
+                          {(useLocale(), label(trayKeys().description))}
+                        </FieldDescription>
+                      </div>
+                      <ToggleSwitch
+                        checked={props.showTrayIcon!}
+                        onChange={(enabled) => props.onShowTrayIconChange?.(enabled)}
+                      >
+                        <SwitchControl size="sm"><SwitchThumb size="sm" /></SwitchControl>
+                      </ToggleSwitch>
+                    </Field>
+                  </div>
+                </Show>
               </Match>
             </Switch>
           </div>

@@ -9,6 +9,12 @@ mock.module("@tauri-apps/api/event", () => ({
     fire = cb;
     return () => {};
   },
+  // bun shares module mocks across test files: keep every export that
+  // `@tauri-apps/api/window` imports (the tray suite loads it).
+  once: async () => () => {},
+  emit: async () => {},
+  emitTo: async () => {},
+  TauriEvent: {},
 }));
 mock.module("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: unknown) => { invoked.push([command, args]); },

@@ -3778,3 +3778,30 @@ describe("AppState — exportação PDF com diagramas pendentes", () => {
     }
   });
 });
+
+describe("AppState — tray icon preference", () => {
+  it("defaults to on and persists both values through the handler", () => {
+    // Mutation captured: a handler that only flips the signal would
+    // forget the choice on the next launch; a hardcoded default would
+    // remove the tray from existing installs on upgrade.
+    withState((state) => {
+      expect(state.showTrayIcon()).toBe(true);
+      expect(localStorage.getItem("markdraw-window-tray-icon")).toBeNull();
+
+      state.handleShowTrayIconChange(false);
+      expect(state.showTrayIcon()).toBe(false);
+      expect(localStorage.getItem("markdraw-window-tray-icon")).toBe("false");
+
+      state.handleShowTrayIconChange(true);
+      expect(state.showTrayIcon()).toBe(true);
+      expect(localStorage.getItem("markdraw-window-tray-icon")).toBe("true");
+    });
+  });
+
+  it("hydrates the signal from the stored preference", () => {
+    localStorage.setItem("markdraw-window-tray-icon", "false");
+    withState((state) => {
+      expect(state.showTrayIcon()).toBe(false);
+    });
+  });
+});

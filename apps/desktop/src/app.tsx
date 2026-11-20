@@ -180,7 +180,7 @@ import { confirm, confirmThree } from "@markdraw/ui/components/confirm-dialog.ts
 import { SCRATCH_ROOT_ID, isScratchPath, makeScratchEntry, type ScratchKind } from "./lib/scratch.ts";
 import { setupTauriDnd } from "./lib/dnd.ts";
 import { setupAppMenu } from "./lib/menu.ts";
-import { setupTray } from "./lib/tray.ts";
+import { createTrayPreferenceSync, setupTray } from "./lib/tray-native.ts";
 import { decideCloseAction } from "./lib/window-close.ts";
 import {
   ALL_WINDOW_CAPABILITIES,
@@ -1824,6 +1824,26 @@ export function App() {
   // Caption buttons the compositor acts on (custom-frame platforms only).
   const [windowCaps, setWindowCaps] = createSignal<WindowCapabilities>(ALL_WINDOW_CAPABILITIES);
 
+  // No system tray in dev — keeps the dev instance from cluttering the menu
+  // bar / colliding with a running prod build (which owns the real tray).
+  // Close-to-tray only hides the window once the tray icon exists: without
+  // it (setup failed, e.g. a Linux session with no StatusNotifierItem
+  // host) a hidden window could not be brought back.
+  let trayAvailable = false;
+  const traySync = createTrayPreferenceSync({
+    isDev: !!import.meta.env.DEV,
+    isTrayAvailable: () => trayAvailable,
+    setup: () => setupTray({
+      onOpenFolder: folder.handleOpenFolder,
+      hideWindow: () => traySync.hideWindow(),
+    }),
+    onAvailabilityChange: (available) => { trayAvailable = available; },
+    onError: (e) => console.warn("Failed to set up tray:", e),
+  });
+  createEffect(() => state.showTrayIcon(), (showTrayIcon) => {
+    void traySync.sync(showTrayIcon);
+  });
+
   // Native app menu (macOS menu bar, Windows/Linux window menu) and tray icon.
   // Both are fire-and-forget; errors are logged but don't break the app.
   onSettled(() => {
@@ -1867,22 +1887,6 @@ export function App() {
       .then(() => (hidesNativeMenuBar(navigator.platform) ? invoke("hide_window_menu") : undefined))
       .catch((e) => console.error("Failed to set up app menu:", e));
 
-    // No system tray in dev — keeps the dev instance from cluttering the menu
-    // bar / colliding with a running prod build (which owns the real tray).
-    // Close-to-tray only hides the window once the tray icon exists: without
-    // it (setup failed, e.g. a Linux session with no StatusNotifierItem
-    // host) a hidden window could not be brought back.
-    let trayAvailable = false;
-    if (!import.meta.env.DEV) {
-      void setupTray({
-        onOpenFolder: folder.handleOpenFolder,
-      })
-        .then(() => {
-          trayAvailable = true;
-        })
-        .catch((e) => console.error("Failed to set up tray:", e));
-    }
-
     // Close-to-tray: clicking the window X hides instead of quitting
     // by default. The user can flip the `closeBehavior` preference to
     // `"quit"` via the toolbar to make X / Cmd+W actually terminate.
@@ -1900,6 +1904,7 @@ export function App() {
         : decideCloseAction({
             closeBehavior: state.closeBehavior(),
             trayAvailable,
+            platform: navigator.platform,
             isUpdating:
               (window as unknown as { __markdraw_updating?: boolean }).__markdraw_updating ??
               false,
@@ -1931,17 +1936,9 @@ export function App() {
         await exit(0);
         return;
       }
-      if (action === "minimize") {
-        // "tray" setting, but no tray icon to bring a hidden window back:
-        // keep the window reachable from the taskbar instead.
-        event.preventDefault();
-        await win.minimize();
-        return;
-      }
-      // action === "hide": pre-DJA-50 default.
+      // Apply the keep-open action against the tray state inside the queue.
       event.preventDefault();
-      await invoke("hide_main_window");
-      await invoke("set_dock_visible", { visible: false });
+      await traySync.hideWindow();
     });
   });
 
@@ -3632,6 +3629,8 @@ export function App() {
       showSidebar={state.sidebarVisible() && rootPaths().size > 0}
       showWindowControls={customWindowFrame}
       showCloseBehaviorToggle={true}
+      showTrayIcon={state.showTrayIcon()}
+      onShowTrayIconChange={state.handleShowTrayIconChange}
       toolbarFilePath={
         isScratchPath(state.selectedFile()?.path)
           ? (state.selectedFile()?.name ?? null)

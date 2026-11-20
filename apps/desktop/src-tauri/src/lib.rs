@@ -1653,13 +1653,27 @@ pub fn run() {
             // an associated .md/.adoc), Tauri delivers it as RunEvent::Opened.
             // We forward the path to the frontend via an event.
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = _event {
+            if let tauri::RunEvent::Opened { ref urls } = _event {
                 for url in urls {
                     if let Ok(path) = url.to_file_path() {
                         if let Some(path_str) = path.to_str() {
                             let _ = _app.emit("open-file", path_str.to_string());
                         }
                     }
+                }
+            }
+            // macOS Dock click after a close that hid the window while no
+            // tray icon exists (the tray is disabled or failed to start).
+            // Same restore path as the tray action and a second instance:
+            // show through the Linux-aware helper, then focus.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                if let Some(window) = _app.get_webview_window("main") {
+                    let app = _app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = show_window(app).await;
+                        let _ = window.set_focus();
+                    });
                 }
             }
         });
