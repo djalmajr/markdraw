@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSignal, flush } from "solid-js";
+import { createRoot, createSignal, flush } from "solid-js";
 import { cleanup, render, waitFor } from "@solidjs/testing-library";
 
 const ctl = vi.hoisted(() => {
@@ -8,13 +8,15 @@ const ctl = vi.hoisted(() => {
   :root { --mermaid-font-family: inherit }`;
   return {
     fixture: defaultFixture,
+    svg: undefined as ((id: string) => string) | undefined,
     calls: [] as string[],
     ids: [] as string[],
     events: [] as string[],
-    mode: "resolve" as "resolve" | "pending",
+    mode: "resolve" as "resolve" | "pending" | "error",
     pending: [] as Array<() => void>,
     reset() {
       this.fixture = defaultFixture;
+      this.svg = undefined;
       this.calls.length = 0;
       this.ids.length = 0;
       this.events.length = 0;
@@ -24,23 +26,22 @@ const ctl = vi.hoisted(() => {
   };
 });
 
-vi.mock("mermaid", () => ({
-  default: {
-    initialize: () => {},
-    render: (id: string, source: string) => {
-      if (id === "mermaid-prewarm") return Promise.resolve({ svg: '<svg viewBox="0 0 10 10"></svg>' });
-      ctl.calls.push(source);
-      ctl.ids.push(id);
-      ctl.events.push(`render:${source}`);
-      const css = ctl.fixture.replaceAll("#mermaid-1", `#${id}`);
-      const svg = `<svg id="${id}" viewBox="0 0 10 20"><style>${css}</style><text>${source}</text></svg>`;
-      if (ctl.mode === "pending") {
-        return new Promise<{ svg: string }>((resolve) => {
-          ctl.pending.push(() => resolve({ svg }));
-        });
-      }
-      return Promise.resolve({ svg });
-    },
+vi.mock(import("../lib/mermaid-frame.ts"), async (original) => ({
+  ...await original(),
+  ensureMermaidWarm: async () => {},
+  renderInFrame: (id: string, source: string) => {
+    ctl.calls.push(source);
+    ctl.ids.push(id);
+    ctl.events.push(`render:${source}`);
+    const css = ctl.fixture.replaceAll("#mermaid-1", `#${id}`);
+    const svg = ctl.svg?.(id) ?? `<svg id="${id}" viewBox="0 0 10 20"><style>${css}</style><text>${source}</text></svg>`;
+    if (ctl.mode === "error") return Promise.reject(new Error("invalid diagram"));
+    if (ctl.mode === "pending") {
+      return new Promise<{ svg: string }>((resolve) => {
+        ctl.pending.push(() => resolve({ svg }));
+      });
+    }
+    return Promise.resolve({ svg });
   },
 }));
 
@@ -50,6 +51,8 @@ import { Preview } from "./preview.tsx";
 import { mermaidCache, mermaidCacheKey } from "../lib/mermaid-cache.ts";
 import { createMermaidLazyRenderer } from "../lib/mermaid-lazy.ts";
 import { flushPendingMermaid } from "../lib/mermaid-flush.ts";
+import { createAppState } from "../composables/create-app-state.ts";
+import { setupAppMenu } from "../../../../apps/desktop/src/lib/menu.ts";
 
 class FakeIO {
   static instances: FakeIO[] = [];
@@ -159,6 +162,38 @@ function props(over: Record<string, unknown> = {}) {
 
 const doc = (...sources: string[]) => sources.map((s) => `<div class="mermaid">${s}</div>`).join("");
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Reduced from Mermaid 12.3.0's timeline output with look: neo and theme: redux.
+function timelineSvg(id: string) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" id="${id}" viewBox="100 -53 790 460.6000061035156">
+    <style>#${id} { font-family: inherit }
+#${id} .section--1 rect,#${id} .section--1 path,#${id} .section--1 circle{fill:#ffffff;stroke:#28253D;stroke-width:2;filter:url(#${id}-drop-shadow);}
+#${id} .section--1 text{fill:#28253D;font-weight:600;}
+#${id} text::before { content: "url(#${id}-drop-shadow)" }</style>
+    <defs><filter id="${id}-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs>
+    <g class="section--1"><rect width="10" height="10"/></g>
+  </svg>`;
+}
+
+// Reduced from Mermaid 12.3.0's flowchart output with look: neo and theme: base.
+function flowchartSvg(id: string) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" id="${id}" viewBox="0 0 168 163">
+    <style>#${id} .node rect,#${id} .node circle,#${id} .node ellipse,#${id} .node polygon,#${id} .node path{fill:#fff4dd;stroke:hsl(40.5882352941, 60%, 83.3333333333%);stroke-width:1px;}
+#${id} [data-look="neo"].node rect,#${id} [data-look="neo"].cluster rect,#${id} [data-look="neo"].node polygon{stroke:url(#${id}-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}</style>
+    <marker id="${id}_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path class="arrowMarkerPath" d="M 0 0 L 11.5 7 L 0 14 z"/></marker>
+    <g class="node default" data-look="neo"><rect class="basic label-container" x="-76" y="-24" width="152" height="48"/></g>
+    <path class="flowchart-link" marker-end="url(#${id}_flowchart-v2-pointEnd-margin)" d="M84,56L84,102"/>
+    <linearGradient id="${id}-gradient" gradientUnits="objectBoundingBox" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="hsl(40.5882352941, 60%, 83.3333333333%)" stop-opacity="1"/><stop offset="100%" stop-color="hsl(-79.4117647059, 60%, 83.3333333333%)" stop-opacity="1"/></linearGradient>
+  </svg>`;
+}
+
+function readSvgInsertion(block: HTMLElement) {
+  // happy-dom's HTML parser drops the SVG style and its following nodes.
+  vi.spyOn(block, "innerHTML", "set").mockImplementation((markup) => {
+    const svg = new DOMParser().parseFromString(markup, "image/svg+xml").documentElement;
+    block.replaceChildren(document.importNode(svg, true));
+  });
+}
 
 beforeEach(() => {
   ctl.reset();
@@ -299,31 +334,215 @@ describe("Preview — Mermaid sob demanda", () => {
     }
   });
 
-  it("compensa o scrollTop quando um diagrama acima da área visível muda de altura", async () => {
-    ctl.mode = "pending";
-    let height = 20;
+  it.each([
+    ["observer", "svg", false], ["observer", "svg", true],
+    ["observer", "erro", false], ["observer", "erro", true],
+    ["flush", "svg", false], ["flush", "svg", true],
+    ["flush", "erro", false], ["flush", "erro", true],
+  ] as const)("preserva o elemento visível via %s, com %s e ancoragem nativa=%s", async (trigger, result, anchored) => {
+    ctl.mode = result === "erro" ? "error" : "resolve";
     const scroller = document.createElement("div");
+    const discarded = vi.fn();
     scroller.className = "content";
-    scroller.scrollTop = 500;
-    document.body.appendChild(scroller);
+    document.body.append(scroller);
     try {
-      render(() => <Preview {...props({ html: doc("A") })} />, { container: scroller });
+      const html = doc("A") + '<section><h2>Visible anchor</h2></section>';
+      render(() => <Preview {...props({
+        html, tocContainer: document.createElement("div"),
+        pendingFragment: "missing", onFragmentDiscarded: discarded,
+      })} />, { container: scroller });
       const block = scroller.querySelector<HTMLElement>(".mermaid")!;
+      const section = scroller.querySelector("section")!;
+      const heading = scroller.querySelector("h2")!;
       place(scroller, 100, 300);
-      place(block, 0, 50);
-      Object.defineProperty(block, "offsetHeight", {
-        configurable: true,
-        get: () => block.querySelector("svg") ? 60 : height,
+      place(block, -500, -340);
+      place(section, 90, 300);
+
+      const selector = result === "erro" ? ".mermaid-error" : "svg";
+      const delta = result === "erro" ? -120 : 40;
+      let scrollTop = 500;
+      let layoutApplied = false;
+      const heightChange = () => {
+        if (!block.querySelector(selector)) return 0;
+        if (!layoutApplied && anchored) scrollTop += delta;
+        layoutApplied = true;
+        return delta;
+      };
+      const setScrollTop = vi.fn((value: number) => { scrollTop = value; });
+      Object.defineProperty(scroller, "scrollTop", {
+        get: () => {
+          heightChange();
+          return scrollTop;
+        },
+        set: setScrollTop,
       });
-      await waitFor(() => expect(ctl.calls).toEqual(["A"]));
-      expect(scroller.scrollTop).toBe(500);
-      ctl.pending.shift()!();
-      await waitFor(() => expect(block.querySelector("svg")).not.toBeNull());
-      expect(scroller.scrollTop).toBe(540);
+      Object.defineProperty(block, "offsetHeight", { get: () => 160 + heightChange() });
+      heading.getBoundingClientRect = () => {
+        const top = 121 + heightChange() - (scrollTop - 500);
+        return rect(top, top + 20);
+      };
+
+      await waitFor(() => expect(discarded).toHaveBeenCalledWith("missing"));
+      expect(block.hasAttribute("data-mermaid-pending")).toBe(true);
+      expect(ctl.calls).toEqual([]);
+      const before = heading.getBoundingClientRect().top;
+
+      if (trigger === "flush") await flushPendingMermaid();
+      else FakeIO.instances.at(-1)!.emit([block], true);
+      await waitFor(() => expect(block.querySelector(selector)).not.toBeNull());
+      expect(heading.getBoundingClientRect().top).toBe(before);
+      expect(scroller.scrollTop).toBe(500 + delta);
+      expect(setScrollTop.mock.calls).toEqual(anchored ? [] : [[500 + delta]]);
     } finally {
       scroller.remove();
     }
   });
+
+  it.each([
+    ["observer", "cache", false], ["observer", "cache", true],
+    ["observer", "render", false], ["observer", "render", true],
+    ["observer", "erro", false], ["observer", "erro", true],
+    ["flush", "cache", false], ["flush", "cache", true],
+    ["flush", "render", false], ["flush", "render", true],
+    ["flush", "erro", false], ["flush", "erro", true],
+  ] as const)("mantém o código alto parado via %s, com %s e ancoragem nativa=%s", async (trigger, result, anchored) => {
+    const source = "A";
+    const failed = result === "erro";
+    ctl.mode = failed ? "error" : "resolve";
+    if (result === "cache") {
+      mermaidCache.set(mermaidCacheKey(source, "default"), '<svg id="cached" viewBox="0 0 10 10"><path /></svg>');
+    }
+
+    const scroller = document.createElement("div");
+    const discarded = vi.fn();
+    scroller.className = "content";
+    document.body.append(scroller);
+    try {
+      const offscreen = `<section>${"<p><em>Fora da tela</em></p>".repeat(40)}</section>`;
+      const lines = Array.from({ length: 100 }, (_, i) => `Linha ${i}`).join("\n");
+      const html = offscreen + doc(source) + `<pre><code>${lines}</code></pre>` + offscreen;
+      render(() => <Preview {...props({
+        html, tocContainer: document.createElement("div"),
+        pendingFragment: "missing", onFragmentDiscarded: discarded,
+      })} />, { container: scroller });
+      const block = scroller.querySelector<HTMLElement>(".mermaid")!;
+      const pre = scroller.querySelector("pre")!;
+      const code = pre.querySelector("code")!;
+      const [above, below] = scroller.querySelectorAll("section");
+      place(scroller, 100, 300);
+      place(block, -500, -340);
+      place(above!, -2500, -500);
+      place(below!, 1900, 3900);
+      const offscreenRects = vi.fn(() => rect(0, 0));
+      for (const descendant of scroller.querySelectorAll("section *")) {
+        descendant.getBoundingClientRect = offscreenRects;
+      }
+      const aboveRect = vi.spyOn(above!, "getBoundingClientRect");
+      const belowRect = vi.spyOn(below!, "getBoundingClientRect");
+
+      const selector = failed ? ".mermaid-error" : "svg";
+      const delta = failed ? -120 : 40;
+      let scrollTop = 500;
+      let layoutApplied = false;
+      const setScrollTop = vi.fn((value: number) => { scrollTop = value; });
+      Object.defineProperty(scroller, "scrollTop", { get: () => scrollTop, set: setScrollTop });
+      const laidOutRect = (top: number, height: number) => () => {
+        const inserted = !!block.querySelector(selector);
+        if (inserted && !layoutApplied) {
+          if (anchored) scrollTop += delta;
+          layoutApplied = true;
+        }
+        const position = top + (inserted ? delta : 0) - (scrollTop - 500);
+        return rect(position, position + height);
+      };
+      const preRect = vi.fn(laidOutRect(-30, 1930));
+      const codeRect = vi.fn(laidOutRect(-5, 1880));
+      pre.getBoundingClientRect = preRect;
+      code.getBoundingClientRect = codeRect;
+
+      await waitFor(() => expect(discarded).toHaveBeenCalledWith("missing"));
+      expect(block.hasAttribute("data-mermaid-pending")).toBe(true);
+      expect(ctl.calls).toEqual([]);
+      const before = code.getBoundingClientRect().top;
+      codeRect.mockClear();
+
+      if (trigger === "flush") await flushPendingMermaid();
+      else FakeIO.instances.at(-1)!.emit([block], true);
+      await waitFor(() => expect(block.querySelector(selector)).not.toBeNull());
+      expect(code.getBoundingClientRect().top).toBe(before);
+      expect(scroller.scrollTop).toBe(500 + delta);
+      expect(setScrollTop.mock.calls).toEqual(anchored ? [] : [[500 + delta]]);
+      expect(ctl.calls).toEqual(result === "cache" ? [] : failed ? [source, source, source] : [source]);
+      expect(offscreenRects).not.toHaveBeenCalled();
+      expect([aboveRect, preRect, belowRect].map((measure) => measure.mock.calls.length)).toEqual([1, 1, 1]);
+      // Search, post-insertion compensation, and the assertion above.
+      expect(codeRect).toHaveBeenCalledTimes(3);
+    } finally {
+      scroller.remove();
+    }
+  });
+
+  it.each([["varredura", false], ["ponto na borda de cima", true]] as const)(
+    "mede só os arredores da área visível para achar a âncora (%s)",
+    async (_label, hitTest) => {
+      const source = "A";
+      mermaidCache.set(mermaidCacheKey(source, "default"), '<svg id="cached" viewBox="0 0 10 10"><path /></svg>');
+      const scroller = document.createElement("div");
+      const discarded = vi.fn();
+      scroller.className = "content";
+      document.body.append(scroller);
+      const originalHitTest = document.elementFromPoint;
+      try {
+        const before = "<p>Antes</p>".repeat(200);
+        const after = "<p>Depois</p>".repeat(200);
+        const lines = Array.from({ length: 100 }, (_, i) => `Linha ${i}`).join("\n");
+        render(() => <Preview {...props({
+          html: before + doc(source) + `<pre><code>${lines}</code></pre>` + after,
+          tocContainer: document.createElement("div"),
+          pendingFragment: "missing", onFragmentDiscarded: discarded,
+        })} />, { container: scroller });
+        const block = scroller.querySelector<HTMLElement>(".mermaid")!;
+        const pre = scroller.querySelector("pre")!;
+        const code = pre.querySelector("code")!;
+        const paragraphs = Array.from(scroller.querySelectorAll("p"));
+        const beforeParagraphs = paragraphs.filter((p) => p.textContent === "Antes");
+        const afterParagraphs = paragraphs.filter((p) => p.textContent === "Depois");
+        place(scroller, 100, 300);
+        place(scroller.querySelector(".doc-body")!, -9000, 12000);
+        place(block, -500, -340);
+        beforeParagraphs.forEach((p, i) => place(p, -9000 + i * 40, -8980 + i * 40));
+        afterParagraphs.forEach((p, i) => place(p, 1900 + i * 40, 1920 + i * 40));
+        const beforeRects = beforeParagraphs.map((p) => vi.spyOn(p, "getBoundingClientRect"));
+        const afterRects = afterParagraphs.map((p) => vi.spyOn(p, "getBoundingClientRect"));
+        let inserted = () => !!block.querySelector("svg");
+        let scrollTop = 500;
+        Object.defineProperty(scroller, "scrollTop", { get: () => scrollTop, set: (v: number) => { scrollTop = v; } });
+        const laidOut = (top: number, height: number) => () => {
+          const position = top + (inserted() ? 40 : 0) - (scrollTop - 500);
+          return rect(position, position + height);
+        };
+        pre.getBoundingClientRect = vi.fn(laidOut(-30, 1930));
+        code.getBoundingClientRect = vi.fn(laidOut(-5, 1880));
+        document.elementFromPoint = (hitTest ? () => code : () => null) as typeof document.elementFromPoint;
+
+        await waitFor(() => expect(discarded).toHaveBeenCalledWith("missing"));
+        const top = code.getBoundingClientRect().top;
+        for (const spy of [...beforeRects, ...afterRects]) spy.mockClear();
+        FakeIO.instances.at(-1)!.emit([block], true);
+        await waitFor(() => expect(inserted()).toBe(true));
+
+        expect(code.getBoundingClientRect().top).toBe(top);
+        const measured = (spies: typeof beforeRects) => spies.filter((spy) => spy.mock.calls.length > 0).length;
+        // The walk stops at the first sibling below the viewport; the hit test
+        // measures none of the far siblings at all.
+        expect(measured(afterRects)).toBeLessThanOrEqual(hitTest ? 0 : 1);
+        if (hitTest) expect(measured(beforeRects)).toBe(0);
+      } finally {
+        document.elementFromPoint = originalHitTest;
+        scroller.remove();
+      }
+    },
+  );
 
   it("assenta o pós-processamento sem esperar um diagrama fora da tela", async () => {
     ctl.mode = "pending";
@@ -738,6 +957,172 @@ describe("Preview — Mermaid rodada 2", () => {
       expect(second.targets.has(block)).toBe(false);
     } finally {
       renderer.dispose();
+    }
+  });
+});
+
+describe("Preview — Mermaid no iframe e exportação", () => {
+  it("espera o diagrama fora da margem antes de imprimir pelo menu nativo", async () => {
+    const scroller = document.createElement("div");
+    scroller.className = "content";
+    document.body.append(scroller);
+    const discarded = vi.fn();
+    const print = vi.fn<() => boolean>();
+    const [state, disposeState] = createRoot((dispose) => [
+      createAppState({
+        printPage: () => { print(); },
+        applyTheme: () => {},
+        convertAdoc: async () => ({ html: "", frontmatter: null }),
+        convertMarkdown: async () => ({ html: "", frontmatter: null }),
+        getStoredTheme: () => "system",
+      }),
+      dispose,
+    ] as const);
+    let activateExport: (() => void) | undefined;
+    let nextCallback = 0;
+    vi.stubGlobal("__TAURI_INTERNALS__", {
+      transformCallback: () => ++nextCallback,
+      invoke: async (command: string, args: {
+        options?: { id?: string };
+        handler?: { onmessage: (id: string) => void };
+      }) => {
+        switch (command) {
+          case "plugin:menu|new":
+            if (args.options?.id === "export-pdf") {
+              const handler = args.handler!;
+              activateExport = () => handler.onmessage("export-pdf");
+            }
+            return [nextCallback, args.options?.id ?? String(nextCallback)];
+          case "plugin:app|version":
+            return "0.0.0";
+          case "plugin:menu|set_as_app_menu":
+            return null;
+          case "print_webview":
+            return print();
+          default:
+            throw new Error(`Unexpected IPC: ${command}`);
+        }
+      },
+    });
+    try {
+      render(() => <Preview {...props({
+        html: doc("A", "B"), tocContainer: document.createElement("div"),
+        pendingFragment: "missing", onFragmentDiscarded: discarded,
+      })} />, { container: scroller });
+      place(scroller, 0, 200);
+      const [visible, offscreen] = scroller.querySelectorAll<HTMLElement>("article .mermaid");
+      place(visible!, 10, 50);
+      place(offscreen!, 1000, 1050);
+
+      await waitFor(() => expect(discarded).toHaveBeenCalledWith("missing"));
+      expect(visible!.querySelector("svg")).not.toBeNull();
+      expect(offscreen!.hasAttribute("data-mermaid-pending")).toBe(true);
+      expect(ctl.calls).toEqual(["A"]);
+
+      await setupAppMenu({
+        exportPdfState: state,
+        onOpenFolder: () => {},
+        onCheckForUpdates: () => {},
+        onEditorMode: () => {},
+        onToggleSidebar: () => {},
+        onToggleToc: () => {},
+        onThemeChange: () => {},
+        onFind: () => {},
+      });
+      ctl.mode = "pending";
+      print.mockImplementation(() => !!offscreen!.querySelector("svg"));
+      activateExport!();
+      await waitFor(() => expect(ctl.calls).toEqual(["A", "B"]));
+      expect(print).not.toHaveBeenCalled();
+      expect(offscreen!.hasAttribute("data-mermaid-pending")).toBe(true);
+      ctl.pending.shift()!();
+      await waitFor(() => expect(print).toHaveBeenCalledOnce());
+      expect(print).toHaveReturnedWith(true);
+    } finally {
+      ctl.pending.splice(0).forEach((resolve) => resolve());
+      disposeState();
+      scroller.remove();
+    }
+  });
+
+  for (const path of ["render", "cache"] as const) {
+    it(`compartilha parte do CSS do timeline neo e mantém o filtro local no caminho de ${path}`, async () => {
+      const scroller = document.createElement("div");
+      scroller.className = "content";
+      document.body.append(scroller);
+      const source = "---\nconfig:\n  look: neo\n  theme: redux\n---\ntimeline\n  2025 : First milestone";
+      const cachedId = "review-timeline";
+      ctl.svg = timelineSvg;
+      if (path === "cache") {
+        mermaidCache.set(mermaidCacheKey(source, "default"), timelineSvg(cachedId));
+      }
+      try {
+        render(() => <Preview {...props({ html: doc(source) })} />, { container: scroller });
+        const block = scroller.querySelector<HTMLElement>("article .mermaid")!;
+        readSvgInsertion(block);
+        await waitFor(() => expect(scroller.querySelector("article .mermaid svg")).not.toBeNull());
+        const svg = scroller.querySelector("article .mermaid svg")!;
+        const originalId = path === "render" ? ctl.ids[0]! : cachedId;
+        expect(ctl.calls).toEqual(path === "render" ? [source] : []);
+        const shared = scroller.querySelector("style[data-mermaid-css]")!;
+        const className = shared.getAttribute("data-mermaid-css")!;
+        expect(svg.classList.contains(className)).toBe(true);
+        expect(shared.textContent).toContain(`.${className} { font-family: inherit }`);
+        expect(shared.textContent).not.toMatch(/filter:\s*url\(/);
+        expect(shared.textContent).not.toContain(".section--1 text");
+
+        const filter = svg.querySelector("filter")!;
+        expect(svg.id).not.toBe(originalId);
+        expect(filter.id).not.toBe(`${originalId}-drop-shadow`);
+        const css = svg.querySelector("style")?.textContent;
+        expect(css).toContain(`.${className}:where(#${svg.id}) .section--1 rect`);
+        expect(css).toContain(`filter:url(#${filter.id})`);
+        expect(css).toContain(`.${className}:where(#${svg.id}) .section--1 text`);
+        expect(css).toContain(`content: "url(#${originalId}-drop-shadow)"`);
+        expect(mermaidCache.classNameFor(mermaidCacheKey(source, "default"))).toBe(className);
+      } finally {
+        scroller.remove();
+      }
+    });
+  }
+
+  it("compartilha o CSS de dois flowcharts com o mesmo tema e isola gradientes e marcadores em render e cache", async () => {
+    const scroller = document.createElement("div");
+    scroller.className = "content";
+    document.body.append(scroller);
+    const config = "---\nconfig:\n  look: neo\n  theme: base\n---\nflowchart TD\n";
+    const renderedSource = config + " A[one] --> B[two]";
+    const cachedSource = config + " C[three] --> D[four]";
+    mermaidCache.set(mermaidCacheKey(cachedSource, "default"), flowchartSvg("cached-flowchart"));
+    ctl.svg = flowchartSvg;
+    try {
+      const html = doc(...[renderedSource, cachedSource].map((source) => source.replaceAll(">", "&gt;")));
+      render(() => <Preview {...props({ html })} />, { container: scroller });
+      scroller.querySelectorAll<HTMLElement>("article .mermaid").forEach(readSvgInsertion);
+      await waitFor(() => expect(scroller.querySelectorAll("article .mermaid svg")).toHaveLength(2));
+
+      expect(ctl.calls).toEqual([renderedSource]);
+      const sharedStyles = scroller.querySelectorAll("style[data-mermaid-css]");
+      expect(sharedStyles).toHaveLength(1);
+      const className = sharedStyles[0]!.getAttribute("data-mermaid-css")!;
+      expect(sharedStyles[0]!.textContent).toContain(`.${className} .node rect`);
+      expect(sharedStyles[0]!.textContent).not.toContain("url(");
+      for (const [index, svg] of Array.from(scroller.querySelectorAll("article .mermaid svg")).entries()) {
+        const originalId = index === 0 ? ctl.ids[0]! : "cached-flowchart";
+        const gradient = svg.querySelector("linearGradient")!;
+        const marker = svg.querySelector("marker")!;
+        const css = svg.querySelector("style")?.textContent;
+        expect(svg.classList.contains(className)).toBe(true);
+        expect(svg.id).not.toBe(originalId);
+        expect(gradient.id).not.toBe(`${originalId}-gradient`);
+        expect(marker.id).not.toBe(`${originalId}_flowchart-v2-pointEnd-margin`);
+        expect(css).toContain(`.${className}:where(#${svg.id}) [data-look="neo"].node rect`);
+        expect(css).toContain(`stroke:url(#${gradient.id})`);
+        expect(css).not.toContain("fill:#fff4dd");
+        expect(svg.querySelector(".flowchart-link")?.getAttribute("marker-end")).toBe(`url(#${marker.id})`);
+      }
+    } finally {
+      scroller.remove();
     }
   });
 });

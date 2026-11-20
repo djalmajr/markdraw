@@ -1852,7 +1852,7 @@ export function App() {
 
     void setupAppMenu({
       onOpenFolder: folder.handleOpenFolder,
-      onExportPdf: () => invoke("print_webview"),
+      exportPdfState: state,
       onCheckForUpdates: () => checkForAppUpdates(false),
       onCloseTab: () => {
         const activeTab = tabStore().activeTabId();

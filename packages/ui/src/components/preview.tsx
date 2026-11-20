@@ -1,7 +1,6 @@
 import { Show, createSignal, onSettled, onCleanup, createEffect, untrack } from "solid-js";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
-import mermaid from "mermaid";
 import Prism from "prismjs";
 import "prismjs/components/prism-markup";
 import "prismjs/components/prism-css";
@@ -34,9 +33,10 @@ import IconExpand from "~icons/lucide/expand";
 import { Portal } from "@solidjs/web";
 import { FrontmatterPanel } from "./frontmatter-panel.tsx";
 import { renderKroki } from "@markdraw/core/kroki.ts";
-import { mermaidCache, mermaidCacheKey, MERMAID_CONFIG } from "../lib/mermaid-cache.ts";
+import { mermaidCache, mermaidCacheKey } from "../lib/mermaid-cache.ts";
+import { ensureMermaidWarm, renderInFrame, retainMermaidFrame, withMermaidLock } from "../lib/mermaid-frame.ts";
 import { createMermaidLazyRenderer, type MermaidLazyRenderer } from "../lib/mermaid-lazy.ts";
-import { MERMAID_CSS_CLASS_PREFIX, MermaidStyleRegistry, parseSvgMarkup, prepareMermaidSvg, svgWithMermaidStyles } from "../lib/mermaid-svg-css.ts";
+import { MERMAID_CSS_CLASS_PREFIX, MermaidStyleRegistry, parseSvgMarkup, prepareMermaidSvg, renameMermaidInlineCss, svgWithMermaidStyles } from "../lib/mermaid-svg-css.ts";
 import { registerMermaidFlush } from "../lib/mermaid-flush.ts";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
 import "katex/dist/katex.min.css";
@@ -111,9 +111,6 @@ function sanitizeHtmlFragment(input: string): string {
   return doc.body.innerHTML;
 }
 
-let mermaidTheme: "dark" | "default" | null = null;
-let mermaidQueue: Promise<void> = Promise.resolve();
-let mermaidWarmPromise: Promise<void> | null = null;
 let mermaidId = 0;
 const pendingMermaidSources = new WeakMap<HTMLElement, string>();
 
@@ -157,81 +154,12 @@ function uniqueMermaidIds(svg: string, updateStyleText = true): string {
         el.setAttribute(attr.name, replaceReferences(attr.value));
       }
     }
-    // The no-CSSOM fallback keeps the baseline textual replacement; in the
-    // CSSOM path the stylesheet has already left the SVG and stays untouched.
     if (updateStyleText && el.localName === "style") {
-      el.textContent = replaceReferences(el.textContent ?? "");
+      const css = el.textContent ?? "";
+      el.textContent = renameMermaidInlineCss(css, ids) ?? replaceReferences(css);
     }
   }
   return serialize();
-}
-
-function initMermaid(theme: "dark" | "default") {
-  if (mermaidTheme === theme) return;
-  mermaid.initialize({
-    startOnLoad: false,
-    theme,
-    // Pin the mermaid 11 appearance. Mermaid 12 defaults to the `neo` look and
-    // to ELK as the layout engine, which recolours and re-routes every existing
-    // diagram (the upstream 12.0.0 notes name exactly these two options: "add
-    // `layout: dagre`, `theme: default` and `look: classic` to your config to
-    // keep the old look"). The new look is a separate, later product decision.
-    ...MERMAID_CONFIG,
-  });
-  mermaidTheme = theme;
-}
-
-function withMermaidLock<T>(work: () => Promise<T>): Promise<T> {
-  const result = mermaidQueue.then(work);
-  mermaidQueue = result.then(() => {}, () => {});
-  return result;
-}
-
-/**
- * Pre-warm mermaid so the first user-facing render doesn't race
- * with internal lazy-init + font measurement. The very first
- * `mermaid.render()` after a fresh page load occasionally throws
- * `null is not an object (evaluating 'element.firstChild')` —
- * subsequent calls work because the lib is now warm. Running a
- * throwaway tiny diagram once per session pays the cost upfront.
- *
- * Memoized as a single shared promise: every Preview instance
- * (split panes, multiple files in sequence) shares the same warm
- * state, and the wait collapses to a no-op after the first
- * resolve. Errors are intentionally swallowed — pre-warm is
- * best-effort and the real render still has its own catch path.
- */
-function ensureMermaidWarm(): Promise<void> {
-  if (mermaidWarmPromise) return mermaidWarmPromise;
-  mermaidWarmPromise = (async () => {
-    // Wait for fonts before measurement-heavy rendering — mermaid
-    // sizes nodes against text width and a missing font can give
-    // a 0-width SVG that trips internal `firstChild` walks.
-    if (typeof document !== "undefined" && document.fonts?.ready) {
-      try { await document.fonts.ready; } catch { /* ignore */ }
-    }
-    // Kitchen-sink pre-warm: exercise the shape renderers we
-    // typically see in user docs (box, rounded, diamond, cylinder,
-    // labelled edges). Mermaid lazy-loads per-shape modules — a
-    // trivial `A-->B` warm-up wasn't enough because the FIRST real
-    // render with new shapes still tripped the firstChild race.
-    try {
-      await withMermaidLock(async () => {
-        initMermaid(document.documentElement.classList.contains("dark") ? "dark" : "default");
-        try {
-          await mermaid.render(
-            "mermaid-prewarm",
-            "graph LR\nA[box] --> B(rounded)\nB --> C{diamond}\nC -->|label| D[(cylinder)]\nD --> E([stadium])",
-          );
-        } finally {
-          document.querySelectorAll('div[id^="dmermaid-"]').forEach((el) => el.remove());
-        }
-      });
-    } catch (e) {
-      console.warn("[mermaid] pre-warm failed", e);
-    }
-  })();
-  return mermaidWarmPromise;
 }
 
 /**
@@ -309,32 +237,73 @@ function mermaidSvgLooksRenderable(svg: string): boolean {
   return true;
 }
 
-type InsertionMetrics = { height: number; above: boolean };
-
-function insertionMetrics(block: HTMLElement, root: HTMLElement | null): InsertionMetrics {
-  const rootRect = root?.getBoundingClientRect();
-  return {
-    height: block.offsetHeight,
-    above: !!rootRect && block.getBoundingClientRect().bottom <= rootRect.top + 1,
-  };
+function anchorAtViewportTop(
+  block: HTMLElement,
+  article: HTMLElement,
+  top: number,
+  bottom: number,
+): { element: Element; top: number } | undefined {
+  if (typeof document.elementFromPoint !== "function") return;
+  const area = article.getBoundingClientRect();
+  const y = Math.max(top, area.top) + 1;
+  if (y >= bottom || area.width <= 0) return;
+  let element = document.elementFromPoint(area.left + area.width / 2, y);
+  // Climb to the nearest element of the article with a box of its own.
+  while (element && element !== article && element.getBoundingClientRect().height === 0) {
+    element = element.parentElement;
+  }
+  // An overlay, something outside the article or the block being replaced
+  // leaves the anchor to the walk below.
+  if (!element || element === article || !article.contains(element) || block.contains(element)) return;
+  return { element, top: element.getBoundingClientRect().top };
 }
 
-function insertMermaidSvg(
+function visibleMermaidAnchor(
   block: HTMLElement,
-  svg: string,
+  article: HTMLElement,
+  root: HTMLElement,
+): { element: Element; top: number } | undefined {
+  const { top, bottom } = root.getBoundingClientRect();
+  if (block.getBoundingClientRect().bottom > top + 1) return;
+
+  // The element under the top edge of the viewport is the natural anchor:
+  // one hit test instead of measuring the article's elements one by one.
+  const atTop = anchorAtViewportTop(block, article, top, bottom);
+  if (atTop) return atTop;
+
+  let crossing: { element: Element; top: number; depth: number } | undefined;
+  function findVisibleTop(parent: Element, depth: number): { element: Element; top: number } | undefined {
+    for (let element = parent.firstElementChild; element; element = element.nextElementSibling) {
+      if (element === block) continue;
+      const rect = element.getBoundingClientRect();
+      // Siblings in a block flow come in vertical order: once one starts below
+      // the viewport, none after it can be visible.
+      if (rect.top >= bottom) break;
+      const startsVisible = rect.top >= top && rect.top < bottom;
+      const crossesTop = rect.top < top && rect.bottom > top;
+      if (!startsVisible && !crossesTop) continue;
+      if (startsVisible && rect.bottom > rect.top) return { element, top: rect.top };
+      if (crossesTop && (!crossing || depth > crossing.depth)) {
+        crossing = { element, top: rect.top, depth };
+      }
+      const visible = findVisibleTop(element, depth + 1);
+      if (visible) return visible;
+    }
+  }
+
+  // A tall block can fill the viewport without any element starting inside it.
+  return findVisibleTop(article, 0) ?? crossing;
+}
+
+function replaceMermaidPlaceholder(
+  block: HTMLElement,
+  html: string,
+  article: HTMLElement,
   root: HTMLElement | null,
-  styles: MermaidStyleRegistry,
   onDiagram: () => void,
   isAnchorTracking: () => boolean,
-  before: InsertionMetrics,
-): string | undefined {
-  // Rewrite the stylesheet while the SVG still has its original id: the
-  // CSSOM path changes selectors only, so `content`/`url(#…)` literals survive.
-  const prepared = prepareMermaidSvg(svg);
-  const html = prepared
-    ? uniqueMermaidIds(prepared.html, false)
-    : uniqueMermaidIds(svg);
-  if (prepared) styles.add(prepared.className, prepared.css);
+): void {
+  const anchor = root && !isAnchorTracking() ? visibleMermaidAnchor(block, article, root) : undefined;
   block.innerHTML = html;
   block.style.color = "";
   block.style.fontStyle = "";
@@ -343,18 +312,33 @@ function insertMermaidSvg(
   block.removeAttribute("data-processing");
   block.setAttribute("data-processed", "true");
 
-  // A diagram above the viewport changes the height of everything the user
-  // is currently reading; keep the scroll position stable. Anchor tracking
-  // repositions from its target and would be cancelled by a scroll write.
-  if (root && before.above && !isAnchorTracking()) {
-    root.scrollTop += block.offsetHeight - before.height;
+  // Reading the new position forces layout, including native scroll anchoring.
+  if (root && anchor) {
+    const remaining = anchor.element.getBoundingClientRect().top - anchor.top;
+    if (remaining !== 0) root.scrollTop += remaining;
   }
   onDiagram();
+}
+
+function insertMermaidSvg(
+  block: HTMLElement,
+  svg: string,
+  article: HTMLElement,
+  root: HTMLElement | null,
+  styles: MermaidStyleRegistry,
+  onDiagram: () => void,
+  isAnchorTracking: () => boolean,
+): string | undefined {
+  const prepared = prepareMermaidSvg(svg);
+  const html = uniqueMermaidIds(prepared?.html ?? svg, prepared?.hasLocalCss ?? true);
+  if (prepared) styles.add(prepared.className, prepared.css);
+  replaceMermaidPlaceholder(block, html, article, root, onDiagram, isAnchorTracking);
   return prepared?.className;
 }
 
 async function renderOneMermaidBlock(
   block: HTMLElement,
+  article: HTMLElement,
   gen: number,
   isStale: IsStaleFn,
   root: HTMLElement | null,
@@ -370,7 +354,7 @@ async function renderOneMermaidBlock(
   try {
     // Pre-warm before the first user-facing render so the lib has
     // fonts + internals ready. After the first resolve this is a no-op.
-    await ensureMermaidWarm();
+    await ensureMermaidWarm(article);
     if (isStale(gen)) return;
 
     const theme = document.documentElement.classList.contains("dark") ? "dark" : "default";
@@ -387,12 +371,7 @@ async function renderOneMermaidBlock(
         // Transient layout races resolve within a couple of frames.
         const result = await withMermaidLock(async () => {
           if (isStale(gen)) return null;
-          initMermaid(theme);
-          try {
-            return await mermaid.render(attemptId, source);
-          } finally {
-            document.querySelectorAll('div[id^="dmermaid-"]').forEach((el) => el.remove());
-          }
+          return renderInFrame(attemptId, source, theme, article, () => isStale(gen));
         });
         if (isStale(gen)) return;
         if (result?.svg && mermaidSvgLooksRenderable(result.svg)) {
@@ -407,24 +386,14 @@ async function renderOneMermaidBlock(
     }
     if (!svg) throw lastErr ?? new Error("mermaid render produced no output");
     if (isStale(gen)) return;
-    // Measure at the mutation point: while the async render ran, the block
-    // may have moved (e.g. the user scrolled it into the viewport).
-    const before = insertionMetrics(block, root);
-    const className = insertMermaidSvg(block, svg, root, styles, onDiagram, isAnchorTracking, before);
+    const className = insertMermaidSvg(block, svg, article, root, styles, onDiagram, isAnchorTracking);
     mermaidCache.set(key, svg, className);
   } catch (e: any) {
     if (isStale(gen)) return;
     const errMsg = e?.message || "Unknown error";
     const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    // Error message is escaped above — safe to inject
-    block.innerHTML = `<pre class="mermaid-error">Mermaid error: ${errMsg.replace(/</g, "&lt;")}\n\n${escaped}</pre>`;
-    block.style.color = "";
-    block.style.fontStyle = "";
-    block.style.minHeight = "";
-    block.removeAttribute("data-mermaid-pending");
-    block.removeAttribute("data-processing");
-    block.setAttribute("data-processed", "true");
-    onDiagram();
+    const html = `<pre class="mermaid-error">Mermaid error: ${errMsg.replace(/</g, "&lt;")}\n\n${escaped}</pre>`;
+    replaceMermaidPlaceholder(block, html, article, root, onDiagram, isAnchorTracking);
   }
 }
 
@@ -456,7 +425,7 @@ function setupMermaidBlocks(
   }
   if (blocks.length === 0) return null;
 
-  void ensureMermaidWarm();
+  void ensureMermaidWarm(container);
   const root = container.closest<HTMLElement>(".content");
   const renderer = createMermaidLazyRenderer({
     root,
@@ -468,13 +437,13 @@ function setupMermaidBlocks(
       const key = mermaidCacheKey(source, theme);
       const cached = mermaidCache.get(key);
       if (!cached) return false;
-      const className = insertMermaidSvg(block, cached, root, styles, onDiagram, isAnchorTracking, insertionMetrics(block, root));
+      const className = insertMermaidSvg(block, cached, container, root, styles, onDiagram, isAnchorTracking);
       if (className && mermaidCache.classNameFor(key) !== className) {
         mermaidCache.set(key, cached, className);
       }
       return true;
     },
-    render: (block) => renderOneMermaidBlock(block, gen, isStale, root, styles, onDiagram, isAnchorTracking),
+    render: (block) => renderOneMermaidBlock(block, container, gen, isStale, root, styles, onDiagram, isAnchorTracking),
   });
   return { renderer, ready: renderer.whenInitialDone() };
 }
@@ -1008,16 +977,15 @@ export function Preview(props: PreviewProps) {
   const [settledGen, setSettledGen] = createSignal(-1);
 
   // The flush used by PDF export is registered before any asynchronous step
-  // of a generation. Each generation owns a readiness promise, released both
-  // when its initial pass settles and when the generation is discarded.
-  function releaseGenerationWait() {
+  // of a generation. Its readiness promise stays available after initial work
+  // settles so export can still drain diagrams outside the observer margin.
+  function invalidateGenerationWait() {
     const wait = generationWait;
     generationWait = undefined;
     wait?.resolve();
   }
 
   function beginGenerationWait(gen: number) {
-    releaseGenerationWait();
     let resolve!: () => void;
     const ready = new Promise<void>((r) => { resolve = r; });
     generationWait = { gen, ready, resolve };
@@ -1076,7 +1044,7 @@ export function Preview(props: PreviewProps) {
 
   function ensureMermaidStyles(): MermaidStyleRegistry {
     if (!mermaidStyles) {
-      mermaidStyles = new MermaidStyleRegistry(articleRef?.closest(".preview") ?? articleRef ?? document.body);
+      mermaidStyles = new MermaidStyleRegistry(articleRef!.parentElement!, articleRef);
     }
     return mermaidStyles;
   }
@@ -1088,9 +1056,10 @@ export function Preview(props: PreviewProps) {
   }
 
   onCleanup(stopTrackingAnchor);
+  onCleanup(retainMermaidFrame());
   onCleanup(() => {
     unregisterMermaidFlush();
-    releaseGenerationWait();
+    invalidateGenerationWait();
     disposeMermaidGeneration();
     mermaidStyles?.dispose();
   });
@@ -1477,7 +1446,7 @@ export function Preview(props: PreviewProps) {
     if (!articleRef) return;
     stopTrackingAnchor();
     disposeMermaidGeneration();
-    releaseGenerationWait();
+    invalidateGenerationWait();
     processingGen = null;
 
     // Empty HTML (file switch): hide old content but keep it for layout stability.
@@ -1520,7 +1489,7 @@ export function Preview(props: PreviewProps) {
     function prepareMermaidGeneration(currentGen: number): Promise<void> {
       const wait = generationWait;
       const settle = () => {
-        if (generationWait === wait) releaseGenerationWait();
+        wait?.resolve();
         scheduleMermaidStylePrune(currentGen);
       };
       let renderer: MermaidLazyRenderer | undefined;
@@ -1535,10 +1504,7 @@ export function Preview(props: PreviewProps) {
         }
         renderer = setup.renderer;
         mermaidRenderer = renderer;
-        return setup.ready.then(() => {
-          if (generationWait === wait) releaseGenerationWait();
-          scheduleMermaidStylePrune(currentGen);
-        }, () => {
+        return setup.ready.then(settle, () => {
           renderer?.dispose();
           if (mermaidRenderer === renderer) mermaidRenderer = undefined;
           settle();
@@ -1623,13 +1589,7 @@ export function Preview(props: PreviewProps) {
           // the FOUC of unhighlighted code.
           () => highlightCodeBlocks(buffer, gen, isStale),
           async () => {
-            // Swap to the live article BEFORE running mermaid / kroki —
-            // both libraries create temp elements in `document.body`
-            // and read layout / fonts off the surrounding document. On
-            // a detached buffer the very first call randomly throws
-            // `null is not an object (evaluating 'element.firstChild')`
-            // because mermaid couldn't measure the temp container's
-            // size. Swap first → live measurement → reliable renders.
+            // Attach the article before observing blocks or reading its typography.
             const scrollContainer = articleRef!.closest(".content");
             const prevScrollTop = scrollContainer?.scrollTop ?? 0;
             articleRef!.replaceChildren(...Array.from(buffer.childNodes));

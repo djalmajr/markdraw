@@ -152,7 +152,7 @@ describe("prepareMermaidSvg", () => {
 @media print {
   #mermaid-1 p::before { content: "#mermaid-1" }
   @supports (display: grid) {
-    #mermaid-1 a[href="#mermaid-1"] { fill: url(#mermaid-1) }
+    #mermaid-1 a[href="#mermaid-1"] { fill: url(#external-gradient) }
   }
 }
 @keyframes pulse { from { opacity: 0 } to { opacity: 1 } }`;
@@ -166,10 +166,56 @@ describe("prepareMermaidSvg", () => {
     expect(prepared.css).toContain("@media print");
     expect(prepared.css).toContain(`@supports (display: grid)`);
     expect(prepared.css).toContain(`.${prepared.className} p::before { content: "#mermaid-1" }`);
-    expect(prepared.css).toContain(`[href="#mermaid-1"] { fill: url(#mermaid-1) }`);
+    expect(prepared.css).toContain(`[href="#mermaid-1"] { fill: url(#external-gradient) }`);
     expect(prepared.css).toContain("@keyframes pulse");
     expect(prepared.css).not.toContain("#mermaid-1 {");
     expect(prepared.css).not.toContain("#mermaid-1 p");
+  });
+
+  it("separa URL local com aspas de URL externa e literal", () => {
+    const css = '#mermaid-1 text::before { content: "url(#shadow)"; filter: url("#external") }\n'
+      + '#mermaid-1 text { filter: URL( "#shadow" ) }';
+    const svg = (style: string) => `<svg id="mermaid-1"><style>${style}</style><defs><filter id="shadow"/></defs></svg>`;
+    const prepared = prepareMermaidSvg(svg(css))!;
+    expect(prepared?.css).toContain('content: "url(#shadow)"; filter: url("#external")');
+    expect(prepared?.css).not.toContain('filter: URL( "#shadow" )');
+    expect(prepared?.html).toContain(`<style>.${prepared.className}:where(#mermaid-1) text { filter: URL( "#shadow" ) }</style>`);
+  });
+
+  it("preserva o corte e a ordem da cascata entre regras dentro e fora de grupos", () => {
+    const svg = `<svg id="mermaid-1"><style>
+      @media print {
+        @supports (display: grid) {
+          #mermaid-1 rect { stroke: blue }
+          #mermaid-1 rect { stroke: url(#gradient) }
+          #mermaid-1 rect { stroke: green }
+        }
+        #mermaid-1 rect { stroke: purple }
+      }
+      #mermaid-1 rect { stroke: red }
+      </style><defs><linearGradient id="gradient"/></defs></svg>`;
+    const prepared = prepareMermaidSvg(svg)!;
+    const sharedScope = `.${prepared.className}`;
+    const localScope = `${sharedScope}:where(#mermaid-1)`;
+    const host = document.createElement("div");
+    const article = host.appendChild(document.createElement("article"));
+    const registry = new MermaidStyleRegistry(host, article);
+    registry.add(prepared.className, prepared.css);
+    expect(host.firstElementChild?.getAttribute("data-mermaid-css")).toBe(prepared.className);
+    expect(prepared.css).toContain("@media print");
+    expect(prepared.css).toContain("@supports (display: grid)");
+    expect(prepared.css).toContain(`${sharedScope} rect { stroke: blue }`);
+    expect(prepared.css.match(/stroke:/g)).toHaveLength(1);
+
+    const local = new DOMParser().parseFromString(prepared.html, "image/svg+xml")
+      .querySelector("style")!.textContent!;
+    expect(local).toContain("@media print");
+    expect(local).toContain("@supports (display: grid)");
+    expect(local.match(/stroke: ([^}]+)}/g)).toEqual([
+      "stroke: url(#gradient) }", "stroke: green }", "stroke: purple }", "stroke: red }",
+    ]);
+    expect(local.match(/[^\n{}]+ rect\s*\{/g)?.map((selector) => selector.trim()))
+      .toEqual(Array(4).fill(`${localScope} rect {`));
   });
 
   it("F5: sem CSSOM construível mantém o <style> dentro do SVG", () => {
