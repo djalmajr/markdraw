@@ -8,6 +8,7 @@ import {
   getTabSession,
   setTabSession,
 } from "@markdraw/core/tabs.ts";
+import * as m from "@markdraw/i18n";
 import type { PaneViewSlice } from "./create-pane-store.ts";
 
 type TabContent = Partial<Pick<TabState, "editorContent" | "savedContent" | "html" | "frontmatter" | "includePaths">>;
@@ -35,8 +36,17 @@ export interface TabStore {
   closeTabsByRoot(rootId: string): TabState | null | undefined;
   activateTab(tabId: TabId): void;
   reorderTabs(newOrder: TabId[]): void;
-  /** Reopen the most recently closed tab. Returns the tab or undefined if stack is empty. */
+  /** Reopen the most recently closed tab. Returns the tab or undefined if stack is empty.
+   *  When a live tab already holds the closed tab's id (a file moved onto its
+   *  path), no second tab with that id is created: the live tab is activated,
+   *  unless the closed tab carries unsaved edits the live one does not hold,
+   *  which come back as the draft `setReopenResolver` builds (and are dropped
+   *  in favour of the live tab when no resolver is set). */
   reopenClosedTab(): TabState | undefined;
+  /** Builds the draft with no file behind it that keeps the edits of a closed
+   *  tab whose id is taken. It receives the closed tab as it was left, with
+   *  `needsLoad` cleared when its buffer is worth keeping; null drops it. */
+  setReopenResolver(resolve: ((closed: TabState) => TabState | null) | null): void;
   /** Pin a tab so it's no longer treated as a preview slot — VSCode
    *  semantics: pinned tabs are permanent (their italic name turns
    *  back to upright) and `loadInActiveTab` won't replace them. */
@@ -46,7 +56,10 @@ export interface TabStore {
   restoreActiveTab(): void;
   updateActiveTabContent(content: TabContent): void;
   updateTabContent(tabId: TabId, content: TabContent & Partial<Pick<TabState, "editorMode" | "needsLoad">>): void;
-  updateTabFile(tabId: TabId, newFilePath: string, newFileName: string, newRootId?: string, content?: TabContent): TabState | undefined;
+  /** `resolveCollision` lets the tab take an identity another tab already has.
+   *  The tab it displaces is passed to the callback, which returns what the
+   *  reopen stack keeps in its place (a draft with no file) or null to drop it. */
+  updateTabFile(tabId: TabId, newFilePath: string, newFileName: string, newRootId?: string, content?: TabContent, resolveCollision?: (displaced: TabState) => TabState | null): TabState | undefined;
   markTabNeedsLoad(tabId: TabId): void;
 
   getTab(tabId: TabId): TabState | undefined;
@@ -69,6 +82,23 @@ interface TabStoreConfig {
    *  blob. Defaults to the legacy single-pane key. */
   storageKey?: string;
   onTabSelected?: (tab: TabState | null) => void;
+}
+
+// A recovered draft keeps only the base name in `fileName` and its number in
+// the language-independent path (`scratch://alpha (recovered 2).md`); the
+// visible suffix is derived here, in the language in use at that moment.
+const RECOVERED_PATH = /^scratch:\/\/.* \(recovered (\d+)\)(?:\.[^./]*)?$/;
+
+/** The name to show for a tab: the file name, plus the localized recovery
+ *  suffix for a recovered draft. Reads the locale, so call it where the caller
+ *  tracks `useLocale()` (JSX, a memo) or at the moment of a selection. */
+export function tabDisplayName(tab: Pick<TabState, "fileName" | "filePath">): string {
+  const n = RECOVERED_PATH.exec(tab.filePath)?.[1];
+  if (!n) return tab.fileName;
+  const dot = tab.fileName.lastIndexOf(".");
+  const stem = dot > 0 ? tab.fileName.slice(0, dot) : tab.fileName;
+  const ext = dot > 0 ? tab.fileName.slice(dot) : "";
+  return `${stem} ${m.tab_recovered_draft({ n: Number(n) })}${ext}`;
 }
 
 export function createTabStore(config: TabStoreConfig): TabStore {
@@ -291,7 +321,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     if (next) {
       // Bulk tab actions call the store directly. Keep the buffer and its
       // file identity paired even when the host has no close callback.
-      pane.setSelectedFile(next.filePath ? { path: next.filePath, name: next.fileName, kind: "file" } : null);
+      pane.setSelectedFile(next.filePath ? { path: next.filePath, name: tabDisplayName(next), kind: "file" } : null);
       pane.setSelectedRootId(next.rootId || null);
       restoreTab(next);
     } else {
@@ -334,11 +364,38 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     return closeTabs(tabList().filter((tab) => tab.rootId === rootId).map((tab) => tab.id));
   }
 
-  function reopenClosedTab(): TabState | undefined {
-    const tab = closedTabsStack.pop();
-    if (!tab) return undefined;
+  let reopenResolver: ((closed: TabState) => TabState | null) | null = null;
 
+  function setReopenResolver(resolve: ((closed: TabState) => TabState | null) | null): void {
+    reopenResolver = resolve;
+  }
+
+  function reopenClosedTab(): TabState | undefined {
+    const closed = closedTabsStack.pop();
+    if (!closed) return undefined;
+
+    // The working buffer of the active tab is only in the pane until now.
     if (activeId()) snapshotActiveTab();
+
+    let tab = closed;
+    const live = getTab(closed.id);
+    if (live) {
+      // A tab id is the file identity: never two tabs with one id. Closing and
+      // activation look tabs up by id, so a twin could not be told apart.
+      const edits = closed.editorContent !== closed.savedContent
+        && closed.editorContent !== live.editorContent;
+      const draft = edits ? reopenResolver?.({ ...closed, needsLoad: false }) : null;
+      if (!draft || getTab(draft.id)) {
+        if (activeId() !== live.id) {
+          setActiveId(live.id);
+          restoreTab(live);
+          persistSession();
+          onTabSelected?.(live);
+        }
+        return live;
+      }
+      tab = draft;
+    }
 
     // Re-add the tab (at the end)
     setTabList((prev) => [...prev, tab]);
@@ -386,24 +443,42 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     );
   }
 
-  function updateTabFile(tabId: TabId, newFilePath: string, newFileName: string, newRootId?: string, content?: TabContent): TabState | undefined {
+  function updateTabFile(tabId: TabId, newFilePath: string, newFileName: string, newRootId?: string, content?: TabContent, resolveCollision?: (displaced: TabState) => TabState | null): TabState | undefined {
     const tab = getTab(tabId);
     if (!tab) return;
     const rootId = newRootId ?? tab.rootId;
-    const newId = makeTabId(rootId, newFilePath);
-    // No-op when the rewrite would collide with an EXISTING tab id
-    // (other than the one being renamed). Caught by the
-    // create-tab-store.stateful property test: rename-to-an-already-
-    // open-name used to drop two tabs into the same id, breaking the
-    // tabs-are-unique invariant and corrupting later operations
-    // keyed by id (close, activate). The FS layer rejects the rename
-    // for the same reason — staying consistent at the store level.
-    if (newId !== tabId && tabList().some((t) => t.id === newId)) return;
-    const renamedFile = { ...content, id: newId, rootId, filePath: newFilePath, fileName: newFileName };
-    setTabList((prev) => prev.map((t) => t.id === tabId ? { ...t, ...renamedFile } : t));
-    if (activeId() === tabId) setActiveId(newId);
+    const baseId = makeTabId(rootId, newFilePath);
+    const active = activeId() === tabId;
+    let renamed: TabState | undefined;
+    let stale: TabState | undefined;
+    setTabList((prev) => {
+      let newId = baseId;
+      const collision = newId !== tabId && prev.some((t) => t.id === newId);
+      if (collision && !resolveCollision) return prev;
+      // Keep both buffers when the moved tab is in the background; never
+      // replace the working buffer of the currently active destination tab.
+      if (collision && !active) {
+        while (prev.some((t) => t.id === newId && t.id !== tabId)) newId = `${baseId}#${++tabCounter}`;
+      } else if (collision) {
+        let closedId: string;
+        do closedId = `${baseId}#${++tabCounter}`;
+        while (prev.some((t) => t.id === closedId));
+        stale = { ...prev.find((t) => t.id === baseId)!, id: closedId };
+      }
+      renamed = { ...tab, ...content, id: newId, rootId, filePath: newFilePath, fileName: newFileName };
+      return prev.filter((t) => !(collision && active && t.id === baseId))
+        .map((t) => t.id === tabId ? { ...t, ...renamed! } : t);
+    });
+    if (!renamed) return;
+    // The callback runs outside the list updater: it may read other state.
+    const displaced = stale ? resolveCollision?.(stale) : null;
+    if (displaced) {
+      closedTabsStack.push(displaced);
+      if (closedTabsStack.length > MAX_CLOSED_TABS) closedTabsStack.shift();
+    }
+    if (active) setActiveId(renamed.id);
     persistSession();
-    return { ...tab, ...renamedFile };
+    return renamed;
   }
 
   function markTabNeedsLoad(tabId: TabId): void {
@@ -471,6 +546,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     activateTab,
     reorderTabs,
     reopenClosedTab,
+    setReopenResolver,
     pinTab,
 
     snapshotActiveTab,

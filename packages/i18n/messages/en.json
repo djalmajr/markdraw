@@ -111,6 +111,7 @@
   "command_new_scratch_asciidoc": "New Scratch: AsciiDoc",
   "command_new_scratch_excalidraw": "New Scratch: Excalidraw",
   "tab_unsaved_scratch": "unsaved scratch",
+  "tab_recovered_draft": "(recovered {n})",
   "tree_copy_path": "Copy path",
   "tree_rename": "Rename",
   "tree_move_to_trash": "Move to Trash",

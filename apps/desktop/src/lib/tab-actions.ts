@@ -1,16 +1,17 @@
 import { createEffect, untrack } from "solid-js";
-import type { TabState } from "@markdraw/core/tabs.ts";
+import { makeTabId, type TabState } from "@markdraw/core/tabs.ts";
 import { getIncludePaths } from "@markdraw/core/asciidoc.ts";
 import { getMarkdownIncludePaths } from "@markdraw/core/markdown.ts";
 import { isMdFile } from "@markdraw/core/utils.ts";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import type { AppState } from "@markdraw/ui/composables/create-app-state.ts";
 import type { PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
+import { tabDisplayName } from "@markdraw/ui/composables/create-tab-store.ts";
 import type { createFileLoader } from "./file-loader.ts";
-import { SCRATCH_ROOT_ID } from "./scratch.ts";
+import { SCRATCH_ROOT_ID, scratchPath } from "./scratch.ts";
 
 interface TabActionDeps {
-  state: Pick<AppState, "paneManager" | "findEntryByPath">;
+  state: Pick<AppState, "paneManager" | "findEntryByPath" | "roots">;
   rootPaths: () => ReadonlyMap<string, string>;
   syncWatcher: ReturnType<typeof createFileLoader>["syncWatcher"];
   loadTabContent: ReturnType<typeof createFileLoader>["loadTabContent"];
@@ -21,6 +22,72 @@ export function createTabActions({
   state, rootPaths, syncWatcher, loadTabContent, loadFileContent,
 }: TabActionDeps) {
   const manager = state.paneManager;
+  // Identity a renamed tab keeps (root -> path -> entry) while the tree still
+  // shows the layout from before the rename. Each entry remembers the tree
+  // object that was current when it was recorded. Tree reads that began before
+  // the operation are rejected by the folder, so the first tree published for
+  // the root afterwards is the one that confirms the operation: from then on
+  // the tree alone decides what exists, and a file removed later is not
+  // revived by this fallback. A closed or reopened root has no such tree.
+  interface PendingEntry { entry: FSEntry; tree: FSEntry[] | undefined }
+  const pendingEntries = new Map<string, Map<string, PendingEntry>>();
+  let draftCounter = 0;
+
+  function currentTree(rootId: string) {
+    return state.roots().get(rootId)?.entries;
+  }
+
+  function pendingEntry(rootId: string, path: string) {
+    const pending = pendingEntries.get(rootId)?.get(path);
+    if (!pending) return null;
+    const tree = currentTree(rootId);
+    if (tree && tree === pending.tree) return pending.entry;
+    releasePending(rootId, path);
+    return null;
+  }
+
+  function releasePending(rootId: string, path: string) {
+    const roots = pendingEntries.get(rootId);
+    if (!roots?.delete(path)) return;
+    if (roots.size === 0) pendingEntries.delete(rootId);
+  }
+
+  // Drop every record the tree has already confirmed or lost with its root.
+  function pruneConfirmed() {
+    for (const [rootId, paths] of Array.from(pendingEntries)) {
+      for (const path of Array.from(paths.keys())) pendingEntry(rootId, path);
+    }
+  }
+
+  // The edits of a destination tab displaced by a move keep no link to the
+  // file that now holds the moved content: a draft in memory, saved only by
+  // an explicit save-as. A tab with no edits has nothing to keep.
+  function displacedAsDraft(stale: TabState): TabState | null {
+    if (stale.needsLoad || stale.editorContent === stale.savedContent) return null;
+    const dot = stale.fileName.lastIndexOf(".");
+    const stem = dot > 0 ? stale.fileName.slice(0, dot) : stale.fileName;
+    const ext = dot > 0 ? stale.fileName.slice(dot) : "";
+    const n = ++draftCounter;
+    // The path (and so the id) stays language-independent and carries the
+    // recovery number; `fileName` keeps the base name. The visible suffix is
+    // derived from both, in the language in use, by `tabDisplayName`.
+    const path = scratchPath(`${stem} (recovered ${n})${ext}`);
+    return {
+      ...stale,
+      id: makeTabId(SCRATCH_ROOT_ID, path),
+      rootId: SCRATCH_ROOT_ID,
+      filePath: path,
+      savedContent: "",
+      needsLoad: false,
+      includePaths: [],
+    };
+  }
+
+  // A tab reopened from the history onto an id a live tab now holds keeps its
+  // edits as such a draft, in every pane.
+  createEffect(manager.panes, (panes) => {
+    for (const pane of panes) pane.tabs.setReopenResolver(displacedAsDraft);
+  });
 
   // Focus changes republish the target for the newly focused pane. Only the
   // focused pane is a dependency: loaders and selection handlers already call
@@ -59,9 +126,14 @@ export function createTabActions({
   );
 
   function selectTab(pane: PaneStore, tab: TabState | null, focused = pane === manager.activePane(), pushHistory = false) {
-    const entry = tab?.rootId === SCRATCH_ROOT_ID
-      ? { path: tab.filePath, name: tab.fileName, kind: "file" as const }
+    let entry = tab?.rootId === SCRATCH_ROOT_ID
+      ? { path: tab.filePath, name: tabDisplayName(tab), kind: "file" as const }
       : tab?.filePath ? state.findEntryByPath(tab.filePath, tab.rootId) : null;
+    if (tab?.filePath && tab.rootId !== SCRATCH_ROOT_ID) {
+      // The tree recognises the destination: the fallback has done its job.
+      if (entry) releasePending(tab.rootId, tab.filePath);
+      else entry = pendingEntry(tab.rootId, tab.filePath);
+    }
     pane.setSelectedFile(entry);
     pane.setSelectedRootId(entry && tab ? tab.rootId : null);
 
@@ -137,23 +209,27 @@ export function createTabActions({
    * move across workspaces reopens the tab under the target root, since a tab
    * id embeds its root.
    */
-  function renameOpenTab(pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry, newRootId: string = rootId) {
+  function renameOpenTab(pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry, newRootId: string = rootId, tabId?: string) {
     const activeTab = pane.tabs.getActiveTab();
-    const active = activeTab?.rootId === rootId && activeTab.filePath === oldPath;
-    const tab = active ? activeTab : pane.tabs.findTabByFile(oldPath, rootId);
+    const tab = tabId ? pane.tabs.getTab(tabId) : activeTab?.rootId === rootId && activeTab.filePath === oldPath
+      ? activeTab : pane.tabs.findTabByFile(oldPath, rootId);
+    const active = tab?.id === activeTab?.id;
     if (!tab) return;
     const watch = (includePaths: string[]) => {
       if (pane === manager.activePane()) syncWatcher(entry, rootPaths().get(newRootId), includePaths);
     };
+    pruneConfirmed();
+    releasePending(rootId, oldPath);
+    let pending = pendingEntries.get(newRootId);
+    if (!pending) pendingEntries.set(newRootId, pending = new Map());
+    pending.set(entry.path, { entry, tree: currentTree(newRootId) });
     const content = active && !tab.needsLoad ? pane.editorContent() : tab.editorContent;
     const base = entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "";
     const includePaths = isMdFile(entry.path)
       ? getMarkdownIncludePaths(content, base)
       : getIncludePaths(content, base);
     if (newRootId === rootId) {
-      const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, rootId, { includePaths });
-      // The new path is already open in this pane: updateTabFile keeps the
-      // tabs unique, so there is no tab to repoint.
+      const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, rootId, { includePaths }, displacedAsDraft);
       if (!renamedTab) return;
       if (active) {
         pane.setSelectedFile(entry);
@@ -183,7 +259,7 @@ export function createTabActions({
           frontmatter: tab.frontmatter,
           editorMode: tab.editorMode,
         };
-    const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, newRootId, { ...carried, includePaths });
+    const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, newRootId, { ...carried, includePaths }, displacedAsDraft);
     if (!renamedTab || !active) return;
     const id = renamedTab.id;
     pane.setSelectedFile(entry);

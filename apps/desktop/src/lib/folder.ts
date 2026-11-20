@@ -15,7 +15,7 @@ interface FolderDeps {
   state: AppState;
   watcher: FileWatcher;
   onRootClosed?: (rootId: string) => void;
-  onFileRenamed?: (pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry, newRootId?: string) => void;
+  onFileRenamed?: (pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry, newRootId?: string, tabId?: string) => void;
 }
 
 export function createFolder(deps: FolderDeps) {
@@ -52,6 +52,16 @@ export function createFolder(deps: FolderDeps) {
     const parts = normalizedPath.split("/").filter(Boolean);
     const name = parts[parts.length - 1];
     return !name || name.includes("\0") ? "Root" : name;
+  }
+
+  // A tree read that began before a successful rename or move (or before its
+  // root closed) describes a layout that no longer exists. Each root counts the
+  // operations that supersede its reads; a read keeps its starting count and
+  // publishes only while the count is unchanged.
+  const treeGenerations = new Map<string, number>();
+  const treeGeneration = (rootId: string) => treeGenerations.get(rootId) ?? 0;
+  function supersedeTreeReads(...rootIds: string[]) {
+    for (const rootId of rootIds) treeGenerations.set(rootId, treeGeneration(rootId) + 1);
   }
 
   async function openFolderPath(path: string): Promise<boolean> {
@@ -114,12 +124,17 @@ export function createFolder(deps: FolderDeps) {
     // call — if the user flips panes mid-read, naive `state.setHtml`
     // would clear the wrong pane's preview. See wiki Round 4 Lesson 6.
     const targetPane = state.paneManager.activePane();
+    const generation = treeGeneration(rootId);
     try {
       const entries = await readTree(
         rootPath,
         state.showHiddenEntries(),
         state.respectGitignore(),
       );
+      // Superseded by a rename or move that finished while this read was in
+      // flight (or by closing the root): publish nothing, clear nothing. The
+      // operation's own refresh publishes the tree that follows it.
+      if (generation !== treeGeneration(rootId)) return;
       const currentPath = targetPane.selectedFile()?.path;
       state.updateRootEntries(rootId, entries);
 
@@ -155,7 +170,9 @@ export function createFolder(deps: FolderDeps) {
       const rootPath = rootPaths().get(rootId);
       if (!rootPath) return;
 
+      const generation = treeGeneration(rootId);
       const entries = await readTree(rootPath, includeHiddenEntries, respectGitignore);
+      if (generation !== treeGeneration(rootId)) return;
       const currentPath = targetPane.selectedFile()?.path;
       state.updateRootEntries(rootId, entries);
 
@@ -169,6 +186,7 @@ export function createFolder(deps: FolderDeps) {
   async function handleCloseRoot(rootId: string) {
     try {
       await updateRoots((next) => { next.delete(rootId); }, (next) => {
+        supersedeTreeReads(rootId);
         state.removeRoot(rootId);
         if (next.size === 0) void watcher.destroy();
         if (!next.has(rootId)) onRootClosed?.(rootId);
@@ -235,24 +253,22 @@ export function createFolder(deps: FolderDeps) {
     }
   }
 
-  // Capture other panes before refreshing the tree: an active first read
-  // must restart with the new identity, not finish against the old path.
-  function repointOtherActivePanes(targetPane: PaneStore, rootId: string, oldPath: string, newPath: string) {
-    const targets: { pane: PaneStore; oldPath: string; entry: FSEntry }[] = [];
+  // Publish every open document's new identity before the tree read can wait.
+  function repointTabs(rootId: string, oldPath: string, newPath: string, newRootId = rootId) {
     for (const pane of state.paneManager.panes()) {
-      if (pane === targetPane || pane.selectedRootId() !== rootId) continue;
-      const selected = pane.selectedFile();
-      const tab = pane.tabs.getActiveTab();
-      if (!selected || !tab || tab.rootId !== rootId || tab.filePath !== selected.path) continue;
-      if (selected.path !== oldPath && !selected.path.startsWith(oldPath + "/")) continue;
-      const path = newPath + selected.path.slice(oldPath.length);
-      const collision = pane.tabs.findTabByFile(path, rootId);
-      if (collision && collision.id !== tab.id) continue;
-      const replacement = { ...selected, path, name: path.slice(path.lastIndexOf("/") + 1) };
-      pane.setSelectedFile(replacement);
-      targets.push({ pane, oldPath: selected.path, entry: replacement });
+      const tabs = pane.tabs.tabs();
+      const activeId = pane.tabs.activeTabId();
+      const active = tabs.find((tab) => tab.id === activeId);
+      const ordered = active ? [active, ...tabs.filter((tab) => tab.id !== activeId)] : tabs;
+      for (const tab of ordered) {
+        if (tab.rootId !== rootId) continue;
+        if (tab.filePath !== oldPath && !tab.filePath.startsWith(oldPath + "/")) continue;
+        const path = newPath + tab.filePath.slice(oldPath.length);
+        onFileRenamed?.(pane, rootId, tab.filePath, {
+          kind: "file", path, name: path.slice(path.lastIndexOf("/") + 1),
+        }, newRootId, tab.id);
+      }
     }
-    return targets;
   }
 
   async function handleRename(entry: FSEntry, rootId: string, newName: string): Promise<void> {
@@ -270,6 +286,7 @@ export function createFolder(deps: FolderDeps) {
     // wrong pane. See Round 4 Lesson 6.
     const targetPane = state.paneManager.activePane();
     await renameFile(rootPath, entry.path, newRelative);
+    supersedeTreeReads(rootId);
 
     // If the renamed entry is (or contains) the open file, rewrite its path.
     // `renamedSel` keeps the new entry so the tab and the OS watcher can
@@ -285,19 +302,8 @@ export function createFolder(deps: FolderDeps) {
       if (renamedSel) targetPane.setSelectedFile(renamedSel);
     }
 
-    const otherPanes = entry.kind === "directory"
-      ? repointOtherActivePanes(targetPane, rootId, entry.path, newRelative) : [];
+    repointTabs(rootId, entry.path, newRelative);
     await refreshRoot(rootId);
-    for (const other of otherPanes) onFileRenamed?.(other.pane, rootId, other.oldPath, other.entry);
-    if (entry.kind === "file") {
-      onFileRenamed?.(targetPane, rootId, entry.path, { ...entry, path: newRelative, name: newName });
-      return;
-    }
-    // The open file restarts a pending first read under the new name and
-    // re-aims the watcher; every other tab under the folder — background tabs
-    // and tabs of the other panes — only needs the rewritten path.
-    if (renamedSel && sel) onFileRenamed?.(targetPane, rootId, sel.path, renamedSel);
-    state.rewriteTabPaths(rootId, entry.path, newRelative);
   }
 
   async function handleDelete(entry: FSEntry, rootId: string): Promise<void> {
@@ -385,6 +391,7 @@ export function createFolder(deps: FolderDeps) {
     } else {
       await movePath(rootPath, entry.path, targetRootPath, newRelative);
     }
+    supersedeTreeReads(rootId, targetRootId);
 
     // Keep the open file pointing at its new location (path, and root when it
     // crossed workspaces).
@@ -404,17 +411,9 @@ export function createFolder(deps: FolderDeps) {
       }
     }
 
-    const otherPanes = entry.kind === "directory" && sameRoot
-      ? repointOtherActivePanes(targetPane, rootId, entry.path, newRelative) : [];
+    repointTabs(rootId, entry.path, newRelative, targetRootId);
     await refreshRoot(rootId);
     if (!sameRoot) await refreshRoot(targetRootId);
-    for (const other of otherPanes) onFileRenamed?.(other.pane, rootId, other.oldPath, other.entry);
-
-    // A move renames the file on disk as well: repoint its tab (and the OS
-    // watcher) at the new location, then the remaining tabs under a folder
-    // moved inside the same workspace.
-    if (movedSel && sel) onFileRenamed?.(targetPane, rootId, sel.path, movedSel, targetRootId);
-    if (entry.kind === "directory" && sameRoot) state.rewriteTabPaths(rootId, entry.path, newRelative);
   }
 
   /** Copy `entry` into the directory at `targetDirRel` ("" = workspace root) of

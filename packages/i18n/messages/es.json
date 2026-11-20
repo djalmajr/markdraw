@@ -111,6 +111,7 @@
   "command_new_scratch_asciidoc": "Nuevo borrador: AsciiDoc",
   "command_new_scratch_excalidraw": "Nuevo borrador: Excalidraw",
   "tab_unsaved_scratch": "borrador sin guardar",
+  "tab_recovered_draft": "(recuperado {n})",
   "tree_copy_path": "Copiar ruta",
   "tree_rename": "Renombrar",
   "tree_move_to_trash": "Mover a la papelera",
