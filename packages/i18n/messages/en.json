@@ -317,6 +317,7 @@
   "settings_ai_custom_remove_model": "Remove model",
   "settings_ai_custom_submit": "Add provider",
   "settings_ai_custom_required": "Provider ID and Base URL are required.",
+  "settings_ai_config_invalid": "The AI configuration file has an error. Fix or delete ai.json before saving.",
   "settings_ai_back": "Back",
   "settings_ai_edit_provider": "Edit provider",
   "settings_ai_custom_provider": "Custom provider",

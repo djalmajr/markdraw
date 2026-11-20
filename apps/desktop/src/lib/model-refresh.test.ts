@@ -258,6 +258,141 @@ describe("model-refresh — fontes", () => {
     expect(h.calls.cli).toEqual([]);
   });
 
+  it("Claude da assinatura: release_date decide quando os dois da família têm data", async () => {
+    // O id mais novo em número saiu ANTES: só a data distingue os dois, então
+    // este caso falha se `release_date` for ignorado.
+    const h = harness({
+      "https://models.dev/api.json": {
+        anthropic: {
+          models: {
+            "claude-opus-4-8": {
+              id: "claude-opus-4-8",
+              name: "Opus 4.8",
+              release_date: "2026-02-01",
+            },
+            "claude-opus-5-5": {
+              id: "claude-opus-5-5",
+              name: "Opus 5.5",
+              release_date: "2026-01-01",
+            },
+          },
+        },
+      },
+    });
+    h.ctx.providers = { "claude-sub": { kind: "claude-cli", name: "Claude" } };
+    expect((await refreshProviderModels(["claude-sub"], h.ctx)).ok).toBe(true);
+    expect(models(h.cache()["claude-sub"])).toEqual({ "claude-opus-4-8": { name: "Opus 4.8" } });
+  });
+
+  it("Claude da assinatura: a mesma data nos dois cai para a versão do id", async () => {
+    const h = harness({
+      "https://models.dev/api.json": {
+        anthropic: {
+          models: {
+            "claude-opus-4-8": {
+              id: "claude-opus-4-8",
+              name: "Opus 4.8",
+              release_date: "2026-02-01",
+            },
+            "claude-opus-5-5": {
+              id: "claude-opus-5-5",
+              name: "Opus 5.5",
+              release_date: "2026-02-01",
+            },
+          },
+        },
+      },
+    });
+    h.ctx.providers = { "claude-sub": { kind: "claude-cli", name: "Claude" } };
+    expect((await refreshProviderModels(["claude-sub"], h.ctx)).ok).toBe(true);
+    expect(models(h.cache()["claude-sub"])).toEqual({ "claude-opus-5-5": { name: "Opus 5.5" } });
+  });
+
+  it("Claude da assinatura: sem data em um dos dois, a versão do id decide (comportamento de hoje)", async () => {
+    const h = harness({
+      "https://models.dev/api.json": {
+        anthropic: {
+          models: {
+            "claude-opus-4-8": {
+              id: "claude-opus-4-8",
+              name: "Opus 4.8",
+              release_date: "2027-01-01",
+            },
+            "claude-opus-5-5": { id: "claude-opus-5-5", name: "Opus 5.5" },
+          },
+        },
+      },
+    });
+    h.ctx.providers = { "claude-sub": { kind: "claude-cli", name: "Claude" } };
+    expect((await refreshProviderModels(["claude-sub"], h.ctx)).ok).toBe(true);
+    expect(models(h.cache()["claude-sub"])).toEqual({ "claude-opus-5-5": { name: "Opus 5.5" } });
+  });
+
+  // F3/F4: a regra de recência é da FAMÍLIA, decidida antes de reduzi-la, então
+  // o vencedor gravado não pode depender da ordem do catálogo. As permutações
+  // passam pelo mesmo ponto de entrada (o refresh que persiste o cache).
+  async function claudeWinners(entries: Array<Record<string, unknown>>): Promise<string[]> {
+    const h = harness({
+      "https://models.dev/api.json": {
+        anthropic: { models: Object.fromEntries(entries.map((e) => [e.id as string, e])) },
+      },
+    });
+    h.ctx.providers = { "claude-sub": { kind: "claude-cli", name: "Claude" } };
+    expect((await refreshProviderModels(["claude-sub"], h.ctx)).ok).toBe(true);
+    return Object.keys(models(h.cache()["claude-sub"]));
+  }
+
+  function permutations<T>(items: T[]): T[][] {
+    if (items.length <= 1) return [items];
+    return items.flatMap((item, i) =>
+      permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [item, ...rest]),
+    );
+  }
+
+  it("Claude da assinatura: todos com data válida → a data decide, em qualquer ordem (F3)", async () => {
+    const catalog = [
+      { id: "claude-opus-4-8", name: "Opus 4.8", release_date: "2026-02-01" },
+      { id: "claude-opus-5-5", name: "Opus 5.5", release_date: "2026-01-01" },
+      { id: "claude-opus-5-0", name: "Opus 5.0", release_date: "2026-03-01" },
+    ];
+    const orders = permutations(catalog);
+    expect(orders.length).toBe(6);
+    for (const order of orders) expect(await claudeWinners(order)).toEqual(["claude-opus-5-0"]);
+  });
+
+  it("Claude da assinatura: um sem data → a versão decide a família inteira, em qualquer ordem (F3)", async () => {
+    // Sonda da revisão: 4.8 vence 5.5 pela data, 5.5 vence 5.0 pela versão e
+    // 5.0 vence 4.8 pela versão. Com a regra única, um candidato sem data leva
+    // a família inteira para a versão do id — e a ordem deixa de importar.
+    const catalog = [
+      { id: "claude-opus-4-8", name: "Opus 4.8", release_date: "2026-02-01" },
+      { id: "claude-opus-5-5", name: "Opus 5.5", release_date: "2026-01-01" },
+      { id: "claude-opus-5-0", name: "Opus 5.0" },
+    ];
+    const orders = permutations(catalog);
+    expect(orders.length).toBe(6);
+    for (const order of orders) expect(await claudeWinners(order)).toEqual(["claude-opus-5-5"]);
+  });
+
+  it("Claude da assinatura: data impossível conta como ausente, em qualquer ordem (F4)", async () => {
+    // `Date.parse("2026-02-30")` vira 2 de março; se a data inválida contasse,
+    // 4.8 venceria. Como ela é ausente, a família cai para a versão: 5.5.
+    const invalid = { id: "claude-opus-4-8", name: "Opus 4.8", release_date: "2026-02-30" };
+    const valid = { id: "claude-opus-5-5", name: "Opus 5.5", release_date: "2026-02-28" };
+    expect(await claudeWinners([invalid, valid])).toEqual(["claude-opus-5-5"]);
+    expect(await claudeWinners([valid, invalid])).toEqual(["claude-opus-5-5"]);
+    // Controle próximo: com as duas datas válidas, a mais recente decide.
+    expect(
+      await claudeWinners([
+        { id: "claude-opus-4-8", name: "Opus 4.8", release_date: "2026-02-28" },
+        { id: "claude-opus-5-5", name: "Opus 5.5", release_date: "2026-02-01" },
+      ]),
+    ).toEqual(["claude-opus-4-8"]);
+    // Fronteira: um único candidato com data impossível continua sendo a
+    // família (a data ausente não o exclui do catálogo).
+    expect(await claudeWinners([invalid])).toEqual(["claude-opus-4-8"]);
+  });
+
   it("non-2xx é falha: não grava nada", async () => {
     const h = harness();
     h.ctx.sources!.httpGetJson = async () => ({ status: 401, body: "{}" });

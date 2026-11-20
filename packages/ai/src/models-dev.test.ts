@@ -46,6 +46,58 @@ describe("parseModelsDevCatalog", () => {
     ).toEqual({ vendor: [{ id: "id-from-key", name: "Named", reasoning: false }] });
   });
 
+  it("keeps a valid calendar day as releaseDate and treats anything else as absent", () => {
+    expect(
+      parseModelsDevCatalog({
+        anthropic: {
+          models: {
+            "claude-opus-5-5": {
+              id: "claude-opus-5-5",
+              name: "Opus 5.5",
+              release_date: "2026-01-15",
+            },
+            "claude-opus-4-8": { id: "claude-opus-4-8", name: "Opus 4.8", release_date: "" },
+            "claude-opus-4-7": { id: "claude-opus-4-7", release_date: 20250101 },
+            "claude-opus-4-6": { id: "claude-opus-4-6" },
+            // F4: Date.parse normalize `2026-02-30` para 2 de março; o dia
+            // impossível tem de contar como ausente, não como 2 de março.
+            "claude-opus-4-5": { id: "claude-opus-4-5", release_date: "2026-02-30" },
+            "claude-opus-4-4": { id: "claude-opus-4-4", release_date: "2026-02-29" },
+            "claude-opus-4-3": { id: "claude-opus-4-3", release_date: "2026-13-01" },
+            "claude-opus-4-2": { id: "claude-opus-4-2", release_date: "2026-1-5" },
+            "claude-opus-4-1": { id: "claude-opus-4-1", release_date: "15/01/2026" },
+          },
+        },
+      }).anthropic,
+    ).toEqual([
+      { id: "claude-opus-5-5", name: "Opus 5.5", releaseDate: "2026-01-15" },
+      { id: "claude-opus-4-8", name: "Opus 4.8" },
+      { id: "claude-opus-4-7" },
+      { id: "claude-opus-4-6" },
+      { id: "claude-opus-4-5" },
+      { id: "claude-opus-4-4" },
+      { id: "claude-opus-4-3" },
+      { id: "claude-opus-4-2" },
+      { id: "claude-opus-4-1" },
+    ]);
+  });
+
+  it("accepts a leap day that exists and rejects one that does not", () => {
+    expect(
+      parseModelsDevCatalog({
+        anthropic: {
+          models: {
+            "claude-opus-5-5": { id: "claude-opus-5-5", release_date: "2024-02-29" },
+            "claude-opus-5-4": { id: "claude-opus-5-4", release_date: "2023-02-29" },
+          },
+        },
+      }).anthropic,
+    ).toEqual([
+      { id: "claude-opus-5-5", releaseDate: "2024-02-29" },
+      { id: "claude-opus-5-4" },
+    ]);
+  });
+
   it("skips providers with no models and tolerates an empty catalog", () => {
     expect(parseModelsDevCatalog({ vendor: {} })).toEqual({});
     expect(parseModelsDevCatalog({ vendor: { models: {} } })).toEqual({ vendor: [] });

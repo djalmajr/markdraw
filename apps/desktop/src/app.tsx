@@ -69,7 +69,14 @@ import {
   type EmbeddingMeta,
 } from "./lib/ai-index.ts";
 import { fetchModels, isOpenAiChatModelId } from "@markdraw/ai/model-catalog.ts";
-import { loadAIConfig, loadUserAIConfig, saveAIConfig } from "./lib/ai-config.ts";
+import {
+  loadAIConfig,
+  mutateUserAIConfig,
+  AIUserConfigInvalidError,
+  applyMcpServerChange,
+  type McpServerChange,
+  type McpServerInput,
+} from "./lib/ai-config.ts";
 import { withProviderSelection } from "./lib/ai-provider-merge.ts";
 import { readModelCache } from "./lib/model-cache.ts";
 import {
@@ -189,6 +196,7 @@ import {
 const RELEASES_INDEX_URL =
   "https://github.com/djalmajr/markdraw/releases";
 import { UpdateAvailableDialog } from "@markdraw/ui/components/update-available-dialog.tsx";
+import { showToast } from "@markdraw/ui/components/ui/toast.tsx";
 import { findInFiles } from "./lib/fs.ts";
 import { WindowControls } from "./components/window-controls.tsx";
 // Capture-to-Figma button is hidden for now (per request). Re-enable by
@@ -908,15 +916,18 @@ export function App() {
     modelId: string;
   }): Promise<void> {
     const { providerId, apiKey, modelId } = opts;
-    if (apiKey) await setApiKey(providerId, apiKey); // key → OS keychain only
-    const modelRef = `${providerId}/${modelId}`;
-    // Read-modify-write so sibling sections (mcp servers, other providers)
-    // survive instead of being clobbered; inside the provider entry only the
-    // selected model is merged in, so a custom provider's kind/name/options and
-    // hand-added sibling models stay. Keys never touch ai.json.
-    const user = await loadUserAIConfig();
-    await saveAIConfig(JSON.stringify(withProviderSelection(user, providerId, modelId)));
-    setStoredAiModel(modelRef);
+    // The shared read-modify-write validates the file BEFORE the keychain is
+    // touched and re-reads it after the key is stored, so a sibling edit made
+    // while the keychain was pending is merged instead of clobbered; only the
+    // selected model is merged into the provider entry, so a custom provider's
+    // kind/name/options and hand-added sibling models stay. Keys never touch
+    // ai.json.
+    await mutateUserAIConfig((user) => withProviderSelection(user, providerId, modelId), {
+      afterValidate: async () => {
+        if (apiKey) await setApiKey(providerId, apiKey); // key → OS keychain only
+      },
+    });
+    setStoredAiModel(`${providerId}/${modelId}`);
     await reloadAiConfigAndProviders();
   }
 
@@ -931,15 +942,15 @@ export function App() {
   }): Promise<void> {
     const id = input.id.trim();
     if (!id) throw new Error("Provider ID is required.");
-    if (input.apiKey) await setApiKey(id, input.apiKey); // key → OS keychain only
     const models: Record<string, { name: string }> = {};
     for (const mdl of input.models) {
       const mid = mdl.id.trim();
       if (mid) models[mid] = { name: mdl.name.trim() || mid };
     }
-    const user = await loadUserAIConfig();
-    await saveAIConfig(
-      JSON.stringify({
+    // Shared read-modify-write: validation before the key is stored, and the
+    // merge lands on the file as it is AFTER the keychain await.
+    await mutateUserAIConfig(
+      (user) => ({
         ...user,
         provider: {
           ...(user.provider ?? {}),
@@ -951,6 +962,11 @@ export function App() {
           },
         },
       }),
+      {
+        afterValidate: async () => {
+          if (input.apiKey) await setApiKey(id, input.apiKey); // key → OS keychain only
+        },
+      },
     );
     await reloadAiConfigAndProviders();
   }
@@ -1015,21 +1031,31 @@ export function App() {
   }
 
   async function removeProvider(ids: string[]): Promise<void> {
-    for (const id of ids) await deleteApiKey(id);
-    // Drop any persisted subscription connection too (no keychain key to clear).
-    for (const id of ids) persistConnectedSubscription(id, false);
-    const user = await loadUserAIConfig();
-    const provider = { ...(user.provider ?? {}) };
-    let changed = false;
-    for (const id of ids) {
-      const up = provider[id];
-      if (up?.kind && up.name) {
-        delete provider[id];
-        changed = true;
-      }
-    }
-    // Read-modify-write so sibling sections (mcp, other providers) survive.
-    if (changed) await saveAIConfig(JSON.stringify({ ...user, provider }));
+    // Shared read-modify-write: an unreadable ai.json refuses the removal
+    // before any keychain entry is deleted, and the provider map is rebuilt from
+    // the file as it is after those deletions.
+    await mutateUserAIConfig(
+      (user) => {
+        const provider = { ...(user.provider ?? {}) };
+        let changed = false;
+        for (const id of ids) {
+          const up = provider[id];
+          if (up?.kind && up.name) {
+            delete provider[id];
+            changed = true;
+          }
+        }
+        // Nothing to drop in ai.json: no write at all.
+        return changed ? { ...user, provider } : null;
+      },
+      {
+        afterValidate: async () => {
+          for (const id of ids) await deleteApiKey(id);
+          // Drop any persisted subscription connection too (no keychain key).
+          for (const id of ids) persistConnectedSubscription(id, false);
+        },
+      },
+    );
     // A selection pointing at the removed provider would resolve to a dead
     // model — clear it so the chat shows the honest no-provider state.
     const selected = getStoredAiModel();
@@ -1297,48 +1323,54 @@ export function App() {
     () => { void untrack(() => refreshDiscoveredMcp()); },
   );
 
-  /** Persist the MCP server list into ai.json, preserving sibling sections. */
-  async function persistMcpServers(servers: MCPServerConfig[]): Promise<void> {
-    const user = await loadUserAIConfig();
-    await saveAIConfig(JSON.stringify({ ...user, mcp: servers }));
+  /** Persist ONE change to the MCP server list into ai.json, preserving sibling
+   *  sections. The list is never built here: the serialized helper applies the
+   *  change over the file it re-reads inside the write queue, so a gesture made
+   *  while another write (the keychain of a provider save) is pending is not
+   *  computed from the stale config the caller saw. Returns the server as it
+   *  stands after the write — `undefined` when the server is gone or the change
+   *  no longer applied — which decides the connection effect. */
+  async function persistMcpServers(
+    change: McpServerChange,
+  ): Promise<MCPServerConfig | undefined> {
+    let server: MCPServerConfig | undefined;
+    await mutateUserAIConfig((user) => {
+      const result = applyMcpServerChange(user, change);
+      if (result === null) return null;
+      server = result.server;
+      return result.config;
+    });
     const selected = getStoredAiModel();
     setAiConfig(await loadAIConfig(aiConfig(), selected ? [selected] : []));
+    return server;
   }
 
-  async function saveMcpServer(input: {
-    id: string;
-    name?: string;
-    transport: "stdio" | "http";
-    command?: string;
-    args?: string[];
-    url?: string;
-    headers?: Record<string, string>;
-    enabled: boolean;
-  }): Promise<void> {
-    // Preserve headers already set (e.g. via ai.json) when an edit doesn't
-    // re-supply them, so a UI tweak never silently drops an auth token.
-    const existing = (aiConfig().mcp ?? []).find((s) => s.id === input.id);
-    const headers = input.headers ?? existing?.headers;
-    const next: MCPServerConfig = {
-      id: input.id,
-      transport: input.transport,
-      enabled: input.enabled,
-      ...(input.name ? { name: input.name } : {}),
-      ...(input.command ? { command: input.command } : {}),
-      ...(input.args && input.args.length ? { args: input.args } : {}),
-      ...(input.url ? { url: input.url } : {}),
-      ...(headers && Object.keys(headers).length ? { headers } : {}),
-    };
-    const servers = [...(aiConfig().mcp ?? [])];
-    const idx = servers.findIndex((s) => s.id === input.id);
-    if (idx >= 0) servers[idx] = next;
-    else servers.push(next);
-    await persistMcpServers(servers);
+  /** Surface a refused ai.json write from the MCP paths, which the settings
+   *  dialog calls fire-and-forget (no error slot to render into). Returns true
+   *  when the toast already told the user; any other failure still propagates. */
+  function reportAiConfigWriteFailure(e: unknown): boolean {
+    if (!(e instanceof AIUserConfigInvalidError)) return false;
+    showToast({ title: e.message, variant: "error", duration: 8000 });
+    return true;
+  }
+
+  async function saveMcpServer(input: McpServerInput): Promise<void> {
+    let server: MCPServerConfig | undefined;
     try {
-      if (next.enabled !== false) await connectMcpServer(next);
-      else await disconnectMcpServer(next.id);
+      // A edição preserva os cabeçalhos já gravados dentro da fila, e não a
+      // partir do `aiConfig()` que a UI tinha ao abrir o formulário.
+      server = await persistMcpServers({ kind: "upsert", input });
     } catch (e) {
-      console.warn(`[mcp] connect failed for "${next.id}":`, e);
+      if (!reportAiConfigWriteFailure(e)) throw e;
+      return;
+    }
+    if (server) {
+      try {
+        if (server.enabled !== false) await connectMcpServer(server);
+        else await disconnectMcpServer(server.id);
+      } catch (e) {
+        console.warn(`[mcp] connect failed for "${server.id}":`, e);
+      }
     }
     await refreshMcpStatuses();
   }
@@ -1375,25 +1407,31 @@ export function App() {
   }
 
   async function removeMcpServer(id: string): Promise<void> {
-    const servers = (aiConfig().mcp ?? []).filter((s) => s.id !== id);
+    try {
+      await persistMcpServers({ kind: "remove", id });
+    } catch (e) {
+      if (!reportAiConfigWriteFailure(e)) throw e;
+      return;
+    }
     try {
       await disconnectMcpServer(id);
     } catch {
       // not connected
     }
-    await persistMcpServers(servers);
     await refreshMcpStatuses();
   }
 
   async function toggleMcpServer(id: string, enabled: boolean): Promise<void> {
-    const servers = (aiConfig().mcp ?? []).map((s) =>
-      s.id === id ? { ...s, enabled } : s,
-    );
-    await persistMcpServers(servers);
-    const server = servers.find((s) => s.id === id);
+    let server: MCPServerConfig | undefined;
+    try {
+      server = await persistMcpServers({ kind: "setEnabled", id, enabled });
+    } catch (e) {
+      if (!reportAiConfigWriteFailure(e)) throw e;
+      return;
+    }
     if (server) {
       try {
-        if (enabled) await connectMcpServer(server);
+        if (server.enabled !== false) await connectMcpServer(server);
         else await disconnectMcpServer(id);
       } catch (e) {
         console.warn(`[mcp] toggle failed for "${id}":`, e);

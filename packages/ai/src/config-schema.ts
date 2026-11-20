@@ -204,6 +204,18 @@ const UserAIConfigSchema = v.object({
   mcp: v.optional(UserMCPListSchema),
 });
 
+/** Shape parsed from ai.json for a read-modify-WRITE. It differs from
+ *  {@link UserAIConfigSchema} in exactly one place: `mcp` is the STRICT list, so
+ *  an entry the write could not preserve refuses the read instead of being
+ *  dropped. The lenient list stays for loading — dropping a typo'd server while
+ *  reading must never be the reason a merge-based write erases it from disk. */
+const UserAIConfigWriteSchema = v.object({
+  model: v.optional(v.string()),
+  small_model: v.optional(v.string()),
+  provider: v.optional(v.record(v.string(), UserProviderConfigSchema)),
+  mcp: v.optional(v.array(MCPServerConfigSchema)),
+});
+
 type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
 type ModelLimit = v.InferOutput<typeof ModelLimitSchema>;
 type ReasoningLevel = v.InferOutput<typeof ReasoningLevelSchema>;
@@ -225,6 +237,13 @@ type UserAIConfig = v.InferOutput<typeof UserAIConfigSchema>;
  *  schema mismatch (mirrors the core `safeJsonParse` storage-boundary pattern). */
 function parseUserConfig(raw: string | null): UserAIConfig | null {
   return safeJsonParse(raw, UserAIConfigSchema);
+}
+
+/** Parse ai.json text for a read-modify-write: same shape as
+ *  {@link parseUserConfig} but EVERY `mcp` entry must be valid (one failing
+ *  entry returns null) and the whole config is null on any other mismatch. */
+function parseUserConfigForWrite(raw: string | null): UserAIConfig | null {
+  return safeJsonParse(raw, UserAIConfigWriteSchema);
 }
 
 function mergeOptions(
@@ -389,8 +408,10 @@ export {
   ProviderKindSchema,
   ProviderOptionsSchema,
   UserAIConfigSchema,
+  UserAIConfigWriteSchema,
   UserProviderConfigSchema,
   mergeConfigs,
   parseUserConfig,
+  parseUserConfigForWrite,
   providerCanEmbed,
 };
