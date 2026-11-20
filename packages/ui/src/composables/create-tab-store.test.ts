@@ -22,6 +22,22 @@ describe("createTabStore", () => {
     localStorage.clear();
   });
 
+  it("drops a pending session save when its owner is disposed", async () => {
+    // Mutation captured: without the owner cleanup, the 500 ms save still
+    // fires after the store's root is gone (in tests, after the environment
+    // is torn down: "localStorage is not defined").
+    let saved = false;
+    const store = createRoot((dispose) => {
+      const s = createTabStore({ pane: createPaneStore("test") });
+      s.openTab(entry("a.md"), "root");
+      dispose();
+      return s;
+    });
+    await new Promise((r) => setTimeout(r, 650));
+    saved = store.getPersistedSession() !== null;
+    expect(saved).toBe(false);
+  });
+
   it("starts with no tabs and no active id", () => {
     withStore((store) => {
       expect(store.tabs()).toEqual([]);
