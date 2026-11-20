@@ -41,18 +41,59 @@ import { NotSupportedError } from "../types.ts";
  */
 export const MAX_CONTEXT_MESSAGES = 200;
 
+/** OpenCode Go is the two builtin providers (`/zen/go/...`) plus any custom
+ *  provider pointed at the same service (`/inference/go/...`). Anything else
+ *  on opencode.ai — notably Zen's `/zen/v1` — is NOT Go. A missing or invalid
+ *  baseURL is simply not Go and never throws. */
+export function isOpenCodeGoBaseURL(baseURL: string | undefined): boolean {
+  if (!baseURL) return false;
+  try {
+    const url = new URL(baseURL);
+    if (url.origin !== "https://opencode.ai") return false;
+    const path = url.pathname.replace(/\/+$/, "");
+    return (
+      path === "/zen/go" ||
+      path.startsWith("/zen/go/") ||
+      path === "/inference/go" ||
+      path.startsWith("/inference/go/")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** The AI SDK appends its own library/runtime suffix to a `user-agent` header
+ *  supplied with a generate/stream call. For Go we want the client to identify
+ *  with exactly the host's agent, so set it at the last hop, on the request the
+ *  injected (or global) fetch actually sends. No-op for non-Go providers. */
+function withGoUserAgent(
+  fetchImpl: AIEngineOptions["fetch"],
+  userAgent: string | undefined,
+): AIEngineOptions["fetch"] | undefined {
+  if (!userAgent) return fetchImpl;
+  return (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set("User-Agent", userAgent);
+    return (fetchImpl ?? globalThis.fetch)(input, { ...init, headers });
+  };
+}
+
 async function buildModel(
   resolved: ResolvedModel,
   apiKey: string | undefined,
   fetchImpl: AIEngineOptions["fetch"],
+  userAgent?: string,
 ): Promise<LanguageModel> {
   const { modelId, providerId, provider } = resolved;
   const baseURL = provider.options?.baseURL;
   const headers = provider.options?.headers;
+  const actualFetch = isOpenCodeGoBaseURL(baseURL)
+    ? withGoUserAgent(fetchImpl, userAgent)
+    : fetchImpl;
   // The AI SDK's FetchFunction is structurally the global fetch; the Tauri HTTP
   // plugin fetch is compatible at runtime.
-  const fetch = fetchImpl as Parameters<typeof import("@ai-sdk/openai-compatible").createOpenAICompatible>[0]["fetch"];
-  const fetchOpt = fetchImpl ? { fetch } : {};
+  const fetch = actualFetch as Parameters<typeof import("@ai-sdk/openai-compatible").createOpenAICompatible>[0]["fetch"];
+  const fetchOpt = actualFetch ? { fetch } : {};
 
   switch (provider.kind) {
     case "anthropic": {
@@ -405,7 +446,7 @@ function createProvider(
       .map((m) => ({ role: m.role, content: m.content }));
     try {
       const apiKey = await getApiKey();
-      const model = await buildModel(resolved, apiKey, opts?.fetch);
+      const model = await buildModel(resolved, apiKey, opts?.fetch, opts?.userAgent);
       const ai = await import("ai");
       const tools = gatedTools.length
         ? Object.fromEntries(
@@ -424,9 +465,19 @@ function createProvider(
         resolved.provider.kind,
         opts?.reasoningEffort,
       );
+      // OpenCode Go refuses chat requests without a stable per-conversation
+      // session id. Put it on the call (both generateText and streamText) —
+      // never on the provider object — so other providers are untouched.
+      const goHeaders = isOpenCodeGoBaseURL(resolved.provider.options?.baseURL)
+        ? {
+            "x-opencode-session": chatOpts?.sessionId || crypto.randomUUID(),
+            ...(opts?.userAgent ? { "User-Agent": opts.userAgent } : {}),
+          }
+        : undefined;
       const common = {
         model,
         ...(instructions ? { instructions } : {}),
+        ...(goHeaders ? { headers: goHeaders } : {}),
         messages: modelMessages,
         ...(chatOpts?.signal ? { abortSignal: chatOpts.signal } : {}),
         ...(chatOpts?.temperature != null ? { temperature: chatOpts.temperature } : {}),

@@ -126,6 +126,10 @@ export interface AiChatStoreConfig {
   /** Restored turns to seed history on construction (multi-chat hydration).
    *  Omitted for the single-session and inline stores. */
   initialMessages?: ChatTurn[];
+  /** Stable per-conversation id, forwarded as `sessionId` on every chat call
+   *  (OpenCode Go needs it as `x-opencode-session`). Without one, the store
+   *  generates an id once on creation and reuses it for all its turns. */
+  sessionId?: string;
   /** Explicit context preamble (attached files/selections) injected into the
    *  message SENT to the model. The displayed turn stays clean — only the
    *  outgoing copy carries it. Resolved per send so it reflects the current
@@ -169,6 +173,7 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
   const [error, setError] = createSignal<AiChatError | null>(null);
   const [queued, setQueued] = createSignal<string | null>(null);
   let controller: AbortController | null = null;
+  const sessionId = config.sessionId || crypto.randomUUID();
   // Resolves the steering sender's promise. A send made while a turn streams
   // must NOT settle at queue time: callers (the composer's mention
   // consumption) release the message's context on settlement, and the context
@@ -349,6 +354,7 @@ export function createAiChatStore(config: AiChatStoreConfig): AiChatStore {
       const stream = provider.chat(aiMessages, {
         system: opts?.system ?? config.system?.(),
         signal: controller.signal,
+        sessionId,
         ...(tools && tools.length
           ? {
               tools,
