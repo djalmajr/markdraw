@@ -14,6 +14,7 @@ import { isSupportedFile } from "@markdraw/core/utils.ts";
 import { expandSlashCommand, type SlashCommandDef } from "@markdraw/ai/slash-commands.ts";
 import type { AiChatStore } from "../composables/create-ai-chat-store.ts";
 import type { AiContextItem, AiInlineReference } from "../composables/ai-context.ts";
+import type { AiInlineReferenceHost } from "../composables/create-app-state.ts";
 import { Button } from "./ui/button.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 import { ScrollArea } from "./ui/scroll-area.tsx";
@@ -97,15 +98,12 @@ export interface AiPanelProps {
   contextItems?: AiContextItem[];
   /** The active-document chip (read via tool, shown for awareness), or null. */
   activeFileContext?: { label: string } | null;
-  /** Host-requested inline reference: insert "@token" for a context item
-   *  (selection chips) into the composer. `seq` bumps retrigger insertion
-   *  even for an identical reference. */
-  inlineReference?: AiInlineReference | null;
-  /** Ack for `inlineReference`: the panel consumed it, the host clears the
-   *  signal. Keeps a pending reference distinguishable from a stale one, so
-   *  a panel that MOUNTS with a reference present (chat tab was closed when
-   *  the user hit ⌘I) still inserts the token instead of swallowing it. */
-  onInlineReferenceHandled?: () => void;
+  /** Host side of host-requested inline references (a selection chip →
+   *  composer "@token"): this panel registers a consumer on mount and the
+   *  host hands each request to it. A request made while no composer was
+   *  mounted (⌘I with the chat tab closed) waits in the host and is taken
+   *  here once this panel exists. */
+  inlineReferenceHost?: AiInlineReferenceHost;
   onRemoveContext?: (id: string) => void;
   /** The context-item IDS behind the composer's inline tokens, in TEXTUAL
    *  order, emitted right before a send — the host reorders its context array
@@ -880,28 +878,34 @@ export function AiPanel(props: AiPanelProps): JSX.Element {
   }
 
   // Host-requested inline reference (a selection chip → composer token).
-  // Keyed on `seq` so an identical re-request still fires. NOT deferred: the
-  // host clears the signal through onInlineReferenceHandled once consumed,
-  // so any non-null value — including one present at MOUNT (the chat tab was
-  // closed when the user hit ⌘I and focusAiComposer just created it) — is a
-  // pending request, never a stale replay.
-  createEffect(
-    () => {
-      const ref = props.inlineReference;
-      return ref ? { seq: ref.seq, itemId: ref.itemId, token: ref.token } : null;
-    },
-    (request) => {
-      if (!request || request.seq === undefined) return;
-      // A transient detached AiPanel instance (mounted, DOM removed, but its
-      // effects still alive) would otherwise consume this reference first —
-      // inserting the token into its orphaned textarea and acking it — so the
-      // visible panel never gets it (the chip stays, the token never appears).
-      // Only the instance actually in the document should handle it.
-      if (!textarea || !textarea.isConnected) return;
-      untrack(() => insertItemToken(request.itemId, request.token));
-      props.onInlineReferenceHandled?.();
-    },
-  );
+  // Consumed EXPLICITLY: the host hands each request to the consumer this
+  // panel registers, and a request made before it mounted (the chat tab was
+  // closed when the user hit ⌘I and focusAiComposer just created it) waits in
+  // the host's pending slot, drained here. There is no effect watching a
+  // request signal: clearing it from the effect that reads it re-ran that
+  // effect through its own write (Solid's EFFECT_WRITES_OWN_SOURCE), settling
+  // in two passes and rendering the pre-write value in between.
+  function consumeInlineReference(request: AiInlineReference): boolean {
+    // A transient detached AiPanel instance (mounted, DOM removed, but its
+    // lifecycle not yet disposed) must not take the reference — inserting the
+    // token into its orphaned textarea would leave the visible panel without
+    // it (the chip stays, the token never appears). Answering false leaves the
+    // request pending for the instance actually in the document.
+    if (!textarea || !textarea.isConnected) return false;
+    insertItemToken(request.itemId, request.token);
+    return true;
+  }
+
+  onSettled(() => {
+    const host = props.inlineReferenceHost;
+    if (!host) return;
+    const unregister = host.register(consumeInlineReference);
+    // Drain only when this instance can take it: a detached one would answer
+    // false after the slot was cleared, and the request would be lost.
+    const pending = textarea?.isConnected ? host.takePending() : null;
+    if (pending) consumeInlineReference(pending);
+    return unregister;
+  });
 
   /** The input split on tracked tokens (longest-first on ties) for the
    *  highlight backdrop — plain text nodes + pill spans, never innerHTML. */

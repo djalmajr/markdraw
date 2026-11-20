@@ -235,11 +235,14 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
   );
 
   function StripTab(tabProps: { tab: RightPanelTab }): JSX.Element {
-    // The strip model emits fresh tab objects on every change, so <For>
-    // re-creates this row whenever its tab changes — reading the prop once
-    // matches the previous For-callback semantics.
-    const tab = untrack(() => tabProps.tab);
-    const dndId = toRpTabDndId(encode(tab));
+    // `<For keyed=…>` keeps this row while its tab id is in the strip and
+    // hands the tab as a LIVE value, so read it where the value is used —
+    // never once in this body — and a rename/pin/streaming change updates the
+    // row instead of rebuilding it. Only the key-derived encoded id is a
+    // snapshot (the key IS the id, so it cannot change under this row).
+    const tab = (): RightPanelTab => tabProps.tab;
+    const id = untrack(() => encode(tab()));
+    const dndId = toRpTabDndId(id);
     const draggable = useDraggable({
       id: dndId,
       get disabled() {
@@ -255,7 +258,7 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
 
     const indicatorSide = (): "after" | "before" | null => {
       const ind = dropIndicator();
-      return ind && ind.encoded === encode(tab) ? ind.side : null;
+      return ind && ind.encoded === id ? ind.side : null;
     };
 
     return (
@@ -263,47 +266,47 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
         <ContextMenuTrigger
           as="div"
           class={["rp-tab", {
-            "rp-tab-active": isActive(tab),
+            "rp-tab-active": isActive(tab()),
             "rp-tab-dragging": draggable.isDragging(),
             "rp-tab-drop-after": indicatorSide() === "after",
             "rp-tab-drop-before": indicatorSide() === "before",
-            "rp-tab-pinned": !!tab.pinned,
+            "rp-tab-pinned": !!tab().pinned,
           }]}
           
-          data-rp-tab={encode(tab)}
-          title={labelOf(tab)}
+          data-rp-tab={id}
+          title={labelOf(tab())}
           role="tab"
-          aria-selected={isActive(tab) ? "true" : "false"}
+          aria-selected={isActive(tab()) ? "true" : "false"}
           ref={(el: HTMLElement) => {
             draggable.ref(el);
             droppable.ref(el);
           }}
           onClick={() => {
-            if (editingId() !== tab.id) props.onSelect(encode(tab));
+            if (editingId() !== tab().id) props.onSelect(encode(tab()));
           }}
-          onDblClick={() => startRename(tab)}
+          onDblClick={() => startRename(tab())}
           onMouseDown={(e: MouseEvent) => {
             if (e.button === 1) {
               e.preventDefault();
-              props.onClose(encode(tab));
+              props.onClose(encode(tab()));
             }
           }}
         >
-          <Show when={tab.pinned}>
+          <Show when={tab().pinned}>
             <IconPin width={11} height={11} class="rp-tab-pin" />
           </Show>
-          <Show when={tab.kind === "chat" && tab.streaming && !isActive(tab)}>
+          <Show when={tab().kind === "chat" && tab().streaming && !isActive(tab())}>
             <span class="rp-tab-dot" aria-hidden="true" />
           </Show>
           <Show
-            when={editingId() === tab.id}
-            fallback={<span class="rp-tab-name">{labelOf(tab)}</span>}
+            when={editingId() === tab().id}
+            fallback={<span class="rp-tab-name">{labelOf(tab())}</span>}
           >
             <input
               class="rp-tab-rename"
               value={draft()}
               autofocus
-              aria-label={(useLocale(), `${m.ai_tab_rename()}: ${labelOf(tab)}`)}
+              aria-label={(useLocale(), `${m.ai_tab_rename()}: ${labelOf(tab())}`)}
               onClick={(e) => e.stopPropagation()}
               onInput={(e) => setDraft(e.currentTarget.value)}
               onBlur={(e) => {
@@ -322,14 +325,14 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
           </Show>
           {/* Hide close while renaming so a stray Tab/click can't drop the
               tab mid-edit. */}
-          <Show when={editingId() !== tab.id}>
+          <Show when={editingId() !== tab().id}>
             <button
               type="button"
               class="rp-tab-close"
               aria-label={(useLocale(), m.tab_close())}
               onClick={(e) => {
                 e.stopPropagation();
-                props.onClose(encode(tab));
+                props.onClose(encode(tab()));
               }}
             >
               <IconX width={12} height={12} />
@@ -338,37 +341,37 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
         </ContextMenuTrigger>
 
         <ContextMenuContent class="rp-tab-menu">
-          <ContextMenuItem onSelect={() => props.onTogglePin(encode(tab))}>
-            {tab.pinned ? (useLocale(), m.ai_tab_unpin()) : (useLocale(), m.ai_tab_pin())}
+          <ContextMenuItem onSelect={() => props.onTogglePin(encode(tab()))}>
+            {tab().pinned ? (useLocale(), m.ai_tab_unpin()) : (useLocale(), m.ai_tab_pin())}
           </ContextMenuItem>
-          <Show when={tab.kind === "chat"}>
+          <Show when={tab().kind === "chat"}>
             <ContextMenuSeparator />
-            <ContextMenuItem onSelect={() => startRename(tab)}>
+            <ContextMenuItem onSelect={() => startRename(tab())}>
               {(useLocale(), m.ai_tab_rename())}
             </ContextMenuItem>
-            <ContextMenuItem onSelect={() => props.onExportChat?.(tab.id)}>
+            <ContextMenuItem onSelect={() => props.onExportChat?.(tab().id)}>
               {(useLocale(), m.ai_tab_export())}
             </ContextMenuItem>
-            <ContextMenuItem onSelect={() => props.onArchiveChat?.(tab.id)}>
+            <ContextMenuItem onSelect={() => props.onArchiveChat?.(tab().id)}>
               {(useLocale(), m.ai_chat_archive())}
             </ContextMenuItem>
           </Show>
           <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => props.onClose(encode(tab))}>
+          <ContextMenuItem onSelect={() => props.onClose(encode(tab()))}>
             {(useLocale(), m.tab_close())}
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => props.onCloseOthers(encode(tab))}>
+          <ContextMenuItem onSelect={() => props.onCloseOthers(encode(tab()))}>
             {(useLocale(), m.tab_close_others())}
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => props.onCloseToRight(encode(tab))}>
+          <ContextMenuItem onSelect={() => props.onCloseToRight(encode(tab()))}>
             {(useLocale(), m.tab_close_to_right())}
           </ContextMenuItem>
           <ContextMenuItem onSelect={() => props.onCloseAll()}>
             {(useLocale(), m.tab_close_all())}
           </ContextMenuItem>
-          <Show when={tab.kind === "chat"}>
+          <Show when={tab().kind === "chat"}>
             <ContextMenuSeparator />
-            <ContextMenuItem class="rp-tab-menu-danger" onSelect={() => props.onDeleteChat?.(tab.id)}>
+            <ContextMenuItem class="rp-tab-menu-danger" onSelect={() => props.onDeleteChat?.(tab().id)}>
               {(useLocale(), m.ai_chat_delete())}
             </ContextMenuItem>
           </Show>
@@ -391,7 +394,7 @@ export function RightPanelTabs(props: RightPanelTabsProps): JSX.Element {
       </Show>
 
       <div class="rp-strip-tabs" ref={listRef} onScroll={updateScrollState} role="tablist">
-        <For each={props.tabs}>{(tab) => <StripTab tab={tab} />}</For>
+        <For each={props.tabs} keyed={(tab) => tab.id}>{(tab) => <StripTab tab={tab()} />}</For>
       </div>
 
       <Show when={hasOverflow()}>

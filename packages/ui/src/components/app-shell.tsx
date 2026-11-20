@@ -636,7 +636,7 @@ export function AppShell(props: AppShellProps) {
         <AiPanel
           store={s.aiSessions.activeStore()}
           focusTrigger={s.aiComposerFocusTrigger()}
-          inlineReference={s.aiInlineReference()}
+          inlineReferenceHost={s.aiInlineReferenceHost}
           providerLabel={props.aiProviderLabel}
           modelGroups={props.aiModelGroups}
           currentModel={props.aiCurrentModel}
@@ -664,7 +664,6 @@ export function AppShell(props: AppShellProps) {
           mode={s.aiMode()}
           planItems={s.aiPlan()?.items}
           onClearPlan={s.clearAiPlan}
-          onInlineReferenceHandled={s.clearAiInlineReference}
           onModeChange={s.setAiMode}
           onTogglePlanItem={s.toggleAiPlanItem}
           reasoningEffort={props.aiReasoning}

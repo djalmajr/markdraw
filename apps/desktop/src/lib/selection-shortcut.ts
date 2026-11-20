@@ -27,6 +27,32 @@ export function selectionShortcutOrigin(target: EventTarget | null): SelectionSh
   return { chatOnly: false, editor: !!element?.closest(".cm-editor") };
 }
 
+/** A shortcut the menu runs has no keystroke of its own — the command palette
+ *  is opened by a keydown and then runs a command, so it cannot tell which
+ *  surface the selection belongs to. Remember the surface that had the focus
+ *  when the menu opened, and run the command with its selection: the editor's
+ *  remembered range only when the editor held the focus, else the preview's
+ *  live DOM selection. */
+export interface PaletteSelectionOrigin {
+  /** Capture the focused surface — call BEFORE the menu takes the focus. */
+  remember(focused: EventTarget | null): void;
+  /** The origin to run the menu's selection command with. Nothing captured
+   *  reads as "not the editor", so a stale CodeMirror range is never used. */
+  origin(): SelectionShortcutOrigin;
+}
+
+export function createPaletteSelectionOrigin(): PaletteSelectionOrigin {
+  let recorded: SelectionShortcutOrigin = { chatOnly: false, editor: false };
+  return {
+    remember(focused) {
+      recorded = selectionShortcutOrigin(focused);
+    },
+    origin() {
+      return recorded;
+    },
+  };
+}
+
 /** The three ways to obtain a selection, in priority order. */
 export interface SelectionSources {
   /** Excalidraw scene selection; independent of the keystroke origin. */

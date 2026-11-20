@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { attachFromSelectionSources, selectionShortcutOrigin } from "./selection-shortcut.ts";
+import {
+  attachFromSelectionSources,
+  createPaletteSelectionOrigin,
+  selectionShortcutOrigin,
+} from "./selection-shortcut.ts";
 
 /** Minimal stand-in for a DOM element: `closest` answers only the classes it
  *  belongs to. Bun has no DOM globals, and the decision uses nothing else. */
@@ -61,6 +65,40 @@ describe("selectionShortcutOrigin — origem do keydown", () => {
       chatOnly: true,
       editor: false,
     });
+  });
+});
+
+describe("createPaletteSelectionOrigin — a paleta não tem tecla de origem", () => {
+  it("aberta com o foco no preview usa a seleção do preview, não a do editor", () => {
+    // O editor guarda o último range depois do blur: se a paleta sempre
+    // usasse o editor, o chip viria da seleção antiga.
+    const palette = createPaletteSelectionOrigin();
+    palette.remember(fakeElement("doc-body"));
+    expect(palette.origin()).toEqual({ chatOnly: false, editor: false });
+  });
+
+  it("aberta com o foco no editor usa a seleção do editor", () => {
+    const palette = createPaletteSelectionOrigin();
+    palette.remember(fakeElement("cm-editor"));
+    expect(palette.origin()).toEqual({ chatOnly: false, editor: true });
+  });
+
+  it("aberta com o foco no chat não anexa nada", () => {
+    const palette = createPaletteSelectionOrigin();
+    palette.remember(fakeElement("ai-panel"));
+    expect(palette.origin()).toEqual({ chatOnly: true, editor: false });
+  });
+
+  it("sem captura não cai na seleção dormente do editor", () => {
+    const palette = createPaletteSelectionOrigin();
+    expect(palette.origin()).toEqual({ chatOnly: false, editor: false });
+  });
+
+  it("cada abertura recaptura: a segunda abertura em outra superfície vence", () => {
+    const palette = createPaletteSelectionOrigin();
+    palette.remember(fakeElement("cm-editor"));
+    palette.remember(fakeElement("doc-body"));
+    expect(palette.origin()).toEqual({ chatOnly: false, editor: false });
   });
 });
 

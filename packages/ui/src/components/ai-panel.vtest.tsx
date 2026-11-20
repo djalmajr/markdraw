@@ -1,14 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSignal, flush } from "solid-js";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { createRoot, createSignal, flush, OBSERVE } from "solid-js";
+import { attribution } from "solid-js/attribution";
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createMockProvider } from "@markdraw/ai/mock-provider.ts";
 import type { SlashCommandDef } from "@markdraw/ai/slash-commands.ts";
 import type { AIMessage, AIProvider } from "@markdraw/ai/types.ts";
 import { createAiChatStore, type AiChatStore } from "../composables/create-ai-chat-store.ts";
+import { createAppState, type ThemeMode } from "../composables/create-app-state.ts";
 import {
   buildContextPreamble,
   type AiContextItem,
-  type AiInlineReference,
 } from "../composables/ai-context.ts";
 import { AiPanel, type AiMentionEntry, type AiSkillEntry } from "./ai-panel.tsx";
 import { AiMessage } from "./ai-message.tsx";
@@ -29,6 +30,25 @@ const fire = new Proxy(fireEvent, {
     };
   },
 });
+
+/** The host half of the inline-reference contract as AppShell wires it: the
+ *  real app state's registry + pending slot, driven through the same
+ *  `requestAiInlineReference` the ⌘I handler and the chips call. */
+function inlineReferenceState() {
+  const deps = {
+    applyTheme: vi.fn(),
+    convertAdoc: vi.fn(async () => ({ html: "", frontmatter: null })),
+    convertMarkdown: vi.fn(async () => ({ html: "", frontmatter: null })),
+    getStoredTheme: vi.fn<() => ThemeMode>(() => "system" as ThemeMode),
+  };
+  const { state, dispose } = createRoot((dispose) => ({
+    state: createAppState(deps),
+    dispose,
+  }));
+  flush();
+  onTestFinished(dispose);
+  return state;
+}
 
 function readyStore(reply = "hello there") {
   return createAiChatStore({
@@ -1319,14 +1339,50 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     return { promise, resolve };
   }
 
-  it("the trigger effect inserts '@token ' inline, shows the pill, and focuses the composer", async () => {
-    const store = readyStore();
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+  it("consumes a host inline reference without writing the source its own effect reads", ({ onTestFinished }) => {
+    // The panel used to watch the request signal in an effect and clear it
+    // through the ack, so the effect re-ran because of its own write
+    // (Solid's EFFECT_WRITES_OWN_SOURCE: two flushes to settle, one frame
+    // with the pre-write value). Consumption is explicit now.
+    if (!OBSERVE) throw new Error("Solid's diagnostics runtime is required");
+    const diagnostics = OBSERVE.diagnostics.capture();
+    const releaseAttribution = attribution.enable({ log: false });
+    onTestFinished(() => {
+      diagnostics.stop();
+      releaseAttribution();
+    });
+    const state = inlineReferenceState();
     const { baseElement } = render(() => (
-      <AiPanel contextItems={[SEL_ITEM]} inlineReference={ref()} store={store} />
+      <AiPanel
+        contextItems={[SEL_ITEM]}
+        inlineReferenceHost={state.aiInlineReferenceHost}
+        store={readyStore()}
+      />
+    ));
+    flush();
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
+    flush();
+    const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
+    expect(ta.value).toBe("@doc.md:3-7 ");
+    const codes = diagnostics.events.map(({ code }) => code);
+    expect(codes).not.toContain("EFFECT_WRITES_OWN_SOURCE");
+    // The registry read must not be an untracked one either.
+    expect(
+      diagnostics.events.filter(
+        (event) =>
+          event.code === "STRICT_READ_UNTRACKED" && event.message.includes("inlineReferenceHost"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("a host request inserts '@token ' inline, shows the pill, and focuses the composer", async () => {
+    const store = readyStore();
+    const state = inlineReferenceState();
+    const { baseElement } = render(() => (
+      <AiPanel contextItems={[SEL_ITEM]} inlineReferenceHost={state.aiInlineReferenceHost} store={store} />
     ));
     const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
     expect(ta.value).toBe("@doc.md:3-7 ");
     expect(baseElement.querySelector(".ai-inline-mention")?.textContent).toBe("@doc.md:3-7");
@@ -1342,104 +1398,107 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     // visible panel would never insert the token (the chip would linger). The
     // isConnected guard makes a detached instance skip it.
     const store = readyStore();
-    const onInlineReferenceHandled = vi.fn();
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const { container } = render(() => (
       <AiPanel
         contextItems={[SEL_ITEM]}
-        inlineReference={ref()}
+        inlineReferenceHost={state.aiInlineReferenceHost}
         store={store}
-        onInlineReferenceHandled={onInlineReferenceHandled}
       />
     ));
+    flush();
     const ta = container.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
     container.remove(); // the zombie's DOM is detached; its effects stay alive
     expect(ta.isConnected).toBe(false);
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
-    // A detached instance neither inserts nor acks — it leaves the reference
+    // A detached instance neither inserts nor takes the reference — it stays
     // pending for the connected panel.
     expect(ta.value).toBe("");
-    expect(onInlineReferenceHandled).not.toHaveBeenCalled();
+    expect(state.aiInlineReferenceHost.takePending()).toEqual({
+      itemId: SEL_ITEM.id,
+      seq: 1,
+      token: SEL_ITEM.label,
+    });
   });
 
   it("inserts a separating space after non-whitespace (focused caret and unfocused append)", () => {
     const store = readyStore();
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const { baseElement } = render(() => (
       <AiPanel
         contextItems={[SEL_ITEM, OTHER_SEL_ITEM]}
-        inlineReference={ref()}
+        inlineReferenceHost={state.aiInlineReferenceHost}
         store={store}
       />
     ));
+    flush();
     // The mount effect focuses the composer — the caret (end of the typed
     // text) follows non-whitespace, so the token gets a separating space.
     const ta = typeText(baseElement, "explain this");
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
     expect(ta.value).toBe("explain this @doc.md:3-7 ");
     // Unfocused: the stale caret is ignored — the next reference APPENDS
     // (already after whitespace here, so no doubled space).
     ta.blur();
     ta.setSelectionRange(0, 0);
-    setRef({ itemId: OTHER_SEL_ITEM.id, seq: 2, token: OTHER_SEL_ITEM.label });
+    state.requestAiInlineReference(OTHER_SEL_ITEM.id, OTHER_SEL_ITEM.label);
     flush();
     expect(ta.value).toBe("explain this @doc.md:3-7 @other.md:1-2 ");
   });
 
-  it("the same seq never re-inserts, and a new seq for the same item only refocuses", () => {
+  it("re-requesting the same item+token refocuses without duplicating the token", () => {
     const store = readyStore();
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const { baseElement } = render(() => (
-      <AiPanel contextItems={[SEL_ITEM]} inlineReference={ref()} store={store} />
+      <AiPanel contextItems={[SEL_ITEM]} inlineReferenceHost={state.aiInlineReferenceHost} store={store} />
     ));
-    const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
     flush();
-    // The same reference re-set with the SAME seq is a no-op...
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
+    // Two requests, each with its own seq from the host (it never replays).
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
     expect(ta.value).toBe("@doc.md:3-7 ");
-    // ...and a NEW seq for the same item+token refocuses without duplicating.
-    setRef({ itemId: SEL_ITEM.id, seq: 2, token: SEL_ITEM.label });
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
     expect(ta.value).toBe("@doc.md:3-7 ");
     expect(baseElement.querySelectorAll(".ai-inline-mention")).toHaveLength(1);
   });
 
-  it("a panel that MOUNTS with a pending reference inserts it and acks the host", () => {
+  it("a panel that MOUNTS with a pending request inserts it and drains the host", () => {
     // ⌘I with the chat tab closed: the host requests the reference, then
     // focusAiComposer creates the panel — the pending value must not be
-    // swallowed as stale. The ack is what makes that distinction safe.
+    // swallowed as stale, and it must be gone once taken.
     const store = readyStore();
-    const onInlineReferenceHandled = vi.fn();
+    const state = inlineReferenceState();
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     const { baseElement } = render(() => (
       <AiPanel
         contextItems={[SEL_ITEM]}
-        inlineReference={{ itemId: SEL_ITEM.id, seq: 7, token: SEL_ITEM.label }}
+        inlineReferenceHost={state.aiInlineReferenceHost}
         store={store}
-        onInlineReferenceHandled={onInlineReferenceHandled}
       />
     ));
+    flush();
     const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
     expect(ta.value).toBe("@doc.md:3-7 ");
-    expect(onInlineReferenceHandled).toHaveBeenCalledTimes(1);
+    expect(state.aiInlineReferenceHost.takePending()).toBeNull();
   });
 
   it("deleting the token text removes the selection item by its ID", () => {
     const store = readyStore();
     const onRemoveContext = vi.fn();
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const { baseElement } = render(() => (
       <AiPanel
         contextItems={[SEL_ITEM]}
-        inlineReference={ref()}
+        inlineReferenceHost={state.aiInlineReferenceHost}
         store={store}
         onRemoveContext={onRemoveContext}
       />
     ));
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
     // Gluing a character onto the token breaks its boundary → untracked.
     typeText(baseElement, "@doc.md:3-7x");
@@ -1449,12 +1508,12 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
 
   it("the chips bar hides a tokened selection but keeps an untokened one showing", () => {
     const store = readyStore();
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const { baseElement } = render(() => (
-      <AiPanel contextItems={[SEL_ITEM, OTHER_SEL_ITEM]} inlineReference={ref()} store={store} />
+      <AiPanel contextItems={[SEL_ITEM, OTHER_SEL_ITEM]} inlineReferenceHost={state.aiInlineReferenceHost} store={store} />
     ));
     expect(baseElement.querySelectorAll(".ai-context-chip")).toHaveLength(2);
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
     const chips = [...baseElement.querySelectorAll(".ai-context-chip")];
     expect(chips).toHaveLength(1);
@@ -1467,11 +1526,11 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     const store = stubStore({ sendMessage });
     const onRemoveContext = vi.fn();
     const onReorderContext = vi.fn();
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const { baseElement } = render(() => (
       <AiPanel
         contextItems={[ALPHA_ITEM, SEL_ITEM]}
-        inlineReference={ref()}
+        inlineReferenceHost={state.aiInlineReferenceHost}
         mentionFiles={[ALPHA_FILE]}
         store={store}
         onRemoveContext={onRemoveContext}
@@ -1482,7 +1541,7 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     // locks the cross-kind textual ordering.
     typeText(baseElement, "@al");
     fire.mouseDown(baseElement.querySelector(".ai-mention-item")!);
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
     const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
     expect(ta.value).toBe("@alpha.md @doc.md:3-7 ");
@@ -1509,7 +1568,7 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     const itemA: AiContextItem = { id: "selection:a", kind: "selection", label: "A", content: "A" };
     const itemB: AiContextItem = { id: "selection:b", kind: "selection", label: "B", content: "B" };
     const [items, setItems] = createSignal([itemB, itemA]);
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const outgoing: AIMessage[][] = [];
     const provider: AIProvider = {
       async *chat(messages) {
@@ -1532,16 +1591,15 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
       <AiPanel
         store={store}
         contextItems={items()}
-        inlineReference={ref()}
-        onInlineReferenceHandled={() => setRef(null)}
+        inlineReferenceHost={state.aiInlineReferenceHost}
         onReorderContext={(ids) => setItems((prev) => ids.map((id) => prev.find((item) => item.id === id)!))}
       />
     ));
-    setRef({ itemId: itemA.id, seq: 1, token: itemA.label });
+    state.requestAiInlineReference(itemA.id, itemA.label);
     flush();
     const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
     ta.blur();
-    setRef({ itemId: itemB.id, seq: 2, token: itemB.label });
+    state.requestAiInlineReference(itemB.id, itemB.label);
     flush();
     expect(ta.value).toBe("@A @B ");
     expect(items().map((item) => item.label)).toEqual(["B", "A"]);
@@ -1553,16 +1611,16 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
   it("a chat switch with a live selection token removes its item and empties the composer", async () => {
     const [store, setStore] = createSignal(readyStore());
     const onRemoveContext = vi.fn();
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const { baseElement } = render(() => (
       <AiPanel
         contextItems={[SEL_ITEM]}
-        inlineReference={ref()}
+        inlineReferenceHost={state.aiInlineReferenceHost}
         store={store()}
         onRemoveContext={onRemoveContext}
       />
     ));
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
     setStore(readyStore());
     flush();
@@ -1577,11 +1635,11 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     const sendMessage = vi.fn(async () => {});
     const store = stubStore({ sendMessage });
     const onMention = vi.fn();
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const { baseElement } = render(() => (
       <AiPanel
         contextItems={[SEL_ITEM]}
-        inlineReference={ref()}
+        inlineReferenceHost={state.aiInlineReferenceHost}
         mentionFiles={[ALPHA_FILE]}
         store={store}
         onMention={onMention}
@@ -1592,7 +1650,7 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     // The insertion bypasses the textarea's input event — the popover belongs
     // to the pre-insertion "@al" text and must close, or its Enter handler
     // would run selectMention (a hidden, token-less mention) instead of send.
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
     expect(baseElement.querySelectorAll(".ai-mention-item")).toHaveLength(0);
     fire.keyDown(ta, { key: "Enter" });
@@ -1603,11 +1661,11 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
   it("closes an open slash list when the trigger fires, so Enter submits instead of selecting", () => {
     const sendMessage = vi.fn(async () => {});
     const store = stubStore({ sendMessage });
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const { baseElement } = render(() => (
       <AiPanel
         contextItems={[SEL_ITEM]}
-        inlineReference={ref()}
+        inlineReferenceHost={state.aiInlineReferenceHost}
         slashCommands={[
           {
             description: "Summarize the conversation",
@@ -1623,7 +1681,7 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
     expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(1);
     // Left open, the stale list's Enter would run selectSlashCommand and wipe
     // the just-inserted token text while its ref stayed tracked.
-    setRef({ itemId: SEL_ITEM.id, seq: 1, token: SEL_ITEM.label });
+    state.requestAiInlineReference(SEL_ITEM.id, SEL_ITEM.label);
     flush();
     expect(baseElement.querySelectorAll(".ai-slash-item")).toHaveLength(0);
     fire.keyDown(ta, { key: "Enter" });
@@ -1646,18 +1704,18 @@ describe("AiPanel — inline selection tokens (host-requested item refs)", () =>
       kind: "selection",
       label: "flow.excalidraw · 1 el-2",
     };
-    const [ref, setRef] = createSignal<AiInlineReference | null>(null);
+    const state = inlineReferenceState();
     const { baseElement } = render(() => (
       <AiPanel
         contextItems={[firstItem, secondItem]}
-        inlineReference={ref()}
+        inlineReferenceHost={state.aiInlineReferenceHost}
         store={store}
         onRemoveContext={onRemoveContext}
       />
     ));
-    setRef({ itemId: firstItem.id, seq: 1, token: "flow.excalidraw:sel" });
+    state.requestAiInlineReference(firstItem.id, "flow.excalidraw:sel");
     flush();
-    setRef({ itemId: secondItem.id, seq: 2, token: "flow.excalidraw:sel" });
+    state.requestAiInlineReference(secondItem.id, "flow.excalidraw:sel");
     flush();
     const ta = baseElement.querySelector<HTMLTextAreaElement>(".ai-composer-input")!;
     expect(ta.value).toBe("@flow.excalidraw:sel @flow.excalidraw:sel-2 ");
