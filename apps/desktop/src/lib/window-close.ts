@@ -19,12 +19,15 @@ import type { CloseBehavior } from "@markdraw/core/window-prefs.ts";
  *                     `process.exit(0)` explicitly because on
  *                     macOS the window-X gesture wouldn't otherwise
  *                     terminate the process.
+ * - `"minimize"`    → `event.preventDefault()` + `window.minimize()`:
+ *                     the "tray" setting with no tray icon to come back
+ *                     from.
  * - `"let-close"`   → the updater bypass. The relaunch flow needs
  *                     the window to close so it can spawn the new
  *                     binary; `relaunch()` handles the actual exit
  *                     of the old process internally.
  */
-type CloseAction = "hide" | "exit" | "let-close";
+type CloseAction = "hide" | "minimize" | "exit" | "let-close";
 
 /**
  * Decide what to do when the OS asks the window to close. Order of
@@ -36,15 +39,23 @@ type CloseAction = "hide" | "exit" | "let-close";
  *   2. `closeBehavior === "quit"` → `"exit"`. User asked us to
  *      terminate; we'll do it explicitly so macOS doesn't leave
  *      the process running window-less.
- *   3. Otherwise → `"hide"` (preserves the pre-DJA-50 close-to-tray
+ *   3. No tray icon to bring the window back (`trayAvailable === false`:
+ *      setting it up failed, e.g. a Linux session with no
+ *      StatusNotifierItem host) → `"minimize"`. Hiding would leave the app
+ *      running with no way back to the window, and quitting here could drop
+ *      unsaved work the user never chose to discard (drafts in other panes,
+ *      a pending autosave).
+ *   4. Otherwise → `"hide"` (preserves the pre-DJA-50 close-to-tray
  *      default).
  */
 function decideCloseAction(args: {
   closeBehavior: CloseBehavior;
   isUpdating: boolean;
+  trayAvailable: boolean;
 }): CloseAction {
   if (args.isUpdating) return "let-close";
   if (args.closeBehavior === "quit") return "exit";
+  if (!args.trayAvailable) return "minimize";
   return "hide";
 }
 
