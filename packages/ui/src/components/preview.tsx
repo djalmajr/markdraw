@@ -420,6 +420,10 @@ function wrapTablesForScroll(container: HTMLElement): void {
   for (const table of tables) {
     // Skip tables already wrapped (covers re-runs of the effect on the same DOM)
     if (table.parentElement?.classList.contains("table-wrapper")) continue;
+    // An admonition's own table only lays out the icon and the content: the
+    // wrapper's bottom margin would show inside the box. Data tables inside
+    // the admonition's content are still wrapped.
+    if (table.parentElement?.classList.contains("admonitionblock")) continue;
     const wrapper = document.createElement("div");
     wrapper.className = "table-wrapper";
     table.parentElement?.insertBefore(wrapper, table);
