@@ -9,7 +9,7 @@ import { useLocale } from "@markdraw/i18n/solid";
 import type { RecentFile } from "@markdraw/core/recent-files.ts";
 import type { RecentFolder } from "@markdraw/core/recent-folders.ts";
 import type { FavoriteFile } from "@markdraw/core/favorites.ts";
-import { effectivePaneEditorMode, type AppState } from "../composables/create-app-state.ts";
+import { effectivePaneEditorMode, type AppState, type FragmentSource } from "../composables/create-app-state.ts";
 import type { PaneStore } from "../composables/create-pane-store.ts";
 import { ContentToolbar } from "./content-toolbar.tsx";
 import { Editor, type EditorApi } from "./editor.tsx";
@@ -106,6 +106,8 @@ export interface PaneViewProps {
   onOpenRecentFolder?: (path: string) => void | Promise<void>;
   onWindowDragStart?: (event?: MouseEvent) => void | Promise<void>;
   onNavigate?: (path: string, fragment?: string | null) => void;
+  // Keep the id argument for AppShell's existing callback signature.
+  onUnresolvedFragment?: (id: string, source: FragmentSource) => void;
   onOpenExternal?: (url: string) => void;
   /** Called when the EmptyState's discoverability ghost button is
    *  clicked. The host opens the shortcuts modal — same handler as
@@ -142,6 +144,13 @@ export function PaneView(props: PaneViewProps) {
   });
   const matchesPane = (target: { rootId: string; path: string }) =>
     pane().selectedRootId() === target.rootId && pane().selectedFile()?.path === target.path;
+  // F6: a pending fragment belongs to the pane that navigated. Other panes
+  // render no pending fragment, so their Previews never consume or clear it.
+  const ownsPendingFragment = () => {
+    const owner = s.pendingFragmentOwner?.();
+    return !owner || owner === pane().paneId;
+  };
+  const pendingFragment = () => ownsPendingFragment() ? s.pendingFragment() : null;
   const pendingHtmlNavigation = () => {
     const target = s.pendingHtmlNavigation()[pane().paneId];
     return target && matchesPane(target) ? target : null;
@@ -345,7 +354,7 @@ export function PaneView(props: PaneViewProps) {
           wrapTables={pane().tableWrap()}
           tocContainer={props.tocContainer}
           currentFilePath={pane().selectedFile()?.path ?? null}
-          pendingFragment={s.pendingFragment()}
+          pendingFragment={pendingFragment()}
           pendingHeadingText={s.pendingHeadingText()}
           onHeadingHandled={() => s.setPendingHeadingText(null)}
           onHeadingDiscarded={(heading) => {
@@ -357,11 +366,27 @@ export function PaneView(props: PaneViewProps) {
             setEditorSyncTargetRatio(ratio);
             setEditorSyncTargetVersion((value) => value + 1);
           }}
-          onFragmentHandled={() => s.setPendingFragment(null)}
+          onFragmentHandled={() => {
+            if (untrack(ownsPendingFragment)) s.setPendingFragment(null);
+          }}
           onFragmentDiscarded={(fragment) => {
-            if (untrack(s.pendingFragment) === fragment) s.setPendingFragment(null);
+            if (untrack(ownsPendingFragment) && untrack(s.pendingFragment) === fragment) {
+              s.setPendingFragment(null);
+            }
           }}
           onNavigate={(target, fragment) => props.onNavigate?.(target, fragment)}
+          onUnresolvedFragment={(id) => {
+            const clickedPane = pane();
+            const tab = clickedPane.tabs.getActiveTab();
+            if (!tab || clickedPane.selectedFile()?.path !== tab.filePath) return;
+            props.onUnresolvedFragment?.(id, Object.freeze({
+              id,
+              paneId: clickedPane.paneId,
+              tabId: tab.id,
+              rootId: tab.rootId,
+              path: tab.filePath,
+            }));
+          }}
           onOpenExternal={props.onOpenExternal}
           onSearchOpenChange={s.setPreviewSearchOpen}
           onSelectionPopover={onSelectionPopover}
@@ -378,7 +403,8 @@ export function PaneView(props: PaneViewProps) {
               const target = untrack(pendingHtmlNavigation);
               if (!target) return;
               s.consumePendingHtmlNavigation(pane().paneId, target);
-              if (target.fragment && untrack(s.pendingFragment) === target.fragment) s.setPendingFragment(null);
+              if (target.fragment && ownsPendingFragment()
+                && untrack(s.pendingFragment) === target.fragment) s.setPendingFragment(null);
             }}
           />
         </Show>

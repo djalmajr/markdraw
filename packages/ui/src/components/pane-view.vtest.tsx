@@ -17,10 +17,12 @@ import { createNavigation } from "../../../../apps/desktop/src/lib/navigation.ts
 vi.mock("./editor.tsx", () => ({ Editor: () => <div data-testid="editor-stub" /> }));
 const previewCtl = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
+  allProps: [] as Record<string, unknown>[],
 }));
 vi.mock("./preview.tsx", () => ({
   Preview: (props: Record<string, unknown>) => {
     previewCtl.props = props;
+    previewCtl.allProps.push(props);
     return <div data-testid="preview-stub" />;
   },
 }));
@@ -31,6 +33,7 @@ afterEach(async () => {
   const hadAppState = disposers.length > 0;
   for (const dispose of disposers.splice(0)) dispose();
   previewCtl.props = null;
+  previewCtl.allProps.length = 0;
   if (hadAppState) await new Promise((resolve) => setTimeout(resolve, 550));
 });
 vi.mock("./editor-toolbar.tsx", () => ({ EditorToolbar: () => null }));
@@ -49,16 +52,26 @@ function fileEntry(name = "doc.md"): FSEntry {
   return { name, path: name, kind: "file" };
 }
 
-function makePane(opts: { file?: FSEntry; mode?: "edit" | "split" | "preview"; html?: string; rootId?: string } = {}): PaneStore {
+function makePane(opts: {
+  file?: FSEntry; mode?: "edit" | "split" | "preview"; html?: string;
+  rootId?: string; paneId?: string; tabId?: string; tabRootId?: string;
+} = {}): PaneStore {
   const [editorMode] = createSignal<"edit" | "split" | "preview">(opts.mode ?? "split");
-  const [selectedFile] = createSignal<FSEntry | null>(opts.file ?? fileEntry());
+  const file = opts.file ?? fileEntry();
+  const [selectedFile] = createSignal<FSEntry | null>(file);
   return {
-    paneId: "p0",
+    paneId: opts.paneId ?? "p0",
     editorMode,
     selectedFile,
     // Methods PaneView's children would consume — children are mocked
     // so these are never reached, but the type cast needs SOMETHING.
-    tabs: { tabs: () => [], getActiveTab: () => null, pinTab: () => {} },
+    tabs: {
+      tabs: () => [],
+      getActiveTab: () => opts.tabId
+        ? { id: opts.tabId, rootId: opts.tabRootId ?? opts.rootId, filePath: file.path }
+        : null,
+      pinTab: () => {},
+    },
     html: () => opts.html ?? "",
     editorContent: () => "",
     setEditorContent: () => {},
@@ -77,7 +90,12 @@ function makePane(opts: { file?: FSEntry; mode?: "edit" | "split" | "preview"; h
 }
 
 function makeState(onEditorResizeStart: (...args: unknown[]) => void): AppState {
-  const [pendingFragment, setPendingFragment] = createSignal<string | null>(null);
+  const [pendingFragment, writePendingFragment] = createSignal<string | null>(null);
+  const [pendingFragmentOwner, writePendingFragmentOwner] = createSignal<string | null>(null);
+  const setPendingFragment = (fragment: string | null, paneId?: string | null) => {
+    writePendingFragmentOwner(fragment === null ? null : (paneId ?? null));
+    writePendingFragment(fragment);
+  };
   type HtmlNavigation = { rootId: string; path: string; fragment: string };
   const [pendingHtmlNavigation, updatePending] = createSignal<Record<string, HtmlNavigation>>({});
   const [appliedHtmlNavigation, updateApplied] = createSignal<Record<string, HtmlNavigation>>({});
@@ -125,6 +143,7 @@ function makeState(onEditorResizeStart: (...args: unknown[]) => void): AppState 
     previewFindTrigger: () => 0,
     triggerPreviewFind: () => {},
     pendingFragment,
+    pendingFragmentOwner,
     setPendingFragment,
     pendingHtmlNavigation,
     appliedHtmlNavigation,
@@ -555,5 +574,58 @@ describe("PaneView pending jump discard", () => {
     discardHeading("Target A");
     flush();
     expect(untrack(state.pendingHeadingText)).toBe("Target B");
+  });
+});
+
+describe("PaneView — origem e dono do fragmento", () => {
+  function mountTwoPanes(state: AppState, onUnresolvedFragment?: (id: string, source: unknown) => void) {
+    render(() => <>
+      <PaneView
+        pane={makePane({
+          paneId: "pane-1", rootId: "root-b", tabId: "tab-a", tabRootId: "root-a",
+          file: { name: "fonte.adoc", path: "fonte.adoc", kind: "file" },
+          mode: "preview",
+        })}
+        state={state} paneIndex={0} isActive={false} onUnresolvedFragment={onUnresolvedFragment}
+      />
+      <PaneView
+        pane={makePane({
+          paneId: "pane-2", rootId: "root-b", tabId: "tab-b",
+          file: { name: "destino.adoc", path: "destino.adoc", kind: "file" },
+          mode: "preview",
+        })}
+        state={state} paneIndex={1} isActive={true}
+      />
+    </>);
+    expect(previewCtl.allProps).toHaveLength(2);
+    return [previewCtl.allProps[0]!, previewCtl.allProps[1]!];
+  }
+
+  it("F6 entrega e limpa o fragmento só no painel dono", () => {
+    const state = makeState(() => {});
+    const [first, second] = mountTwoPanes(state);
+    state.setPendingFragment("alvo", "pane-2");
+    flush();
+    expect(first.pendingFragment).toBeNull();
+    expect(second.pendingFragment).toBe("alvo");
+
+    (first.onFragmentDiscarded as (id: string) => void)("alvo");
+    flush();
+    expect(untrack(state.pendingFragment)).toBe("alvo");
+
+    (second.onFragmentDiscarded as (id: string) => void)("alvo");
+    flush();
+    expect(untrack(state.pendingFragment)).toBeNull();
+  });
+
+  it("F4 entrega a identidade imutável da aba exibida no mesmo clique", () => {
+    const state = makeState(() => {});
+    const onUnresolvedFragment = vi.fn();
+    const [first] = mountTwoPanes(state, onUnresolvedFragment);
+    (first.onUnresolvedFragment as (id: string) => void)("alvo");
+    expect(onUnresolvedFragment).toHaveBeenCalledExactlyOnceWith("alvo", {
+      id: "alvo", rootId: "root-a", path: "fonte.adoc", paneId: "pane-1", tabId: "tab-a",
+    });
+    expect(Object.isFrozen(onUnresolvedFragment.mock.calls[0]![1])).toBe(true);
   });
 });

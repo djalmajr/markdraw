@@ -110,9 +110,21 @@ export function createNavigation(deps: NavigationDeps) {
     return false;
   }
 
-  async function handleNavigate(targetPath: string, fragment?: string | null) {
-    state.setPendingFragment(fragment ?? null);
-    state.setPendingHtmlNavigation(state.paneManager.activePane().paneId, null);
+  async function handleNavigate(targetPath: string | QualifiedPath, fragment?: string | null) {
+    const ownerPaneId = state.paneManager.activePane().paneId;
+    if (typeof targetPath !== "string") {
+      const entry = state.findEntryByPath(targetPath.path, targetPath.rootId);
+      if (entry?.kind === "file") {
+        state.setPendingFragment(fragment ?? null, ownerPaneId);
+        await openTarget(entry, targetPath.rootId, fragment ?? null);
+      } else {
+        showToast({ title: "File not found", description: targetPath.path, duration: 4000 });
+      }
+      return;
+    }
+
+    state.setPendingFragment(fragment ?? null, ownerPaneId);
+    state.setPendingHtmlNavigation(ownerPaneId, null);
     const resolved = resolveNavigationTarget(targetPath, rootPaths());
     // Preview maps AsciiDoc's generated `.html` xref links back to `.adoc`.
     // If that document is absent, try the literal `.html` file before failing.
