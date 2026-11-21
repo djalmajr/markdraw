@@ -254,13 +254,13 @@
 /* When chrome collapses, center the preview column at a comfortable
    reading width — the visible delta between "default" and "reader"
    should feel like opening a magazine. */
-.app.reader-mode .preview-panel .content {
+.app.reader-mode .preview-panel .content:not(:where(.doc-body .content)) {
   max-width: 760px;
   margin-inline: auto;
   padding-inline: 24px;
 }
 
-.app.resizing .content,
+.app.resizing .content:not(:where(.doc-body .content)),
 .app.resizing .toc-panel,
 .app.resizing .editor-panel {
   contain: strict;
@@ -1419,7 +1419,10 @@ body:has(.app.window-frame-toolbar) .doc-body a {
 }
 
 /* === Content / Preview === */
-.content {
+/* The pane's scroll container. Asciidoctor also emits `.content` inside the
+   document (admonition cells, listing, example, sidebar and image blocks):
+   `:where` keeps these rules off them without raising specificity. */
+.content:not(:where(.doc-body .content)) {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
@@ -1434,7 +1437,7 @@ body:has(.app.window-frame-toolbar) .doc-body a {
 
 /* The iframe owns its own scrolling, so drop the host pane's reserved gutter
    (otherwise an empty stable-gutter strip frames the page on the right). */
-.content:has(.html-preview-frame) {
+.content:not(:where(.doc-body .content)):has(.html-preview-frame) {
   overflow: hidden;
   scrollbar-gutter: auto;
 }
@@ -5187,7 +5190,7 @@ kbd.shortcuts-help-key {
     overflow: visible !important;
   }
 
-  .content {
+  .content:not(:where(.doc-body .content)) {
     overflow: visible !important;
     height: auto !important;
     transform: none !important;
