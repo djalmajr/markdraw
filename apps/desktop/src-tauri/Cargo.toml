@@ -1,6 +1,6 @@
 [package]
 name = "markdraw"
-version = "0.26.1-9"
+version = "0.26.1-10"
 description = "Markdraw Desktop - AsciiDoc & Markdown viewer"
 edition = "2021"
 
