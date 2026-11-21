@@ -398,6 +398,8 @@ export function PaneView(props: PaneViewProps) {
           currentFilePath={pane().selectedFile()?.path ?? null}
           currentTabId={pane().tabs.activeTabId?.() ?? null}
           tabActivationVersion={pane().tabs.activationVersion?.()}
+          cacheTabs={props.htmlPreviewHost ? pane().tabs.tabs() : undefined}
+          darkMode={props.htmlPreviewHost ? s.darkMode() : undefined}
           getTabScrollRestore={getTabScrollRestore}
           pendingFragment={pendingFragment()}
           pendingHeadingText={s.pendingHeadingText()}

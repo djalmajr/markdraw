@@ -31,7 +31,20 @@ interface LoadOptions {
   external: boolean;
   /** Absolute paths the watcher event named (external refreshes only). */
   eventPaths?: readonly string[];
+  diskChange?: symbol;
+  reload?: boolean;
   tab?: { pane: PaneStore; id: string };
+}
+
+interface WatcherRefresh {
+  pane: PaneStore;
+  tab?: TabState;
+  fileHit: boolean;
+  diskChange?: symbol;
+}
+
+function normalizeEventPath(path: string): string {
+  return path.replaceAll("\\", "/").replace(/\/+$/, "");
 }
 
 export function createFileLoader(deps: FileLoaderDeps) {
@@ -57,8 +70,14 @@ export function createFileLoader(deps: FileLoaderDeps) {
   /** How a document of the workspace at `root` reads its includes: one cache,
    *  one IPC per layer of nested includes, and the hook that keeps the tab and
    *  the watcher on what an accepted edit conversion depends on. */
-  function createReader(root: string, rootId: string | null | undefined, includeFileCache = new Map<string, string>()): DocReader {
+  function createReader(
+    root: string,
+    rootId: string | null | undefined,
+    includeFileCache = new Map<string, string>(),
+    consulted?: Set<string>,
+  ): DocReader {
     const readFile = async (relPath: string) => {
+      consulted?.add(relPath);
       const cached = includeFileCache.get(relPath);
       if (cached !== undefined) return cached;
 
@@ -76,6 +95,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
       const found = new Map<string, string | null>();
       const missing: string[] = [];
       for (const relPath of relPaths) {
+        consulted?.add(relPath);
         const cached = includeFileCache.get(relPath);
         if (cached !== undefined) found.set(relPath, cached);
         else missing.push(relPath);
@@ -105,11 +125,12 @@ export function createFileLoader(deps: FileLoaderDeps) {
     // `consulted` is what the accepted conversion asked for (missing paths it
     // tried to read included), so an include the edit removed leaves the list
     // even though the cache still holds its text.
-    const converted = (pane: PaneStore, _text: string, doc: ConvertedDoc, consulted: ReadonlySet<string>) => {
+    const converted = (pane: PaneStore, _text: string, doc: ConvertedDoc, pathsRead: ReadonlySet<string>) => {
+      consulted = undefined;
       if (doc.rootId !== rootId || doc.tabId === null) return;
       const current = pane.tabs.getTab(doc.tabId);
       if (!current || current.filePath !== doc.filePath || current.rootId !== rootId) return;
-      const paths = Array.from(consulted);
+      const paths = Array.from(pathsRead);
       const known = new Set(current.includePaths);
       if (paths.length !== known.size || paths.some((p) => !known.has(p))) {
         pane.tabs.updateTabContent(current.id, { includePaths: paths });
@@ -143,25 +164,126 @@ export function createFileLoader(deps: FileLoaderDeps) {
     void watcher.stop();
   }
 
+  async function markDiskChanges(paths: readonly string[], focusedWatcher = false): Promise<WatcherRefresh[]> {
+    // The focused watcher and the recursive workspace watcher use the same
+    // normalized event paths, including on Windows.
+    const changed = new Set(paths.map(normalizeEventPath));
+    const parent = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
+    const matches = (path: string) => {
+      let current = normalizeEventPath(path);
+      while (current) {
+        if (changed.has(current)) return true;
+        current = parent(current);
+      }
+      return false;
+    };
+    const change = Symbol();
+    const roots = rootPaths();
+    const echoes = new Map<string, string>();
+    if (ownWrites?.revision()) {
+      const absolutePaths = new Map<string, string>();
+      for (const pane of state.paneManager.panes()) {
+        for (const tab of pane.tabs.tabs()) {
+          const root = roots.get(tab.rootId);
+          if (!root || !tab.filePath) continue;
+          const absolute = `${root}/${tab.filePath}`;
+          const normalized = normalizeEventPath(absolute);
+          if (changed.has(normalized)) absolutePaths.set(normalized, absolute);
+        }
+      }
+      if (absolutePaths.size > 0) {
+        // Verify each notification against disk. A later notification for the
+        // same path might be an external write even if an earlier one was ours.
+        await Promise.all(Array.from(absolutePaths, async ([normalized, absolute]) => {
+          try {
+            const content = await readFileContent(absolute);
+            if (await ownWrites.matches(absolute, await hashContent(content))) echoes.set(normalized, content);
+          } catch {
+            // A file that disappeared or could not be read still needs invalidation.
+          }
+        }));
+      }
+    }
+    // Selection may have changed during the disk read or the hash check.
+    const focused = focusedWatcher ? state.paneManager.activePane() : undefined;
+    const focusedTabId = focused?.tabs.activeTabId();
+    const refreshes: WatcherRefresh[] = [];
+    if (focused && !focusedTabId) refreshes.push({ pane: focused, fileHit: false });
+    for (const pane of state.paneManager.panes()) {
+      for (const tab of pane.tabs.tabs()) {
+        const root = roots.get(tab.rootId);
+        if (!root || !tab.filePath) continue;
+        const isFocusedTab = pane === focused && tab.id === focusedTabId;
+        const absolute = normalizeEventPath(`${root}/${tab.filePath}`);
+        const fileHit = matches(absolute);
+        const includeHit = tab.includePaths.some((path) => matches(`${root}/${path}`));
+        if (!fileHit && !includeHit && !(changed.size === 0 && isFocusedTab)) continue;
+        const active = pane.tabs.activeTabId() === tab.id;
+        const echo = echoes.get(absolute);
+        if (!includeHit && echo !== undefined && !matches(parent(absolute))) {
+          const saved = active ? pane.savedContent() : tab.savedContent;
+          const buffer = active ? pane.editorContent() : tab.editorContent;
+          // Another pane may still have a clean preview of an older revision.
+          if (echo === saved || buffer !== saved) {
+            // Only the content watcher verifies the preview of an own-write echo.
+            if (isFocusedTab) refreshes.push({ pane, tab, fileHit });
+            continue;
+          }
+        }
+        pane.tabs.updateTabContent(tab.id, { diskChange: change });
+        if (active) refreshes.push({ pane, tab, fileHit, diskChange: change });
+      }
+    }
+    return refreshes;
+  }
+
+  async function handleWatcherChange(
+    eventPaths: readonly string[],
+    source: "focused" | "recursive",
+    onRefreshed?: (pane: PaneStore, tabId: string | undefined, changedElsewhere: boolean) => void,
+  ) {
+    const refreshes = await markDiskChanges(eventPaths, source === "focused");
+    if (!state.autoRefresh()) return;
+    await Promise.all(refreshes.map(async ({ pane, tab, fileHit, diskChange }) => {
+      const file = pane.selectedFile();
+      const rootId = pane.selectedRootId();
+      const activation = pane.tabs.activationVersion();
+      const isCurrent = () => state.paneManager.panes().includes(pane)
+        && (diskChange !== undefined || state.paneManager.activePane() === pane)
+        && pane.tabs.activationVersion() === activation
+        && pane.tabs.activeTabId() === (tab?.id ?? null)
+        && pane.selectedFile() === file && pane.selectedRootId() === rootId;
+      if (!file || !isCurrent() || pane.loading() || pane.tabs.getActiveTab()?.needsLoad
+        || (tab && (tab.filePath !== file.path || tab.rootId !== rootId))) return;
+
+      // An include-only event can rerender the live buffer. If the document
+      // itself changed, keep the invalidation mark and leave local edits alone.
+      if (fileHit && pane.editorContent() !== pane.savedContent()) return;
+
+      const changedElsewhere = await refreshFromDisk(file, rootId ?? undefined, eventPaths, diskChange, pane);
+      if (isCurrent()) onRefreshed?.(pane, tab?.id, changedElsewhere);
+    }));
+  }
+
   async function loadFileContent(entry: FSEntry, pushHistory = true, force = false, rootId?: string) {
     await load(entry, { pushHistory, force, rootId, external: false });
   }
 
-  async function loadTabContent(pane: PaneStore, entry: FSEntry, tab: Pick<TabState, "id" | "rootId">, pushHistory = false) {
-    await load(entry, { pushHistory, force: true, rootId: tab.rootId, external: false, tab: { pane, id: tab.id } });
+  async function loadTabContent(pane: PaneStore, entry: FSEntry, tab: Pick<TabState, "id" | "rootId">, pushHistory = false, reload = false) {
+    await load(entry, { pushHistory, force: true, rootId: tab.rootId, external: false, tab: { pane, id: tab.id }, reload });
   }
 
   /** Re-read the open file after a watcher event without clobbering unsaved
    *  edits — the event is often our own autosave (see external-reload.ts). */
-  async function refreshFromDisk(entry: FSEntry, rootId?: string, eventPaths?: readonly string[]): Promise<boolean> {
+  async function refreshFromDisk(entry: FSEntry, rootId?: string, eventPaths?: readonly string[], diskChange?: symbol, pane?: PaneStore): Promise<boolean> {
     // true only when the buffer adopted the disk text: the file changed
     // elsewhere (our own autosave writes and include changes don't count).
-    return (await load(entry, { pushHistory: false, force: true, rootId, external: true, eventPaths })) === true;
+    return (await load(entry, { pushHistory: false, force: true, rootId, external: true, eventPaths, diskChange }, pane)) === true;
   }
 
   /** Resolves true when a watcher refresh adopted the disk text. */
-  async function load(entry: FSEntry, opts: LoadOptions): Promise<boolean | undefined> {
-    const { pushHistory, force, rootId, external, eventPaths, tab } = opts;
+  async function load(entry: FSEntry, opts: LoadOptions, pane?: PaneStore): Promise<boolean | undefined> {
+    const { pushHistory, force, rootId, external, eventPaths, tab, reload } = opts;
     // Pin the target pane at call time. AppState's per-doc setters
     // (setHtml, setEditorContent, …) are proxies that route to
     // `paneManager.activePane()` on each call — without pinning, a
@@ -171,7 +293,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
     // pane mid-conversion). Writing directly to the captured pane
     // keeps the load atomic from the user's perspective: the file
     // they asked for lands where they asked for it.
-    const targetPane = tab?.pane ?? state.paneManager.activePane();
+    const targetPane = tab?.pane ?? pane ?? state.paneManager.activePane();
     const targetRootId = rootId ?? targetPane.selectedRootId();
     const root = targetRootId ? rootPaths().get(targetRootId) : null;
     if (!root || entry.kind !== "file") return;
@@ -180,10 +302,17 @@ export function createFileLoader(deps: FileLoaderDeps) {
       && targetPane.selectedRootId() === targetRootId;
     if (!force && isSameFile) return;
     if (external && targetPane.tabs.getActiveTab()?.needsLoad) return;
-    // `order` ranks the events as they arrive; `seq` is the generation of the
-    // refresh that really converts (claimed below). An event that turns out to
-    // be the echo of our own write claims nothing, so it cannot invalidate a
-    // refresh that is still running (an include that changed on disk).
+    const getDocumentTab = () => {
+      const liveTab = tab ? targetPane.tabs.getTab(tab.id) : targetPane.tabs.getActiveTab();
+      return liveTab?.filePath === entry.path && liveTab.rootId === targetRootId ? liveTab : undefined;
+    };
+    let documentTab = getDocumentTab();
+    let diskChange = external ? opts.diskChange : documentTab?.diskChange;
+    const clearDiskChange = () => {
+      if (documentTab && diskChange) targetPane.tabs.clearTabDiskChange(documentTab.id, diskChange);
+    };
+    const activation = targetPane.tabs.activationVersion();
+    // An autosave echo does not claim a conversion or invalidate one in flight.
     const order = external ? ++eventOrder : 0;
     let seq = 0;
     const claim = () => {
@@ -195,6 +324,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
       return true;
     };
     const request = {};
+    const lastExplicitLoad = latestLoad.get(targetPane);
     if (!external) latestLoad.set(targetPane, request);
     // A watcher refresh runs in the background and must drop its result once
     // a newer refresh started or the pane switched to another file (tab
@@ -205,6 +335,8 @@ export function createFileLoader(deps: FileLoaderDeps) {
     // never claim, so they outdate nothing.
     const superseded = () => external
       ? ((seq !== 0 ? latestRefresh.get(targetPane) !== seq : (latestClaim.get(targetPane) ?? 0) > order)
+        || latestLoad.get(targetPane) !== lastExplicitLoad
+        || targetPane.tabs.activationVersion() !== activation
         || targetPane.selectedFile()?.path !== entry.path
         || targetPane.selectedRootId() !== targetRootId
         || targetPane.tabs.getActiveTab()?.needsLoad)
@@ -229,10 +361,25 @@ export function createFileLoader(deps: FileLoaderDeps) {
     const watch = (includePaths: string[]) => {
       if (isFocused()) syncWatcher(entry, root, includePaths);
     };
+    let reloadBuffer: string | undefined;
+    const keepLocalReload = () => {
+      if (!reload) return false;
+      const buffer = targetPane.editorContent();
+      if (buffer === targetPane.savedContent() && (reloadBuffer === undefined || reloadBuffer === buffer)) {
+        reloadBuffer = buffer;
+        return false;
+      }
+      if (!targetPane.html() && documentTab?.html) {
+        targetPane.setHtml(documentTab.html);
+        targetPane.setFrontmatter(documentTab.frontmatter);
+      }
+      watch(documentTab?.includePaths ?? []);
+      return true;
+    };
 
     targetPane.setSelectedRootId(targetRootId);
     targetPane.setSelectedFile(entry);
-    if (!isSameFile) {
+    if (!isSameFile || (!external && diskChange)) {
       targetPane.setHtml("");
       state.notePreviewFailed(targetPane, targetRootId ?? null, entry.path, tab ? tab.id : undefined);
     }
@@ -267,12 +414,17 @@ export function createFileLoader(deps: FileLoaderDeps) {
       targetPane.setSavedContent("");
       watch([]);
       markTabLoaded("", "", null, []);
+      clearDiskChange();
       if (!external) targetPane.setLoading(false);
       return;
     }
 
     // Yield to let the UI render loading state before heavy conversion
     await new Promise((r) => setTimeout(r, 0));
+    if (tab && !documentTab) {
+      documentTab = getDocumentTab();
+      diskChange = documentTab?.diskChange;
+    }
 
     // Paths this load wants to watch. Filled as soon as they are known so the
     // error path below can keep the watcher on the file that failed.
@@ -280,7 +432,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
     let readContent: string | undefined;
 
     try {
-      if (superseded()) return;
+      if (superseded() || keepLocalReload()) return;
       const absolutePath = `${root}/${entry.path}`;
       // A save can land while a watcher read is in flight: the text read may
       // then predate it, and adopting it would put the old disk text back over
@@ -295,7 +447,9 @@ export function createFileLoader(deps: FileLoaderDeps) {
         try {
           content = await readFileContent(absolutePath);
         } catch (readErr) {
-          if (failureStale()) return;
+          if (failureStale() || keepLocalReload()) return;
+          // The buffer may have become dirty while the watcher read was in flight.
+          if (external && targetPane.editorContent() !== targetPane.savedContent()) return;
           // read_file (read_to_string) throws on non-UTF8 input. A binary
           // that isn't an image/PDF (handled above) can be neither rendered
           // nor edited as text → mark it unsupported so PaneView shows the
@@ -310,7 +464,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
           if (isFocused()) void watcher.stop();
           return;
         }
-        if (superseded()) return;
+        if (superseded() || keepLocalReload()) return;
         const after = writeState();
         settled = !external || (after.saved === before.saved && after.writes === before.writes);
       }
@@ -337,7 +491,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
           // this text (or a conversion of it is on its way): an error on
           // screen, the HTML of another text or nothing published converts
           // again. A file with no preview has nothing to publish.
-          if (ownWrites && eventIsOnly(absolutePath, eventPaths)) {
+          if (ownWrites && eventIsOnly(normalizeEventPath(absolutePath), eventPaths?.map(normalizeEventPath))) {
             const errorsBefore = errorsPublished.get(targetPane) ?? 0;
             if (await ownWrites.matches(absolutePath, await hashContent(content))
               && (!isSupportedFile(entry.path)
@@ -347,7 +501,9 @@ export function createFileLoader(deps: FileLoaderDeps) {
               && (errorsPublished.get(targetPane) ?? 0) === errorsBefore) {
               // The echo confirmed the publication: work that started before it
               // can no longer put an error over this preview.
-              if (!superseded()) latestConfirmed.set(targetPane, Math.max(latestConfirmed.get(targetPane) ?? 0, order));
+              if (!superseded()) {
+                latestConfirmed.set(targetPane, Math.max(latestConfirmed.get(targetPane) ?? 0, order));
+              }
               return false;
             }
           }
@@ -374,6 +530,7 @@ export function createFileLoader(deps: FileLoaderDeps) {
         targetPane.setEditorContent(content);
         targetPane.setSavedContent(content);
         markTabLoaded(content, "", null, []);
+        clearDiskChange();
         watch([]);
         return external;
       }
@@ -398,19 +555,24 @@ export function createFileLoader(deps: FileLoaderDeps) {
       // Edits of this document convert with this reader (this root and cache),
       // not with whichever file loaded last. An outdated load must not replace
       // a newer one's reader.
-      if (superseded()) return;
-      const reader = createReader(root, targetRootId, includeFileCache);
+      if (superseded() || keepLocalReload()) return;
+      const consulted = new Set(scanPaths);
+      const reader = createReader(root, targetRootId, includeFileCache, consulted);
       const { readFile, readFiles } = reader;
       state.registerReader(targetPane, targetRootId ?? null, entry.path, reader);
 
       const result = await state.convert(entry.path, source, readFile, readFiles!);
-      // Conversion may have read includes missing from the batch above.
       watchedIncludes = Array.from(new Set([...scanPaths, ...includeFileCache.keys()]));
 
       // Yield again before DOM update to prevent long frame
       await new Promise((r) => setTimeout(r, 0));
 
-      if (stale()) return;
+      if (stale() || keepLocalReload()) return;
+      if (tab && documentTab && targetPane.tabs.getTab(tab.id)?.diskChange !== diskChange) {
+        // A watcher event arrived after this load began. The newer load
+        // inherits the target without adding a second history entry.
+        return await load(entry, { ...opts, pushHistory: false });
+      }
       targetPane.setHtml(result.html);
       targetPane.setFrontmatter(result.frontmatter);
       state.notePreviewed(targetPane, targetRootId ?? null, entry.path, source);
@@ -419,11 +581,12 @@ export function createFileLoader(deps: FileLoaderDeps) {
         targetPane.setSavedContent(content);
       }
 
-      markTabLoaded(content, result.html, result.frontmatter, watchedIncludes);
+      markTabLoaded(content, result.html, result.frontmatter, Array.from(consulted));
+      clearDiskChange();
       watch(watchedIncludes);
       return external && adoptDisk;
     } catch (e) {
-      if (failureStale()) return;
+      if (failureStale() || keepLocalReload()) return;
       console.error("Failed to convert file:", e);
       const errorHtml = `<div class="error">Error converting file: ${e}</div>`;
       errorsPublished.set(targetPane, (errorsPublished.get(targetPane) ?? 0) + 1);
@@ -437,6 +600,9 @@ export function createFileLoader(deps: FileLoaderDeps) {
         targetPane.setFrontmatter(null);
         markTabLoaded(readContent, errorHtml, null, watchedIncludes);
       }
+      if (documentTab && !targetPane.tabs.getTab(documentTab.id)?.diskChange) {
+        targetPane.tabs.updateTabContent(documentTab.id, { diskChange: Symbol() });
+      }
       // Keep the watcher on the file (and its includes) that failed: the next
       // save on disk must reach refreshFromDisk, or the preview stays on the
       // error until the user reopens the tab. A previous file's target must
@@ -447,5 +613,5 @@ export function createFileLoader(deps: FileLoaderDeps) {
     }
   }
 
-  return { loadFileContent, loadTabContent, refreshFromDisk, syncWatcher };
+  return { loadFileContent, loadTabContent, refreshFromDisk, syncWatcher, markDiskChanges, handleWatcherChange };
 }

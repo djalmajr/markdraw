@@ -68,7 +68,8 @@ export interface TabStore {
   setScrollCapture(capture: ((tabId: TabId) => TabScrollPositions) | null): void;
   restoreActiveTab(): void;
   updateActiveTabContent(content: TabContent): void;
-  updateTabContent(tabId: TabId, content: TabContent & Partial<Pick<TabState, "editorMode" | "needsLoad">>): void;
+  updateTabContent(tabId: TabId, content: TabContent & Partial<Pick<TabState, "editorMode" | "needsLoad" | "diskChange">>): void;
+  clearTabDiskChange(tabId: TabId, change: symbol): void;
   /** `resolveCollision` lets the tab take an identity another tab already has.
    *  The tab it displaces is passed to the callback, which returns what the
    *  reopen stack keeps in its place (a draft with no file) or null to drop it. */
@@ -177,21 +178,24 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     const currentHtml = pane.html();
     const currentFrontmatter = pane.frontmatter();
     const currentMode = pane.editorMode();
+    const loading = pane.loading();
 
     setTabList((prev) =>
       prev.map((t) => {
         if (t.id !== id || t.needsLoad) return t;
+        const reloading = t.diskChange && loading && !currentHtml;
+        const positions = reloading ? undefined : captured;
         return {
           ...t,
           editorContent: currentContent,
           savedContent: currentSaved,
-          html: currentHtml,
-          frontmatter: currentFrontmatter,
+          html: reloading ? t.html : currentHtml,
+          frontmatter: reloading ? t.frontmatter : currentFrontmatter,
           editorMode: currentMode,
-          editorScrollTop: captured?.editorScrollTop ?? t.editorScrollTop,
-          previewScrollTop: captured?.previewScrollTop ?? t.previewScrollTop,
-          previewScrollAnchor: captured?.previewScrollAnchor !== undefined
-            ? captured.previewScrollAnchor
+          editorScrollTop: positions?.editorScrollTop ?? t.editorScrollTop,
+          previewScrollTop: positions?.previewScrollTop ?? t.previewScrollTop,
+          previewScrollAnchor: positions?.previewScrollAnchor !== undefined
+            ? positions.previewScrollAnchor
             : t.previewScrollAnchor,
         };
       }),
@@ -488,6 +492,12 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     );
   }
 
+  function clearTabDiskChange(tabId: TabId, change: symbol): void {
+    setTabList((prev) => prev.map((tab) =>
+      tab.id === tabId && tab.diskChange === change ? { ...tab, diskChange: undefined } : tab,
+    ));
+  }
+
   function updateTabFile(tabId: TabId, newFilePath: string, newFileName: string, newRootId?: string, content?: TabContent, resolveCollision?: (displaced: TabState) => TabState | null): TabState | undefined {
     const tab = getTab(tabId);
     if (!tab) return;
@@ -638,6 +648,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     restoreActiveTab,
     updateActiveTabContent,
     updateTabContent,
+    clearTabDiskChange,
     updateTabFile,
     markTabNeedsLoad,
 

@@ -136,13 +136,14 @@ export function SearchOverlay(props: SearchOverlayProps) {
     setInternalCurrentIndex(0);
   }
 
-  function activateMark(index: number) {
+  function activateMark(index: number, scroll = true) {
     for (const mark of marks) {
       mark.classList.remove("search-active");
     }
     if (marks[index]) {
       const target = marks[index]!;
       target.classList.add("search-active");
+      if (!scroll) return;
 
       const explicitHost = props.container?.closest(".content") as HTMLElement | null;
       const scrollHost = explicitHost ?? findScrollableAncestor(target);
@@ -156,14 +157,12 @@ export function SearchOverlay(props: SearchOverlayProps) {
     }
   }
 
-  function highlightMatches(currentQuery: string, currentOptions: SearchOptions) {
-    if (!props.container) return;
-
+  function highlightMatches(container: HTMLElement, currentQuery: string, currentOptions: SearchOptions, scroll: boolean) {
     clearHighlights();
     if (!currentQuery) return;
 
     const walker = document.createTreeWalker(
-      props.container,
+      container,
       NodeFilter.SHOW_TEXT,
       {
         acceptNode(node) {
@@ -215,7 +214,7 @@ export function SearchOverlay(props: SearchOverlayProps) {
     setInternalMatchCount(nextMarks.length);
     if (nextMarks.length > 0) {
       setInternalCurrentIndex(0);
-      activateMark(0);
+      activateMark(0, scroll);
     }
   }
 
@@ -325,8 +324,9 @@ export function SearchOverlay(props: SearchOverlayProps) {
       query: query(),
       options: options(),
       external: useExternalEngine(),
+      container: props.container,
     }),
-    ({ visible, query: currentQuery, options: currentOptions, external }) => {
+    ({ visible, query: currentQuery, options: currentOptions, external, container }, previous) => {
       clearTimeout(debounceTimer);
       if (!visible) {
         clearHighlights();
@@ -338,8 +338,13 @@ export function SearchOverlay(props: SearchOverlayProps) {
         return;
       }
 
+      if (container !== previous?.container || !container) clearHighlights();
+      if (!container) return;
+
+      // A preview refresh keeps the tab's restored scroll position or link target.
+      const scroll = !previous?.visible || currentQuery !== previous.query || currentOptions !== previous.options;
       debounceTimer = setTimeout(() => {
-        highlightMatches(currentQuery, currentOptions);
+        highlightMatches(container, currentQuery, currentOptions, scroll);
       }, 120);
     },
   );

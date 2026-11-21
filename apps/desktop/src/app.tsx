@@ -1630,25 +1630,20 @@ export function App() {
   // File watcher (watches current file + includes for content changes).
   // Also fires for our own autosave writes, so the refresh keeps unsaved edits.
   const ownWrites = createOwnWrites();
-  const watcher = new FileWatcher(async (eventPaths) => {
-    const pane = state.paneManager.activePane();
-    const tab = pane.tabs.getActiveTab();
-    const file = pane.selectedFile();
-    if (!file || tab?.needsLoad) return;
-
+  const watcher = new FileWatcher((eventPaths) => {
+    void refreshWatchedFiles(eventPaths, "focused");
+  });
+  async function refreshWatchedFiles(eventPaths: readonly string[], source: "focused" | "recursive") {
     try {
-      const changedElsewhere = await loader.refreshFromDisk(file, undefined, eventPaths);
-      // Re-index only for an outside edit: autosave no longer writes back
-      // after a reload, which used to re-index as a side effect. Not on every
-      // event — each autosave fires one, and re-indexing re-chunks (and, on
-      // the Complete tier, re-embeds) the whole document.
-      if (changedElsewhere) reindexActiveFile();
-      if (tab && pane.selectedFile()?.path === file.path) tabActions.updateLoadedTabCache(pane, tab.id);
+      await loader.handleWatcherChange(eventPaths, source, (pane, tabId, changedElsewhere) => {
+        if (changedElsewhere && state.paneManager.activePane() === pane) reindexActiveFile();
+        if (tabId) tabActions.updateLoadedTabCache(pane, tabId);
+      });
     } catch {
       // File likely deleted — the dir watcher will refresh the tree
       // and the tab will show an error until clicked away
     }
-  });
+  }
 
   // Create modules: loader -> navigation -> folder -> dnd
   const loader = createFileLoader({ rootPaths, state, watcher, ownWrites });
@@ -1777,6 +1772,8 @@ export function App() {
     const pendingRoots = new Set<string>();
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     const unlisten = listen<{ paths: string[] }>("fs-tree-change", (event) => {
+      // The focused content watcher cannot see changes to parked documents.
+      void refreshWatchedFiles(event.payload.paths, "recursive");
       // Identify which roots were affected
       const paths = rootPaths();
       for (const changed of event.payload.paths) {

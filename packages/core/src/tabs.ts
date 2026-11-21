@@ -63,6 +63,8 @@ export interface TabState {
   previewScrollAnchor: PreviewScrollAnchor | null;
   isPinned: boolean;
   includePaths: string[];
+  /** Identity of the disk change still to be reflected in this tab. */
+  diskChange?: symbol;
   /** Tab content needs to be loaded from disk (e.g. restored from session). */
   needsLoad: boolean;
 }
