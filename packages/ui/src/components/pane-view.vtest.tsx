@@ -6,6 +6,7 @@ import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import type { AppState } from "../composables/create-app-state.ts";
 import type { PaneStore } from "../composables/create-pane-store.ts";
 import { createAppState } from "../composables/create-app-state.ts";
+import { createPaneStore } from "../composables/create-pane-store.ts";
 import { createTabActions } from "../../../../apps/desktop/src/lib/tab-actions.ts";
 import { createNavigation } from "../../../../apps/desktop/src/lib/navigation.ts";
 
@@ -67,6 +68,8 @@ function makePane(opts: {
     // so these are never reached, but the type cast needs SOMETHING.
     tabs: {
       tabs: () => [],
+      activeTabId: () => opts.tabId ?? null,
+      setScrollCapture: () => {},
       getActiveTab: () => opts.tabId
         ? { id: opts.tabId, rootId: opts.tabRootId ?? opts.rootId, filePath: file.path }
         : null,
@@ -165,6 +168,28 @@ function makeState(onEditorResizeStart: (...args: unknown[]) => void): AppState 
     debouncedConvert: () => {},
     _readFile: null,
   } as unknown as AppState;
+}
+
+function fakeRect(top: number, bottom: number): DOMRect {
+  return {
+    top, bottom, left: 0, right: 100, width: 100, height: bottom - top,
+    x: 0, y: top, toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function layoutPreview(content: HTMLElement, tops: number[], initialTop: number) {
+  let scrollTop = initialTop;
+  Object.defineProperty(content, "scrollTop", {
+    configurable: true,
+    get: () => scrollTop,
+    set: (value: number) => { scrollTop = value; },
+  });
+  content.getBoundingClientRect = () => fakeRect(0, 200);
+  content.innerHTML = `<div class="doc-body">${tops.map((top, i) => `<p data-top="${top}">block ${i}</p>`).join("")}</div>`;
+  for (const [index, block] of Array.from(content.querySelectorAll(".doc-body > p")).entries()) {
+    const top = tops[index]! - scrollTop;
+    block.getBoundingClientRect = () => fakeRect(top, top + 50);
+  }
 }
 
 describe("PaneView resize handle", () => {
@@ -627,5 +652,95 @@ describe("PaneView — origem e dono do fragmento", () => {
       id: "alvo", rootId: "root-a", path: "fonte.adoc", paneId: "pane-1", tabId: "tab-a",
     });
     expect(Object.isFrozen(onUnresolvedFragment.mock.calls[0]![1])).toBe(true);
+  });
+});
+
+describe("PaneView — captura independente da rolagem do preview", () => {
+  it("cada painel guarda o scrollTop e a âncora da sua própria aba", () => {
+    const [paneA, paneB, dispose] = createRoot((rootDispose) => [
+      createPaneStore("pane-a"),
+      createPaneStore("pane-b"),
+      rootDispose,
+    ] as const);
+    disposers.push(dispose);
+    for (const [pane, name] of [[paneA, "a.md"], [paneB, "b.md"]] as const) {
+      const entry = fileEntry(name);
+      pane.setSelectedFile(entry);
+      pane.setHtml(`<p>${name}</p>`);
+      pane.tabs.openTab(entry, "root");
+    }
+    const state = makeState(() => {});
+    const { container } = render(() => (
+      <>
+        <PaneView pane={paneA} state={state} paneIndex={0} isActive={true} />
+        <PaneView pane={paneB} state={state} paneIndex={1} isActive={false} />
+      </>
+    ));
+    const contents = Array.from(container.querySelectorAll<HTMLElement>(".preview-panel .content"));
+    expect(contents).toHaveLength(2);
+    expect(previewCtl.allProps.map((props) => props.tabActivationVersion)).toEqual([1, 1]);
+    layoutPreview(contents[0]!, [0, 200, 400, 600], 450);
+    layoutPreview(contents[1]!, [0, 200, 400], 120);
+    contents[0]!.querySelector<HTMLElement>(".doc-body")!.dataset.previewTabId = paneA.tabs.activeTabId() ?? "";
+    contents[1]!.querySelector<HTMLElement>(".doc-body")!.dataset.previewTabId = paneB.tabs.activeTabId() ?? "";
+
+    paneA.tabs.snapshotActiveTab();
+    paneB.tabs.snapshotActiveTab();
+    flush();
+
+    expect(paneA.tabs.getActiveTab()?.previewScrollTop).toBe(450);
+    expect(paneA.tabs.getActiveTab()?.previewScrollAnchor).toEqual({ blockIndex: 3, offset: 150 });
+    expect(paneB.tabs.getActiveTab()?.previewScrollTop).toBe(120);
+    expect(paneB.tabs.getActiveTab()?.previewScrollAnchor).toEqual({ blockIndex: 1, offset: 80 });
+
+    paneA.tabs.openTab(fileEntry("next.md"), "root");
+    flush();
+    expect(previewCtl.allProps.map((props) => props.tabActivationVersion)).toEqual([2, 1]);
+  });
+
+  it("não captura a posição enquanto a aba ainda carrega ou exibe outro documento", () => {
+    const [pane, dispose] = createRoot((rootDispose) => [
+      createPaneStore("pane-a"), rootDispose,
+    ] as const);
+    disposers.push(dispose);
+    const entry = fileEntry("loading.md");
+    pane.setSelectedFile(entry);
+    pane.setHtml("");
+    const tabId = pane.tabs.openTab(entry, "root");
+    flush();
+    pane.tabs.snapshotActiveTab({
+      previewScrollTop: 640,
+      previewScrollAnchor: { blockIndex: 2, offset: -8 },
+    });
+    flush();
+    const state = makeState(() => {});
+    const { container } = render(() => (
+      <PaneView pane={pane} state={state} paneIndex={0} isActive={true} />
+    ));
+    const content = container.querySelector<HTMLElement>(".preview-panel .content")!;
+
+    // Old document still in the DOM, hidden by the empty-HTML loading branch.
+    layoutPreview(content, [0, 200, 400, 600], 900);
+    content.querySelector<HTMLElement>(".doc-body")!.dataset.previewTabId = "";
+    pane.tabs.snapshotActiveTab();
+    flush();
+    expect(pane.tabs.getTab(tabId)?.previewScrollTop).toBe(640);
+    expect(pane.tabs.getTab(tabId)?.previewScrollAnchor).toEqual({ blockIndex: 2, offset: -8 });
+
+    // A drawn article that belongs to a different tab cannot update it either.
+    layoutPreview(content, [0, 200, 400, 600], 300);
+    content.querySelector<HTMLElement>(".doc-body")!.dataset.previewTabId = "outra-aba";
+    pane.tabs.snapshotActiveTab();
+    flush();
+    expect(pane.tabs.getTab(tabId)?.previewScrollTop).toBe(640);
+    expect(pane.tabs.getTab(tabId)?.previewScrollAnchor).toEqual({ blockIndex: 2, offset: -8 });
+
+    // Once the loaded document is drawn for this tab, capture resumes.
+    layoutPreview(content, [0, 200, 400, 600], 300);
+    content.querySelector<HTMLElement>(".doc-body")!.dataset.previewTabId = tabId;
+    pane.tabs.snapshotActiveTab();
+    flush();
+    expect(pane.tabs.getTab(tabId)?.previewScrollTop).toBe(300);
+    expect(pane.tabs.getTab(tabId)?.previewScrollAnchor).toEqual({ blockIndex: 2, offset: 100 });
   });
 });

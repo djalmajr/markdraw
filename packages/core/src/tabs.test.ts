@@ -79,14 +79,18 @@ describe("tab session persistence", () => {
           id: "r::a.md",
           isPinned: true,
           rootId: "r",
-          // Runtime-only field that should NOT be persisted:
+          // Runtime-only fields that should NOT be persisted:
           editorContent: "should not survive",
+          previewScrollTop: 321,
+          previewScrollAnchor: { blockIndex: 2, offset: -12 },
         },
       ],
     };
     setTabSession(session as unknown as PersistedTabSession);
     const raw = JSON.parse(localStorage.getItem("markdraw-tab-session")!);
     expect(raw.tabs[0]).not.toHaveProperty("editorContent");
+    expect(raw.tabs[0]).not.toHaveProperty("previewScrollTop");
+    expect(raw.tabs[0]).not.toHaveProperty("previewScrollAnchor");
   });
 
   it("filters out malformed tab entries on read", () => {

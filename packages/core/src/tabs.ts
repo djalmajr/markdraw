@@ -40,6 +40,14 @@ const OpenRootsSchema = v.array(
 
 export type TabId = string;
 
+/** Position of the article block crossing the top edge of the preview.
+ *  `blockIndex` is stable across re-renders of unchanged content; `offset`
+ *  is the block top relative to the scroll container's viewport top. */
+export interface PreviewScrollAnchor {
+  blockIndex: number;
+  offset: number;
+}
+
 export interface TabState {
   id: TabId;
   filePath: string;
@@ -52,6 +60,7 @@ export interface TabState {
   editorMode: "edit" | "split" | "preview";
   editorScrollTop: number;
   previewScrollTop: number;
+  previewScrollAnchor: PreviewScrollAnchor | null;
   isPinned: boolean;
   includePaths: string[];
   /** Tab content needs to be loaded from disk (e.g. restored from session). */

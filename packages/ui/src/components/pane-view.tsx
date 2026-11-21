@@ -11,6 +11,7 @@ import type { RecentFolder } from "@markdraw/core/recent-folders.ts";
 import type { FavoriteFile } from "@markdraw/core/favorites.ts";
 import { effectivePaneEditorMode, type AppState, type FragmentSource } from "../composables/create-app-state.ts";
 import type { PaneStore } from "../composables/create-pane-store.ts";
+import type { TabScrollPositions } from "../composables/create-tab-store.ts";
 import { ContentToolbar } from "./content-toolbar.tsx";
 import { Editor, type EditorApi } from "./editor.tsx";
 import { EditorToolbar } from "./editor-toolbar.tsx";
@@ -31,6 +32,24 @@ export function fromPaneDropDndId(dndId: unknown): number | null {
   if (typeof dndId !== "string" || !dndId.startsWith("pane::")) return null;
   const parsed = Number(dndId.slice("pane::".length));
   return Number.isInteger(parsed) ? parsed : null;
+}
+
+export function capturePreviewScroll(article: HTMLElement, content: HTMLElement): TabScrollPositions {
+  const blocks = Array.from(article.children);
+  const scrollTop = content.scrollTop;
+  if (blocks.length === 0) {
+    return { previewScrollTop: scrollTop, previewScrollAnchor: null };
+  }
+  const contentTop = content.getBoundingClientRect().top;
+  let blockIndex = blocks.findIndex((block) => block.getBoundingClientRect().bottom > contentTop + 1);
+  if (blockIndex < 0) blockIndex = blocks.length - 1;
+  return {
+    previewScrollTop: scrollTop,
+    previewScrollAnchor: {
+      blockIndex,
+      offset: blocks[blockIndex]!.getBoundingClientRect().top - contentTop,
+    },
+  };
 }
 
 export interface PaneViewProps {
@@ -283,6 +302,29 @@ export function PaneView(props: PaneViewProps) {
   // bug that made the drag-handle silently do nothing.
   let contentPanelsRef: HTMLDivElement | undefined;
 
+  pane().tabs.setScrollCapture?.((tabId) => {
+    const content = previewPanelRef?.querySelector<HTMLElement>(".content");
+    if (!content) return {};
+    const article = content.querySelector<HTMLElement>(".doc-body");
+    // While a file loads the old article remains hidden in the DOM. Only a
+    // drawn article tagged with this very tab may update its saved position.
+    if (!article || article.children.length === 0 || article.dataset.previewTabId !== tabId) {
+      return {};
+    }
+    return capturePreviewScroll(article, content);
+  });
+
+  const getTabScrollRestore = () => {
+    const tab = pane().tabs.getActiveTab?.();
+    if (!tab) return null;
+    return {
+      tabId: tab.id,
+      path: tab.filePath,
+      scrollTop: tab.previewScrollTop,
+      anchor: tab.previewScrollAnchor,
+    };
+  };
+
   // Pane-level droppable so a tab dragged from the OTHER pane can land
   // here even when this pane has zero tabs (the empty splitter case).
   // The visual highlight (`.pane-view-drop-target`) only kicks in when
@@ -354,6 +396,9 @@ export function PaneView(props: PaneViewProps) {
           wrapTables={pane().tableWrap()}
           tocContainer={props.tocContainer}
           currentFilePath={pane().selectedFile()?.path ?? null}
+          currentTabId={pane().tabs.activeTabId?.() ?? null}
+          tabActivationVersion={pane().tabs.activationVersion?.()}
+          getTabScrollRestore={getTabScrollRestore}
           pendingFragment={pendingFragment()}
           pendingHeadingText={s.pendingHeadingText()}
           onHeadingHandled={() => s.setPendingHeadingText(null)}

@@ -5,6 +5,7 @@ import {
   type TabState,
   type PersistedTab,
   type PersistedTabSession,
+  type PreviewScrollAnchor,
   makeTabId,
   getTabSession,
   setTabSession,
@@ -14,9 +15,17 @@ import type { PaneViewSlice } from "./create-pane-store.ts";
 
 type TabContent = Partial<Pick<TabState, "editorContent" | "savedContent" | "html" | "frontmatter" | "includePaths">>;
 
+export interface TabScrollPositions {
+  editorScrollTop?: number;
+  previewScrollTop?: number;
+  previewScrollAnchor?: PreviewScrollAnchor | null;
+}
+
 export interface TabStore {
   tabs: () => TabState[];
   activeTabId: () => TabId | null;
+  /** Advances when a tab is selected, including after closing the active tab. */
+  activationVersion: () => number;
 
   /** Create a new tab (used by "Open in New Tab", middle-click,
    *  file-tree double-click, etc.). The result is **pinned by
@@ -53,7 +62,10 @@ export interface TabStore {
    *  back to upright) and `loadInActiveTab` won't replace them. */
   pinTab(tabId: TabId): void;
 
-  snapshotActiveTab(scrollPositions?: { editorScrollTop: number; previewScrollTop: number }): void;
+  snapshotActiveTab(scrollPositions?: TabScrollPositions): void;
+  /** Set by the pane view so the store can capture live DOM scroll state
+   *  before any tab switch rewrites the pane's working copy. */
+  setScrollCapture(capture: ((tabId: TabId) => TabScrollPositions) | null): void;
   restoreActiveTab(): void;
   updateActiveTabContent(content: TabContent): void;
   updateTabContent(tabId: TabId, content: TabContent & Partial<Pick<TabState, "editorMode" | "needsLoad">>): void;
@@ -124,9 +136,16 @@ export function createTabStore(config: TabStoreConfig): TabStore {
 
   const [tabList, setTabList] = createSignal<TabState[]>([]);
   const [activeId, setActiveId] = createSignal<TabId | null>(null);
+  const [activationVersion, setActivationVersion] = createSignal(0);
+  let scrollCapture: ((tabId: TabId) => TabScrollPositions) | null = null;
   let tabCounter = 0;
   const closedTabsStack: TabState[] = [];
   const MAX_CLOSED_TABS = 20;
+
+  function selectActiveTab(tabId: TabId | null): void {
+    setActiveId(tabId);
+    if (tabId !== null) setActivationVersion((version) => version + 1);
+  }
 
   function getTab(tabId: TabId): TabState | undefined {
     return tabList().find((t) => t.id === tabId);
@@ -148,10 +167,11 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     return tabList().filter((t) => t.editorContent !== t.savedContent);
   }
 
-  function snapshotActiveTab(scrollPositions?: { editorScrollTop: number; previewScrollTop: number }): void {
+  function snapshotActiveTab(scrollPositions?: TabScrollPositions): void {
     const id = activeId();
     if (!id) return;
 
+    const captured = scrollPositions ?? scrollCapture?.(id);
     const currentContent = pane.editorContent();
     const currentSaved = pane.savedContent();
     const currentHtml = pane.html();
@@ -168,8 +188,11 @@ export function createTabStore(config: TabStoreConfig): TabStore {
           html: currentHtml,
           frontmatter: currentFrontmatter,
           editorMode: currentMode,
-          editorScrollTop: scrollPositions?.editorScrollTop ?? t.editorScrollTop,
-          previewScrollTop: scrollPositions?.previewScrollTop ?? t.previewScrollTop,
+          editorScrollTop: captured?.editorScrollTop ?? t.editorScrollTop,
+          previewScrollTop: captured?.previewScrollTop ?? t.previewScrollTop,
+          previewScrollAnchor: captured?.previewScrollAnchor !== undefined
+            ? captured.previewScrollAnchor
+            : t.previewScrollAnchor,
         };
       }),
     );
@@ -202,6 +225,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
       editorMode: "preview",
       editorScrollTop: 0,
       previewScrollTop: 0,
+      previewScrollAnchor: null,
       // New tabs land in the "preview" slot — italic in the tab bar,
       // replaced by the next single-click. Promoted via `pinTab` on
       // double-click or the first edit (see Editor's onChange).
@@ -240,7 +264,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
       snapshotActiveTab();
       const newTab = createTabState(entry, rootId);
       setTabList((prev) => prev.map((t) => (t.id === emptyActive.id ? newTab : t)));
-      setActiveId(tabId);
+      selectActiveTab(tabId);
       persistSession();
       return tabId;
     }
@@ -249,7 +273,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     if (tabList().length === 0) {
       const newTab = createTabState(entry, rootId);
       setTabList([newTab]);
-      setActiveId(tabId);
+      selectActiveTab(tabId);
       persistSession();
       return tabId;
     }
@@ -270,7 +294,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
       snapshotActiveTab();
       const newTab = createTabState(entry, rootId);
       setTabList((prev) => prev.map((t) => (t.id === previewTab.id ? newTab : t)));
-      setActiveId(tabId);
+      selectActiveTab(tabId);
       persistSession();
       return tabId;
     }
@@ -308,7 +332,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     });
 
     if (!background) {
-      setActiveId(tabId);
+      selectActiveTab(tabId);
     }
 
     persistSession();
@@ -338,7 +362,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     if (nextId === currentId) return;
 
     const next = remaining.find((tab) => tab.id === nextId) ?? null;
-    setActiveId(nextId);
+    selectActiveTab(nextId);
     if (next) {
       // Bulk tab actions call the store directly. Keep the buffer and its
       // file identity paired even when the host has no close callback.
@@ -358,7 +382,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
 
   function closeAllTabs(): void {
     setTabList([]);
-    setActiveId(null);
+    selectActiveTab(null);
     clearPane();
     persistSession();
     onTabSelected?.(null);
@@ -408,7 +432,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
       const draft = edits ? reopenResolver?.({ ...closed, needsLoad: false }) : null;
       if (!draft || getTab(draft.id)) {
         if (activeId() !== live.id) {
-          setActiveId(live.id);
+          selectActiveTab(live.id);
           restoreTab(live);
           persistSession();
           onTabSelected?.(live);
@@ -420,7 +444,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
 
     // Re-add the tab (at the end)
     setTabList((prev) => [...prev, tab]);
-    setActiveId(tab.id);
+    selectActiveTab(tab.id);
     restoreTab(tab);
     persistSession();
     onTabSelected?.(tab);
@@ -432,7 +456,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     const tab = getTab(tabId);
     if (!tab) return;
     snapshotActiveTab();
-    setActiveId(tabId);
+    selectActiveTab(tabId);
     restoreTab(tab);
     persistSession();
   }
@@ -593,6 +617,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
   return {
     tabs: tabList,
     activeTabId: activeId,
+    activationVersion,
 
     openTab,
     loadInActiveTab,
@@ -609,6 +634,7 @@ export function createTabStore(config: TabStoreConfig): TabStore {
     pinTab,
 
     snapshotActiveTab,
+    setScrollCapture: (capture) => { scrollCapture = capture; },
     restoreActiveTab,
     updateActiveTabContent,
     updateTabContent,
