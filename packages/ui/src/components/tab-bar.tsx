@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
-import { PointerSensor } from "@dnd-kit/dom";
+import { PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
 import { useDraggable, useDroppable } from "../lib/dnd/index.ts";
 import { tabDisplayName, type TabStore } from "../composables/create-tab-store.ts";
 import type { TabState } from "@markdraw/core/tabs.ts";
@@ -40,6 +40,17 @@ interface TabBarProps {
 
 const TAB_DND_PREFIX = "tab::";
 const SCROLL_STEP = 150;
+const defaultPointerActivation = PointerSensor.defaults.activationConstraints;
+const tabPointerSensor = PointerSensor.configure({
+  activationConstraints(event, source) {
+    if (event.pointerType === "mouse") {
+      return [new PointerActivationConstraints.Distance({ value: 8 })];
+    }
+    return typeof defaultPointerActivation === "function"
+      ? defaultPointerActivation(event, source)
+      : defaultPointerActivation;
+  },
+});
 
 /** Build the dnd id for a tab, encoding both pane index + tab id. */
 export function toTabDndId(paneIndex: number, tabId: string): string {
@@ -80,7 +91,7 @@ function DraggableTab(props: {
   const draggable = useDraggable({
     get id() { return dndId(); },
     get disabled() { return !props.canDrag; },
-    sensors: [PointerSensor],
+    sensors: [tabPointerSensor],
   });
   const droppable = useDroppable({
     get id() { return dndId(); },

@@ -625,6 +625,11 @@ body:has(.app.window-frame-toolbar) .doc-body a {
   opacity: 0.8;
   border-radius: 2px;
   box-shadow: none;
+  background: hsl(var(--sidebar-bg));
+}
+
+.tab-bar-drag-overlay::after {
+  content: none;
 }
 
 /* === Status Bar === */
