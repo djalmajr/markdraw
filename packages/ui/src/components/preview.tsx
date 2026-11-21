@@ -39,6 +39,7 @@ import { createMermaidLazyRenderer, type MermaidLazyRenderer } from "../lib/merm
 import { MERMAID_CSS_CLASS_PREFIX, MermaidStyleRegistry, parseSvgMarkup, prepareMermaidSvg, renameMermaidInlineCss, svgWithMermaidStyles } from "../lib/mermaid-svg-css.ts";
 import { registerMermaidFlush } from "../lib/mermaid-flush.ts";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
+import type { PreviewScrollAnchor } from "@markdraw/core/tabs.ts";
 import "katex/dist/katex.min.css";
 import "@mdit/plugin-alert/style";
 import "../styles/asciidoc.css";
@@ -300,7 +301,7 @@ function replaceMermaidPlaceholder(
   html: string,
   article: HTMLElement,
   root: HTMLElement | null,
-  onDiagram: () => void,
+  onDiagram: (block: HTMLElement) => void,
   isAnchorTracking: () => boolean,
 ): void {
   const anchor = root && !isAnchorTracking() ? visibleMermaidAnchor(block, article, root) : undefined;
@@ -317,7 +318,7 @@ function replaceMermaidPlaceholder(
     const remaining = anchor.element.getBoundingClientRect().top - anchor.top;
     if (remaining !== 0) root.scrollTop += remaining;
   }
-  onDiagram();
+  onDiagram(block);
 }
 
 function insertMermaidSvg(
@@ -326,7 +327,7 @@ function insertMermaidSvg(
   article: HTMLElement,
   root: HTMLElement | null,
   styles: MermaidStyleRegistry,
-  onDiagram: () => void,
+  onDiagram: (block: HTMLElement) => void,
   isAnchorTracking: () => boolean,
 ): string | undefined {
   const prepared = prepareMermaidSvg(svg);
@@ -343,7 +344,7 @@ async function renderOneMermaidBlock(
   isStale: IsStaleFn,
   root: HTMLElement | null,
   styles: MermaidStyleRegistry,
-  onDiagram: () => void,
+  onDiagram: (block: HTMLElement) => void,
   isAnchorTracking: () => boolean,
 ): Promise<void> {
   if (isStale(gen)) return;
@@ -402,7 +403,7 @@ function setupMermaidBlocks(
   gen: number,
   isStale: IsStaleFn,
   styles: MermaidStyleRegistry,
-  onDiagram: () => void,
+  onDiagram: (block: HTMLElement) => void,
   isAnchorTracking: () => boolean,
 ): { renderer: MermaidLazyRenderer; ready: Promise<void> } | null {
   const candidates = Array.from(container.querySelectorAll<HTMLElement>("div.mermaid"));
@@ -529,7 +530,7 @@ async function renderKrokiBlocks(
   gen: number,
   isStale: IsStaleFn,
   signal: AbortSignal,
-  onDiagram: () => void,
+  onDiagram: (block: HTMLElement) => void,
 ): Promise<void> {
   const blocks = container.querySelectorAll<HTMLElement>("div.kroki");
   await Promise.all(Array.from(blocks, async (block) => {
@@ -561,7 +562,7 @@ async function renderKrokiBlocks(
       block.style.fontStyle = "";
     }
 
-    onDiagram();
+    onDiagram(block);
   }));
 }
 
@@ -831,6 +832,41 @@ export interface PreviewSelectionInfo {
   text: string;
 }
 
+interface TabScrollRestore {
+  tabId: string;
+  path: string;
+  scrollTop: number;
+  anchor: PreviewScrollAnchor | null;
+}
+
+interface PendingTabScrollTarget {
+  gen: number;
+  content: HTMLElement;
+  block: Element;
+  offset: number;
+  diagramsAbove: Set<HTMLElement>;
+  expectedTop: number;
+  cleanup: () => void;
+}
+
+function maxScrollTopOf(content: HTMLElement): number {
+  return Math.max(0, content.scrollHeight - content.clientHeight);
+}
+
+function tabScrollAnchorBlock(article: HTMLElement, anchor: PreviewScrollAnchor): Element | undefined {
+  if (Number.isInteger(anchor.blockIndex) && anchor.blockIndex >= 0 && Number.isFinite(anchor.offset)) {
+    return article.children[anchor.blockIndex];
+  }
+}
+
+function blockOffsetInViewport(block: Element, content: HTMLElement): number {
+  return block.getBoundingClientRect().top - content.getBoundingClientRect().top;
+}
+
+function setClampedScrollTop(content: HTMLElement, top: number): void {
+  content.scrollTop = Math.max(0, Math.min(maxScrollTopOf(content), top));
+}
+
 interface PreviewProps {
   findTrigger: number;
   html: string;
@@ -849,6 +885,12 @@ interface PreviewProps {
   tocContainer?: HTMLElement;
   /** Current file path (relative to root), used to resolve xref links */
   currentFilePath: string | null;
+  /** The tab bound to this pane, so a restore never lands in another tab. */
+  currentTabId?: string | null;
+  /** Tab-store selection version; a rename only changes currentTabId. */
+  tabActivationVersion?: number;
+  /** Read at swap time: the scroll position saved when this tab was left. */
+  getTabScrollRestore?: () => TabScrollRestore | null;
   /** Fragment ID to scroll to after content loads (from cross-file xref navigation) */
   pendingFragment: string | null;
   /** Called after the pending fragment has been scrolled to (to clear the signal) */
@@ -1057,6 +1099,79 @@ export function Preview(props: PreviewProps) {
     repositionAnchor = undefined;
   }
 
+  function clearPendingScrollTarget() {
+    pendingScrollTarget?.cleanup();
+    pendingScrollTarget = null;
+  }
+
+  function trackPendingScrollTarget(
+    gen: number,
+    content: HTMLElement,
+    article: HTMLElement,
+    block: Element,
+    offset: number,
+  ) {
+    const diagramsAbove = new Set<HTMLElement>();
+    for (const diagram of article.querySelectorAll<HTMLElement>("div.mermaid, div.kroki")) {
+      if (!(block.compareDocumentPosition(diagram) & Node.DOCUMENT_POSITION_PRECEDING)) continue;
+      if (!diagram.textContent?.trim()) continue;
+      if (diagram.dataset.processed && (
+        diagram.matches(".kroki") ? diagram.dataset.processed === "true" : diagram.querySelector("svg, .mermaid-error")
+      )) continue;
+      diagramsAbove.add(diagram);
+    }
+
+    const cancel = () => clearPendingScrollTarget();
+    const onScroll = () => {
+      const target = pendingScrollTarget;
+      if (target && Math.abs(content.scrollTop - target.expectedTop) > 1) cancel();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) cancel();
+    };
+    content.addEventListener("wheel", cancel, { passive: true });
+    content.addEventListener("touchstart", cancel, { passive: true });
+    content.addEventListener("touchmove", cancel, { passive: true });
+    content.addEventListener("pointerdown", cancel, { passive: true });
+    content.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("keydown", onKey);
+    pendingScrollTarget = {
+      gen,
+      content,
+      block,
+      offset,
+      diagramsAbove,
+      expectedTop: content.scrollTop,
+      cleanup: () => {
+        content.removeEventListener("wheel", cancel);
+        content.removeEventListener("touchstart", cancel);
+        content.removeEventListener("touchmove", cancel);
+        content.removeEventListener("pointerdown", cancel);
+        content.removeEventListener("scroll", onScroll);
+        window.removeEventListener("keydown", onKey);
+      },
+    };
+    retryPendingScrollTarget();
+  }
+
+  function retryPendingScrollTarget(drawnDiagram?: HTMLElement) {
+    const target = pendingScrollTarget;
+    if (!target) return;
+    if (isStale(target.gen) || !target.block.isConnected) {
+      clearPendingScrollTarget();
+      return;
+    }
+    const { content, block, offset, diagramsAbove } = target;
+    if (drawnDiagram) diagramsAbove.delete(drawnDiagram);
+    const delta = blockOffsetInViewport(block, content) - offset;
+    setClampedScrollTop(content, content.scrollTop + delta);
+    target.expectedTop = content.scrollTop;
+    if (diagramsAbove.size === 0 && Math.abs(blockOffsetInViewport(block, content) - offset) <= 1) {
+      clearPendingScrollTarget();
+    }
+  }
+
+  onCleanup(clearPendingScrollTarget);
   onCleanup(stopTrackingAnchor);
   onCleanup(retainMermaidFrame());
   onCleanup(() => {
@@ -1247,6 +1362,7 @@ export function Preview(props: PreviewProps) {
    * - .adoc file links: navigate via SPA routing
    */
   function scrollToTarget(target: HTMLElement, track = false) {
+    clearPendingScrollTarget();
     stopTrackingAnchor();
     const contentEl = articleRef?.closest<HTMLElement>(".content");
     let expectedTop = contentEl?.scrollTop ?? 0;
@@ -1395,6 +1511,9 @@ export function Preview(props: PreviewProps) {
   // Note: props.html can come from local or remote documents.
   // Always sanitize before injecting into the DOM.
   let pendingNewDocument = false;
+  let lastSeenActivationVersion: number | undefined;
+  let pendingRestoreTabId: string | null = null;
+  let pendingScrollTarget: PendingTabScrollTarget | null = null;
 
   // Re-populate the shared TOC panel when this Preview becomes the
   // pane that owns it. AppShell hands the `tocContainerRef` to whichever
@@ -1443,9 +1562,17 @@ export function Preview(props: PreviewProps) {
   );
 
   createEffect(
-    () => props.html,
-    (_html) => {
+    () => ({ html: props.html, tabId: props.currentTabId ?? null, activationVersion: props.tabActivationVersion }),
+    ({ html: _html, tabId, activationVersion }) => {
     if (!articleRef) return;
+    clearPendingScrollTarget();
+    // The article stays in the DOM while a file loads. Untag it so a capture
+    // during that window cannot attribute the previous document to the new tab.
+    articleRef.dataset.previewTabId = "";
+    const activated = activationVersion !== lastSeenActivationVersion;
+    if (activated) pendingRestoreTabId = tabId;
+    else if (pendingRestoreTabId !== tabId) pendingRestoreTabId = null;
+    lastSeenActivationVersion = activationVersion;
     stopTrackingAnchor();
     disposeMermaidGeneration();
     invalidateGenerationWait();
@@ -1488,6 +1615,13 @@ export function Preview(props: PreviewProps) {
     pendingNewDocument = false;
     const sanitizedHtml = sanitizeHtmlFragment(_html);
 
+    const onDiagramDrawn = (block: HTMLElement) => {
+      if (isStale(gen)) return;
+      retryPendingScrollTarget(block);
+      repositionAnchor?.();
+    };
+    const isAnchorTracking = () => !!pendingScrollTarget || !!repositionAnchor;
+
     function prepareMermaidGeneration(currentGen: number): Promise<void> {
       const wait = generationWait;
       const settle = () => {
@@ -1498,8 +1632,10 @@ export function Preview(props: PreviewProps) {
       try {
         const setup = setupMermaidBlocks(
           articleRef!, currentGen, isStale, ensureMermaidStyles(),
-          () => repositionAnchor?.(), () => !!repositionAnchor,
+          onDiagramDrawn, isAnchorTracking,
         );
+        // Adding the Mermaid placeholders can change the layout before any SVG draws.
+        if (!isStale(currentGen)) retryPendingScrollTarget();
         if (!setup || isStale(currentGen)) {
           settle();
           return Promise.resolve();
@@ -1521,10 +1657,22 @@ export function Preview(props: PreviewProps) {
 
     // Shared post-swap logic: TOC handling, collapse toggles, reveal, fragment scroll
     function afterSwap(container: HTMLElement, scrollToTop: boolean) {
-      const scrollContainer = articleRef!.closest(".content");
-      if (scrollToTop && scrollContainer) {
-        scrollContainer.scrollTop = 0;
-      }
+      const scrollContainer = articleRef!.closest<HTMLElement>(".content");
+      const hasPendingJump = !!untrack(() => props.pendingFragment ?? props.pendingHeadingText);
+      const currentTabId = untrack(() => props.currentTabId) ?? null;
+      const currentActivationVersion = untrack(() => props.tabActivationVersion);
+      const restore = pendingRestoreTabId !== null
+        && pendingRestoreTabId === tabId
+        && currentTabId === tabId
+        && currentActivationVersion === activationVersion
+        && !hasPendingJump
+          ? untrack(() => props.getTabScrollRestore?.())
+          : null;
+      const validRestore = restore && restore.tabId === tabId
+        && restore.path === (untrack(() => props.currentFilePath) ?? null)
+        ? restore
+        : null;
+      if (currentTabId === tabId && currentActivationVersion === activationVersion) pendingRestoreTabId = null;
 
       // Move #toc from article to external panel container. Always
       // update `tocNode` (even when this pane is inactive) so the next
@@ -1569,6 +1717,21 @@ export function Preview(props: PreviewProps) {
         cleanupToc = undefined;
       }
 
+      // The capture measured the article with the toc already detached.
+      // Apply the saved index only after this swap did the same, otherwise
+      // the index points at the preceding sibling.
+      if (validRestore && scrollContainer) {
+        const anchor = validRestore.anchor;
+        const block = anchor && tabScrollAnchorBlock(container, anchor);
+        if (anchor && block) {
+          trackPendingScrollTarget(gen, scrollContainer, container, block, anchor.offset);
+        } else {
+          setClampedScrollTop(scrollContainer, validRestore.scrollTop);
+        }
+      } else if (scrollToTop && scrollContainer) {
+        scrollContainer.scrollTop = 0;
+      }
+      articleRef!.dataset.previewTabId = tabId ?? "";
       articleRef!.style.opacity = "";
       setRenderedHtml(_html);
     }
@@ -1603,7 +1766,7 @@ export function Preview(props: PreviewProps) {
           // first block races with layout and throws `firstChild`.
           () => nextPaintFrame(),
           () => prepareMermaidGeneration(gen),
-          () => renderKrokiBlocks(articleRef!, gen, isStale, krokiController.signal, () => repositionAnchor?.()),
+          () => renderKrokiBlocks(articleRef!, gen, isStale, krokiController.signal, onDiagramDrawn),
         ]),
       );
     } else {
@@ -1621,7 +1784,7 @@ export function Preview(props: PreviewProps) {
         finishPostProcessing(gen, [
           () => highlightCodeBlocks(articleRef!, gen, isStale),
           () => prepareMermaidGeneration(gen),
-          () => renderKrokiBlocks(articleRef!, gen, isStale, krokiController.signal, () => repositionAnchor?.()),
+          () => renderKrokiBlocks(articleRef!, gen, isStale, krokiController.signal, onDiagramDrawn),
         ]),
       );
     }

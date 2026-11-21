@@ -428,4 +428,33 @@ describe("createTabStore", () => {
       expect(store.tabs()).toHaveLength(2);
     });
   });
+
+  it("stores preview scrollTop and anchor in the tab snapshot", () => {
+    withStore((store) => {
+      const id = store.openTab(entry("a.md"), "r");
+      store.snapshotActiveTab({
+        previewScrollTop: 420,
+        previewScrollAnchor: { blockIndex: 3, offset: -18 },
+      });
+      expect(store.getTab(id)?.previewScrollTop).toBe(420);
+      expect(store.getTab(id)?.previewScrollAnchor).toEqual({ blockIndex: 3, offset: -18 });
+
+      store.snapshotActiveTab({ previewScrollTop: 0 });
+      expect(store.getTab(id)?.previewScrollTop).toBe(0);
+      expect(store.getTab(id)?.previewScrollAnchor).toEqual({ blockIndex: 3, offset: -18 });
+    });
+  });
+
+  it("uses the pane's scroll capture when snapshotActiveTab has no arguments", () => {
+    withStore((store) => {
+      store.setScrollCapture(() => ({
+        previewScrollTop: 275,
+        previewScrollAnchor: { blockIndex: 1, offset: 12 },
+      }));
+      const id = store.openTab(entry("a.md"), "r");
+      store.snapshotActiveTab();
+      expect(store.getTab(id)?.previewScrollTop).toBe(275);
+      expect(store.getTab(id)?.previewScrollAnchor).toEqual({ blockIndex: 1, offset: 12 });
+    });
+  });
 });
