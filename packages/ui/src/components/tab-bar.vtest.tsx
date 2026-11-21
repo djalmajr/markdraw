@@ -30,7 +30,7 @@ function setupPaneWithTabs(filenames: string[]) {
   return pane;
 }
 
-describe("TabBar — keyboard activation", () => {
+describe("TabBar — activation and drag", () => {
   it.each(["Enter", "Space"])("activates a focused tab with %s without starting a drag", (code) => {
     const pane = setupPaneWithTabs(["a.md", "b.md"]);
     flush();
@@ -53,13 +53,38 @@ describe("TabBar — keyboard activation", () => {
     expect(pane.tabs.activeTabId()).toBe("root::a.md");
   });
 
-  it("still starts and finishes a tab drag with the pointer", async () => {
+  it.each([0, 3])("activates the tab after holding the mouse for 400 ms with %i px of movement", async (distance) => {
+    const pane = setupPaneWithTabs(["a.md", "b.md"]);
+    flush();
+    const beforeDrag = vi.fn((event: BeforeDragStartEvent) => event.preventDefault());
+    const { getByRole } = render(() => (
+      <DragDropProvider onBeforeDragStart={beforeDrag}>
+        <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={pane.tabs.activateTab} onCloseTab={() => {}} />
+      </DragDropProvider>
+    ));
+    const tab = getByRole("button", { name: "a.md" });
+    const pointer = { pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, clientY: 10 };
+    fireEvent.pointerDown(tab, { ...pointer, buttons: 1, clientX: 10 });
+    if (distance) fireEvent.pointerMove(tab, { ...pointer, buttons: 1, clientX: 10 + distance });
+    await vi.advanceTimersByTimeAsync(400);
+    expect(pane.tabs.activeTabId()).toBe("root::b.md");
+
+    fireEvent.pointerUp(tab, { ...pointer, buttons: 0, clientX: 10 + distance });
+    // Happy DOM does not synthesize a click from pointerup.
+    fireEvent.click(tab);
+    flush();
+    expect(beforeDrag.mock.calls.length).toBe(0);
+    expect(pane.tabs.activeTabId()).toBe("root::a.md");
+  });
+
+  it("starts and finishes a mouse drag after 10 px of movement", async () => {
     const pane = setupPaneWithTabs(["a.md"]);
     flush();
+    const beforeDrag = vi.fn();
     const start = vi.fn();
     const end = vi.fn();
     const { getByRole, unmount } = render(() => (
-      <DragDropProvider onDragStart={start} onDragEnd={end}>
+      <DragDropProvider onBeforeDragStart={beforeDrag} onDragStart={start} onDragEnd={end}>
         <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={() => {}} onCloseTab={() => {}} />
       </DragDropProvider>
     ));
@@ -67,16 +92,37 @@ describe("TabBar — keyboard activation", () => {
     try {
       const tab = getByRole("button", { name: "a.md" });
       fireEvent.pointerDown(tab, { ...pointer, buttons: 1, clientX: 10, clientY: 10 });
-      fireEvent.pointerMove(tab, { ...pointer, buttons: 1, clientX: 22, clientY: 10 });
+      fireEvent.pointerMove(tab, { ...pointer, buttons: 1, clientX: 17, clientY: 10 });
+      expect(beforeDrag.mock.calls.length).toBe(0);
+      fireEvent.pointerMove(tab, { ...pointer, buttons: 1, clientX: 20, clientY: 10 });
       await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
       await vi.waitFor(() => expect(tab.classList.contains("tab-bar-item-dragging")).toBe(true));
 
-      fireEvent.pointerUp(tab, { ...pointer, buttons: 0, clientX: 22, clientY: 10 });
+      fireEvent.pointerUp(tab, { ...pointer, buttons: 0, clientX: 20, clientY: 10 });
       await vi.waitFor(() => expect(end).toHaveBeenCalledOnce());
       await vi.waitFor(() => expect(tab.classList.contains("tab-bar-item-dragging")).toBe(false));
     } finally {
       unmount();
     }
+  });
+
+  it.each([["touch", 250], ["pen", 200]] as const)("keeps the %s hold delay", async (pointerType, delay) => {
+    const pane = setupPaneWithTabs(["a.md"]);
+    flush();
+    const beforeDrag = vi.fn((event: BeforeDragStartEvent) => event.preventDefault());
+    const { getByRole } = render(() => (
+      <DragDropProvider onBeforeDragStart={beforeDrag}>
+        <TabBar paneIndex={0} tabStore={pane.tabs} onActivateTab={() => {}} onCloseTab={() => {}} />
+      </DragDropProvider>
+    ));
+    const tab = getByRole("button", { name: "a.md" });
+    const pointer = { pointerId: 1, pointerType, isPrimary: true, button: 0, clientX: 10, clientY: 10 };
+    fireEvent.pointerDown(tab, { ...pointer, buttons: 1 });
+    await vi.advanceTimersByTimeAsync(delay - 1);
+    expect(beforeDrag).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(beforeDrag).toHaveBeenCalledOnce();
+    fireEvent.pointerUp(tab, { ...pointer, buttons: 0 });
   });
 
   it("leaves the close button and keyboard context menu in control of their keys", () => {
