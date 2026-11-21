@@ -520,9 +520,31 @@
 }
 
 /* Section anchors */
+.doc-body h1,
+.doc-body h2,
+.doc-body h3,
+.doc-body h4,
+.doc-body h5,
+.doc-body h6 {
+  position: relative;
+}
+
 .doc-body a.anchor {
+  /* Asciidoctor's section anchor is an empty link. It sits in the left
+     margin, out of the flow, so it no longer pushes the heading text to the
+     right, and keeps a clickable "#" that shows on hover. */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* Fixed pixels, not em: the preview's side margin is 48px, and an em
+     offset grows past it with large headings and font sizes. */
+  left: -24px;
+  width: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: min(0.75em, 18px);
   opacity: 0;
-  padding-right: 6px;
   text-decoration: none;
   font-weight: normal;
 }
@@ -534,6 +556,18 @@
 .doc-body h5:hover a.anchor,
 .doc-body h6:hover a.anchor {
   opacity: 0.5;
+}
+
+.doc-body a.anchor::before {
+  content: "#";
+}
+
+/* A heading inside a table cell (AsciiDoc "a" columns) has only the cell's
+   12px padding to its left, and a scrolling table wrapper clips anything
+   past it: keep the anchor inside that padding. */
+.doc-body :is(td, th) a.anchor {
+  left: -11px;
+  width: 10px;
 }
 
 /* TOC - Rendered inside .toc-panel (flex sibling of .content) */
