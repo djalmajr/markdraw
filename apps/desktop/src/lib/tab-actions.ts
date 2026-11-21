@@ -11,7 +11,7 @@ import type { createFileLoader } from "./file-loader.ts";
 import { SCRATCH_ROOT_ID, scratchPath } from "./scratch.ts";
 
 interface TabActionDeps {
-  state: Pick<AppState, "paneManager" | "findEntryByPath" | "roots" | "transferReader" | "rekeyReader" | "carryEdit" | "pushNavHistory" | "rebindReader">;
+  state: Pick<AppState, "paneManager" | "findEntryByPath" | "roots" | "transferReader" | "rekeyReader" | "carryEdit" | "pushNavHistory" | "rebindReader" | "autoRefresh">;
   rootPaths: () => ReadonlyMap<string, string>;
   syncWatcher: ReturnType<typeof createFileLoader>["syncWatcher"];
   loadTabContent: ReturnType<typeof createFileLoader>["loadTabContent"];
@@ -125,6 +125,13 @@ export function createTabActions({
     },
   );
 
+  function isTabClean(pane: PaneStore, tab: TabState) {
+    const isCurrent = pane.tabs.activeTabId() === tab.id
+      && pane.selectedFile()?.path === tab.filePath
+      && pane.selectedRootId() === tab.rootId;
+    return isCurrent ? pane.editorContent() === pane.savedContent() : tab.editorContent === tab.savedContent;
+  }
+
   function selectTab(pane: PaneStore, tab: TabState | null, focused = pane === manager.activePane(), pushHistory = false) {
     let entry = tab?.rootId === SCRATCH_ROOT_ID
       ? { path: tab.filePath, name: tabDisplayName(tab), kind: "file" as const }
@@ -134,19 +141,21 @@ export function createTabActions({
       if (entry) releasePending(tab.rootId, tab.filePath);
       else entry = pendingEntry(tab.rootId, tab.filePath);
     }
+    const reload = !!tab?.diskChange && !tab.needsLoad && isTabClean(pane, tab);
     pane.setSelectedFile(entry);
     pane.setSelectedRootId(entry && tab ? tab.rootId : null);
 
     const rootPath = entry && tab ? rootPaths().get(tab.rootId) : undefined;
-    if (tab?.needsLoad && entry && rootPath) {
+    if (tab && (tab.needsLoad || reload) && entry && rootPath) {
       if (focused) syncWatcher(null);
-      return loadTabContent(pane, entry, tab, pushHistory);
+      return loadTabContent(pane, entry, tab, pushHistory, reload);
     }
     if (tab?.needsLoad && (tab.rootId === SCRATCH_ROOT_ID || !tab.filePath)) {
       pane.tabs.updateTabContent(tab.id, { needsLoad: false });
     }
     pane.setLoading(false);
     if (focused) syncWatcher(entry, rootPath, tab?.includePaths);
+    if (pushHistory && entry && tab) state.pushNavHistory({ entry, rootId: tab.rootId });
   }
 
   function activateTab(pane: PaneStore, tabId: string, pushHistory = false) {
@@ -166,16 +175,15 @@ export function createTabActions({
     });
   }
 
-  // Show an already loaded tab that was just activated. A buffer with unsaved
-  // edits is the document: reading the disk again would replace it, so the tab
-  // is shown as it was left. A clean one is read again, like any other open.
+  // Reuse a loaded preview through the same selection path as the tab bar.
+  // Tabs without HTML still use the file loader, and local edits stay intact.
   async function showLoadedTab(pane: PaneStore, tab: TabState, entry: FSEntry, rootId: string, pushHistory: boolean) {
-    if (tab.editorContent === tab.savedContent) {
+    if (!tab.html && !tab.diskChange && isTabClean(pane, tab)) {
       await loadFileContent(entry, pushHistory, false, rootId);
+      updateLoadedTabCache(pane, tab.id);
       return;
     }
-    await selectTab(pane, pane.tabs.getTab(tab.id) ?? tab, true, false);
-    if (pushHistory) state.pushNavHistory({ entry, rootId });
+    await selectTab(pane, pane.tabs.getTab(tab.id) ?? tab, true, pushHistory);
   }
 
   async function openFile(entry: FSEntry, rootId: string, pinned = false, pushHistory = true) {
@@ -203,7 +211,6 @@ export function createTabActions({
       return;
     }
     await showLoadedTab(pane, existing, entry, rootId, pushHistory);
-    updateLoadedTabCache(pane, id);
   }
 
   function closeTabs(pane: PaneStore, tabIds: readonly string[]) {
@@ -216,10 +223,8 @@ export function createTabActions({
 
   /**
    * Point a tab at the file's new path after a rename or move. The active tab
-   * of the focused pane also re-aims the shared OS watcher (same file, new
-   * absolute path) and restarts its first read when one is still pending; a
-   * move across workspaces reopens the tab under the target root, since a tab
-   * id embeds its root.
+   * re-aims the shared OS watcher when focused and restarts a pending read.
+   * A move across workspaces replaces the root-bearing tab id.
    */
   function renameOpenTab(pane: PaneStore, rootId: string, oldPath: string, entry: FSEntry, newRootId: string = rootId, tabId?: string) {
     const activeTab = pane.tabs.getActiveTab();
@@ -227,6 +232,10 @@ export function createTabActions({
       ? activeTab : pane.tabs.findTabByFile(oldPath, rootId);
     const active = tab?.id === activeTab?.id;
     if (!tab) return;
+    // A watcher refresh keeps the previous HTML on screen, so it does not set
+    // loading. Its clean, marked tab still needs to read from the new path.
+    const reloadPending = active && !!tab.diskChange && !tab.needsLoad
+      && (pane.loading() || (state.autoRefresh() && isTabClean(pane, tab)));
     const watch = (includePaths: string[]) => {
       if (pane === manager.activePane()) syncWatcher(entry, rootPaths().get(newRootId), includePaths);
     };
@@ -249,9 +258,14 @@ export function createTabActions({
       : isMdFile(entry.path)
         ? getMarkdownIncludePaths(content, base)
         : getIncludePaths(content, base);
+    const invalidatePreview = !tab.needsLoad && !sameResolution
+      && (tab.includePaths.length > 0 || includePaths.length > 0 || isMdFile(oldPath) !== isMdFile(entry.path));
     if (newRootId === rootId) {
       const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, rootId, { includePaths }, displacedAsDraft);
       if (!renamedTab) return;
+      if (invalidatePreview) {
+        pane.tabs.updateTabContent(renamedTab.id, { diskChange: Symbol() });
+      }
       // The loaded document keeps its include reader under the new path.
       if (!tab.needsLoad) state.rekeyReader(pane, rootId, oldPath, entry.path);
       if (active) {
@@ -263,8 +277,8 @@ export function createTabActions({
         { pane, tabId: tab.id, rootId, filePath: oldPath },
         { pane, tabId: renamedTab.id, rootId, filePath: entry.path },
       );
-      if (active && renamedTab.needsLoad) {
-        void loadTabContent(pane, entry, renamedTab);
+      if (active && (renamedTab.needsLoad || reloadPending)) {
+        void loadTabContent(pane, entry, renamedTab, false, reloadPending);
         return;
       }
       if (active) watch(renamedTab.includePaths);
@@ -276,7 +290,7 @@ export function createTabActions({
       ? {
           editorContent: pane.editorContent(),
           savedContent: pane.savedContent(),
-          html: pane.html(),
+          html: reloadPending ? tab.html : pane.html(),
           frontmatter: pane.frontmatter(),
           editorMode: pane.editorMode(),
         }
@@ -289,6 +303,7 @@ export function createTabActions({
         };
     const renamedTab = pane.tabs.updateTabFile(tab.id, entry.path, entry.name, newRootId, { ...carried, includePaths }, displacedAsDraft);
     if (!renamedTab) return;
+    if (invalidatePreview) pane.tabs.updateTabContent(renamedTab.id, { diskChange: Symbol() });
     // The reader the tab loaded with resolves against the old workspace: the
     // pending conversion must read the includes of the destination one.
     if (!tab.needsLoad) state.rebindReader(pane, newRootId, entry.path);
@@ -300,8 +315,8 @@ export function createTabActions({
     const id = renamedTab.id;
     pane.setSelectedFile(entry);
     pane.setSelectedRootId(newRootId);
-    if (tab.needsLoad) {
-      void loadTabContent(pane, entry, { id, rootId: newRootId });
+    if (tab.needsLoad || reloadPending) {
+      void loadTabContent(pane, entry, { id, rootId: newRootId }, false, reloadPending);
       return;
     }
     // The pane keeps the working buffer across the identity replacement.
@@ -343,6 +358,7 @@ export function createTabActions({
       editorMode: content.editorMode,
       includePaths: tab.includePaths,
       needsLoad: tab.needsLoad,
+      diskChange: tab.diskChange,
     };
 
     if (existingTarget) manager.setActivePane(targetIndex);

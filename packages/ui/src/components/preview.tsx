@@ -1,4 +1,4 @@
-import { Show, createSignal, onSettled, onCleanup, createEffect, untrack } from "solid-js";
+import { Show, createSignal, onSettled, onCleanup, createEffect, createMemo, untrack } from "solid-js";
 import * as m from "@markdraw/i18n";
 import { useLocale } from "@markdraw/i18n/solid";
 import Prism from "prismjs";
@@ -39,7 +39,7 @@ import { createMermaidLazyRenderer, type MermaidLazyRenderer } from "../lib/merm
 import { MERMAID_CSS_CLASS_PREFIX, MermaidStyleRegistry, parseSvgMarkup, prepareMermaidSvg, renameMermaidInlineCss, svgWithMermaidStyles } from "../lib/mermaid-svg-css.ts";
 import { registerMermaidFlush } from "../lib/mermaid-flush.ts";
 import type { Frontmatter } from "@markdraw/core/frontmatter.ts";
-import type { PreviewScrollAnchor } from "@markdraw/core/tabs.ts";
+import type { TabState, PreviewScrollAnchor } from "@markdraw/core/tabs.ts";
 import "katex/dist/katex.min.css";
 import "@mdit/plugin-alert/style";
 import "../styles/asciidoc.css";
@@ -114,6 +114,8 @@ function sanitizeHtmlFragment(input: string): string {
 
 let mermaidId = 0;
 const pendingMermaidSources = new WeakMap<HTMLElement, string>();
+const pendingKrokiSources = new WeakMap<HTMLElement, string>();
+const highlightedBlocks = new WeakSet<HTMLElement>();
 
 function uniqueMermaidIds(svg: string, updateStyleText = true): string {
   const { root, serialize } = parseSvgMarkup(svg);
@@ -218,7 +220,7 @@ async function highlightCodeBlocks(
     if (isStale(gen)) return;
 
     const language = detectCodeLanguage(codeEl);
-    if (!language) continue;
+    if (!language || highlightedBlocks.has(codeEl)) continue;
 
     codeEl.classList.add(`language-${language}`);
     const preEl = codeEl.parentElement;
@@ -227,6 +229,7 @@ async function highlightCodeBlocks(
     }
 
     Prism.highlightElement(codeEl);
+    highlightedBlocks.add(codeEl);
     await yieldToMain();
   }
 }
@@ -414,8 +417,13 @@ function setupMermaidBlocks(
       if (block.querySelector("svg, .mermaid-error")) continue;
       block.removeAttribute("data-processed");
     }
-    const source = block.textContent?.trim() ?? "";
+    const source = pendingMermaidSources.get(block) ?? block.textContent?.trim() ?? "";
     if (!source) continue;
+    if (block.hasAttribute("data-mermaid-pending")) {
+      block.removeAttribute("data-processing");
+      blocks.push(block);
+      continue;
+    }
     pendingMermaidSources.set(block, source);
     block.textContent = "Rendering diagram...";
     block.style.color = "hsl(var(--muted-foreground))";
@@ -536,11 +544,10 @@ async function renderKrokiBlocks(
   await Promise.all(Array.from(blocks, async (block) => {
     if (isStale(gen)) return;
     if (block.getAttribute("data-processed") === "true") return;
-    block.setAttribute("data-processed", "true");
-
     const type = block.getAttribute("data-type") || "plantuml";
-      const source = block.textContent || "";
-      if (!source.trim()) return;
+    const source = pendingKrokiSources.get(block) ?? block.textContent ?? "";
+    if (!source.trim()) return;
+    pendingKrokiSources.set(block, source);
 
     block.textContent = "Rendering diagram...";
     block.style.color = "hsl(var(--muted-foreground))";
@@ -562,6 +569,8 @@ async function renderKrokiBlocks(
       block.style.fontStyle = "";
     }
 
+    pendingKrokiSources.delete(block);
+    block.setAttribute("data-processed", "true");
     onDiagram(block);
   }));
 }
@@ -660,6 +669,7 @@ export function setupTocScrollTracking(container: HTMLElement, tocEl?: HTMLEleme
   if (headings.length === 0) return;
 
   let currentActive: HTMLAnchorElement | null = null;
+  let disposed = false;
 
   function setActive(id: string) {
     if (currentActive) {
@@ -710,7 +720,7 @@ export function setupTocScrollTracking(container: HTMLElement, tocEl?: HTMLEleme
    * Also handles bottom-of-page: if scrolled to the end, activate the last heading.
    */
   function updateActiveFromScroll() {
-    if (!scrollContainer) return;
+    if (disposed || !scrollContainer) return;
 
     const scrollTop = scrollContainer.scrollTop;
     const scrollHeight = scrollContainer.scrollHeight;
@@ -756,6 +766,7 @@ export function setupTocScrollTracking(container: HTMLElement, tocEl?: HTMLEleme
   }
 
   return () => {
+    disposed = true;
     if (scrollContainer) {
       scrollContainer.removeEventListener("scroll", updateActiveFromScroll);
     }
@@ -889,6 +900,8 @@ interface PreviewProps {
   currentTabId?: string | null;
   /** Tab-store selection version; a rename only changes currentTabId. */
   tabActivationVersion?: number;
+  cacheTabs?: readonly Pick<TabState, "id" | "diskChange">[];
+  darkMode?: boolean;
   /** Read at swap time: the scroll position saved when this tab was left. */
   getTabScrollRestore?: () => TabScrollRestore | null;
   /** Fragment ID to scroll to after content loads (from cross-file xref navigation) */
@@ -934,8 +947,23 @@ interface PreviewProps {
   onTocChange: (hasToc: boolean) => void;
 }
 
+interface RenderedPreview {
+  tabId: string | null;
+  html: string;
+  article: HTMLElement;
+  toc: HTMLElement | undefined;
+  highlighted: boolean;
+}
+
+const RECENT_PREVIEW_LIMIT = 3;
+
 export function Preview(props: PreviewProps) {
-  const [hasArticle, setHasArticle] = createSignal(false);
+  const [activeArticle, setActiveArticle] = createSignal<HTMLElement>();
+  const hasArticle = () => !!activeArticle();
+  const parkedPreviews = new Map<string, RenderedPreview>();
+  const cacheTabs = createMemo(() => props.cacheTabs);
+  let renderedPreview: RenderedPreview | undefined;
+  let lastTheme: boolean | undefined;
   const [overlayHost, setOverlayHost] = createSignal<HTMLElement | undefined>(undefined);
   const [viewerSvg, setViewerSvg] = createSignal<string | null>(null);
   const [viewerImage, setViewerImage] = createSignal<string | null>(null);
@@ -1016,6 +1044,7 @@ export function Preview(props: PreviewProps) {
   let repositionAnchor: (() => void) | undefined;
   let processingGen: number | null = null;
   let mermaidRenderer: MermaidLazyRenderer | undefined;
+  let krokiController: AbortController | undefined;
   let mermaidStyles: MermaidStyleRegistry | undefined;
   let generationWait: { gen: number; ready: Promise<void>; resolve: () => void } | undefined;
   const [settledGen, setSettledGen] = createSignal(-1);
@@ -1066,9 +1095,11 @@ export function Preview(props: PreviewProps) {
     setTimeout(() => {
       if (isStale(gen) || !articleRef || !mermaidStyles) return;
       const used = new Set<string>();
-      for (const svg of articleRef.querySelectorAll("svg")) {
-        for (const name of Array.from(svg.classList)) {
-          if (name.startsWith(MERMAID_CSS_CLASS_PREFIX)) used.add(name);
+      for (const article of [articleRef, ...Array.from(parkedPreviews.values(), (preview) => preview.article)]) {
+        for (const svg of article.querySelectorAll("svg")) {
+          for (const name of svg.classList) {
+            if (name.startsWith(MERMAID_CSS_CLASS_PREFIX)) used.add(name);
+          }
         }
       }
       // An unchanged diagram may be outside the margin in the new generation:
@@ -1088,7 +1119,7 @@ export function Preview(props: PreviewProps) {
 
   function ensureMermaidStyles(): MermaidStyleRegistry {
     if (!mermaidStyles) {
-      mermaidStyles = new MermaidStyleRegistry(articleRef!.parentElement!, articleRef);
+      mermaidStyles = new MermaidStyleRegistry(articleRef!.parentElement!);
     }
     return mermaidStyles;
   }
@@ -1175,10 +1206,14 @@ export function Preview(props: PreviewProps) {
   onCleanup(stopTrackingAnchor);
   onCleanup(retainMermaidFrame());
   onCleanup(() => {
+    ++renderGen;
+    krokiController?.abort();
     unregisterMermaidFlush();
     invalidateGenerationWait();
     disposeMermaidGeneration();
     mermaidStyles?.dispose();
+    articleRef?.removeEventListener("click", handleClick);
+    parkedPreviews.clear();
   });
 
   // A superseded generation must not mutate the live article.
@@ -1561,59 +1596,108 @@ export function Preview(props: PreviewProps) {
     },
   );
 
+  function replaceArticle(next: HTMLElement) {
+    articleRef!.removeEventListener("click", handleClick);
+    articleRef!.replaceWith(next);
+    articleRef = next;
+    next.classList.add("doc-body");
+    next.classList.toggle("doc-tables-wrap", untrack(() => props.wrapTables));
+    next.addEventListener("click", handleClick);
+    setActiveArticle(next);
+  }
+
+  createEffect(() => props.wrapTables, (wrap) => {
+    articleRef?.classList.toggle("doc-tables-wrap", wrap);
+  });
+
+  createEffect(cacheTabs, (tabs) => {
+    const reusable = new Set(tabs?.filter((tab) => !tab.diskChange).map((tab) => tab.id));
+    let removed = false;
+    for (const id of parkedPreviews.keys()) {
+      if (!reusable.has(id)) removed = parkedPreviews.delete(id) || removed;
+    }
+    if (removed) scheduleMermaidStylePrune(renderGen);
+  });
+
   createEffect(
-    () => ({ html: props.html, tabId: props.currentTabId ?? null, activationVersion: props.tabActivationVersion }),
-    ({ html: _html, tabId, activationVersion }) => {
+    () => ({
+      html: props.html,
+      tabId: props.currentTabId ?? null,
+      activationVersion: props.tabActivationVersion,
+      theme: props.darkMode,
+      tabs: untrack(cacheTabs),
+    }),
+    ({ html: _html, tabId, activationVersion, theme, tabs }) => {
     if (!articleRef) return;
-    clearPendingScrollTarget();
-    // The article stays in the DOM while a file loads. Untag it so a capture
-    // during that window cannot attribute the previous document to the new tab.
-    articleRef.dataset.previewTabId = "";
     const activated = activationVersion !== lastSeenActivationVersion;
+    const themeChanged = theme !== lastTheme;
+    lastSeenActivationVersion = activationVersion;
+    lastTheme = theme;
     if (activated) pendingRestoreTabId = tabId;
     else if (pendingRestoreTabId !== tabId) pendingRestoreTabId = null;
-    lastSeenActivationVersion = activationVersion;
+
+    if (themeChanged) parkedPreviews.clear();
+
+    const gen = ++renderGen;
+    krokiController?.abort();
+    clearPendingScrollTarget();
     stopTrackingAnchor();
     disposeMermaidGeneration();
     invalidateGenerationWait();
     processingGen = null;
+    articleRef.dataset.previewTabId = "";
 
-    // Empty HTML (file switch): hide old content but keep it for layout stability.
-    // Cancel any in-flight pipeline so stale renders don't swap in.
+    const reusable = (id: string) => tabs?.some((tab) => tab.id === id && !tab.diskChange);
+    let cached: RenderedPreview | undefined;
+    if (tabs && tabId !== null && _html) {
+      const candidate = parkedPreviews.get(tabId);
+      parkedPreviews.delete(tabId);
+      if (candidate && candidate.html === _html && reusable(tabId)) cached = candidate;
+    }
+    if (tabs && activated && renderedPreview?.tabId !== tabId) {
+      const leavingId = renderedPreview?.tabId;
+      if (!themeChanged && renderedPreview && leavingId && reusable(leavingId)) {
+        parkedPreviews.set(leavingId, renderedPreview);
+        if (parkedPreviews.size >= RECENT_PREVIEW_LIMIT) {
+          parkedPreviews.delete(parkedPreviews.keys().next().value!);
+        }
+      }
+      replaceArticle(cached?.article ?? document.createElement("article"));
+      setSizeMenuImg(null);
+    } else if (cached) {
+      replaceArticle(cached.article);
+    }
+    renderedPreview = undefined;
+
     if (!_html) {
-      ++renderGen;
       setRenderedHtml(null);
       articleRef.style.opacity = "0";
-      // Drop the cached toc handle: the next render will produce a
-      // fresh one. Holding on to the old one across a file switch
-      // would risk re-attaching a stale tree if the user flipped
-      // panes during the transition.
+      cleanupToc?.();
+      cleanupToc = undefined;
       tocNode = undefined;
       pendingNewDocument = true;
-      // An empty document has NO toc, so clear the shared tree + flag —
-      // otherwise the panel keeps showing the PREVIOUS file's headings when
-      // you switch to an empty (or heading-less, empty-rendered) Markdown file.
-      // Only the active pane owns the shared container; guard on it so an
-      // inactive pane doesn't wipe the active one's toc.
       const emptyTocContainer = untrack(() => props.tocContainer);
       if (emptyTocContainer) {
         emptyTocContainer.textContent = "";
         props.onTocChange(false);
       }
+      scheduleMermaidStylePrune(gen);
       return;
     }
 
-    const gen = ++renderGen;
     beginGenerationWait(gen);
-    const krokiController = new AbortController();
+    const controller = new AbortController();
+    krokiController = controller;
     processingGen = gen;
-    // Invalidate the previous generation immediately: a request arriving
-    // during this render must not consume against an article that is about
-    // to be swapped, nor against the half-processed new one.
     setRenderedHtml(null);
     const isNewDocument = pendingNewDocument;
     pendingNewDocument = false;
-    const sanitizedHtml = sanitizeHtmlFragment(_html);
+    const preview = cached ?? { tabId, html: _html, article: articleRef, toc: undefined, highlighted: false };
+    const highlight = async (article: HTMLElement) => {
+      if (preview.highlighted) return;
+      await highlightCodeBlocks(article, gen, isStale);
+      if (!isStale(gen)) preview.highlighted = true;
+    };
 
     const onDiagramDrawn = (block: HTMLElement) => {
       if (isStale(gen)) return;
@@ -1688,8 +1772,10 @@ export function Preview(props: PreviewProps) {
       // `tocNode` valid as a cache so the next focus flip can move
       // the same node into the now-bound shared container.
       const tocContainer = untrack(() => props.tocContainer);
-      const toc = container.querySelector<HTMLElement>("#toc");
-      tocNode = toc ?? undefined;
+      const toc = cached ? cached.toc : container.querySelector<HTMLElement>("#toc") ?? undefined;
+      tocNode = toc;
+      preview.toc = toc;
+      renderedPreview = preview;
       if (tocContainer) {
         tocContainer.textContent = "";
         if (toc) tocContainer.appendChild(toc);
@@ -1723,10 +1809,9 @@ export function Preview(props: PreviewProps) {
       if (validRestore && scrollContainer) {
         const anchor = validRestore.anchor;
         const block = anchor && tabScrollAnchorBlock(container, anchor);
-        if (anchor && block) {
+        if (cached || !block) setClampedScrollTop(scrollContainer, validRestore.scrollTop);
+        if (anchor && block && (!cached || Math.abs(blockOffsetInViewport(block, scrollContainer) - anchor.offset) > 1)) {
           trackPendingScrollTarget(gen, scrollContainer, container, block, anchor.offset);
-        } else {
-          setClampedScrollTop(scrollContainer, validRestore.scrollTop);
         }
       } else if (scrollToTop && scrollContainer) {
         scrollContainer.scrollTop = 0;
@@ -1736,62 +1821,46 @@ export function Preview(props: PreviewProps) {
       setRenderedHtml(_html);
     }
 
-    // New documents are highlighted in a detached buffer before the swap.
-    // Editing (live preview): swap immediately for instant feedback, then
-    // run highlight/mermaid/kroki in-place progressively.
-    if (isNewDocument) {
-      const buffer = document.createElement("div");
-      buffer.innerHTML = sanitizedHtml;
-      wrapTablesForScroll(buffer);
-      wrapImagesForScroll(buffer);
-      if (props.resolveImageSrc) rewriteImageSources(buffer, props.resolveImageSrc);
-
-      queueMicrotask(() =>
-        finishPostProcessing(gen, [
-          // Syntax highlighting can run against the detached buffer —
-          // it's pure DOM mutation with no document-level
-          // dependencies, and finishing it before the swap eliminates
-          // the FOUC of unhighlighted code.
-          () => highlightCodeBlocks(buffer, gen, isStale),
-          async () => {
-            // Attach the article before observing blocks or reading its typography.
-            const scrollContainer = articleRef!.closest(".content");
-            const prevScrollTop = scrollContainer?.scrollTop ?? 0;
-            articleRef!.replaceChildren(...Array.from(buffer.childNodes));
-            if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
-            afterSwap(articleRef!, true);
-          },
-          // Wait one paint frame so the freshly-attached article has
-          // been laid out before mermaid measures. Without this, the
-          // first block races with layout and throws `firstChild`.
-          () => nextPaintFrame(),
-          () => prepareMermaidGeneration(gen),
-          () => renderKrokiBlocks(articleRef!, gen, isStale, krokiController.signal, onDiagramDrawn),
-        ]),
-      );
-    } else {
-      const scrollContainer = articleRef!.closest(".content");
-      const prevScrollTop = scrollContainer?.scrollTop ?? 0;
-      articleRef!.innerHTML = sanitizedHtml;
-      if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
-      wrapTablesForScroll(articleRef!);
-      wrapImagesForScroll(articleRef!);
-      if (props.resolveImageSrc) rewriteImageSources(articleRef!, props.resolveImageSrc);
-
-      afterSwap(articleRef!, false);
-
-      queueMicrotask(() =>
-        finishPostProcessing(gen, [
-          () => highlightCodeBlocks(articleRef!, gen, isStale),
-          () => prepareMermaidGeneration(gen),
-          () => renderKrokiBlocks(articleRef!, gen, isStale, krokiController.signal, onDiagramDrawn),
-        ]),
-      );
-    }
-    return () => {
-      ++renderGen;
-      krokiController.abort();
+    const renderDiagrams = [
+      () => prepareMermaidGeneration(gen),
+      () => renderKrokiBlocks(preview.article, gen, isStale, controller.signal, onDiagramDrawn),
+    ];
+    const run = (steps: Array<() => Promise<void>>) => {
+      queueMicrotask(() => finishPostProcessing(gen, steps));
     };
+
+    if (cached) {
+      afterSwap(preview.article, false);
+      run([() => highlight(preview.article), ...renderDiagrams]);
+      return;
+    }
+
+    const sanitizedHtml = sanitizeHtmlFragment(_html);
+    const container = isNewDocument ? document.createElement("div") : preview.article;
+    const scrollContainer = articleRef.closest(".content");
+    const prevScrollTop = scrollContainer?.scrollTop ?? 0;
+    container.innerHTML = sanitizedHtml;
+    if (scrollContainer) scrollContainer.scrollTop = prevScrollTop;
+    wrapTablesForScroll(container);
+    wrapImagesForScroll(container);
+    const resolveImageSrc = untrack(() => props.resolveImageSrc);
+    if (resolveImageSrc) rewriteImageSources(container, resolveImageSrc);
+
+    if (isNewDocument) {
+      // A detached buffer keeps unhighlighted code out of the first paint.
+      run([
+        () => highlight(container),
+        async () => {
+          preview.article.replaceChildren(...Array.from(container.childNodes));
+          afterSwap(preview.article, true);
+        },
+        () => nextPaintFrame(),
+        ...renderDiagrams,
+      ]);
+    } else {
+      afterSwap(preview.article, false);
+      run([() => highlight(preview.article), ...renderDiagrams]);
+    }
     },
   );
 
@@ -1904,7 +1973,7 @@ export function Preview(props: PreviewProps) {
     <div class="preview-scope">
       <Show when={hasArticle()}>
         <SearchOverlay
-          container={articleRef!}
+          container={renderedHtml() ? activeArticle() : undefined}
           class="search-overlay-preview"
           portalHost={props.previewOverlayHost ?? overlayHost()}
           visible={props.searchOpen}
@@ -1952,11 +2021,11 @@ export function Preview(props: PreviewProps) {
         <article
           ref={(el) => {
             articleRef = el;
-            setHasArticle(true);
+            el.classList.toggle("doc-tables-wrap", untrack(() => props.wrapTables));
+            el.addEventListener("click", handleClick);
+            setActiveArticle(el);
           }}
-          class={["doc-body", { "doc-tables-wrap": props.wrapTables }]}
-          
-          onClick={handleClick}
+          class="doc-body"
         />
       </div>
     </div>

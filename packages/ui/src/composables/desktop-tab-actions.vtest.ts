@@ -4,9 +4,11 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { EditorView } from "@codemirror/view";
 import type { FSEntry } from "@markdraw/core/types.ts";
 import type { TabState } from "@markdraw/core/tabs.ts";
+import { UNSUPPORTED_CONTENT } from "@markdraw/core/utils.ts";
 import { createFileAutosave } from "../../../../apps/desktop/src/lib/file-autosave.ts";
 import { createFolder } from "../../../../apps/desktop/src/lib/folder.ts";
 import { createFileLoader } from "../../../../apps/desktop/src/lib/file-loader.ts";
+import { createOwnWrites, type OwnWrites } from "../../../../apps/desktop/src/lib/external-reload.ts";
 import { createTabActions } from "../../../../apps/desktop/src/lib/tab-actions.ts";
 import { SCRATCH_ROOT_ID, isScratchPath } from "../../../../apps/desktop/src/lib/scratch.ts";
 import { setLocale } from "@markdraw/i18n/runtime";
@@ -61,7 +63,7 @@ afterEach(async () => {
   }
 });
 
-function fixture() {
+function fixture(readIncludes = false, ownWrites?: OwnWrites) {
   const watcher = new FileWatcher(() => {});
   return createRoot((dispose) => {
     disposeFixtures.push(async () => {
@@ -76,10 +78,14 @@ function fixture() {
       getStoredTheme: () => "system",
       applyTheme: () => {},
       convertAdoc: async () => { throw new Error("Unexpected conversion"); },
-      convertMarkdown: async ({ fileContent }) => ({ html: `<p>${fileContent}</p>`, frontmatter: null, toc: null, meta: {} }),
+      convertMarkdown: async ({ fileContent, readFile }) => {
+        const include = readIncludes ? fileContent.match(/<!-- include: (.+?) -->/)?.[1] : undefined;
+        const text = include ? await readFile?.(include) : fileContent;
+        return { html: `<p>${text}</p>`, frontmatter: null, toc: null, meta: {} };
+      },
     });
     const [rootPaths, setRootPaths] = createSignal(new Map<string, string>());
-    const loader = createFileLoader({ state, rootPaths, watcher });
+    const loader = createFileLoader({ state, rootPaths, watcher, ownWrites });
     const actions: ReturnType<typeof createTabActions> = createTabActions({
       state, rootPaths, syncWatcher: loader.syncWatcher, loadTabContent: loader.loadTabContent,
       loadFileContent: loader.loadFileContent,
@@ -90,7 +96,7 @@ function fixture() {
       onFileRenamed: actions.renameOpenTab,
     });
     createFileAutosave(state, folder.handleEditorSave, () => {});
-    return { state, paneManager, rootPaths, actions, folder, watcher };
+    return { state, paneManager, rootPaths, actions, folder, watcher, loader };
   });
 }
 
@@ -2653,6 +2659,588 @@ describe("desktop document transitions in Solid 2", () => {
   });
 });
 
+describe("reopening a converted tab", () => {
+  function tabCacheFixture(ownWrites?: OwnWrites) {
+    const app = fixture(true, ownWrites);
+    const pane = app.paneManager.activePane();
+    const include = "includes/section.md";
+    const path = `${workspace}/${alpha.path}`;
+    let disk = `Alpha\n<!-- include: ${include} -->`;
+    let section = "Section";
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return [alpha, beta];
+      if (command === "read_file") return args.path === path ? disk : "Beta";
+      if (command === "read_files_relative") return { [include]: section };
+      if (command === "plugin:event|listen") return 1;
+    });
+    const run = async (action: void | Promise<unknown>) => {
+      await vi.advanceTimersByTimeAsync(20);
+      await action;
+      flush();
+    };
+    const finishWatcher = async (event: Promise<void>) => {
+      const settled = vi.fn();
+      void event.then(settled, settled);
+      await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce());
+      await event;
+      flush();
+    };
+    const holdDiskRead = () => {
+      const response = Promise.withResolvers<string>();
+      const reading = Promise.withResolvers<void>();
+      const original = invoke.getMockImplementation()!;
+      let blocked = false;
+      invoke.mockImplementation(async (command, args) => {
+        if (command === "read_file" && args.path === path && !blocked) {
+          blocked = true;
+          reading.resolve();
+          return response.promise;
+        }
+        return original(command, args);
+      });
+      return { response, reading };
+    };
+    const open = (entry: FSEntry) => run(app.actions.openFile(entry, workspace, true));
+    return {
+      ...app, pane, path, include, run, open, finishWatcher, holdDiskRead,
+      get disk() { return disk; },
+      writeDisk: (text: string) => { disk = text; },
+      writeInclude: (text: string) => { section = text; },
+      reads: () => calls("read_file").filter((args) => args.path === path).length,
+    };
+  }
+
+  it.each([
+    { route: "tree", source: "recursive", includeChanged: false },
+    { route: "tab bar", source: "recursive", includeChanged: false },
+    { route: "tab bar", source: "focused", includeChanged: true },
+    { route: "unfocused pane", source: "recursive", includeChanged: true },
+  ] as const)(
+    "refreshes HTML after late disk invalidation from the $source watcher on the $route",
+    async ({ route, source, includeChanged }) => {
+      const ownWrites = createOwnWrites();
+      const app = tabCacheFixture(ownWrites);
+      const { actions, finishWatcher, folder, holdDiskRead, include, loader, open, pane, paneManager, path, reads, run } = app;
+      await folder.openFolderPath(workspace);
+      await open(alpha);
+      const id = pane.tabs.activeTabId()!;
+      ownWrites.mark(path, app.disk);
+      await open(beta);
+
+      const nextText = "Latest text from disk";
+      if (includeChanged) app.writeInclude(nextText);
+      else app.writeDisk(nextText);
+      const { reading, response } = holdDiskRead();
+      const onRefreshed = vi.fn((target: PaneStore, tabId?: string) => {
+        if (tabId) actions.updateLoadedTabCache(target, tabId);
+      });
+      const event = loader.handleWatcherChange(includeChanged ? [path, `${workspace}/${include}`] : [path], source, onRefreshed);
+      try {
+        await reading.promise;
+        if (route === "unfocused pane") {
+          const right = paneManager.splitFromActive()!;
+          flush();
+          await open(beta);
+          expect(paneManager.activePane()).toBe(right);
+        }
+        if (route === "tree") await open(alpha);
+        else await run(actions.activateTab(pane, id));
+        expect(pane.tabs.activeTabId()).toBe(id);
+        expect(pane.html()).toBe("<p>Section</p>");
+        expect(pane.tabs.getActiveTab()?.diskChange).toBeUndefined();
+        expect(reads()).toBe(2);
+
+        response.resolve(app.disk);
+        await finishWatcher(event);
+        expect(pane.html()).toBe(`<p>${nextText}</p>`);
+        expect(pane.tabs.getActiveTab()).toMatchObject({ html: `<p>${nextText}</p>`, diskChange: undefined });
+        expect(pane.loading()).toBe(false);
+        expect(reads()).toBe(3);
+        expect(onRefreshed).toHaveBeenCalledExactlyOnceWith(pane, id, !includeChanged);
+        if (route === "unfocused pane") {
+          expect(paneManager.activePane()).not.toBe(pane);
+          expect(paneManager.activePane().html()).toBe("<p>Beta</p>");
+        }
+      } finally {
+        response.resolve(app.disk);
+        await finishWatcher(event);
+      }
+    },
+  );
+
+  it("uses the late watcher focus to verify an autosave echo for the newly focused pane", async () => {
+    const ownWrites = createOwnWrites();
+    const app = tabCacheFixture(ownWrites);
+    const { actions, finishWatcher, folder, holdDiskRead, loader, open, pane, paneManager, path, state } = app;
+    await folder.openFolderPath(workspace);
+    await open(alpha);
+    ownWrites.mark(path, app.disk);
+    const id = pane.tabs.activeTabId()!;
+    pane.setHtml("<p>Previous preview error</p>");
+    state.notePreviewFailed(pane, workspace, alpha.path, id);
+    paneManager.splitFromActive();
+    flush();
+    await open(beta);
+    const { reading, response } = holdDiskRead();
+    const onRefreshed = vi.fn();
+    const event = loader.handleWatcherChange([path], "focused", onRefreshed);
+    try {
+      await reading.promise;
+      paneManager.setActivePane(0);
+      flush();
+      expect(paneManager.activePane()).toBe(pane);
+      expect(pane.html()).toBe("<p>Previous preview error</p>");
+      response.resolve(app.disk);
+      await finishWatcher(event);
+      expect(pane.html()).toBe("<p>Section</p>");
+      expect(pane.tabs.getActiveTab()?.diskChange).toBeUndefined();
+      expect(onRefreshed).toHaveBeenCalledExactlyOnceWith(pane, id, false);
+    } finally {
+      response.resolve(app.disk);
+      await finishWatcher(event);
+    }
+  });
+
+  it.each(["unsaved edit", "auto-refresh disabled"] as const)(
+    "keeps the mark from a late watcher event with %s",
+    async (condition) => {
+      const ownWrites = createOwnWrites();
+      const app = tabCacheFixture(ownWrites);
+      const { finishWatcher, folder, holdDiskRead, loader, open, pane, path, reads, state } = app;
+      await folder.openFolderPath(workspace);
+      await open(alpha);
+      ownWrites.mark(path, app.disk);
+      const before = app.disk;
+      app.writeDisk("External text");
+      const { reading, response } = holdDiskRead();
+      const event = loader.handleWatcherChange([path], "recursive");
+      const expected = condition === "unsaved edit" ? `${before}\nUnsaved edit` : before;
+      try {
+        await reading.promise;
+        if (condition === "unsaved edit") pane.setEditorContent(expected);
+        else state.setAutoRefresh(false);
+        flush();
+        response.resolve(app.disk);
+        await finishWatcher(event);
+        expect(pane.tabs.getActiveTab()?.diskChange).toBeDefined();
+        expect(pane.editorContent()).toBe(expected);
+        expect(pane.savedContent()).toBe(before);
+        expect(pane.html()).toBe("<p>Section</p>");
+        // The read needed to classify the notification is the only extra read.
+        expect(reads()).toBe(2);
+      } finally {
+        response.resolve(app.disk);
+        await finishWatcher(event);
+      }
+    },
+  );
+
+  it.each([
+    { order: "focused only", sources: ["focused"], unfocused: false },
+    { order: "focused first", sources: ["focused", "recursive"], unfocused: false },
+    { order: "recursive first", sources: ["recursive", "focused"], unfocused: false },
+    { order: "recursive on an unfocused pane", sources: ["recursive"], unfocused: true },
+  ] as const)("refreshes an include with unsaved edits ($order)", async ({ sources, unfocused }) => {
+    const app = tabCacheFixture();
+    const { disk, finishWatcher, folder, include, loader, open, pane, paneManager, state } = app;
+    await folder.openFolderPath(workspace);
+    await open(alpha);
+    expect(pane.html()).toBe("<p>Section</p>");
+
+    const edited = `${disk}\nUnsaved user edit`;
+    pane.setEditorContent(edited);
+    flush();
+    if (unfocused) {
+      paneManager.splitFromActive();
+      flush();
+      await open(beta);
+      expect(paneManager.activePane()).not.toBe(pane);
+    }
+    app.writeInclude("Updated section");
+    for (const source of sources) {
+      await finishWatcher(loader.handleWatcherChange([`${workspace}/${include}`], source));
+    }
+
+    expect(pane.html()).toBe("<p>Updated section</p>");
+    expect(pane.editorContent()).toBe(edited);
+    expect(pane.savedContent()).toBe(disk);
+    expect(pane.tabs.getActiveTab()?.diskChange).toBeUndefined();
+    expect(await state.previewReflects(pane, workspace, alpha.path, edited)).toBe(true);
+    if (unfocused) expect(paneManager.activePane().html()).toBe("<p>Beta</p>");
+  });
+
+  it.each([
+    { source: "focused", batch: "file only" },
+    { source: "recursive", batch: "file and include" },
+  ] as const)("skips a main-file change with unsaved edits ($batch)", async ({ source, batch }) => {
+    const app = tabCacheFixture();
+    const { disk, finishWatcher, folder, include, loader, open, pane, path, reads } = app;
+    await folder.openFolderPath(workspace);
+    await open(alpha);
+    const edited = `${disk}\nUnsaved user edit`;
+    pane.setEditorContent(edited);
+    flush();
+
+    const paths = [path];
+    if (batch === "file and include") {
+      // Saving the main file can leave the same bytes on disk. The main-file
+      // path still prevents this batch from becoming an include-only refresh.
+      paths.push(`${workspace}/${include}`);
+      app.writeInclude("Updated section");
+    } else {
+      app.writeDisk("External main-file text");
+    }
+    const onRefreshed = vi.fn();
+    await finishWatcher(loader.handleWatcherChange(paths, source, onRefreshed));
+
+    expect(pane.tabs.getActiveTab()?.diskChange).toBeDefined();
+    expect(pane.html()).toBe("<p>Section</p>");
+    expect(pane.editorContent()).toBe(edited);
+    expect(pane.savedContent()).toBe(disk);
+    expect(reads()).toBe(1);
+    expect(onRefreshed).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { error: "No such file or directory", edit: "before the event" },
+    { error: "Stream did not contain valid UTF-8", edit: "before the event" },
+    { error: "No such file or directory", edit: "during the read" },
+    { error: "Stream did not contain valid UTF-8", edit: "during the read" },
+    { error: "Permission denied", edit: "during the read" },
+    { error: "No such file or directory", edit: "none" },
+  ])("handles a watcher read error in an unfocused pane ($error, edit: $edit)", async ({ error, edit }) => {
+    const { actions, finishWatcher, folder, loader, open, pane, paneManager } = tabCacheFixture();
+    const notes: FSEntry = { kind: "file", name: "notes.txt", path: "notes.txt" };
+    const path = `${workspace}/${notes.path}`;
+    const saved = "Saved notes";
+    const edited = "Unsaved notes";
+    const response = Promise.withResolvers<string>();
+    const original = invoke.getMockImplementation()!;
+    let failRead = false;
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return [notes, beta];
+      if (command !== "read_file" || args.path !== path) return original(command, args);
+      if (!failRead) return saved;
+      if (edit === "during the read") return response.promise;
+      throw new Error(error);
+    });
+    await folder.openFolderPath(workspace);
+    await open(notes);
+    expect(pane.editorContent()).toBe(saved);
+    expect(pane.savedContent()).toBe(saved);
+    const id = pane.tabs.activeTabId()!;
+    paneManager.splitFromActive();
+    flush();
+    await open(beta);
+    expect(paneManager.activePane()).not.toBe(pane);
+
+    if (edit === "before the event") {
+      pane.setEditorContent(edited);
+      flush();
+      actions.updateLoadedTabCache(pane, id);
+    }
+    flush();
+    failRead = true;
+    const event = loader.handleWatcherChange([path], "recursive", (target, tabId) => {
+      if (tabId) actions.updateLoadedTabCache(target, tabId);
+    });
+    try {
+      if (edit === "during the read") {
+        await vi.advanceTimersByTimeAsync(10);
+        expect(calls("read_file").filter((args) => args.path === path)).toHaveLength(2);
+        pane.setEditorContent(edited);
+        flush();
+        response.reject(new Error(error));
+      }
+      await finishWatcher(event);
+    } finally {
+      response.resolve(saved);
+      await finishWatcher(event);
+    }
+
+    const expected = edit === "none"
+      ? { editorContent: "", savedContent: "", html: UNSUPPORTED_CONTENT }
+      : { editorContent: edited, savedContent: saved, html: "" };
+    expect(pane.editorContent()).toBe(expected.editorContent);
+    expect(pane.savedContent()).toBe(expected.savedContent);
+    expect(pane.html()).toBe(expected.html);
+    expect(pane.tabs.getTab(id)?.diskChange).toBeDefined();
+    expect(pane.tabs.getTab(id)).toMatchObject(expected);
+    expect(calls("read_file").filter((args) => args.path === path)).toHaveLength(edit === "before the event" ? 1 : 2);
+    expect(paneManager.activePane().html()).toBe("<p>Beta</p>");
+  });
+
+  it.each(["active tab bar", "active tree", "inactive tab bar"])(
+    "preserves unsaved text on the %s after an include event",
+    async (route) => {
+      const { folder, pane, open, disk, state, actions, include, loader, run, reads } = tabCacheFixture();
+      await folder.openFolderPath(workspace);
+      await open(alpha);
+      const id = pane.tabs.activeTabId()!;
+      const edited = `${disk}\nUnsaved user edit`;
+      state.debouncedConvert(edited, alpha.path, async () => null);
+      flush();
+      expect(pane.tabs.getTab(id)?.editorContent).toBe(disk);
+      if (route === "inactive tab bar") await open(beta);
+      await loader.markDiskChanges([`${workspace}/${include}`]);
+      flush();
+      const mark = pane.tabs.getTab(id)?.diskChange;
+      expect(mark).toBeDefined();
+
+      const selection = route === "active tree" ? actions.openFile(alpha, workspace) : actions.activateTab(pane, id);
+      try {
+        flush();
+        expect(pane.loading()).toBe(false);
+        expect(pane.html()).toBe("<p>Section</p>");
+      } finally {
+        await run(selection);
+      }
+
+      expect(pane.editorContent()).toBe(edited);
+      expect(pane.savedContent()).toBe(disk);
+      expect(pane.tabs.getTab(id)?.diskChange).toBe(mark);
+      expect(reads()).toBe(1);
+    },
+  );
+
+  it.each(["stays on the tab", "switches away"])(
+    "preserves edits made during a disk reload when the user %s",
+    async (route) => {
+      const { folder, pane, open, disk, actions, path, loader, run } = tabCacheFixture();
+      await folder.openFolderPath(workspace);
+      await open(alpha);
+      const id = pane.tabs.activeTabId()!;
+      await open(beta);
+      await loader.markDiskChanges([path]);
+      flush();
+      const held = Promise.withResolvers<string>();
+      const started = vi.fn();
+      const original = invoke.getMockImplementation()!;
+      invoke.mockImplementation(async (command, args) => {
+        if (command === "read_file" && args.path === path) {
+          started();
+          return held.promise;
+        }
+        return original(command, args);
+      });
+      const loading = actions.activateTab(pane, id);
+      try {
+        await vi.advanceTimersByTimeAsync(5);
+        expect(started).toHaveBeenCalledOnce();
+        const edits = `${disk}\nTyped during the read`;
+        pane.setEditorContent(edits);
+        pane.tabs.updateTabContent(id, { previewScrollTop: 137, previewScrollAnchor: { blockIndex: 0, offset: 12 } });
+        flush();
+        if (route === "switches away") {
+          pane.tabs.setScrollCapture(() => ({ previewScrollTop: 0, previewScrollAnchor: null }));
+          await run(actions.activateTab(pane, pane.tabs.findTabByFile(beta.path, workspace)!.id));
+          expect(pane.tabs.getTab(id)).toMatchObject({
+            editorContent: edits,
+            previewScrollTop: 137,
+            previewScrollAnchor: { blockIndex: 0, offset: 12 },
+          });
+        }
+        held.resolve("External text from the pending read");
+        await run(loading);
+        if (route === "switches away") await run(actions.activateTab(pane, id));
+        expect(pane.editorContent()).toBe(edits);
+        expect(pane.savedContent()).toBe(disk);
+        expect(pane.html()).toBe("<p>Section</p>");
+        expect(pane.tabs.getTab(id)?.diskChange).toBeDefined();
+        expect(pane.loading()).toBe(false);
+      } finally {
+        held.resolve("");
+        await run(loading);
+      }
+    },
+  );
+
+  it.each(["recursive first", "focused first", "overlapping"])(
+    "keeps a saved preview through an autosave echo with the %s watcher delivery",
+    async (order) => {
+      const ownWrites = createOwnWrites();
+      const app = tabCacheFixture(ownWrites);
+      const { folder, pane, open, loader, path, actions, run, reads, include, finishWatcher } = app;
+      await folder.openFolderPath(workspace);
+      await open(alpha);
+      const id = pane.tabs.activeTabId()!;
+      const saved = `${app.disk}\nSaved edit`;
+      ownWrites.mark(path, saved);
+      app.writeDisk(saved);
+      pane.setEditorContent(saved);
+      pane.setSavedContent(saved);
+      app.state.notePreviewed(pane, workspace, alpha.path, saved);
+      flush();
+      const paths = [path];
+      const recursive = () => finishWatcher(loader.handleWatcherChange(paths, "recursive"));
+      const focused = () => finishWatcher(loader.handleWatcherChange(paths, "focused"));
+
+      if (order === "recursive first") await recursive();
+      if (order === "overlapping") await Promise.all([focused(), recursive()]);
+      else await focused();
+      if (order === "focused first") await recursive();
+      flush();
+      expect(pane.tabs.getTab(id)?.diskChange).toBeUndefined();
+      const beforeReturn = reads();
+      await open(beta);
+      await run(actions.activateTab(pane, id));
+      expect(reads()).toBe(beforeReturn);
+      expect(pane.html()).toBe("<p>Section</p>");
+
+      await open(beta);
+      app.writeInclude("Updated include");
+      await loader.markDiskChanges([path, `${workspace}/${include}`]);
+      flush();
+      expect(pane.tabs.getTab(id)?.diskChange).toBeDefined();
+      await run(actions.activateTab(pane, id));
+      expect(pane.html()).toBe("<p>Updated include</p>");
+
+      await open(beta);
+      app.writeDisk("External text after the save");
+      await recursive();
+      flush();
+      expect(pane.tabs.getTab(id)?.diskChange).toBeDefined();
+      await run(actions.activateTab(pane, id));
+      expect(pane.html()).toBe("<p>External text after the save</p>");
+    },
+  );
+
+  it.each([
+    { changed: "file", expectedHtml: "<p>Replacement main file</p>" },
+    { changed: "include", expectedHtml: "<p>Replacement section</p>" },
+  ])("retains the $changed disk change when moving a dirty tab between panes", async ({ changed, expectedHtml }) => {
+    const app = tabCacheFixture();
+    const { actions, disk, finishWatcher, folder, include, loader, open, pane, paneManager, path, reads, run } = app;
+    await folder.openFolderPath(workspace);
+    await open(alpha);
+    const id = pane.tabs.activeTabId()!;
+    const edited = `${disk}\nLocal text`;
+    pane.setEditorContent(edited);
+    flush();
+    await open(beta);
+
+    if (changed === "file") app.writeDisk("Replacement main file");
+    else app.writeInclude("Replacement section");
+    await finishWatcher(loader.handleWatcherChange([changed === "file" ? path : `${workspace}/${include}`], "recursive"));
+    const diskChange = pane.tabs.getTab(id)?.diskChange;
+    expect(diskChange).toBeDefined();
+    const readsBeforeMove = reads();
+
+    actions.moveTab(id, 0);
+    await run();
+    const target = paneManager.activePane();
+    const targetId = target.tabs.activeTabId()!;
+    expect(target).not.toBe(pane);
+    expect(target.editorContent()).toBe(edited);
+    expect(reads()).toBe(readsBeforeMove);
+    expect(target.tabs.getTab(targetId)?.diskChange).toBe(diskChange);
+
+    target.setEditorContent(disk);
+    flush();
+    await run(actions.activateTab(target, targetId));
+    expect(reads()).toBe(readsBeforeMove + 1);
+    expect(target.html()).toBe(expectedHtml);
+    expect(target.tabs.getTab(targetId)?.diskChange).toBeUndefined();
+  });
+
+  it.each(["unchanged", "file", "include"])("reopens through openFile after a %s disk event", async (change) => {
+    const { loader, paneManager, actions, folder } = fixture(true);
+    const include = "includes/section.md";
+    let disk = `Alpha\n<!-- include: ${include} -->`;
+    let section = "Original include";
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return [alpha, beta];
+      if (command === "read_file") return args.path === `${workspace}/alpha.md` ? disk : "Beta";
+      if (command === "read_files_relative") return { [include]: section };
+      if (command === "plugin:event|listen") return 1;
+    });
+    await folder.openFolderPath(workspace);
+    const pane = paneManager.activePane();
+    const open = async (entry: FSEntry) => {
+      const opening = actions.openFile(entry, workspace, true);
+      await vi.advanceTimersByTimeAsync(10);
+      await opening;
+    };
+    await open(alpha);
+    const tabId = pane.tabs.activeTabId()!;
+    expect(pane.tabs.getTab(tabId)?.includePaths).toEqual([include]);
+    await open(beta);
+    if (change === "file") disk = `Edited alpha\n<!-- include: ${include} -->`;
+    if (change === "include") section = "Edited include";
+    if (change !== "unchanged") {
+      loader.markDiskChanges([`${workspace}/${change === "file" ? alpha.path : include}`]);
+      flush();
+      expect(pane.tabs.getTab(tabId)?.diskChange).toBeDefined();
+      expect(pane.tabs.getActiveTab()?.diskChange).toBeUndefined();
+    }
+
+    await open(alpha);
+    expect(pane.tabs.activeTabId()).toBe(tabId);
+    expect(pane.html()).toBe(`<p>${section}</p>`);
+    expect(pane.editorContent()).toBe(disk);
+    expect(pane.tabs.getActiveTab()?.diskChange).toBeUndefined();
+    const fileReads = calls("read_file").filter((args) => args.path === `${workspace}/alpha.md`);
+    expect(fileReads).toHaveLength(change === "unchanged" ? 1 : 2);
+    expect(calls("read_files_relative")).toHaveLength(change === "unchanged" ? 1 : 2);
+  });
+
+  it("retries a selected tab when an include changes during its disk read", async () => {
+    const { loader, paneManager, actions, folder } = fixture(true);
+    const include = "includes/section.md";
+    const firstRead = Promise.withResolvers<Record<string, string>>();
+    let section = "Original";
+    let paused = false;
+    let blocked = false;
+    invoke.mockImplementation(async (command, args) => {
+      if (command === "read_dir") return [alpha, beta];
+      if (command === "read_file") return args.path === `${workspace}/alpha.md`
+        ? `Alpha\n<!-- include: ${include} -->`
+        : "Beta";
+      if (command === "read_files_relative") {
+        if (paused && !blocked) {
+          blocked = true;
+          return firstRead.promise;
+        }
+        return { [include]: section };
+      }
+      if (command === "plugin:event|listen") return 1;
+    });
+    await folder.openFolderPath(workspace);
+    const pane = paneManager.activePane();
+    const advance = async (opening: Promise<void>) => {
+      await vi.advanceTimersByTimeAsync(20);
+      await opening;
+    };
+    await advance(actions.openFile(alpha, workspace, true));
+    const id = pane.tabs.activeTabId()!;
+    await advance(actions.openFile(beta, workspace, true));
+    loader.markDiskChanges([`${workspace}/${include}`]);
+    flush();
+    paused = true;
+    const opening = actions.activateTab(pane, id);
+    try {
+      await vi.advanceTimersByTimeAsync(5);
+      expect(blocked).toBe(true);
+      expect(pane.html()).toBe("");
+      section = "Latest";
+      loader.markDiskChanges([`${workspace}/${include}`]);
+      flush();
+      firstRead.resolve({ [include]: "Intermediate" });
+
+      await vi.advanceTimersByTimeAsync(2);
+      expect(pane.html()).not.toContain("Intermediate");
+      await advance(Promise.resolve(opening));
+      expect(pane.html()).toBe("<p>Latest</p>");
+      expect(pane.tabs.getActiveTab()?.diskChange).toBeUndefined();
+      expect(calls("read_files_relative")).toHaveLength(3);
+    } finally {
+      firstRead.resolve({ [include]: "Intermediate" });
+      await advance(Promise.resolve(opening));
+    }
+
+  });
+});
+
 describe("activation of an unloaded tab", () => {
   it.each(["before", "after"])("watches Alpha and its includes when focus returns %s the first read", async (when) => {
     const { paneManager, actions, folder } = fixture();
@@ -3020,6 +3608,90 @@ describe("activation of an unloaded tab", () => {
 });
 
 describe("rename and move re-aim the shared watcher", () => {
+  it.each([
+    ["selection", "rename"],
+    ["selection", "move within root"],
+    ["selection", "move across roots"],
+    ["watcher", "rename"],
+    ["watcher", "move within root"],
+    ["watcher", "move across roots"],
+  ] as const)(
+    "finishes a pending disk reload from %s after a %s",
+    async (source, route) => {
+      const { loader, paneManager, actions, folder } = fixture();
+      const other = "/other";
+      const destinationRoot = route === "move across roots" ? other : workspace;
+      const entry: FSEntry = route === "rename"
+        ? { kind: "file", path: "renamed.md", name: "renamed.md" }
+        : { ...alpha, path: "sub/alpha.md" };
+      const sub: FSEntry = { kind: "directory", path: "sub", name: "sub", children: [entry] };
+      const held = Promise.withResolvers<string>();
+      const started = vi.fn();
+      let pause = false;
+      let moved = false;
+      invoke.mockImplementation(async (command, args) => {
+        if (command === "read_dir") {
+          if (args.path === other) return [{ ...sub, children: moved ? [entry] : [] }];
+          if (!moved) return [alpha, beta];
+          if (route === "move across roots") return [beta];
+          return [route === "rename" ? entry : sub, beta];
+        }
+        if (command === "rename_file" || command === "move_path") moved = true;
+        if (command === "read_file") {
+          if (args.path === `${workspace}/alpha.md`) {
+            if (!pause) return "Original Alpha";
+            started();
+            return held.promise;
+          }
+          return args.path === `${destinationRoot}/${entry.path}` ? "Updated Alpha" : "Beta";
+        }
+        if (command === "plugin:event|listen") return 1;
+      });
+      if (destinationRoot === other) await folder.openFolderPath(other);
+      await folder.openFolderPath(workspace);
+      const pane = paneManager.activePane();
+      const run = async (action: void | Promise<unknown>) => {
+        await vi.advanceTimersByTimeAsync(20);
+        await action;
+        flush();
+      };
+      await run(actions.openFile(alpha, workspace, true));
+      const id = pane.tabs.activeTabId()!;
+      const paths = [`${workspace}/alpha.md`];
+      if (source === "selection") {
+        await run(actions.openFile(beta, workspace, true));
+        await loader.markDiskChanges(paths);
+        flush();
+      }
+      pause = true;
+      const loading = source === "selection"
+        ? actions.activateTab(pane, id)
+        : loader.handleWatcherChange(paths, "recursive");
+      try {
+        await vi.advanceTimersByTimeAsync(5);
+        expect(started).toHaveBeenCalledOnce();
+        expect(pane.html()).toBe(source === "selection" ? "" : "<p>Original Alpha</p>");
+        if (route === "rename") await folder.handleRename(alpha, workspace, entry.name);
+        else await folder.handleMove(alpha, "sub", workspace, destinationRoot);
+        flush();
+        expect(pane.selectedFile()?.path).toBe(entry.path);
+        expect(pane.selectedRootId()).toBe(destinationRoot);
+        await vi.advanceTimersByTimeAsync(20);
+        expect(pane.html()).toBe("<p>Updated Alpha</p>");
+        held.resolve("Late old response");
+        await run(loading);
+        expect(pane.html()).toBe("<p>Updated Alpha</p>");
+        expect(pane.editorContent()).toBe("Updated Alpha");
+        expect(pane.tabs.getActiveTab()?.diskChange).toBeUndefined();
+        expect(pane.loading()).toBe(false);
+        expect(calls("read_file").filter((args) => args.path === `${destinationRoot}/${entry.path}`)).toHaveLength(1);
+      } finally {
+        held.resolve("");
+        await run(loading);
+      }
+    },
+  );
+
   it("points the watcher at a renamed file's new path", async () => {
     const { folder, paneManager, watcher } = fixture();
     const renamed = { ...alpha, path: "renamed.md", name: "renamed.md" };
