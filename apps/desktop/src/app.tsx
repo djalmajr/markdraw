@@ -18,7 +18,7 @@ import { captureMcpState, listenForMcpState, type McpStateRequest } from "./lib/
 import { createMcpApprovalQueue, McpApprovalDialog, type McpApprovalRequest } from "@markdraw/ui/components/mcp-approval-dialog.tsx";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { createAppState } from "@markdraw/ui/composables/create-app-state.ts";
+import { createAppState, type FragmentSource } from "@markdraw/ui/composables/create-app-state.ts";
 import { createPaneManager } from "@markdraw/ui/composables/create-pane-manager.ts";
 import { createSessionRestore, type PaneStore } from "@markdraw/ui/composables/create-pane-store.ts";
 import { exportChatArtifact, savePlanArtifact } from "./lib/ai-artifacts.ts";
@@ -168,7 +168,9 @@ import {
 import { fileKind, isSupportedFile } from "@markdraw/core/utils.ts";
 import { dedupeTokenLabel, excalidrawSceneToOutline, excalidrawSelectionToContext } from "@markdraw/ui/composables/ai-context.ts";
 import { buildBacklinkIndex } from "@markdraw/core/backlinks.ts";
+import { buildAnchorIndex } from "@markdraw/core/asciidoc-anchors.ts";
 import { flattenWorkspace } from "@markdraw/core/file-index.ts";
+import { createAnchorNavigation, type AnchorIndexState } from "./lib/anchor-navigation.ts";
 import { createDir, createFile, readFileByPath, readFileContent, writeFile } from "./lib/fs.ts";
 import { extractPdfText } from "./lib/pdf-text.ts";
 import { fetchMediaBytes, routeMediaAsset } from "./lib/media-asset.ts";
@@ -2453,16 +2455,24 @@ export function App() {
   // both index builders — re-reading per index would double the
   // I/O for every workspace event.
   const [workspaceSymbols, setWorkspaceSymbols] = createSignal<readonly WorkspaceSymbol[]>([]);
+  let anchorIndexState: AnchorIndexState = { index: null, pending: null };
   let workspaceBuildToken = 0;
   createEffect(
     () => ({ roots: state.rootsList(), paths: rootPaths() }),
     ({ roots, paths }) => {
       if (roots.length === 0 || paths.size === 0) {
+        // Invalidate an in-flight build too: otherwise a read started before
+        // the last root closed can repopulate the index afterwards.
+        workspaceBuildToken++;
+        anchorIndexState = { index: new Map(), pending: null };
         state.setBacklinkIndex(new Map());
         setWorkspaceSymbols([]);
         return;
       }
       const token = ++workspaceBuildToken;
+      let finishBuild!: () => void;
+      const pending = new Promise<void>((resolve) => { finishBuild = resolve; });
+      anchorIndexState = { index: null, pending };
       void (async () => {
         const indexed = flattenWorkspace(roots).filter((f) => isSupportedFile(f.path));
         const filesForBacklinks: { path: string; content: string }[] = [];
@@ -2489,11 +2499,18 @@ export function App() {
           }
         }
         if (token !== workspaceBuildToken) return; // newer build started
+        anchorIndexState = { index: buildAnchorIndex(filesForSymbols), pending: null };
         state.setBacklinkIndex(buildBacklinkIndex(filesForBacklinks));
         setWorkspaceSymbols(buildWorkspaceSymbols(filesForSymbols));
-      })();
+      })().finally(() => finishBuild());
     },
   );
+
+  const handleUnresolvedFragment = createAnchorNavigation({
+    getState: () => anchorIndexState,
+    getActivePane: state.paneManager.activePane,
+    navigate: navigation.handleNavigate,
+  });
 
   // ── Workspace index (Fast/Complete tiers, DJA-15) ─────────────────────────
   // Enumerate → sha-diff → chunk → embed (Complete) → push to the per-root Rust
@@ -3681,6 +3698,9 @@ export function App() {
       onAddFileMention={(f) => void addFileMention(f)}
       onDoubleClickFile={handleOpenInNewTab}
       onNavigate={navigation.handleNavigate}
+      onUnresolvedFragment={(_id, source?: FragmentSource) => {
+        if (source) void handleUnresolvedFragment(source);
+      }}
       onOpenExternal={(url) => openUrl(url)}
       onOpenFolder={folder.handleOpenFolder}
       onOpenRecentFile={handleOpenRecentFile}

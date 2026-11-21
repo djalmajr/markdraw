@@ -869,6 +869,8 @@ interface PreviewProps {
   onHeadingDiscarded?: (heading: string) => void;
   /** Called when user clicks a document link (.adoc/.md); receives the resolved path and optional fragment */
   onNavigate: (path: string, fragment?: string | null) => void;
+  /** Called for a `#fragment` link whose target is not in this document. */
+  onUnresolvedFragment?: (id: string) => void;
   /** Open an external URL (http/https) in the system browser. Desktop-only. */
   onOpenExternal?: (url: string) => void;
   /**
@@ -1336,7 +1338,7 @@ export function Preview(props: PreviewProps) {
     if (href.startsWith("#")) {
       e.preventDefault();
       const targetId = decodeURIComponent(href.slice(1));
-      if (targetId) scrollToFragment(targetId);
+      if (targetId && !scrollToFragment(targetId)) props.onUnresolvedFragment?.(targetId);
       return;
     }
 

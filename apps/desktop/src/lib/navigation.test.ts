@@ -44,14 +44,16 @@ function makeNavigation(
 ) {
   const loaded: Array<{ entry: FSEntry; rootId?: string }> = [];
   const opened: Array<{ entry: FSEntry; rootId: string; pinned: boolean; pushHistory: boolean }> = [];
-  const fragments: Array<string | null> = [];
+  const fragments: Array<{ fragment: string | null; paneId?: string | null }> = [];
   const htmlTargets: Array<{ paneId: string; target: { rootId: string; path: string; fragment: string } | null }> = [];
   const rootsAdded: Array<{ id: string; name: string; collapsed: boolean; entries: FSEntry[] }> = [];
   const selectedRoots: Array<string | null> = [];
   const roots = new Map(Object.keys(entriesByRoot).map((id) => [id, `/work/${id}`]));
   for (const [id, path] of Object.entries(overrides)) roots.set(id, path);
   const state = {
-    setPendingFragment: (fragment: string | null) => fragments.push(fragment),
+    setPendingFragment: (fragment: string | null, paneId?: string | null) => {
+      fragments.push({ fragment, paneId });
+    },
     paneManager: { activePane: () => ({ paneId: "pane-0" }) },
     setPendingHtmlNavigation: (paneId: string, target: { rootId: string; path: string; fragment: string } | null) => htmlTargets.push({ paneId, target }),
     navStack: () => history?.stack ?? [],
@@ -124,7 +126,7 @@ describe("createNavigation.handleNavigate — links .html sem irmão .adoc", () 
     expect(toasts).toEqual([
       { title: "File not found", description: "diagrams/arquitetura.adoc", duration: 4000 },
     ]);
-    expect(fragments).toEqual(["secao"]);
+    expect(fragments).toEqual([{ fragment: "secao", paneId: "pane-0" }]);
   });
 
   it("mantém o fragmento quando o fallback .html abre", async () => {
@@ -132,7 +134,7 @@ describe("createNavigation.handleNavigate — links .html sem irmão .adoc", () 
       root: ["diagrams/arquitetura.html"],
     });
     await navigation.handleNavigate("diagrams/arquitetura.adoc", "secao");
-    expect(fragments).toEqual(["secao"]);
+    expect(fragments).toEqual([{ fragment: "secao", paneId: "pane-0" }]);
     expect(opened.map((call) => call.entry.path)).toEqual(["diagrams/arquitetura.html"]);
   });
 
@@ -206,6 +208,41 @@ describe("createNavigation.handleNavigate — links .html sem irmão .adoc", () 
     navigation.handleGoBack();
     expect(loaded.map((call) => [call.entry.path, call.rootId])).toEqual([["a.adoc", "root"]]);
     expect(opened).toEqual([]);
+  });
+});
+
+describe("createNavigation — dono do fragmento", () => {
+  it("grava o painel ativo como dono do fragmento", async () => {
+    const { navigation, fragments, htmlTargets } = makeNavigation({
+      root: ["capítulo%20um.adoc"],
+    });
+    await navigation.handleNavigate("/work/root/cap%C3%ADtulo%2520um.adoc", "alvo");
+    expect(fragments).toEqual([{ fragment: "alvo", paneId: "pane-0" }]);
+    expect(htmlTargets[0]).toEqual({ paneId: "pane-0", target: null });
+  });
+
+  it("F6 abre o caminho qualificado com % literal na raiz e no arquivo", async () => {
+    const rootId = "/work/Guias%20São Paulo";
+    const path = "capítulo%20um.adoc";
+    const { navigation, opened, fragments } = makeNavigation({
+      root: ["capítulo um.adoc", path],
+      [rootId]: ["capítulo um.adoc", path],
+    }, { [rootId]: rootId, root: "/work/Guias São Paulo" });
+    await navigation.handleNavigate({ path, rootId }, "alvo");
+    expect(opened).toEqual([{
+      entry: { name: path, path, kind: "file" },
+      rootId, pinned: false, pushHistory: true,
+    }]);
+    expect(fragments).toEqual([{ fragment: "alvo", paneId: "pane-0" }]);
+  });
+
+  it("não busca em outra raiz quando o destino qualificado saiu da árvore", async () => {
+    const { navigation, opened, fragments } = makeNavigation({
+      root: ["target.adoc"], other: [],
+    });
+    await navigation.handleNavigate({ rootId: "other", path: "target.adoc" }, "alvo");
+    expect(opened).toEqual([]);
+    expect(fragments).toEqual([]);
   });
 });
 

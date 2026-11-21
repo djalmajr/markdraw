@@ -3805,3 +3805,25 @@ describe("AppState — tray icon preference", () => {
     });
   });
 });
+
+describe("AppState — fragmento pendente com dono (F6)", () => {
+  it("grava o painel que pediu o fragmento e o limpa ao apagar", () => {
+    withState((state) => {
+      expect(state.pendingFragmentOwner()).toBeNull();
+      state.setPendingFragment("alvo", "pane-2");
+      expect(state.pendingFragment()).toBe("alvo");
+      expect(state.pendingFragmentOwner()).toBe("pane-2");
+      state.setPendingFragment(null);
+      expect(state.pendingFragment()).toBeNull();
+      expect(state.pendingFragmentOwner()).toBeNull();
+    });
+  });
+
+  it("mantém compatibilidade com chamadores sem dono", () => {
+    withState((state) => {
+      state.setPendingFragment("secao");
+      expect(state.pendingFragment()).toBe("secao");
+      expect(state.pendingFragmentOwner()).toBeNull();
+    });
+  });
+});

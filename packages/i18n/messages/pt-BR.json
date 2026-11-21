@@ -162,6 +162,7 @@
   "find_in_files_results_summary": "{count} ocorrências em {fileCount} arquivos",
   "find_in_files_no_results": "Nenhuma ocorrência",
   "preview_loading": "Convertendo...",
+  "anchor_target_not_found": "Destino do link não encontrado",
   "toc_title": "Sumário",
   "toc_expand_all": "Expandir tudo",
   "toc_collapse_all": "Recolher tudo",

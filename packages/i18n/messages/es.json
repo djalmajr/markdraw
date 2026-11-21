@@ -162,6 +162,7 @@
   "find_in_files_results_summary": "{count} coincidencias en {fileCount} archivos",
   "find_in_files_no_results": "Sin coincidencias",
   "preview_loading": "Convirtiendo...",
+  "anchor_target_not_found": "Destino del enlace no encontrado",
   "toc_title": "Tabla de contenidos",
   "toc_expand_all": "Expandir todo",
   "toc_collapse_all": "Contraer todo",

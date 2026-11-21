@@ -162,6 +162,7 @@
   "find_in_files_results_summary": "{count} matches in {fileCount} files",
   "find_in_files_no_results": "No matches",
   "preview_loading": "Converting...",
+  "anchor_target_not_found": "Link target not found",
   "toc_title": "Table of Contents",
   "toc_expand_all": "Expand All",
   "toc_collapse_all": "Collapse All",

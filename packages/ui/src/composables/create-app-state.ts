@@ -175,6 +175,15 @@ export interface AiPlanState {
   items: AiPlanItem[];
 }
 
+/** Document identity captured at the moment a `#id` link is clicked. */
+export interface FragmentSource {
+  readonly id: string;
+  readonly paneId: string;
+  readonly tabId: string;
+  readonly rootId: string;
+  readonly path: string;
+}
+
 interface AppStateConfig {
   applyTheme: (mode: ThemeMode) => void;
   convertAdoc: (opts: ConvertOptions) => Promise<ConvertResult>;
@@ -430,9 +439,17 @@ export function createAppState(config: AppStateConfig) {
   // and scrolls the matching one into view, then the TOC scroll
   // tracker auto-updates the active highlight.
   const [pendingHeadingText, setPendingHeadingText] = createSignal<string | null>(null);
-  const [pendingFragment, setPendingFragment] = createSignal<string | null>(
+  const [pendingFragment, writePendingFragment] = createSignal<string | null>(
     null,
   );
+  /** Pane that owns the pending fragment: only that pane delivers it to its
+   *  Preview, and only that pane clears it. Callers without a pane keep the
+   *  historical global behaviour. */
+  const [pendingFragmentOwner, setPendingFragmentOwner] = createSignal<string | null>(null);
+  function setPendingFragment(fragment: string | null, paneId?: string | null) {
+    setPendingFragmentOwner(fragment === null ? null : (paneId ?? null));
+    writePendingFragment(fragment);
+  }
   type HtmlNavigation = { rootId: string; path: string; fragment: string };
   const [pendingHtmlNavigation, updatePendingHtmlNavigation] = createSignal<Record<string, HtmlNavigation>>({});
   const [appliedHtmlNavigation, updateAppliedHtmlNavigation] = createSignal<Record<string, HtmlNavigation>>({});
@@ -2109,6 +2126,7 @@ export function createAppState(config: AppStateConfig) {
     navIndex,
     navStack,
     pendingFragment,
+    pendingFragmentOwner,
     pendingHtmlNavigation,
     appliedHtmlNavigation,
     pendingHeadingText,

@@ -203,6 +203,7 @@ interface AppShellProps {
   ) => void;
   onDoubleClickFile?: (entry: FSEntry, rootId: string) => void;
   onNavigate: (path: string, fragment?: string | null) => void;
+  onUnresolvedFragment?: (id: string) => void;
   onOpenExternal?: (url: string) => void;
   onOpenFolder?: () => void;
   onOpenRecentFile?: (recentFile: RecentFile) => void | Promise<void>;
@@ -1044,6 +1045,7 @@ export function AppShell(props: AppShellProps) {
                         onOpenRecentFolder={props.onOpenRecentFolder}
                         onWindowDragStart={props.onWindowDragStart}
                         onNavigate={props.onNavigate}
+                        onUnresolvedFragment={props.onUnresolvedFragment}
                         onOpenExternal={props.onOpenExternal}
                         onShowShortcutsHelp={props.onShortcutsHelpOpen}
                         onActivate={() => s.paneManager.setActivePane(i())}
