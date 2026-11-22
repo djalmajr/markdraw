@@ -1401,8 +1401,26 @@ pub(crate) fn tauri_context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
+/// Disable WebKitGTK's DMA-BUF renderer when an NVIDIA driver is loaded,
+/// unless the user already chose a value for the variable.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn should_disable_dmabuf_renderer(user_set: bool, nvidia_driver_loaded: bool) -> bool {
+    !user_set && nvidia_driver_loaded
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebKitGTK's DMA-BUF renderer alternates between old and new frames on
+    // NVIDIA drivers (tabs, tree and outline flickered between two states).
+    // Must be set before the first WebView exists; a value the user set wins.
+    #[cfg(target_os = "linux")]
+    if should_disable_dmabuf_renderer(
+        std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_some(),
+        std::path::Path::new("/proc/driver/nvidia/version").exists(),
+    ) {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     // Before GTK starts and before any other thread exists. `wayland,x11`
     // falls back to X11 if the Wayland connection fails.
     #[cfg(target_os = "linux")]
@@ -1682,6 +1700,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dmabuf_renderer_is_disabled_only_for_nvidia_without_a_user_choice() {
+        assert!(should_disable_dmabuf_renderer(false, true));
+        assert!(!should_disable_dmabuf_renderer(false, false));
+        assert!(!should_disable_dmabuf_renderer(true, true));
+        assert!(!should_disable_dmabuf_renderer(true, false));
+    }
     use std::fs;
     use tempfile::tempdir;
 
